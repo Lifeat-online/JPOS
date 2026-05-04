@@ -11,6 +11,35 @@ import { fileURLToPath } from "url";
 import fs from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { query } from "./server/db.ts";
+import {
+  getProductsByTenant,
+  getTenantIdBySlug,
+  getUserByUid,
+  getStaffTenantByEmail,
+  getAppConfigByTenant,
+  getCustomersByTenant,
+  getStaffByTenant,
+  getWorkstationsByTenant,
+  getActiveSalesByTenant,
+  getOpenCashSessionByStaff,
+} from "./server/mariadb-adapter.ts";
+import {
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+  createStaff,
+  updateStaff,
+  deleteStaff,
+  createWorkstation,
+  deleteWorkstation,
+  createSale,
+  updateSaleStatus,
+  getSaleById,
+} from "./server/mariadb-crud.ts";
 
 dotenv.config();
 
@@ -251,7 +280,277 @@ async function startServer() {
     }
   });
 
-  // Generate PayFast Payment Data
+  app.get("/api/mariadb/health", async (req, res) => {
+    try {
+      await query("SELECT 1");
+      res.json({ status: "ok" });
+    } catch (err) {
+      res.status(500).json({ status: "error", message: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/products", async (req, res) => {
+    try {
+      const products = await getProductsByTenant(req.params.tenantId);
+      res.json(products);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/customers", async (req, res) => {
+    try {
+      const customers = await getCustomersByTenant(req.params.tenantId);
+      res.json(customers);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/staff", async (req, res) => {
+    try {
+      const staff = await getStaffByTenant(req.params.tenantId);
+      res.json(staff);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/workstations", async (req, res) => {
+    try {
+      const workstations = await getWorkstationsByTenant(req.params.tenantId);
+      res.json(workstations);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/sales", async (req, res) => {
+    try {
+      const sales = await getActiveSalesByTenant(req.params.tenantId);
+      res.json(sales);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/cash-sessions", async (req, res) => {
+    try {
+      const staffId = req.query.staffId as string | undefined;
+      if (!staffId) {
+        return res.status(400).json({ error: "Missing staffId query parameter" });
+      }
+      const session = await getOpenCashSessionByStaff(req.params.tenantId, staffId);
+      res.json(session);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/users/:uid", async (req, res) => {
+    try {
+      const user = await getUserByUid(req.params.uid);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/staff", async (req, res) => {
+    try {
+      const email = req.query.email as string | undefined;
+      if (!email) {
+        return res.status(400).json({ error: "Missing email query parameter" });
+      }
+      const staff = await getStaffTenantByEmail(email);
+      if (!staff) {
+        return res.status(404).json({ error: "Staff not found" });
+      }
+      res.json(staff);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/config", async (req, res) => {
+    try {
+      const config = await getAppConfigByTenant(req.params.tenantId);
+      if (!config) {
+        return res.status(404).json({ error: "Tenant config not found" });
+      }
+      res.json(config);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/slugs/:slug/tenant", async (req, res) => {
+    try {
+      const tenantId = await getTenantIdBySlug(req.params.slug);
+      if (!tenantId) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+      res.json({ tenantId });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CRUD: Products
+  // ─────────────────────────────────────────────────────────────────────────
+
+  app.post("/api/mariadb/tenants/:tenantId/products", async (req, res) => {
+    try {
+      const product = await createProduct(req.params.tenantId, req.body);
+      res.status(201).json(product);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/products/:productId", async (req, res) => {
+    try {
+      const product = await updateProduct(req.params.tenantId, req.params.productId, req.body);
+      res.json(product);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/products/:productId", async (req, res) => {
+    try {
+      await deleteProduct(req.params.tenantId, req.params.productId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CRUD: Customers
+  // ─────────────────────────────────────────────────────────────────────────
+
+  app.post("/api/mariadb/tenants/:tenantId/customers", async (req, res) => {
+    try {
+      const customer = await createCustomer(req.params.tenantId, req.body);
+      res.status(201).json(customer);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/customers/:customerId", async (req, res) => {
+    try {
+      const customer = await updateCustomer(req.params.tenantId, req.params.customerId, req.body);
+      res.json(customer);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/customers/:customerId", async (req, res) => {
+    try {
+      await deleteCustomer(req.params.tenantId, req.params.customerId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CRUD: Staff
+  // ─────────────────────────────────────────────────────────────────────────
+
+  app.post("/api/mariadb/tenants/:tenantId/staff", async (req, res) => {
+    try {
+      const staff = await createStaff(req.params.tenantId, req.body);
+      res.status(201).json(staff);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/staff/:staffId", async (req, res) => {
+    try {
+      const staff = await updateStaff(req.params.tenantId, req.params.staffId, req.body);
+      res.json(staff);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/staff/:staffId", async (req, res) => {
+    try {
+      await deleteStaff(req.params.tenantId, req.params.staffId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CRUD: Workstations
+  // ─────────────────────────────────────────────────────────────────────────
+
+  app.post("/api/mariadb/tenants/:tenantId/workstations", async (req, res) => {
+    try {
+      const workstation = await createWorkstation(req.params.tenantId, req.body);
+      res.status(201).json(workstation);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/workstations/:workstationId", async (req, res) => {
+    try {
+      await deleteWorkstation(req.params.tenantId, req.params.workstationId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CRUD: Sales
+  // ─────────────────────────────────────────────────────────────────────────
+
+  app.post("/api/mariadb/tenants/:tenantId/sales", async (req, res) => {
+    try {
+      const sale = await createSale(req.params.tenantId, req.body);
+      res.status(201).json(sale);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/sales/:saleId", async (req, res) => {
+    try {
+      const sale = await getSaleById(req.params.tenantId, req.params.saleId);
+      if (!sale) {
+        return res.status(404).json({ error: "Sale not found" });
+      }
+      res.json(sale);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/sales/:saleId", async (req, res) => {
+    try {
+      const { status } = req.body;
+      if (!status) {
+        return res.status(400).json({ error: "Missing status field" });
+      }
+      const sale = await updateSaleStatus(req.params.tenantId, req.params.saleId, status);
+      res.json(sale);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
   app.post("/api/payfast/generate", async (req, res) => {
     const { amount, item_name, sale_id, return_url, cancel_url } = req.body;
     

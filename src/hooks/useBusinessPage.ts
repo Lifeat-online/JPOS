@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
 import { AppConfig } from '../types';
+import { getTenantConfig, getTenantIdBySlug } from '../api';
 
 interface BusinessPageData {
   tenantId: string | null;
@@ -17,39 +16,48 @@ export function useBusinessPage(slug: string | undefined): BusinessPageData {
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    if (!slug) { setNotFound(true); setLoading(false); return; }
-
-    // Look up slug → tenantId from the root slugs collection
-    const slugDoc = doc(db, 'slugs', slug.toLowerCase());
-    getDoc(slugDoc).then(snap => {
-      if (!snap.exists() || !snap.data().tenantId) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
-      const tid = snap.data().tenantId as string;
-      setTenantId(tid);
-
-      // Subscribe to the tenant's config
-      const unsubscribe = onSnapshot(
-        doc(db, 'tenants', tid, 'settings', 'app'),
-        (configSnap) => {
-          if (configSnap.exists()) {
-            setConfig(configSnap.data() as AppConfig);
-          }
-          setLoading(false);
-        },
-        (err) => {
-          console.error('Business page config error:', err);
-          setLoading(false);
-        }
-      );
-      return () => unsubscribe();
-    }).catch(err => {
-      console.error('Slug lookup error:', err);
+    let isMounted = true;
+    if (!slug) {
       setNotFound(true);
       setLoading(false);
-    });
+      return;
+    }
+
+    async function resolveTenant() {
+      try {
+        const slugResult = await getTenantIdBySlug(slug.toLowerCase());
+        const tid = slugResult.tenantId;
+        if (!tid) {
+          if (isMounted) {
+            setNotFound(true);
+            setLoading(false);
+          }
+          return;
+        }
+
+        if (isMounted) {
+          setTenantId(tid);
+        }
+
+        const configResult = await getTenantConfig(tid);
+        if (isMounted) {
+          setConfig(configResult);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('Business page lookup error:', err);
+        if (isMounted) {
+          setNotFound(true);
+          setLoading(false);
+        }
+      }
+    }
+
+    resolveTenant();
+
+    return () => {
+      isMounted = false;
+    };
   }, [slug]);
 
   return { tenantId, config, loading, notFound };

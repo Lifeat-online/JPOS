@@ -1,13 +1,18 @@
 import { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
-import {
-  collection, query, orderBy, limit, onSnapshot,
-  where, doc, setDoc, serverTimestamp, getDocs, collectionGroup,
-} from 'firebase/firestore';
-import { db } from '../firebase';
 import { Product, Customer, Staff, Sale, AppConfig, Workstation } from '../types';
-import { getTenantCollection, getTenantDoc } from '../tenantHelper';
 import { usePosStore } from '../store/usePosStore';
+import {
+  getUserByUid,
+  getStaffTenantByEmail,
+  getTenantProducts,
+  getTenantCustomers,
+  getTenantStaff,
+  getTenantSales,
+  getTenantWorkstations,
+  getTenantConfig,
+  getOpenCashSession,
+} from '../api';
 
 export const DEFAULT_CONFIG: AppConfig = {
   payfastMerchantId: '10000100',
@@ -34,63 +39,56 @@ export function useAppData(user: User | null) {
   const [currentUserStaff, setCurrentUserStaff] = useState<Staff | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'manager' | 'cashier' | null>(null);
 
-  // Resolve tenantId from the users collection, or by searching staff collectionGroup
   useEffect(() => {
-    if (!user) {
-      setTenantId(null);
-      setTenantLoading(false);
-      return;
-    }
-    setTenantLoading(true);
-    const unsubscribe = onSnapshot(
-      doc(db, 'users', user.uid),
-      async (snap) => {
-        if (snap.exists() && snap.data().tenantId) {
-          setTenantId(snap.data().tenantId);
+    let active = true;
+    async function resolveTenant() {
+      if (!user) {
+        setTenantId(null);
+        setTenantLoading(false);
+        return;
+      }
+
+      setTenantLoading(true);
+      try {
+        const userRecord = await getUserByUid(user.uid);
+        if (userRecord?.tenant_id) {
+          if (!active) return;
+          setTenantId(userRecord.tenant_id);
           setTenantLoading(false);
-        } else {
-          // No users doc yet — could be a brand new user (will go through SetupWizard)
-          // or an invited staff member. Try the collectionGroup lookup but don't block on failure.
-          try {
-            const staffQuery = query(collectionGroup(db, 'staff'), where('email', '==', user.email));
-            const staffSnap = await getDocs(staffQuery);
-            if (!staffSnap.empty) {
-              const foundTenantId = staffSnap.docs[0].ref.parent.parent?.id;
-              if (foundTenantId) {
-                await setDoc(doc(db, 'users', user.uid), {
-                  tenantId: foundTenantId,
-                  email: user.email,
-                  name: user.displayName || user.email?.split('@')[0] || 'User',
-                  createdAt: serverTimestamp(),
-                }, { merge: true });
-                // onSnapshot will fire again with tenantId set
-                return;
-              }
-            }
-          } catch (err: any) {
-            // Permission denied or missing index — treat as new user, let SetupWizard run
-            console.warn('Staff collectionGroup lookup skipped:', err.code);
-          }
-          setTenantId(null);
-          setTenantLoading(false);
+          return;
         }
-      },
-      (err) => {
-        // Permission denied means the users doc doesn't exist yet — treat as new user
-        console.warn('Users doc read error (expected for new users):', err.code);
+      } catch (err) {
+        console.warn('Tenant resolve by user UID failed:', err);
+      }
+
+      if (user.email) {
+        try {
+          const staffRecord = await getStaffTenantByEmail(user.email);
+          if (staffRecord?.tenant_id) {
+            if (!active) return;
+            setTenantId(staffRecord.tenant_id);
+            setTenantLoading(false);
+            return;
+          }
+        } catch (err) {
+          console.warn('Tenant resolve by staff email failed:', err);
+        }
+      }
+
+      if (active) {
         setTenantId(null);
         setTenantLoading(false);
       }
-    );
-    return () => unsubscribe();
-  }, [user]);
+    }
 
-  // Derive current user's staff record and role
+    resolveTenant();
+    return () => { active = false; };
+  }, [user, setTenantId]);
+
   useEffect(() => {
     if (user && !isStaffLoading) {
       const s = staff.find(s => s.email === user.email) ?? null;
       setCurrentUserStaff(s);
-      // dev role gets treated as admin for nav/access purposes
       const role = s?.role === 'dev' ? 'admin' : (s?.role ?? null);
       setCurrentUserRole(role);
     } else if (!user) {
@@ -99,99 +97,152 @@ export function useAppData(user: User | null) {
     }
   }, [user, staff, isStaffLoading]);
 
-  // Products
   useEffect(() => {
-    if (!user || !tenantId) { setProducts([]); return; }
-    const unsubscribe = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'products')),
-      (snap) => setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product))),
-      (err) => console.error('Products subscription error:', err)
-    );
-    return () => unsubscribe();
-  }, [user, tenantId]);
-
-  // Customers
-  useEffect(() => {
-    if (!user || !tenantId) { setCustomers([]); return; }
-    const unsubscribe = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'customers'), orderBy('name', 'asc')),
-      (snap) => setCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Customer))),
-      (err) => console.error('Customers subscription error:', err)
-    );
-    return () => unsubscribe();
-  }, [user, tenantId]);
-
-  // Staff
-  useEffect(() => {
-    if (!user || !tenantId) { setStaff([]); setIsStaffLoading(false); return; }
-    setIsStaffLoading(true);
-    const unsubscribe = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'staff'), orderBy('name', 'asc')),
-      (snap) => {
-        setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as Staff)));
-        setIsStaffLoading(false);
-      },
-      (err) => { console.error('Staff subscription error:', err); setIsStaffLoading(false); }
-    );
-    return () => unsubscribe();
-  }, [user, tenantId]);
-
-  // Config
-  useEffect(() => {
-    if (!user || !tenantId) { setConfigLoading(false); return; }
-    setConfigLoading(true);
-    const unsubscribe = onSnapshot(
-      getTenantDoc(db, tenantId, 'settings', 'app'),
-      (snap) => {
-        if (snap.exists()) setConfig(snap.data() as AppConfig);
-        setConfigLoading(false);
-      },
-      (err) => { console.error('Config subscription error:', err); setConfigLoading(false); }
-    );
-    return () => unsubscribe();
-  }, [user, tenantId]);
-
-  // Sales
-  useEffect(() => {
-    if (!user || !tenantId) { setSales([]); return; }
-    const unsubscribe = onSnapshot(
-      query(
-        getTenantCollection(db, tenantId, 'sales'),
-        where('status', 'in', ['completed', 'pending', 'open', 'kitchen']),
-        orderBy('createdAt', 'desc'),
-        limit(100)
-      ),
-      (snap) => setSales(snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale))),
-      (err) => console.error('Sales subscription error:', err)
-    );
-    return () => unsubscribe();
-  }, [user, tenantId]);
-
-  // Workstations
-  useEffect(() => {
-    if (!user || !tenantId) { setWorkstations([]); return; }
-    const unsubscribe = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'workstations')),
-      (snap) => setWorkstations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Workstation))),
-      (err) => console.error('Workstations subscription error:', err)
-    );
-    return () => unsubscribe();
-  }, [user, tenantId]);
-
-  // Active cash session for current staff member
-  useEffect(() => {
-    if (!currentUserStaff || !tenantId) { setActiveSession(null); return; }
-    const unsubscribe = onSnapshot(
-      query(
-        getTenantCollection(db, tenantId, 'cashSessions'),
-        where('staffId', '==', currentUserStaff.id),
-        where('status', '==', 'open')
-      ),
-      (snap) => {
-        setActiveSession(snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() });
+    let active = true;
+    async function loadProducts() {
+      if (!tenantId) {
+        setProducts([]);
+        return;
       }
-    );
-    return () => unsubscribe();
+      try {
+        const fetched = await getTenantProducts(tenantId);
+        if (!active) return;
+        setProducts(fetched);
+      } catch (err) {
+        console.error('Products load error:', err);
+        if (active) setProducts([]);
+      }
+    }
+    loadProducts();
+    return () => { active = false; };
+  }, [tenantId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadCustomers() {
+      if (!tenantId) {
+        setCustomers([]);
+        return;
+      }
+      try {
+        const fetched = await getTenantCustomers(tenantId);
+        if (!active) return;
+        setCustomers(fetched);
+      } catch (err) {
+        console.error('Customers load error:', err);
+        if (active) setCustomers([]);
+      }
+    }
+    loadCustomers();
+    return () => { active = false; };
+  }, [tenantId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadStaff() {
+      if (!tenantId) {
+        setStaff([]);
+        setIsStaffLoading(false);
+        return;
+      }
+      setIsStaffLoading(true);
+      try {
+        const fetched = await getTenantStaff(tenantId);
+        if (!active) return;
+        setStaff(fetched);
+      } catch (err) {
+        console.error('Staff load error:', err);
+        if (active) setStaff([]);
+      } finally {
+        if (active) setIsStaffLoading(false);
+      }
+    }
+    loadStaff();
+    return () => { active = false; };
+  }, [tenantId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadConfig() {
+      if (!tenantId) {
+        setConfigLoading(false);
+        return;
+      }
+      setConfigLoading(true);
+      try {
+        const fetched = await getTenantConfig(tenantId);
+        if (!active) return;
+        if (fetched) {
+          setConfig(fetched);
+        }
+      } catch (err) {
+        console.error('Config load error:', err);
+      } finally {
+        if (active) setConfigLoading(false);
+      }
+    }
+    loadConfig();
+    return () => { active = false; };
+  }, [tenantId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadSales() {
+      if (!tenantId) {
+        setSales([]);
+        return;
+      }
+      try {
+        const fetched = await getTenantSales(tenantId);
+        if (!active) return;
+        setSales(fetched);
+      } catch (err) {
+        console.error('Sales load error:', err);
+        if (active) setSales([]);
+      }
+    }
+    loadSales();
+    return () => { active = false; };
+  }, [tenantId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadWorkstations() {
+      if (!tenantId) {
+        setWorkstations([]);
+        return;
+      }
+      try {
+        const fetched = await getTenantWorkstations(tenantId);
+        if (!active) return;
+        setWorkstations(fetched);
+      } catch (err) {
+        console.error('Workstations load error:', err);
+        if (active) setWorkstations([]);
+      }
+    }
+    loadWorkstations();
+    return () => { active = false; };
+  }, [tenantId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadActiveSession() {
+      if (!currentUserStaff || !tenantId) {
+        setActiveSession(null);
+        return;
+      }
+      try {
+        const fetched = await getOpenCashSession(tenantId, currentUserStaff.id);
+        if (!active) return;
+        setActiveSession(fetched);
+      } catch (err) {
+        console.error('Active session load error:', err);
+        if (active) setActiveSession(null);
+      }
+    }
+    loadActiveSession();
+    return () => { active = false; };
   }, [currentUserStaff, tenantId]);
 
   return {
