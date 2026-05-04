@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background rounded square -->
+  <rect width="64" height="64" rx="14" fill="#2563EB"/>
+
+  <!-- POS terminal screen -->
+  <rect x="12" y="10" width="40" height="26" rx="4" fill="white" opacity="0.15"/>
+  <rect x="14" y="12" width="36" height="22" rx="3" fill="white" opacity="0.9"/>
+
+  <!-- Screen content lines -->
+  <rect x="18" y="16" width="20" height="3" rx="1.5" fill="#2563EB" opacity="0.5"/>
+  <rect x="18" y="22" width="28" height="2" rx="1" fill="#2563EB" opacity="0.3"/>
+  <rect x="18" y="27" width="22" height="2" rx="1" fill="#2563EB" opacity="0.3"/>
+
+  <!-- Terminal base / stand -->
+  <rect x="26" y="36" width="12" height="4" rx="2" fill="white" opacity="0.6"/>
+  <rect x="20" y="40" width="24" height="3" rx="1.5" fill="white" opacity="0.5"/>
+
+  <!-- Keypad dots -->
+  <circle cx="22" cy="49" r="2.5" fill="white" opacity="0.8"/>
+  <circle cx="32" cy="49" r="2.5" fill="white" opacity="0.8"/>
+  <circle cx="42" cy="49" r="2.5" fill="white" opacity="0.8"/>
+
+  <!-- Currency symbol -->
+  <text x="38" y="25" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#2563EB" opacity="0.8">R</text>
+</svg>

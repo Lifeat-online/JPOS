@@ -1,0 +1,329 @@
+import React, { useMemo, useState } from 'react';
+import { ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, LayoutGrid, Settings, Package, CheckCircle2, X, ShoppingCart, Loader2, QrCode, Users, UserPlus, UserCog, Save, ShieldCheck, ChevronRight, ChevronDown, Edit, StickyNote, Maximize, AlertCircle, History as HistoryIcon, Moon, Sun, Lock, ChefHat, Trophy, BarChart3, Utensils } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { usePosStore } from '../store/usePosStore';
+import { CustomerSelector } from './CustomerSelector';
+import { BarcodeScanner } from './BarcodeScanner';
+import { DEFAULT_CATEGORY_TREE } from '../App'; // If needed
+import { useNavigate } from 'react-router-dom';
+
+export function PointOfSaleView({
+  user,
+  currentUserStaff,
+  activeSession,
+  config,
+  categoryTree,
+  CATEGORY_MAP,
+  SUB_CATEGORY_MAP,
+  CATEGORIES,
+  allowedCategories,
+  filteredProducts,
+  getCategoryIcon,
+  getProductImage,
+  handleCheckout,
+  handleSaveOrder,
+  checkoutModal,
+  setCheckoutModal,
+  customerModal,
+  setCustomerModal,
+  tenderModal,
+  setTenderModal,
+  tenderedAmount,
+  setTenderedAmount,
+  cardOverageAction,
+  setCardOverageAction,
+  isScanning,
+  setIsScanning,
+  handleBarcodeScan,
+  isCartOpen,
+  setIsCartOpen
+}: any) {
+
+  const navigate = useNavigate();
+  const { 
+    cart, 
+    addToCart, 
+    updateQuantity, 
+    clearCart, 
+    setCart,
+    searchQuery, 
+    setSearchQuery,
+    /* selectedCustomerId, */
+    /* setSelectedCustomerId, */
+    activeTableNumber,
+    setActiveTableNumber,
+    activeOrderId,
+    setActiveOrderId,
+    isProcessing,
+    activeCategory,
+    setActiveCategory,
+    products,
+    customers,
+  } = usePosStore();
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+
+  const cartTotal = useMemo(
+    () => cart.reduce((total, item) => total + (item.price * item.quantity), 0),
+    [cart]
+  );
+
+  return (
+    <>
+      {!activeSession ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50 dark:bg-slate-950">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-10 max-w-md w-full shadow-2xl text-center border border-slate-100 dark:border-slate-800/60">
+                <div className="w-20 h-20 bg-orange-50 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                   <Lock className="w-10 h-10 text-orange-500" />
+                </div>
+                <h3 className="text-2xl font-black mb-2 tracking-tight text-slate-900 dark:text-white">Register Closed</h3>
+                <p className="text-slate-500 font-medium mb-8">You must open the register and declare a starting float before processing transactions.</p>
+                <button onClick={() => navigate('cash')} className="w-full py-4 bg-primary text-white rounded-xl font-bold uppercase tracking-widest text-sm shadow-xl shadow-primary/20 hover:scale-105 active:scale-95 transition-all">
+                  Open Register
+                </button>
+              </div>
+            </div>
+          ) : (
+          <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden relative">
+            {/* Categories Section - Mobile Horizontal, Desktop Sidebar */}
+            <nav className="w-full lg:w-24 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-700/60 flex lg:flex-col items-center py-2 lg:py-6 px-4 lg:px-0 gap-3 lg:gap-6 overflow-x-auto no-scrollbar shrink-0 shadow-sm lg:shadow-none z-10">
+              {allowedCategories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`min-w-[80px] lg:w-16 h-12 lg:h-16 rounded-xl flex flex-col items-center justify-center gap-1 transition-all border-2 shrink-0 ${
+                    activeCategory === cat 
+                    ? 'bg-[#eff6ff] text-primary border-[#bfdbfe] shadow-sm' 
+                    : 'text-slate-400 dark:text-slate-500 border-transparent bg-slate-50 dark:bg-[#0B1120] lg:bg-transparent lg:dark:bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <span className="text-base lg:text-xl">{cat === 'All' ? '🏠' : getCategoryIcon(cat)}</span>
+                  <span className="text-[9px] lg:text-[10px] font-bold uppercase tracking-wide">{cat}</span>
+                </button>
+              ))}
+            </nav>
+
+            {/* Product Section */}
+            <section className="flex-1 flex flex-col min-w-0 min-h-0 bg-slate-50/30">
+              <div className="p-4 lg:p-6 pb-2 flex flex-col sm:flex-row gap-3 lg:gap-4 shrink-0">
+                <div className="relative flex-1">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 w-5 h-5" />
+                  <input 
+                    type="text" 
+                    placeholder="Search products..."
+                    className="w-full pl-12 pr-12 py-3 lg:py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-medium transition-all shadow-sm"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  <button 
+                    onClick={() => setIsScanning(true)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-slate-50 dark:bg-[#0B1120] text-primary rounded-lg hover:bg-primary hover:text-white transition-all shadow-sm active:scale-95"
+                    title="Scan Barcode"
+                  >
+                    <Maximize className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="sm:w-80 relative">
+                  <CustomerSelector 
+                    customers={customers}
+                    selectedId={selectedCustomerId}
+                    onSelect={setSelectedCustomerId}
+                    onAddNew={() => setCustomerModal({ isOpen: true, customer: {} })}
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 lg:p-6 pt-2 grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 lg:gap-4 auto-rows-max lg:auto-rows-[160px] pb-24 lg:pb-6">
+                <AnimatePresence>
+                  {filteredProducts.map(product => (
+                    <motion.div
+                      key={product.id}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => addToCart(product)}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-2xl p-4 flex lg:flex-col justify-between items-center lg:items-start cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800 relative group shadow-sm active:border-primary gap-4 lg:gap-0"
+                    >
+                      <div className="w-12 h-12 lg:w-10 lg:h-10 bg-slate-50 dark:bg-[#0B1120] rounded-xl flex items-center justify-center text-xl lg:text-lg group-hover:scale-110 transition-transform shrink-0 overflow-hidden">
+                        <img 
+                          src={getProductImage(product)} 
+                          alt={product.name}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-sm leading-tight mb-0.5 text-slate-900 dark:text-white truncate">{product.name}</div>
+                        <div className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">{product.category}</div>
+                        <div className="lg:hidden flex items-baseline gap-2 mt-1">
+                           <span className="font-extrabold text-primary">R{product.price.toFixed(2)}</span>
+                           <span className="text-[8px] font-black text-slate-300 dark:text-slate-600">{product.stock} Units</span>
+                        </div>
+                      </div>
+                      <div className="hidden lg:flex items-end justify-between w-full mt-2">
+                        <div className="font-extrabold text-lg text-primary tracking-tight">R{product.price.toFixed(2)}</div>
+                        <div className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${product.stock < 10 ? 'bg-red-50 text-red-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                          {product.stock}
+                        </div>
+                      </div>
+                      <div className="absolute top-2 right-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1.5">
+                        <div 
+                          className="p-1.5 bg-primary/10 text-primary rounded-lg hover:bg-primary hover:text-white transition-all shadow-sm"
+                          onClick={(e) => { e.stopPropagation(); addToCart(product); }}
+                        >
+                          <Plus className="w-4 h-4" />
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            </section>
+
+            {/* Cart Section - Drawer on mobile, Sidebar on desktop */}
+            <AnimatePresence>
+              {(isCartOpen || window.innerWidth >= 1024) && (
+                <>
+                  {/* Backdrop for mobile */}
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={() => setIsCartOpen(false)}
+                    className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[45]"
+                  />
+                  <motion.aside 
+                    initial={window.innerWidth < 1024 ? { y: '100%' } : { x: '100%' }}
+                    animate={window.innerWidth < 1024 ? { y: 0 } : { x: 0 }}
+                    exit={window.innerWidth < 1024 ? { y: '100%' } : { x: '100%' }}
+                    transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                    className={`fixed bottom-0 left-0 right-0 lg:relative lg:inset-auto z-50 lg:z-10 w-full lg:w-[360px] max-h-[90vh] lg:max-h-none bg-white dark:bg-slate-900 lg:border-l border-slate-200 dark:border-slate-700/60 flex flex-col flex-shrink-0 shadow-2xl rounded-t-3xl lg:rounded-none overflow-hidden`}
+                  >
+                    <div className="p-5 border-b border-slate-200 dark:border-slate-700/60 flex justify-between items-center bg-white dark:bg-slate-900 sticky top-0 z-10">
+                      <div>
+                        <h2 className="font-extrabold text-lg flex items-center gap-2 text-slate-900 dark:text-white">
+                          <ShoppingCart className="w-5 h-5 text-primary" />
+                          Current Order
+                        </h2>
+                        {selectedCustomerId && (
+                          <div className="flex items-center gap-1 text-[10px] font-black text-primary uppercase tracking-widest mt-1">
+                            <Users className="w-3 h-3" />
+                            {customers.find(c => c.id === selectedCustomerId)?.name}
+                          </div>
+                        )}
+                      </div>
+                      <button 
+                        onClick={() => setIsCartOpen(false)}
+                        className="lg:hidden p-2 bg-slate-50 dark:bg-[#0B1120] rounded-full text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:text-slate-300"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 bg-slate-50/50 dark:bg-slate-950/50 min-h-[200px]">
+                      {cart.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center text-slate-300 dark:text-slate-600 opacity-50 space-y-2 text-center p-8 grayscale">
+                          <ShoppingBag className="w-12 h-12" />
+                          <p className="text-xs font-black uppercase tracking-widest">Cart is empty</p>
+                        </div>
+                      ) : (
+                        cart.map(item => (
+                          <div key={item.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl flex items-center justify-between border border-slate-100 dark:border-slate-800/60 shadow-sm transition-all hover:border-primary/20">
+                            <div className="flex-1 pr-4 min-w-0">
+                              <p className="font-bold text-slate-900 dark:text-white text-sm truncate">{item.name}</p>
+                              <p className="text-xs font-black text-primary mt-0.5">R{(item.price * item.quantity).toFixed(2)}</p>
+                            </div>
+                            <div className="flex items-center gap-4 bg-slate-50 dark:bg-[#0B1120] rounded-xl p-1 shrink-0">
+                              <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-lg text-xs font-black shadow-sm active:scale-90">-</button>
+                              <span className="font-black text-xs w-4 text-center">{item.quantity}</span>
+                              <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 flex items-center justify-center bg-primary text-white rounded-lg text-xs font-black shadow-sm active:scale-90">+</button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="p-5 lg:p-6 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800/60 shadow-[0_-10px_40px_rgba(0,0,0,0.03)] sticky bottom-0">
+                      
+                      {config?.business?.isRestaurantMode && activeTableNumber && (
+                        <div className="flex justify-between items-center mb-4 p-3 bg-primary/10 rounded-xl border border-primary/20">
+                          <span className="font-bold text-primary flex items-center gap-2"><Utensils className="w-4 h-4"/> Table {activeTableNumber}</span>
+                          <button onClick={() => { setActiveTableNumber(null); setActiveOrderId(null); }} className="text-xs font-bold text-slate-500 hover:text-slate-700">Clear</button>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center mb-6">
+                        <span className="font-bold text-slate-400 dark:text-slate-500 text-xs uppercase tracking-widest">Grand Total</span>
+                        <span className="font-black text-4xl text-slate-900 dark:text-white tracking-tighter">R{cartTotal.toFixed(2)}</span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3 mb-4">
+                        <button 
+                          disabled={isProcessing || cart.length === 0}
+                          onClick={() => { setTenderModal({ isOpen: true, method: 'cash' }); setTenderedAmount(''); }}
+                          className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-emerald-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-emerald-600/30"
+                        >
+                          <Banknote className="w-5 h-5" />
+                          <span className="text-[9px] uppercase tracking-widest">CASH</span>
+                        </button>
+                        <button 
+                          disabled={isProcessing || cart.length === 0}
+                          onClick={() => { setTenderModal({ isOpen: true, method: 'card' }); setTenderedAmount(''); }}
+                          className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-slate-800/30"
+                        >
+                          <CreditCard className="w-5 h-5" />
+                          <span className="text-[9px] uppercase tracking-widest">CARD</span>
+                        </button>
+                        <button 
+                          disabled={isProcessing || cart.length === 0}
+                          onClick={() => handleCheckout('payfast')}
+                          className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-payfast text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-payfast/20"
+                        >
+                          {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <QrCode className="w-5 h-5" />}
+                          <span className="text-[9px] uppercase tracking-widest">PAYFAST</span>
+                        </button>
+                      </div>
+
+
+                      {config?.business?.isRestaurantMode && (
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                          <button 
+                            disabled={isProcessing || cart.length === 0}
+                            onClick={() => handleSaveOrder(false)}
+                            className="h-14 rounded-2xl bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 text-xs uppercase tracking-widest flex items-center justify-center gap-2 border border-orange-200 dark:border-orange-800/50"
+                          >
+                            <span className="truncate">Hold</span>
+                          </button>
+                          <button 
+                            disabled={isProcessing || cart.length === 0}
+                            onClick={() => handleSaveOrder(true)}
+                            className="h-14 rounded-2xl bg-orange-500 text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-orange-500/30 text-xs uppercase tracking-widest flex items-center justify-center gap-2"
+                          >
+                            <ChefHat className="w-4 h-4 shrink-0" /> <span className="truncate">Kitchen</span>
+                          </button>
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-2">
+                        <button onClick={() => setCart([])} title="Clear Cart" className="h-14 w-14 bg-slate-50 dark:bg-[#0B1120] text-red-500 rounded-2xl flex items-center justify-center hover:bg-red-50 transition-all border border-slate-100 dark:border-slate-800/60 active:scale-95 shrink-0">
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                        <button title="Add Note" className="flex-1 h-14 bg-slate-50 dark:bg-[#0B1120] text-slate-400 dark:text-slate-500 rounded-2xl flex items-center justify-center hover:bg-slate-100 dark:bg-slate-800 transition-all border border-slate-100 dark:border-slate-800/60 active:scale-95 gap-2">
+                          <StickyNote className="w-4 h-4" />
+                          <span className="text-[10px] font-bold uppercase tracking-widest">Note</span>
+                        </button>
+                        <button onClick={() => navigate('cash')} title="Cash Drawer" className="flex-1 h-14 bg-slate-50 dark:bg-[#0B1120] text-emerald-500 rounded-2xl flex items-center justify-center hover:bg-emerald-50 hover:border-emerald-100 transition-all border border-slate-100 dark:border-slate-800/60 active:scale-95 gap-2">
+                          <Banknote className="w-4 h-4" />
+                          <span className="text-[10px] font-bold uppercase tracking-widest">Drawer</span>
+                        </button>
+                      </div>
+                    </div>
+                  </motion.aside>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+          )}
+    </>
+  );
+}

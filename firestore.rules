@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ----------------------------------------------------------------
+    // HELPERS
+    // ----------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ----------------------------------------------------------------
+    // DEFAULT DENY
+    // ----------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ----------------------------------------------------------------
+    // USERS — each user can read/write their own record
+    // ----------------------------------------------------------------
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // ----------------------------------------------------------------
+    // TENANTS — any signed-in user can create (setup wizard)
+    // All sub-collections: any signed-in user can read/write
+    // (Role enforcement is handled in the application layer)
+    // ----------------------------------------------------------------
+    match /tenants/{tenantId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isSignedIn();
+
+      match /{subcollection}/{docId} {
+        allow read, write: if isSignedIn();
+      }
+
+      match /{subcollection}/{docId}/{nested=**} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // COLLECTION GROUP — allow signed-in users to query staff
+    // across all tenants by email (invited staff lookup)
+    // ----------------------------------------------------------------
+    match /{path=**}/staff/{staffId} {
+      allow read: if isSignedIn();
+    }
+
+    // ----------------------------------------------------------------
+    // COLLECTION GROUP — allow customers to find their own record
+    // across tenants by email (client portal lookup)
+    // ----------------------------------------------------------------
+    match /{path=**}/customers/{customerId} {
+      allow read: if isSignedIn();
+    }
+
+    // ----------------------------------------------------------------
+    // DEV BROADCASTS — root-level, readable by all signed-in users
+    // ----------------------------------------------------------------
+    match /devBroadcasts/{msgId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+  }
+}

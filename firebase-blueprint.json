@@ -1,0 +1,94 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "A retail item available for sale",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "category": { "type": "string" },
+        "stock": { "type": "number" },
+        "imageUrl": { "type": "string" },
+        "barcode": { "type": "string" }
+      },
+      "required": ["name", "price", "stock"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "A completed transaction",
+      "type": "object",
+      "properties": {
+        "items": { "type": "array" },
+        "total": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "payfast"] },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" },
+        "payfast_payment_id": { "type": "string" },
+        "customerId": { "type": "string" }
+      },
+      "required": ["items", "total", "paymentMethod", "status", "createdAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "A customer profile",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email"]
+    },
+    "Config": {
+      "title": "Application Configuration",
+      "description": "Global settings for the POS",
+      "type": "object",
+      "properties": {
+        "payfastMerchantId": { "type": "string" },
+        "payfastMerchantKey": { "type": "string" },
+        "payfastPassphrase": { "type": "string" },
+        "payfastSandbox": { "type": "boolean" }
+      }
+    },
+    "Staff": {
+      "title": "Staff Member",
+      "description": "Personnel account",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "cashier", "manager"] },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "role"]
+    }
+  },
+  "firestore": {
+    "products": {
+      "schema": "Product",
+      "description": "Catalog of items"
+    },
+    "sales": {
+      "schema": "Sale",
+      "description": "History of transactions"
+    },
+    "customers": {
+      "schema": "Customer",
+      "description": "Customer database"
+    },
+    "staff": {
+      "schema": "Staff",
+      "description": "Employee directory"
+    },
+    "config": {
+      "schema": "Config",
+      "description": "App settings"
+    }
+  }
+}

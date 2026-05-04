@@ -1,0 +1,7 @@
+{
+  "artifactType":  "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary":  "Implementation plan for the new Restaurant Mode workflow, introducing Workstations, granular order lifecycle tracking, staff performance metrics, and a gamified badge system.",
+  "updatedAt":  "2026-05-02T13:38:42.945074400Z",
+  "version":  "2",
+  "requestFeedback":  true
+}
