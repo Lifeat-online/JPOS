@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { query, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, orderBy, increment } from 'firebase/firestore';
-import { db } from '../firebase';
 import { CashSession, Staff } from '../types';
 import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
-import { getTenantCollection, getTenantDoc } from '../tenantHelper';
+import { apiGet, apiPost, apiPut } from '../api';
 
 interface CashManagementViewProps {
   currentUserStaff: Staff | null;
@@ -77,24 +75,25 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
   const newFloat = Object.entries(openingBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
   const closeAmount = Object.entries(closingBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
 
-  useEffect(() => {
+  const fetchSessions = async () => {
     if (!tenantId) return;
-    const q = query(
-      getTenantCollection(db, tenantId, 'cashSessions'),
-      orderBy('openedAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snap) => {
-      let docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as CashSession));
+    try {
+      let data = await apiGet<CashSession[]>(`/api/mariadb/tenants/${tenantId}/cash-sessions?limit=50`);
       if (currentUserStaff?.role === 'cashier') {
-        docs = docs.filter(s => s.staffId === currentUserStaff.id);
+        data = data.filter(s => s.staffId === currentUserStaff.id);
       }
-      setSessions(docs);
+      setSessions(data || []);
+    } catch (err) {
+      console.error('CashSessions fetch error:', err);
+    } finally {
       setLoading(false);
-    }, (err) => {
-      console.error('CashSessions subscription error:', err);
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    }
+  };
+
+  useEffect(() => {
+    fetchSessions();
+    const interval = setInterval(fetchSessions, 30000);
+    return () => clearInterval(interval);
   }, [tenantId, currentUserStaff?.role, currentUserStaff?.id]);
 
   const openRegister = async (e: React.FormEvent) => {
@@ -102,15 +101,16 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
     if (!currentUserStaff || !tenantId) return;
     setIsProcessing(true);
     try {
-      await addDoc(getTenantCollection(db, tenantId, 'cashSessions'), {
+      await apiPost(`/api/mariadb/tenants/${tenantId}/cash-sessions`, {
         staffId: currentUserStaff.id,
         staffName: currentUserStaff.name,
-        openedAt: serverTimestamp(),
+        openedAt: new Date().toISOString(),
         openingFloat: newFloat,
         openingBreakdown,
         expectedCash: newFloat,
         status: 'open',
       });
+      await fetchSessions();
       setOpeningBreakdown({});
     } catch (err) {
       console.error(err);
@@ -128,9 +128,9 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
       if (difference < 0) {
         netTips = Math.max(0, netTips + difference);
       }
-      await updateDoc(getTenantDoc(db, tenantId, 'cashSessions', activeSession.id), {
+      await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}`, {
         status: 'closed',
-        closedAt: serverTimestamp(),
+        closedAt: new Date().toISOString(),
         actualCash: closeAmount,
         closingBreakdown,
         difference,
@@ -138,10 +138,11 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
         notes: closeNotes,
       });
       if (netTips > 0 && currentUserStaff) {
-        await updateDoc(getTenantDoc(db, tenantId, 'staff', currentUserStaff.id), {
-          walletBalance: increment(netTips),
+        await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${currentUserStaff.id}`, {
+          walletBalanceDelta: netTips, // Sending as delta for backend increment
         });
       }
+      await fetchSessions();
       setClosingBreakdown({});
       setCloseNotes('');
     } catch (err) {
@@ -181,19 +182,19 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
               </form>
             ) : (
               <form onSubmit={closeRegister} className="space-y-6">
-                <div className={`grid ${activeSession.accumulatedTips > 0 ? 'grid-cols-3' : 'grid-cols-2'} gap-4`}>
+                <div className={`grid ${(activeSession.accumulatedTips || 0) > 0 ? 'grid-cols-3' : 'grid-cols-2'} gap-4`}>
                   <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Starting Float</p>
-                    <p className="text-xl font-black">R{activeSession.openingFloat.toFixed(2)}</p>
+                    <p className="text-xl font-black">R{(activeSession.openingFloat || 0).toFixed(2)}</p>
                   </div>
                   <div className="p-4 bg-primary/10 rounded-2xl border border-primary/20">
                     <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">Expected Cash</p>
-                    <p className="text-xl font-black text-primary">R{activeSession.expectedCash.toFixed(2)}</p>
+                    <p className="text-xl font-black text-primary">R{(activeSession.expectedCash || 0).toFixed(2)}</p>
                   </div>
-                  {(activeSession.accumulatedTips > 0) && (
+                  {((activeSession.accumulatedTips || 0) > 0) && (
                     <div className="p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20">
                       <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Tips</p>
-                      <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">R{activeSession.accumulatedTips.toFixed(2)}</p>
+                      <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">R{(activeSession.accumulatedTips || 0).toFixed(2)}</p>
                     </div>
                   )}
                 </div>
@@ -224,8 +225,8 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
              <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Calendar className="w-6 h-6 text-slate-400"/> Recent Sessions</h3>
              <div className="space-y-4 max-h-[800px] overflow-y-auto pr-2 custom-scrollbar">
                 {sessions.filter(s => s.status === 'closed').slice(0, 50).map(s => {
-                   const opened = s.openedAt?.toDate ? s.openedAt.toDate() : new Date();
-                   const closed = s.closedAt?.toDate ? s.closedAt.toDate() : new Date();
+                   const opened = new Date(s.openedAt);
+                   const closed = s.closedAt ? new Date(s.closedAt) : new Date();
                    const diff = s.difference || 0;
                    return (
                      <div key={s.id} className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
@@ -241,11 +242,11 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
                         <div className="flex gap-4 text-sm font-medium border-t border-slate-200 dark:border-slate-700/60 pt-4">
                            <div className="flex-1">
                              <span className="text-slate-400 mr-2 text-[10px] uppercase tracking-widest block mb-1">Float</span> 
-                             <span className="font-bold">R{s.openingFloat.toFixed(2)}</span>
+                             <span className="font-bold">R{(s.openingFloat || 0).toFixed(2)}</span>
                            </div>
                            <div className="flex-1">
                              <span className="text-slate-400 mr-2 text-[10px] uppercase tracking-widest block mb-1">Expected</span> 
-                             <span className="font-bold">R{s.expectedCash.toFixed(2)}</span>
+                             <span className="font-bold">R{(s.expectedCash || 0).toFixed(2)}</span>
                            </div>
                            <div className="flex-1">
                              <span className="text-slate-400 mr-2 text-[10px] uppercase tracking-widest block mb-1">Actual</span> 

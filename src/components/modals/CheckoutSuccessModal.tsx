@@ -36,7 +36,7 @@ export const CheckoutSuccessModal: React.FC<CheckoutSuccessModalProps> = ({ sale
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-slate-500 font-medium">Total</span>
-              <span className="font-black text-slate-900 dark:text-white">{currency}{sale.total.toFixed(2)}</span>
+              <span className="font-black text-slate-900 dark:text-white">{currency}{Number(sale.total || 0).toFixed(2)}</span>
             </div>
             {sale.taxAmount !== undefined && sale.taxAmount > 0 && (
               <div className="flex justify-between text-xs">

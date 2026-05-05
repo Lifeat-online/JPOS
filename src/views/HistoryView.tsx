@@ -73,9 +73,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     <td className="px-6 py-4 text-xs font-bold text-slate-600 dark:text-slate-300">
                       {sale.customerId ? customers.find(c => c.id === sale.customerId)?.name || 'Deleted' : 'Guest'}
                     </td>
-                    <td className="px-6 py-4 text-xs font-semibold text-slate-600 dark:text-slate-300 truncate">{sale.createdAt?.toDate().toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</td>
+                    <td className="px-6 py-4 text-xs font-semibold text-slate-600 dark:text-slate-300 truncate">{new Date(sale.createdAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</td>
                     <td className="px-6 py-4 text-xs font-bold uppercase text-slate-500 dark:text-slate-400">{sale.paymentMethod}</td>
-                    <td className="px-6 py-4 font-extrabold text-slate-900 dark:text-white">R{sale.total.toFixed(2)}</td>
+                    <td className="px-6 py-4 font-extrabold text-slate-900 dark:text-white">R{Number(sale.total || 0).toFixed(2)}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
                         sale.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'

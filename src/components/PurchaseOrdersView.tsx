@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { query, onSnapshot, doc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
 import { PurchaseOrder, Vendor, Product } from '../types';
 import { Plus, Loader2, Save, X, ShoppingBag } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { usePosStore } from '../store/usePosStore';
-import { getTenantCollection, getTenantDoc } from '../tenantHelper';
+import { apiGet, apiPost, apiPut } from '../api';
 
 export function PurchaseOrdersView() {
   const tenantId = usePosStore(s => s.tenantId);
@@ -17,28 +15,28 @@ export function PurchaseOrdersView() {
   const [currentOrder, setCurrentOrder] = useState<Partial<PurchaseOrder>>({ items: [], type: 'once_off' });
   const [isProcessing, setIsProcessing] = useState(false);
 
-  useEffect(() => {
+  const fetchData = async () => {
     if (!tenantId) return;
-    let loaded = 0;
-    const done = () => { loaded++; if (loaded >= 3) setLoading(false); };
+    try {
+      const [pos, vends, prods] = await Promise.all([
+        apiGet<PurchaseOrder[]>(`/api/mariadb/tenants/${tenantId}/purchase-orders`),
+        apiGet<Vendor[]>(`/api/mariadb/tenants/${tenantId}/vendors`),
+        apiGet<Product[]>(`/api/mariadb/tenants/${tenantId}/products`),
+      ]);
+      setOrders(pos || []);
+      setVendors(vends || []);
+      setProducts(prods || []);
+    } catch (err) {
+      console.error('PO fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const unsubOrders = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'purchaseOrders')),
-      snap => { setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as PurchaseOrder))); done(); },
-      err => { console.error('PO subscription error:', err); done(); }
-    );
-    const unsubVendors = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'vendors')),
-      snap => { setVendors(snap.docs.map(d => ({ id: d.id, ...d.data() } as Vendor))); done(); },
-      err => { console.error('Vendors subscription error:', err); done(); }
-    );
-    const unsubProducts = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'products')),
-      snap => { setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product))); done(); },
-      err => { console.error('Products subscription error:', err); done(); }
-    );
-
-    return () => { unsubOrders(); unsubVendors(); unsubProducts(); };
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
   }, [tenantId]);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -57,15 +55,26 @@ export function PurchaseOrdersView() {
         expectedDeliveryDate: currentOrder.expectedDeliveryDate || null,
       };
       if (currentOrder.id) {
-        await updateDoc(getTenantDoc(db, tenantId, 'purchaseOrders', currentOrder.id), { ...data, updatedAt: serverTimestamp() });
+        await apiPut(`/api/mariadb/tenants/${tenantId}/purchase-orders/${currentOrder.id}`, data);
       } else {
-        await addDoc(getTenantCollection(db, tenantId, 'purchaseOrders'), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/purchase-orders`, data);
       }
+      await fetchData();
       setModalOpen(false);
     } catch (err) {
       console.error(err);
     }
     setIsProcessing(false);
+  };
+
+  const markReceived = async (orderId: string) => {
+    if (!tenantId) return;
+    try {
+      await apiPut(`/api/mariadb/tenants/${tenantId}/purchase-orders/${orderId}`, { status: 'received' });
+      await fetchData();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const statusColor = (s: string) => ({
@@ -121,9 +130,9 @@ export function PurchaseOrdersView() {
                 >
                   View / Edit
                 </button>
-                {order.status === 'sent' && tenantId && (
+                {order.status === 'sent' && (
                   <button
-                    onClick={() => updateDoc(getTenantDoc(db, tenantId, 'purchaseOrders', order.id), { status: 'received' })}
+                    onClick={() => markReceived(order.id)}
                     className="flex-1 py-2 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-200 transition"
                   >
                     Mark Received

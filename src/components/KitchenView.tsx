@@ -12,8 +12,8 @@ export function KitchenView({ sales, onCompleteOrder }: KitchenViewProps) {
   const kitchenOrders = sales
     .filter(s => s.status === 'kitchen')
     .sort((a, b) => {
-      const timeA = a.createdAt?.seconds || 0;
-      const timeB = b.createdAt?.seconds || 0;
+      const timeA = new Date(a.createdAt).getTime();
+      const timeB = new Date(b.createdAt).getTime();
       return timeA - timeB;
     });
 
@@ -46,7 +46,7 @@ export function KitchenView({ sales, onCompleteOrder }: KitchenViewProps) {
                     </h3>
                     <div className="text-[10px] uppercase font-bold tracking-widest text-white/80 flex items-center gap-1.5">
                       <Clock className="w-3 h-3" /> 
-                      {order.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || 'Now'}
+                      {new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || 'Now'}
                     </div>
                   </div>
                   <div className="text-2xl font-black bg-white/20 px-3 py-1 rounded-xl">

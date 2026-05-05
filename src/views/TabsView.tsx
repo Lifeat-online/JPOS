@@ -14,8 +14,8 @@ export function TabsView({ sales, customers, onResumeTab }: TabsViewProps) {
   const openTabs = sales
     .filter(s => s.isTab && s.status === 'open')
     .sort((a, b) => {
-      const ta = a.createdAt?.seconds || 0;
-      const tb = b.createdAt?.seconds || 0;
+      const ta = new Date(a.createdAt).getTime();
+      const tb = new Date(b.createdAt).getTime();
       return ta - tb; // oldest first
     });
 
@@ -53,7 +53,7 @@ export function TabsView({ sales, customers, onResumeTab }: TabsViewProps) {
             <div className="text-right">
               <p className="text-xs font-black uppercase tracking-widest text-slate-400">Total Outstanding</p>
               <p className="text-2xl font-black text-indigo-600 dark:text-indigo-400">
-                R{openTabs.reduce((sum, t) => sum + t.total, 0).toFixed(2)}
+                R{openTabs.reduce((sum, t) => sum + Number(t.total), 0).toFixed(2)}
               </p>
             </div>
           )}
@@ -110,7 +110,7 @@ export function TabsView({ sales, customers, onResumeTab }: TabsViewProps) {
                     <div className="flex items-center gap-3">
                       <div className="text-right">
                         <p className="text-2xl font-black text-slate-900 dark:text-white">
-                          R{tab.total.toFixed(2)}
+                          R{Number(tab.total).toFixed(2)}
                         </p>
                       </div>
                       <button
@@ -132,13 +132,13 @@ export function TabsView({ sales, customers, onResumeTab }: TabsViewProps) {
                               {item.quantity}× {item.name}
                             </span>
                             <span className="font-bold text-slate-800 dark:text-white">
-                              R{(item.price * item.quantity).toFixed(2)}
+                              R{(Number(item.price) * Number(item.quantity)).toFixed(2)}
                             </span>
                           </div>
                         ))}
                         <div className="border-t border-slate-200 dark:border-slate-700 pt-2 flex justify-between font-black text-slate-900 dark:text-white">
                           <span>Total</span>
-                          <span>R{tab.total.toFixed(2)}</span>
+                          <span>R{Number(tab.total).toFixed(2)}</span>
                         </div>
                       </div>
                     </div>

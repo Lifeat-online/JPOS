@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import { Sale, OrderItem, Workstation, Staff } from '../types';
 import { ChefHat, CheckCircle2, Clock, Play } from 'lucide-react';
-import { updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
-import { getTenantDoc, getTenantCollection } from '../tenantHelper';
 import { usePosStore } from '../store/usePosStore';
+import { apiPost, apiPut } from '../api';
 
 interface WorkstationViewProps {
   sales: Sale[];
@@ -18,43 +16,39 @@ export function WorkstationView({ sales, workstations, currentUserStaff }: Works
 
   const handleItemStatusUpdate = async (
     saleId: string,
-    itemIdx: number,
+    item: any,
     newStatus: 'accepted' | 'ready',
-    currentItems: any[],
     order: Sale
   ) => {
     try {
-      const updatedItems = [...currentItems];
-      updatedItems[itemIdx] = {
-        ...updatedItems[itemIdx],
+      if (!tenantId) return;
+
+      // Granular update of the specific sale item
+      await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${saleId}/items/${item.id}`, {
         status: newStatus,
-        actionStaffId: currentUserStaff?.id || null,
-        ...(newStatus === 'accepted' ? { acceptedAt: new Date() } : { readyAt: new Date() }),
-      };
-      await updateDoc(getTenantDoc(db, tenantId, 'sales', saleId), { items: updatedItems });
+        actionStaffId: currentUserStaff?.id || null
+      });
 
       // When an item is marked ready, send a notification to the General channel
-      if (newStatus === 'ready' && tenantId) {
-        const item = currentItems[itemIdx];
+      if (newStatus === 'ready') {
         const activeWs = workstations.find(w => w.id === activeWorkstationId);
         const tableLabel = order.tableNumber ? `Table ${order.tableNumber}` : 'Takeaway';
         const wsLabel = activeWs?.name || 'Workstation';
         const text = `🍽️ ${tableLabel} — ${item.quantity}× ${item.name} is READY (${wsLabel})`;
 
-        await addDoc(getTenantCollection(db, tenantId, 'messages'), {
+        await apiPost(`/api/mariadb/tenants/${tenantId}/messages`, {
           channel: 'general',
           senderId: 'system',
           senderName: wsLabel,
           senderRole: 'workstation',
           text,
-          createdAt: serverTimestamp(),
-          readBy: [],          // empty — everyone should see this as unread
+          readBy: [],
           isDevBroadcast: false,
           isSystemNotification: true,
         });
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to update item status:', e);
     }
   };
 
@@ -79,7 +73,7 @@ export function WorkstationView({ sales, workstations, currentUserStaff }: Works
         return o.workstationId === activeWorkstationId && (o.status === 'pending' || o.status === 'accepted');
       })
     )
-    .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-slate-50 dark:bg-[#0B1120]">
@@ -129,7 +123,7 @@ export function WorkstationView({ sales, workstations, currentUserStaff }: Works
                       </h3>
                       <div className="text-[10px] uppercase font-bold tracking-widest text-white/80 flex items-center gap-1.5">
                         <Clock className="w-3 h-3" />
-                        {order.createdAt?.toDate?.()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || 'Now'}
+                        {order.createdAt ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Now'}
                       </div>
                     </div>
                     <div className="text-xl font-black bg-white/20 px-3 py-1 rounded-xl">
@@ -151,14 +145,14 @@ export function WorkstationView({ sales, workstations, currentUserStaff }: Works
                           <div className="flex border-t border-slate-100 dark:border-slate-800 pt-3">
                             {item.status === 'pending' ? (
                               <button
-                                onClick={() => handleItemStatusUpdate(order.id, idx, 'accepted', order.items, order)}
+                                onClick={() => handleItemStatusUpdate(order.id, item, 'accepted', order)}
                                 className="flex-1 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md shadow-blue-500/25"
                               >
                                 <Play className="w-4 h-4 fill-current" /> Accept & Prep
                               </button>
                             ) : (
                               <button
-                                onClick={() => handleItemStatusUpdate(order.id, idx, 'ready', order.items, order)}
+                                onClick={() => handleItemStatusUpdate(order.id, item, 'ready', order)}
                                 className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md shadow-emerald-500/25"
                               >
                                 <CheckCircle2 className="w-4 h-4" /> Mark Ready

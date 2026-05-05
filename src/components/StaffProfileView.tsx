@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import { Staff } from '../types';
 import { Mail, Phone, Wallet, Loader2, DollarSign } from 'lucide-react';
-import { updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { apiPost, apiPut } from '../api';
 import { usePosStore } from '../store/usePosStore';
-import { getTenantCollection, getTenantDoc } from '../tenantHelper';
 
 interface StaffProfileViewProps {
   currentUserStaff: Staff | null;
@@ -29,21 +27,26 @@ export function StaffProfileView({ currentUserStaff }: StaffProfileViewProps) {
 
     setIsProcessing(true);
     try {
-      await updateDoc(getTenantDoc(db, tenantId, 'staff', currentUserStaff.id), {
+      // 1. Update staff wallet balance
+      await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${currentUserStaff.id}`, {
         walletBalance: (currentUserStaff.walletBalance || 0) - amount,
       });
-      await addDoc(getTenantCollection(db, tenantId, 'payoutRequests'), {
+
+      // 2. Create payout request
+      await apiPost(`/api/mariadb/tenants/${tenantId}/payout-requests`, {
         staffId: currentUserStaff.id,
+        staffName: currentUserStaff.name,
         amount,
         status: 'pending',
-        createdAt: serverTimestamp(),
+        note: `Payout request from ${currentUserStaff.name}`,
       });
+
       setSuccessMsg(`Successfully requested payout of R${amount.toFixed(2)}`);
       setShowPayoutModal(false);
       setPayoutAmount('');
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err) {
-      console.error(err);
+      console.error('Payout request failed:', err);
     }
     setIsProcessing(false);
   };

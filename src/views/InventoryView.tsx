@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Plus, Minus, Package, ShieldCheck, Banknote, ChevronRight, ChevronDown, Edit } from 'lucide-react';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
 import { Product, AppConfig } from '../types';
 import { VendorManagementView } from '../components/VendorManagementView';
 import { PurchaseOrdersView } from '../components/PurchaseOrdersView';
+import { apiPut } from '../api';
+import { usePosStore } from '../store/usePosStore';
 
 interface InventoryViewProps {
   products: Product[];
@@ -16,6 +16,7 @@ interface InventoryViewProps {
 export const InventoryView: React.FC<InventoryViewProps> = ({
   products, config, onEditProduct, onAddProduct,
 }) => {
+  const tenantId = usePosStore(state => state.tenantId);
   const [tab, setTab] = useState<'products' | 'vendors' | 'purchaseOrders'>('products');
   const [search, setSearch] = useState('');
   const [section, setSection] = useState('All');
@@ -54,8 +55,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   }), [products]);
 
   const adjustStock = async (product: Product, delta: number) => {
-    const ref = doc(db, 'products', product.id);
-    await updateDoc(ref, { stock: Math.max(0, (product.stock || 0) + delta) });
+    if (!tenantId) return;
+    try {
+      await apiPut(`/api/mariadb/tenants/${tenantId}/products/${product.id}`, { 
+        stock: Math.max(0, (product.stock || 0) + delta) 
+      });
+    } catch (err) {
+      console.error('Failed to adjust stock:', err);
+    }
   };
 
   const getProductImage = (product: Partial<Product>) => {
@@ -253,7 +260,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <div className="space-y-2">
                           <div className="flex justify-between items-start gap-4">
                             <h3 className="font-black text-xl text-slate-900 dark:text-white leading-tight">{product.name}</h3>
-                            <p className="text-xl font-black text-primary">R{product.price.toFixed(2)}</p>
+                            <p className="text-xl font-black text-primary">R{Number(product.price || 0).toFixed(2)}</p>
                           </div>
                           <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">{product.barcode || 'NO SERIAL'}</p>
                         </div>

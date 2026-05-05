@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Wallet, CheckCircle2, XCircle, Clock, DollarSign,
-  ChevronDown, ChevronUp, Loader2, Plus, Minus,
+  Loader2, Plus, Minus,
 } from 'lucide-react';
-import {
-  query, onSnapshot, updateDoc, addDoc, serverTimestamp, orderBy,
-} from 'firebase/firestore';
-import { db } from '../firebase';
 import { Staff, PayoutRequest } from '../types';
-import { getTenantCollection, getTenantDoc } from '../tenantHelper';
 import { usePosStore } from '../store/usePosStore';
+import { 
+  getPayoutRequests, 
+  getCustomerPayoutRequests, 
+  updatePayoutRequest, 
+  updateCustomerPayoutRequest, 
+  createPayoutRequest,
+  updateStaff 
+} from '../api';
 
 interface WalletAdminViewProps {
   staff: Staff[];
@@ -29,31 +32,33 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
   const [adjustType, setAdjustType] = useState<'add' | 'deduct'>('add');
   const [adjustProcessing, setAdjustProcessing] = useState(false);
 
-  // Staff payout requests
-  useEffect(() => {
+  // Data fetching
+  const fetchData = async () => {
     if (!tenantId) return;
-    const q = query(
-      getTenantCollection(db, tenantId, 'payoutRequests'),
-      orderBy('createdAt', 'desc')
-    );
-    const unsub = onSnapshot(q, snap => {
-      setRequests(snap.docs.map(d => ({ id: d.id, ...d.data() } as PayoutRequest)));
+    try {
+      const [payouts, clientPayouts] = await Promise.all([
+        getPayoutRequests(tenantId),
+        getCustomerPayoutRequests(tenantId)
+      ]);
+      setRequests((payouts || []).map((p: any) => ({
+        ...p,
+        amount: Number(p.amount || 0),
+      })));
+      setClientRequests((clientPayouts || []).map((p: any) => ({
+        ...p,
+        amount: Number(p.amount || 0),
+      })));
+    } catch (err) {
+      console.error('Error fetching payout data:', err);
+    } finally {
       setLoading(false);
-    }, err => { console.error('Payout requests error:', err); setLoading(false); });
-    return () => unsub();
-  }, [tenantId]);
+    }
+  };
 
-  // Customer payout requests
   useEffect(() => {
-    if (!tenantId) return;
-    const q = query(
-      getTenantCollection(db, tenantId, 'customerPayoutRequests'),
-      orderBy('createdAt', 'desc')
-    );
-    const unsub = onSnapshot(q, snap => {
-      setClientRequests(snap.docs.map(d => ({ id: d.id, ...d.data() } as PayoutRequest)));
-    }, err => console.error('Customer payout requests error:', err));
-    return () => unsub();
+    fetchData();
+    const interval = setInterval(fetchData, 30000); // Poll every 30s
+    return () => clearInterval(interval);
   }, [tenantId]);
 
   const pendingRequests = useMemo(() => requests.filter(r => r.status === 'pending'), [requests]);
@@ -64,7 +69,7 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
     staff.find(s => s.id === staffId)?.name || staffId.slice(0, 8) + '…';
 
   const totalWalletBalance = useMemo(
-    () => staff.reduce((sum, s) => sum + (s.walletBalance || 0), 0),
+    () => staff.reduce((sum, s) => sum + Number(s.walletBalance || 0), 0),
     [staff]
   );
 
@@ -72,31 +77,34 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
     if (!tenantId) return;
     setProcessing(req.id);
     try {
-      await updateDoc(getTenantDoc(db, tenantId, 'payoutRequests', req.id), {
+      await updatePayoutRequest(tenantId, req.id, {
         status: 'approved',
-        processedAt: serverTimestamp(),
+        processedAt: new Date().toISOString(),
         processedBy: currentUserStaff?.id || 'admin',
       });
+      await fetchData();
     } catch (err) { console.error(err); }
     setProcessing(null);
   };
 
   const handleReject = async (req: PayoutRequest) => {
     if (!tenantId) return;
+    if (!req.staffId) return;
     setProcessing(req.id);
     try {
       // Refund the amount back to the staff wallet
       const staffMember = staff.find(s => s.id === req.staffId);
       if (staffMember) {
-        await updateDoc(getTenantDoc(db, tenantId, 'staff', req.staffId), {
+        await updateStaff(tenantId, req.staffId, {
           walletBalance: (staffMember.walletBalance || 0) + req.amount,
         });
       }
-      await updateDoc(getTenantDoc(db, tenantId, 'payoutRequests', req.id), {
+      await updatePayoutRequest(tenantId, req.id, {
         status: 'rejected',
-        processedAt: serverTimestamp(),
+        processedAt: new Date().toISOString(),
         processedBy: currentUserStaff?.id || 'admin',
       });
+      await fetchData();
     } catch (err) { console.error(err); }
     setProcessing(null);
   };
@@ -105,11 +113,12 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
     if (!tenantId) return;
     setProcessing(req.id);
     try {
-      await updateDoc(getTenantDoc(db, tenantId, 'payoutRequests', req.id), {
+      await updatePayoutRequest(tenantId, req.id, {
         status: 'paid',
-        processedAt: serverTimestamp(),
+        processedAt: new Date().toISOString(),
         processedBy: currentUserStaff?.id || 'admin',
       });
+      await fetchData();
     } catch (err) { console.error(err); }
     setProcessing(null);
   };
@@ -123,20 +132,23 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
     try {
       const delta = adjustType === 'add' ? amount : -amount;
       const newBalance = Math.max(0, adjustModal.current + delta);
-      await updateDoc(getTenantDoc(db, tenantId, 'staff', adjustModal.staffId), {
+      await updateStaff(tenantId, adjustModal.staffId, {
         walletBalance: newBalance,
       });
+      
       // Log the adjustment as a payout request for audit trail
-      await addDoc(getTenantCollection(db, tenantId, 'payoutRequests'), {
+      await createPayoutRequest(tenantId, {
         staffId: adjustModal.staffId,
         staffName: adjustModal.name,
         amount: Math.abs(delta),
         status: 'paid',
         note: `Manual ${adjustType === 'add' ? 'credit' : 'debit'}: ${adjustNote || 'Admin adjustment'}`,
-        createdAt: serverTimestamp(),
-        processedAt: serverTimestamp(),
+        createdAt: new Date().toISOString(),
+        processedAt: new Date().toISOString(),
         processedBy: currentUserStaff?.id || 'admin',
       });
+      
+      await fetchData();
       setAdjustModal(null);
       setAdjustAmount('');
       setAdjustNote('');
@@ -149,6 +161,12 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
     approved: { label: 'Approved', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
     rejected: { label: 'Rejected', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
     paid:     { label: 'Paid',     color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
+  };
+
+  const formatDate = (date: any) => {
+    if (!date) return '—';
+    const d = new Date(date);
+    return isNaN(d.getTime()) ? '—' : d.toLocaleString();
   };
 
   return (
@@ -180,20 +198,20 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
             <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Total Wallet Liability</p>
-            <p className="text-2xl font-black text-slate-900 dark:text-white">R{totalWalletBalance.toFixed(2)}</p>
+            <p className="text-2xl font-black text-slate-900 dark:text-white">R{Number(totalWalletBalance).toFixed(2)}</p>
             <p className="text-xs text-slate-400 mt-1">Across {staff.length} staff members</p>
           </div>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
             <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Pending Payouts</p>
             <p className="text-2xl font-black text-amber-600 dark:text-amber-400">
-              R{pendingRequests.reduce((s, r) => s + r.amount, 0).toFixed(2)}
+              R{pendingRequests.reduce((s, r) => s + Number(r.amount), 0).toFixed(2)}
             </p>
             <p className="text-xs text-slate-400 mt-1">{pendingRequests.length} request{pendingRequests.length !== 1 ? 's' : ''} awaiting</p>
           </div>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
             <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Total Paid Out</p>
             <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
-              R{requests.filter(r => r.status === 'paid').reduce((s, r) => s + r.amount, 0).toFixed(2)}
+              R{requests.filter(r => r.status === 'paid').reduce((s, r) => s + Number(r.amount), 0).toFixed(2)}
             </p>
             <p className="text-xs text-slate-400 mt-1">All time</p>
           </div>
@@ -244,20 +262,20 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
                           <div>
                             <div className="flex items-center gap-2 mb-1">
                               <div className="w-8 h-8 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl flex items-center justify-center font-black text-sm">
-                                {getStaffName(req.staffId).charAt(0)}
+                                {getStaffName(req.staffId || '').charAt(0)}
                               </div>
-                              <span className="font-black text-slate-900 dark:text-white">{getStaffName(req.staffId)}</span>
+                              <span className="font-black text-slate-900 dark:text-white">{getStaffName(req.staffId || '')}</span>
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest ${statusConfig.pending.color}`}>
                                 Pending
                               </span>
                             </div>
                             <p className="text-xs text-slate-400 ml-10">
-                              Requested {req.createdAt?.toDate?.()?.toLocaleString() || 'recently'}
+                              Requested {formatDate(req.createdAt)}
                             </p>
                             {req.note && <p className="text-xs text-slate-500 ml-10 mt-1 italic">"{req.note}"</p>}
                           </div>
                           <div className="text-right">
-                            <p className="text-2xl font-black text-slate-900 dark:text-white">R{req.amount.toFixed(2)}</p>
+                            <p className="text-2xl font-black text-slate-900 dark:text-white">R{Number(req.amount).toFixed(2)}</p>
                           </div>
                         </div>
                         <div className="flex gap-3 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
@@ -302,18 +320,18 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
                         <div key={req.id} className={`flex items-center justify-between px-5 py-3.5 gap-4 ${idx > 0 ? 'border-t border-slate-100 dark:border-slate-800' : ''}`}>
                           <div className="flex items-center gap-3 min-w-0">
                             <div className="w-7 h-7 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center font-black text-xs text-slate-600 dark:text-slate-400 shrink-0">
-                              {getStaffName(req.staffId).charAt(0)}
+                              {getStaffName(req.staffId || '').charAt(0)}
                             </div>
                             <div className="min-w-0">
-                              <p className="font-bold text-sm text-slate-800 dark:text-white truncate">{getStaffName(req.staffId)}</p>
+                              <p className="font-bold text-sm text-slate-800 dark:text-white truncate">{getStaffName(req.staffId || '')}</p>
                               <p className="text-xs text-slate-400 truncate">
-                                {req.processedAt?.toDate?.()?.toLocaleDateString() || '—'}
+                                {formatDate(req.processedAt)}
                                 {req.note && ` · ${req.note}`}
                               </p>
                             </div>
                           </div>
                           <div className="flex items-center gap-3 shrink-0">
-                            <span className="font-black text-slate-900 dark:text-white">R{req.amount.toFixed(2)}</span>
+                            <span className="font-black text-slate-900 dark:text-white">R{Number(req.amount).toFixed(2)}</span>
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest ${statusConfig[req.status]?.color || statusConfig.pending.color}`}>
                               {statusConfig[req.status]?.label || req.status}
                             </span>
@@ -355,24 +373,23 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
                               </div>
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest ${statusConfig.pending.color}`}>Pending</span>
                             </div>
-                            <p className="text-xs text-slate-400 ml-10">{req.createdAt?.toDate?.()?.toLocaleString() || 'recently'}</p>
+                            <p className="text-xs text-slate-400 ml-10">{formatDate(req.createdAt)}</p>
                             {req.note && <p className="text-xs text-slate-500 ml-10 mt-1 italic">"{req.note}"</p>}
                           </div>
-                          <p className="text-2xl font-black text-slate-900 dark:text-white">R{req.amount.toFixed(2)}</p>
+                          <p className="text-2xl font-black text-slate-900 dark:text-white">R{Number(req.amount).toFixed(2)}</p>
                         </div>
                         <div className="flex gap-3 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
                           <button
                             onClick={async () => {
                               if (!tenantId) return;
                               setProcessing(req.id);
-                              // Refund to customer wallet
                               try {
-                                // Find customer and refund
-                                await updateDoc(getTenantDoc(db, tenantId, 'customerPayoutRequests', req.id), {
-                                  status: 'rejected', processedAt: serverTimestamp(), processedBy: currentUserStaff?.id || 'admin',
+                                await updateCustomerPayoutRequest(tenantId, req.id, {
+                                  status: 'rejected', 
+                                  processedAt: new Date().toISOString(), 
+                                  processedBy: currentUserStaff?.id || 'admin',
                                 });
-                                // Note: refunding customer wallet would require knowing their customer doc ID
-                                // For now just mark rejected — admin can manually credit via customer edit
+                                await fetchData();
                               } catch (err) { console.error(err); }
                               setProcessing(null);
                             }}
@@ -387,9 +404,12 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
                               if (!tenantId) return;
                               setProcessing(req.id);
                               try {
-                                await updateDoc(getTenantDoc(db, tenantId, 'customerPayoutRequests', req.id), {
-                                  status: 'paid', processedAt: serverTimestamp(), processedBy: currentUserStaff?.id || 'admin',
+                                await updateCustomerPayoutRequest(tenantId, req.id, {
+                                  status: 'paid', 
+                                  processedAt: new Date().toISOString(), 
+                                  processedBy: currentUserStaff?.id || 'admin',
                                 });
+                                await fetchData();
                               } catch (err) { console.error(err); }
                               setProcessing(null);
                             }}
@@ -413,10 +433,10 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
                         <div key={req.id} className={`flex items-center justify-between px-5 py-3.5 gap-4 ${idx > 0 ? 'border-t border-slate-100 dark:border-slate-800' : ''}`}>
                           <div className="min-w-0">
                             <p className="font-bold text-sm text-slate-800 dark:text-white truncate">{req.customerName || 'Customer'}</p>
-                            <p className="text-xs text-slate-400 truncate">{req.processedAt?.toDate?.()?.toLocaleDateString() || '—'}{req.note && ` · ${req.note}`}</p>
+                            <p className="text-xs text-slate-400 truncate">{formatDate(req.processedAt)}{req.note && ` · ${req.note}`}</p>
                           </div>
                           <div className="flex items-center gap-3 shrink-0">
-                            <span className="font-black text-slate-900 dark:text-white">R{req.amount.toFixed(2)}</span>
+                            <span className="font-black text-slate-900 dark:text-white">R{Number(req.amount).toFixed(2)}</span>
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest ${statusConfig[req.status]?.color || statusConfig.pending.color}`}>
                               {statusConfig[req.status]?.label || req.status}
                             </span>
@@ -449,7 +469,7 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
                   <div className="text-right">
                     <p className="text-xs font-black uppercase tracking-widest text-slate-400">Balance</p>
                     <p className={`text-xl font-black ${(s.walletBalance || 0) > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
-                      R{(s.walletBalance || 0).toFixed(2)}
+                      R{Number(s.walletBalance || 0).toFixed(2)}
                     </p>
                   </div>
                   <button
@@ -479,7 +499,7 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl">
             <h3 className="text-xl font-black text-slate-900 dark:text-white mb-1">Adjust Wallet</h3>
             <p className="text-sm text-slate-500 mb-6">
-              {adjustModal.name} · Current balance: <span className="font-bold text-slate-900 dark:text-white">R{adjustModal.current.toFixed(2)}</span>
+              {adjustModal.name} · Current balance: <span className="font-bold text-slate-900 dark:text-white">R{Number(adjustModal.current).toFixed(2)}</span>
             </p>
             <form onSubmit={handleAdjustBalance} className="space-y-4">
               {/* Add / Deduct toggle */}
@@ -525,7 +545,7 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
 
               {adjustAmount && (
                 <div className={`p-3 rounded-xl text-sm font-bold text-center ${adjustType === 'add' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'}`}>
-                  New balance: R{Math.max(0, adjustModal.current + (adjustType === 'add' ? 1 : -1) * (parseFloat(adjustAmount) || 0)).toFixed(2)}
+                  New balance: R{Math.max(0, Number(adjustModal.current) + (adjustType === 'add' ? 1 : -1) * (parseFloat(adjustAmount) || 0)).toFixed(2)}
                 </div>
               )}
 

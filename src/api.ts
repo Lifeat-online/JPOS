@@ -1,74 +1,111 @@
-export async function apiGet<T>(path: string) {
-  const response = await fetch(path, {
+/**
+ * REST API client — MariaDB backend.
+ * All requests automatically attach the JWT Bearer token.
+ * On 401, attempts a token refresh and retries once before throwing.
+ */
+import { getAccessToken } from './hooks/useAuth';
+
+// ── Token refresh (client-side) ──────────────────────────────────────────────
+
+async function tryRefresh(): Promise<boolean> {
+  const refreshToken = localStorage.getItem('jpos_refresh_token');
+  if (!refreshToken) return false;
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ refreshToken }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    localStorage.setItem('jpos_access_token',  data.accessToken);
+    localStorage.setItem('jpos_refresh_token', data.refreshToken);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ── Auth header helper ────────────────────────────────────────────────────────
+
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = getAccessToken();
+  return {
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
+}
+
+// ── Core fetch with auto-refresh ──────────────────────────────────────────────
+
+async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<T> {
+  const doRequest = () => fetch(input, {
+    ...init,
     headers: {
-      Accept: 'application/json',
+      ...authHeaders(init.headers as Record<string, string>),
     },
   });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`API request failed [${response.status}]: ${body}`);
+  let res = await doRequest();
+
+  // If unauthorized, try to refresh once and retry
+  if (res.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      res = await doRequest();
+    }
   }
 
-  return response.json() as Promise<T>;
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`API request failed [${res.status}]: ${body}`);
+  }
+
+  return res.json() as Promise<T>;
 }
 
-export async function apiPost<T>(path: string, data: any) {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(data),
+// ── Public helpers ────────────────────────────────────────────────────────────
+
+export function apiGet<T>(path: string): Promise<T> {
+  return apiFetch<T>(path, { method: 'GET' });
+}
+
+export function apiPost<T>(path: string, data: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(data),
   });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`API request failed [${response.status}]: ${body}`);
-  }
-
-  return response.json() as Promise<T>;
 }
 
-export async function apiPut<T>(path: string, data: any) {
-  const response = await fetch(path, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(data),
+export function apiPut<T>(path: string, data: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method:  'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(data),
   });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`API request failed [${response.status}]: ${body}`);
-  }
-
-  return response.json() as Promise<T>;
 }
 
-export async function apiDelete<T>(path: string) {
-  const response = await fetch(path, {
-    method: 'DELETE',
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`API request failed [${response.status}]: ${body}`);
-  }
-
-  return response.json() as Promise<T>;
+export function apiDelete<T>(path: string): Promise<T> {
+  return apiFetch<T>(path, { method: 'DELETE' });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function apiLogin(email: string, password: string, tenantId?: string) {
+  return fetch('/api/auth/login', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ email, password, tenantId }),
+  }).then(r => r.json());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tenant Data Queries
-// ─────────────────────────────────────────────────────────────────────────
-
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function getTenantProducts(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/products`);
@@ -94,6 +131,14 @@ export function getTenantSales(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/sales`);
 }
 
+export function getTenantTableSections(tenantId: string) {
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/table-sections`);
+}
+
+export function getTenantRestaurantTables(tenantId: string) {
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/restaurant-tables`);
+}
+
 export function getOpenCashSession(tenantId: string, staffId: string) {
   return apiGet<any>(`/api/mariadb/tenants/${tenantId}/cash-sessions?staffId=${encodeURIComponent(staffId)}`);
 }
@@ -110,9 +155,9 @@ export function getStaffTenantByEmail(email: string) {
   return apiGet<any>(`/api/mariadb/staff?email=${encodeURIComponent(email)}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // CRUD: Products
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function createProduct(tenantId: string, product: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/products`, product);
@@ -126,9 +171,9 @@ export function deleteProduct(tenantId: string, productId: string) {
   return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/products/${productId}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // CRUD: Customers
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function createCustomer(tenantId: string, customer: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/customers`, customer);
@@ -142,9 +187,9 @@ export function deleteCustomer(tenantId: string, customerId: string) {
   return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // CRUD: Staff
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function createStaff(tenantId: string, staff: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/staff`, staff);
@@ -158,9 +203,9 @@ export function deleteStaff(tenantId: string, staffId: string) {
   return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/staff/${staffId}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // CRUD: Workstations
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function createWorkstation(tenantId: string, workstation: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/workstations`, workstation);
@@ -170,9 +215,33 @@ export function deleteWorkstation(tenantId: string, workstationId: string) {
   return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/workstations/${workstationId}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+export function createTableSection(tenantId: string, section: any) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/table-sections`, section);
+}
+
+export function updateTableSection(tenantId: string, sectionId: string, updates: any) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/table-sections/${sectionId}`, updates);
+}
+
+export function deleteTableSection(tenantId: string, sectionId: string) {
+  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/table-sections/${sectionId}`);
+}
+
+export function createRestaurantTable(tenantId: string, table: any) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/restaurant-tables`, table);
+}
+
+export function updateRestaurantTable(tenantId: string, tableId: string, updates: any) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/restaurant-tables/${tableId}`, updates);
+}
+
+export function deleteRestaurantTable(tenantId: string, tableId: string) {
+  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/restaurant-tables/${tableId}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CRUD: Sales
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function createSale(tenantId: string, sale: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/sales`, sale);
@@ -184,4 +253,44 @@ export function getSaleById(tenantId: string, saleId: string) {
 
 export function updateSaleStatus(tenantId: string, saleId: string, status: string) {
   return apiPut<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}`, { status });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Payout Requests
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function getPayoutRequests(tenantId: string) {
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/payout-requests`);
+}
+
+export function getCustomerPayoutRequests(tenantId: string) {
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests`);
+}
+
+export function updatePayoutRequest(tenantId: string, id: string, updates: any) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/payout-requests/${id}`, updates);
+}
+
+export function updateCustomerPayoutRequest(tenantId: string, id: string, updates: any) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests/${id}`, updates);
+}
+
+export function createPayoutRequest(tenantId: string, data: any) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/payout-requests`, data);
+}
+
+export function setupTenant(data: any) {
+  return apiPost<{ tenantId: string }>(`/api/mariadb/setup`, data);
+}
+
+export function seedProducts(tenantId: string, products: any[]) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/seed-products`, { products });
+}
+
+export function clearAllSales(tenantId: string) {
+  return apiDelete<any>(`/api/mariadb/tenants/${tenantId}/sales`);
+}
+
+export function createCustomerPayoutRequest(tenantId: string, data: any) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests`, data);
 }

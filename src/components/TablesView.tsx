@@ -1,44 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { Sale, OrderItem, RestaurantTable, TableSection } from '../types';
 import { Utensils, Users, CheckCircle2, X, Plus } from 'lucide-react';
-import { updateDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
-import { getTenantDoc, getTenantCollection } from '../tenantHelper';
+import { apiPut } from '../api';
 import { usePosStore } from '../store/usePosStore';
 
 interface TablesViewProps {
   sales: Sale[];
+  tableSections: TableSection[];
+  restaurantTables: RestaurantTable[];
   onSelectTable: (tableNumber: string, existingSale?: Sale) => void;
 }
 
-export function TablesView({ sales, onSelectTable }: TablesViewProps) {
+export function TablesView({ sales, tableSections, restaurantTables, onSelectTable }: TablesViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
-  const [sections, setSections] = useState<TableSection[]>([]);
-  const [configuredTables, setConfiguredTables] = useState<RestaurantTable[]>([]);
   const [activeSection, setActiveSection] = useState<string>('all');
 
-  // Load configured sections and tables from Firestore
-  useEffect(() => {
-    if (!tenantId) return;
-    const unsubSections = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'tableSections'), orderBy('order', 'asc')),
-      snap => setSections(snap.docs.map(d => ({ id: d.id, ...d.data() } as TableSection))),
-    );
-    const unsubTables = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'restaurantTables')),
-      snap => setConfiguredTables(snap.docs.map(d => ({ id: d.id, ...d.data() } as RestaurantTable))),
-    );
-    return () => { unsubSections(); unsubTables(); };
-  }, [tenantId]);
-
   // Fall back to 20 hardcoded tables if none configured
-  const useFallback = configuredTables.length === 0;
+  const useFallback = restaurantTables.length === 0;
   const fallbackTables: RestaurantTable[] = Array.from({ length: 20 }, (_, i) => ({
     id: `T${i + 1}`, label: `T${i + 1}`, sectionId: 'default', status: 'active',
   }));
 
-  const allTables = useFallback ? fallbackTables : configuredTables.filter(t => t.status === 'active');
+  const allTables = useFallback ? fallbackTables : restaurantTables.filter(t => t.status === 'active');
   const displayTables = activeSection === 'all' ? allTables : allTables.filter(t => t.sectionId === activeSection);
 
   const activeSales = sales.filter(s => s.tableNumber && (s.status === 'open' || s.status === 'kitchen'));
@@ -54,14 +38,18 @@ export function TablesView({ sales, onSelectTable }: TablesViewProps) {
 
   const markItemsDelivered = async (sale: Sale) => {
     if (!tenantId) return;
-    const updatedItems = sale.items.map(item => {
+    const readyItems = sale.items.filter(item => (item as OrderItem).status === 'ready');
+    
+    // In MariaDB REST, we update items individually or via a bulk endpoint if we had one.
+    // For now, we'll use the individual item update endpoint in a loop or implement a bulk one.
+    // Let's use the individual one since we added it to server.ts.
+    for (const item of readyItems) {
       const o = item as OrderItem;
-      if (o.status === 'ready') {
-        return { ...o, status: 'delivered', deliveredAt: new Date() };
-      }
-      return item;
-    });
-    await updateDoc(getTenantDoc(db, tenantId, 'sales', sale.id), { items: updatedItems });
+      await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${sale.id}/items/${o.id}`, {
+        status: 'delivered',
+        deliveredAt: new Date().toISOString()
+      });
+    }
   };
 
   const selectedSale = selectedTable
@@ -77,7 +65,7 @@ export function TablesView({ sales, onSelectTable }: TablesViewProps) {
         </div>
 
         {/* Section filter tabs */}
-        {!useFallback && sections.length > 0 && (
+        {!useFallback && tableSections.length > 0 && (
           <div className="flex gap-2 overflow-x-auto no-scrollbar">
             <button
               onClick={() => setActiveSection('all')}
@@ -85,7 +73,7 @@ export function TablesView({ sales, onSelectTable }: TablesViewProps) {
             >
               All ({allTables.length})
             </button>
-            {sections.map(s => {
+            {tableSections.map(s => {
               const count = allTables.filter(t => t.sectionId === s.id).length;
               return (
                 <button
@@ -155,7 +143,7 @@ export function TablesView({ sales, onSelectTable }: TablesViewProps) {
 
                 {isOccupied && activeSale && (
                   <div className="mt-4 pt-4 border-t border-white/20 flex justify-between items-center text-white">
-                    <span className="text-[10px] font-black uppercase tracking-widest opacity-80">R{activeSale.total.toFixed(2)}</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest opacity-80">R{Number(activeSale.total || 0).toFixed(2)}</span>
                     <span className="text-[10px] font-bold uppercase py-0.5 px-2 bg-white/20 rounded-md">
                       {activeSale.status}
                     </span>
@@ -175,7 +163,7 @@ export function TablesView({ sales, onSelectTable }: TablesViewProps) {
             <div className="bg-primary px-6 py-5 flex justify-between items-center text-white shrink-0">
               <div>
                 <h3 className="text-2xl font-black">Table {selectedTable}</h3>
-                <p className="text-white/70 text-sm font-medium">R{selectedSale.total.toFixed(2)} · {selectedSale.status}</p>
+                <p className="text-white/70 text-sm font-medium">R{Number(selectedSale.total || 0).toFixed(2)} · {selectedSale.status}</p>
               </div>
               <button onClick={() => setSelectedTable(null)} className="p-2 bg-white/20 rounded-xl hover:bg-white/30 transition-all">
                 <X className="w-5 h-5" />

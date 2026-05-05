@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import {
-  query, onSnapshot, where, orderBy, limit,
-  getDocs, doc, setDoc, serverTimestamp, collectionGroup,
-} from 'firebase/firestore';
-import { db } from '../firebase';
+/**
+ * useClientPortal — MariaDB REST edition.
+ * Replaced all Firestore subscriptions with REST polling.
+ * Polls every 30 seconds to stay reasonably fresh without real-time overhead.
+ */
+import { useState, useEffect, useCallback } from 'react';
+import { JwtUser } from './useAuth';
 import { Customer, Sale, PayoutRequest } from '../types';
-import { getTenantCollection, getTenantDoc } from '../tenantHelper';
+import { apiGet, apiPut } from '../api';
 
 interface ClientPortalData {
   customer: Customer | null;
@@ -17,7 +17,9 @@ interface ClientPortalData {
   notFound: boolean;
 }
 
-export function useClientPortal(user: User | null): ClientPortalData {
+const POLL_MS = 30_000;
+
+export function useClientPortal(user: JwtUser | null): ClientPortalData {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -25,39 +27,28 @@ export function useClientPortal(user: User | null): ClientPortalData {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
-  // Step 1: Find the customer record by email across all tenants
+  // Step 1: Find the customer record by email
   useEffect(() => {
     if (!user?.email) { setLoading(false); return; }
 
     const findCustomer = async () => {
       try {
-        // Search customers collectionGroup by email
-        const q = query(
-          collectionGroup(db, 'customers'),
-          where('email', '==', user.email)
+        const result = await apiGet<{ customer: Customer; tenantId: string } | null>(
+          `/api/mariadb/customers/by-email?email=${encodeURIComponent(user.email)}`
         );
-        const snap = await getDocs(q);
-
-        if (snap.empty) {
+        if (!result?.customer) {
           setNotFound(true);
           setLoading(false);
           return;
         }
+        setTenantId(result.tenantId);
+        setCustomer(result.customer);
 
-        const customerDoc = snap.docs[0];
-        const foundTenantId = customerDoc.ref.parent.parent?.id || null;
-        const customerData = { id: customerDoc.id, ...customerDoc.data() } as Customer;
-
-        setTenantId(foundTenantId);
-        setCustomer(customerData);
-
-        // Link the customer's UID if not already set
-        if (!customerData.uid && foundTenantId) {
-          await setDoc(
-            getTenantDoc(db, foundTenantId, 'customers', customerDoc.id),
-            { uid: user.uid },
-            { merge: true }
-          );
+        // Link customer UID if not already set
+        if (!result.customer.uid && result.tenantId) {
+          await apiPut(`/api/mariadb/tenants/${result.tenantId}/customers/${result.customer.id}`, {
+            uid: user.uid,
+          }).catch(() => {});
         }
       } catch (err) {
         console.error('Client portal lookup error:', err);
@@ -69,56 +60,49 @@ export function useClientPortal(user: User | null): ClientPortalData {
     findCustomer();
   }, [user?.email]);
 
-  // Step 2: Subscribe to customer doc for live updates
-  useEffect(() => {
+  // Step 2 + 3: Poll customer, sales, and payout requests
+  const fetchPortalData = useCallback(async () => {
     if (!customer?.id || !tenantId) return;
-
-    const unsub = onSnapshot(
-      getTenantDoc(db, tenantId, 'customers', customer.id),
-      (snap) => {
-        if (snap.exists()) {
-          setCustomer({ id: snap.id, ...snap.data() } as Customer);
-        }
+    try {
+      const [customerRes, salesRes, payoutsRes] = await Promise.all([
+        apiGet<Customer>(`/api/mariadb/tenants/${tenantId}/customers/${customer.id}`),
+        apiGet<Sale[]>(`/api/mariadb/tenants/${tenantId}/sales?customerId=${customer.id}&limit=50`),
+        apiGet<PayoutRequest[]>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests?customerId=${customer.id}`),
+      ]);
+      if (customerRes) {
+        setCustomer({
+          ...customerRes,
+          loyaltyPoints: Number(customerRes.loyaltyPoints || 0),
+          walletBalance: Number(customerRes.walletBalance || 0),
+        });
       }
-    );
-    return () => unsub();
+      setSales((salesRes || []).map(s => ({
+        ...s,
+        total: Number(s.total || 0),
+        subtotal: s.subtotal ? Number(s.subtotal) : undefined,
+        items: (s.items || []).map(item => ({
+          ...item,
+          price: Number(item.price || 0),
+          quantity: Number(item.quantity || 0),
+        })),
+      })));
+      setPayoutRequests((payoutsRes || []).map(p => ({
+        ...p,
+        amount: Number(p.amount || 0),
+      })));
+    } catch (err) {
+      console.error('Client portal poll error:', err);
+    } finally {
+      setLoading(false);
+    }
   }, [customer?.id, tenantId]);
 
-  // Step 3: Subscribe to this customer's sales
   useEffect(() => {
     if (!customer?.id || !tenantId) return;
-
-    const unsub = onSnapshot(
-      query(
-        getTenantCollection(db, tenantId, 'sales'),
-        where('customerId', '==', customer.id),
-        orderBy('createdAt', 'desc'),
-        limit(50)
-      ),
-      (snap) => {
-        setSales(snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)));
-        setLoading(false);
-      },
-      (err) => { console.error('Client sales error:', err); setLoading(false); }
-    );
-    return () => unsub();
-  }, [customer?.id, tenantId]);
-
-  // Step 4: Subscribe to this customer's payout requests
-  useEffect(() => {
-    if (!customer?.id || !tenantId) return;
-
-    const unsub = onSnapshot(
-      query(
-        getTenantCollection(db, tenantId, 'customerPayoutRequests'),
-        where('customerId', '==', customer.id),
-        orderBy('createdAt', 'desc')
-      ),
-      (snap) => setPayoutRequests(snap.docs.map(d => ({ id: d.id, ...d.data() } as PayoutRequest))),
-      (err) => console.error('Client payout requests error:', err)
-    );
-    return () => unsub();
-  }, [customer?.id, tenantId]);
+    fetchPortalData();
+    const interval = setInterval(fetchPortalData, POLL_MS);
+    return () => clearInterval(interval);
+  }, [fetchPortalData]);
 
   return { customer, tenantId, sales, payoutRequests, loading, notFound };
 }

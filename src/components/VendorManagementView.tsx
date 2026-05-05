@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { query, onSnapshot, doc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
 import { Vendor } from '../types';
 import { Plus, Edit, Loader2, Save, X, Building2, Mail, Phone, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { usePosStore } from '../store/usePosStore';
-import { getTenantCollection, getTenantDoc } from '../tenantHelper';
+import { apiGet, apiPost, apiPut } from '../api';
 
 export function VendorManagementView() {
   const tenantId = usePosStore(s => s.tenantId);
@@ -15,17 +13,23 @@ export function VendorManagementView() {
   const [currentVendor, setCurrentVendor] = useState<Partial<Vendor>>({});
   const [isProcessing, setIsProcessing] = useState(false);
 
-  useEffect(() => {
+  const fetchVendors = async () => {
     if (!tenantId) return;
-    const q = query(getTenantCollection(db, tenantId, 'vendors'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setVendors(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Vendor)));
+    try {
+      const data = await apiGet<Vendor[]>(`/api/mariadb/tenants/${tenantId}/vendors`);
+      setVendors(data || []);
+    } catch (err) {
+      console.error('Vendors fetch error:', err);
+    } finally {
       setLoading(false);
-    }, (err) => {
-      console.error('Vendors subscription error:', err);
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    }
+  };
+
+  useEffect(() => {
+    fetchVendors();
+    // Poll every 30s to keep in sync
+    const interval = setInterval(fetchVendors, 30000);
+    return () => clearInterval(interval);
   }, [tenantId]);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -42,10 +46,11 @@ export function VendorManagementView() {
         status: currentVendor.status || 'active',
       };
       if (currentVendor.id) {
-        await updateDoc(getTenantDoc(db, tenantId, 'vendors', currentVendor.id), data);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/vendors/${currentVendor.id}`, data);
       } else {
-        await addDoc(getTenantCollection(db, tenantId, 'vendors'), { ...data, createdAt: serverTimestamp() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/vendors`, data);
       }
+      await fetchVendors();
       setModalOpen(false);
     } catch (err) {
       console.error(err);
@@ -55,9 +60,14 @@ export function VendorManagementView() {
 
   const toggleStatus = async (vendor: Vendor) => {
     if (!tenantId) return;
-    await updateDoc(getTenantDoc(db, tenantId, 'vendors', vendor.id), {
-      status: vendor.status === 'active' ? 'inactive' : 'active',
-    });
+    try {
+      await apiPut(`/api/mariadb/tenants/${tenantId}/vendors/${vendor.id}`, {
+        status: vendor.status === 'active' ? 'inactive' : 'active',
+      });
+      await fetchVendors();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   if (loading) return <div className="p-8 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;

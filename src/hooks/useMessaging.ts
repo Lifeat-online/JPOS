@@ -1,14 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
-import { User } from 'firebase/auth';
-import {
-  collection, query, orderBy, limit, onSnapshot,
-  addDoc, updateDoc, doc, serverTimestamp,
-} from 'firebase/firestore';
-import { db } from '../firebase';
+/**
+ * useMessaging — MariaDB REST edition.
+ * Replaced Firestore onSnapshot real-time listeners with REST polling.
+ * Polls the messages endpoint every 10 seconds while the hook is mounted.
+ */
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { JwtUser } from './useAuth';
 import { Message, Staff } from '../types';
-import { getTenantCollection } from '../tenantHelper';
+import { apiGet, apiPost, apiPut } from '../api';
 
-const DEV_EMAIL = 'jameskoen78@gmail.com';
+const POLL_MS = 10_000;
 
 /** Build a deterministic DM channel ID from two user IDs */
 export function dmChannel(uidA: string, uidB: string): string {
@@ -16,7 +16,7 @@ export function dmChannel(uidA: string, uidB: string): string {
 }
 
 interface UseMessagingOptions {
-  user: User | null;
+  user: JwtUser | null;
   tenantId: string | null;
   currentUserStaff: Staff | null;
   staff: Staff[];
@@ -24,86 +24,63 @@ interface UseMessagingOptions {
 
 export function useMessaging({ user, tenantId, currentUserStaff, staff }: UseMessagingOptions) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [devBroadcasts, setDevBroadcasts] = useState<Message[]>([]);
   const [activeChannel, setActiveChannel] = useState<string>('general');
   const [unreadCount, setUnreadCount] = useState(0);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const isDev = user?.email === DEV_EMAIL;
   const myId = currentUserStaff?.id || user?.uid || '';
 
-  // ── Tenant messages ───────────────────────────────────────────────────────────
-  useEffect(() => {
+  // ── Fetch messages ────────────────────────────────────────────────────────────
+  const fetchMessages = useCallback(async () => {
     if (!user || !tenantId) { setMessages([]); return; }
-    const q = query(
-      getTenantCollection(db, tenantId, 'messages'),
-      orderBy('createdAt', 'asc'),
-      limit(200)
-    );
-    const unsubscribe = onSnapshot(q,
-      (snap) => setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() } as Message))),
-      (err) => console.error('Messages subscription error:', err)
-    );
-    return () => unsubscribe();
+    try {
+      const data = await apiGet<Message[]>(`/api/mariadb/tenants/${tenantId}/messages?limit=200`);
+      setMessages(data || []);
+    } catch (err) {
+      console.error('Messages fetch error:', err);
+    }
   }, [user, tenantId]);
 
-  // ── Dev broadcasts ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!user) { setDevBroadcasts([]); return; }
-    const q = query(
-      collection(db, 'devBroadcasts'),
-      orderBy('createdAt', 'asc'),
-      limit(50)
-    );
-    const unsubscribe = onSnapshot(q,
-      (snap) => setDevBroadcasts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Message))),
-      (err) => console.error('DevBroadcasts subscription error:', err)
-    );
-    return () => unsubscribe();
-  }, [user]);
+    fetchMessages();
+    pollingRef.current = setInterval(fetchMessages, POLL_MS);
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [fetchMessages]);
 
   // ── Unread count ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!myId) { setUnreadCount(0); return; }
-
-    const relevantMessages = messages.filter(m => {
+    const relevant = messages.filter(m => {
       if (m.channel === 'general') return true;
       if (m.channel.startsWith('dm_') && m.channel.includes(myId)) return true;
       return false;
     });
-
-    const unread = [
-      ...relevantMessages,
-      ...devBroadcasts,
-    ].filter(m => !(m.readBy || []).includes(myId)).length;
-
-    setUnreadCount(unread);
-  }, [messages, devBroadcasts, myId]);
+    setUnreadCount(relevant.filter(m => !(m.readBy || []).includes(myId)).length);
+  }, [messages, myId]);
 
   // ── Send a message ────────────────────────────────────────────────────────────
   const sendMessage = useCallback(async (text: string, channel: string) => {
-    if (!text.trim() || !user || !currentUserStaff) return;
+    if (!text.trim() || !user || !currentUserStaff || !tenantId) return;
 
-    const payload: Omit<Message, 'id'> = {
-      channel: channel as Message['channel'],
+    const payload = {
+      channel,
       senderId: currentUserStaff.id,
       senderName: currentUserStaff.name,
       senderRole: currentUserStaff.role,
       text: text.trim(),
-      createdAt: serverTimestamp(),
       readBy: [currentUserStaff.id],
-      isDevBroadcast: false,
     };
 
-    if (isDev && channel === 'dev-broadcast') {
-      await addDoc(collection(db, 'devBroadcasts'), {
-        ...payload,
-        isDevBroadcast: true,
-        tenantId,
-      });
-    } else if (tenantId) {
-      await addDoc(getTenantCollection(db, tenantId, 'messages'), payload);
+    try {
+      await apiPost(`/api/mariadb/tenants/${tenantId}/messages`, payload);
+      // Optimistic refresh
+      await fetchMessages();
+    } catch (err) {
+      console.error('Failed to send message:', err);
     }
-  }, [user, currentUserStaff, tenantId, isDev]);
+  }, [user, currentUserStaff, tenantId, fetchMessages]);
 
   // ── Mark messages as read ─────────────────────────────────────────────────────
   const markChannelRead = useCallback(async (channel: string) => {
@@ -115,49 +92,43 @@ export function useMessaging({ user, tenantId, currentUserStaff, staff }: UseMes
 
     await Promise.all(
       unread.map(m =>
-        updateDoc(doc(getTenantCollection(db, tenantId, 'messages'), m.id), {
-          readBy: [...(m.readBy || []), myId],
-        })
+        apiPut(`/api/mariadb/tenants/${tenantId}/messages/${m.id}/read`, { userId: myId })
+          .catch(e => console.warn('markRead failed:', e))
       )
     );
 
-    if (channel === 'general') {
-      const unreadBroadcasts = devBroadcasts.filter(m => !(m.readBy || []).includes(myId));
-      await Promise.all(
-        unreadBroadcasts.map(m =>
-          updateDoc(doc(collection(db, 'devBroadcasts'), m.id), {
-            readBy: [...(m.readBy || []), myId],
-          })
-        )
-      );
-    }
-  }, [messages, devBroadcasts, myId, tenantId]);
+    // Optimistic local update
+    setMessages(prev =>
+      prev.map(m =>
+        m.channel === channel && !(m.readBy || []).includes(myId)
+          ? { ...m, readBy: [...(m.readBy || []), myId] }
+          : m
+      )
+    );
+  }, [messages, myId, tenantId]);
 
   // ── Get messages for a channel ────────────────────────────────────────────────
   const getChannelMessages = useCallback((channel: string): Message[] => {
-    const tenantMsgs = messages.filter(m => m.channel === channel);
-    if (channel === 'general') {
-      return [...devBroadcasts, ...tenantMsgs].sort((a, b) => {
-        const ta = a.createdAt?.seconds || 0;
-        const tb = b.createdAt?.seconds || 0;
+    return messages
+      .filter(m => m.channel === channel)
+      .sort((a, b) => {
+        const ta = new Date(a.createdAt).getTime();
+        const tb = new Date(b.createdAt).getTime();
         return ta - tb;
       });
-    }
-    return tenantMsgs;
-  }, [messages, devBroadcasts]);
+  }, [messages]);
 
   // ── Unread count per channel ──────────────────────────────────────────────────
   const getChannelUnread = useCallback((channel: string): number => {
     if (!myId) return 0;
-    const msgs = channel === 'general'
-      ? [...devBroadcasts, ...messages.filter(m => m.channel === 'general')]
-      : messages.filter(m => m.channel === channel);
-    return msgs.filter(m => !(m.readBy || []).includes(myId)).length;
-  }, [messages, devBroadcasts, myId]);
+    return messages
+      .filter(m => m.channel === channel)
+      .filter(m => !(m.readBy || []).includes(myId)).length;
+  }, [messages, myId]);
 
   return {
     messages,
-    devBroadcasts,
+    devBroadcasts: [] as Message[], // Legacy compat — no longer separate
     activeChannel,
     setActiveChannel,
     unreadCount,
@@ -165,7 +136,7 @@ export function useMessaging({ user, tenantId, currentUserStaff, staff }: UseMes
     markChannelRead,
     getChannelMessages,
     getChannelUnread,
-    isDev,
+    isDev: false,
     myId,
     staff,
     dmChannel,

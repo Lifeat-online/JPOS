@@ -1,16 +1,15 @@
+/**
+ * useCheckout — MariaDB REST edition.
+ * Replaces all Firestore addDoc/updateDoc calls with REST API calls.
+ */
 import { useState, useMemo } from 'react';
-import { User } from 'firebase/auth';
-import {
-  addDoc, updateDoc,
-  serverTimestamp, increment,
-} from 'firebase/firestore';
-import { db } from '../firebase';
+import { JwtUser } from './useAuth';
 import { Customer, Staff, AppConfig } from '../types';
 import { usePosStore } from '../store/usePosStore';
-import { getTenantCollection, getTenantDoc } from '../tenantHelper';
+import { apiPost, apiPut, createSale, updateCustomer, updateStaff } from '../api';
 
 interface CheckoutDeps {
-  user: User | null;
+  user: JwtUser | null;
   tenantId: string | null;
   currentUserStaff: Staff | null;
   customers: Customer[];
@@ -59,21 +58,14 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   const cartTotalAfterDiscount = Math.max(0, cartTotal - pointsDiscount);
 
   const stampOrderItems = (items: any[], delivered = false) => {
-    return items.map(item => {
-      const orderItem = {
-        ...item,
-        status: item.status || 'pending',
-        workstationId: item.workstationId,
-        orderedAt: item.orderedAt || serverTimestamp(),
-      } as any;
-
-      if (delivered) {
-        orderItem.status = 'delivered';
-        orderItem.deliveredAt = serverTimestamp();
-      }
-
-      return orderItem;
-    });
+    const now = new Date().toISOString();
+    return items.map(item => ({
+      ...item,
+      status: delivered ? 'delivered' : (item.status || 'pending'),
+      workstationId: item.workstationId,
+      orderedAt: item.orderedAt || now,
+      ...(delivered ? { deliveredAt: now } : {}),
+    }));
   };
 
   // ── Points redemption ────────────────────────────────────────────────────────
@@ -91,7 +83,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
   // ── Shared loyalty points update ─────────────────────────────────────────────
   const updateLoyaltyPoints = async (amountPaid: number) => {
-    if (!selectedCustomerId || !config?.business?.enableLoyalty || !config?.business?.pointsEarnedPerCurrency) return;
+    if (!selectedCustomerId || !config?.business?.enableLoyalty || !config?.business?.pointsEarnedPerCurrency || !tenantId) return;
     const pointsEarned = Math.floor(amountPaid / config.business.pointsEarnedPerCurrency);
     const customer = customers.find(c => c.id === selectedCustomerId);
     const currentPoints = customer?.loyaltyPoints || customer?.points || 0;
@@ -99,9 +91,10 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     if (pointsDiscount > 0 && config.business.pointsRequiredForDiscount && config.business.discountAmountForPoints) {
       pointsConsumed = Math.ceil(pointsDiscount / config.business.discountAmountForPoints) * config.business.pointsRequiredForDiscount;
     }
-    await updateDoc(getTenantDoc(db, tenantId, 'customers', selectedCustomerId), {
-      loyaltyPoints: Math.max(0, currentPoints - pointsConsumed) + pointsEarned,
-    });
+    const newPoints = Math.max(0, currentPoints - pointsConsumed) + pointsEarned;
+    await updateCustomer(tenantId, selectedCustomerId, { loyaltyPoints: newPoints }).catch(e =>
+      console.warn('Failed to update loyalty points:', e)
+    );
   };
 
   // ── Reset cart state after checkout ─────────────────────────────────────────
@@ -115,7 +108,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
   // ── Save order (restaurant hold/send to workstations) ────────────────────────
   const handleSaveOrder = async (sendToWorkstations: boolean, navigate: (path: string) => void) => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || !tenantId) return;
     setIsProcessing(true);
     try {
       const saleData: any = {
@@ -124,30 +117,21 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         paymentMethod: 'pending',
         status: sendToWorkstations ? 'kitchen' : 'open',
         customerId: selectedCustomerId || null,
-        userId: user?.uid || null,
         staffId: currentUserStaff?.id || null,
       };
       if (activeTableNumber) saleData.tableNumber = activeTableNumber;
 
-      let savedId = activeOrderId;
       if (activeOrderId) {
-        await updateDoc(getTenantDoc(db, tenantId, 'sales', activeOrderId), saleData);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
       } else {
-        saleData.createdAt = serverTimestamp();
-        const ref = await addDoc(getTenantCollection(db, tenantId, 'sales'), saleData);
-        savedId = ref.id;
-        // Store the new order ID so subsequent sends update the same doc
-        setActiveOrderId(savedId);
+        const created = await createSale(tenantId, saleData);
+        setActiveOrderId(created.id);
       }
 
-      // Keep the cart loaded — the waiter may want to add more items or checkout.
-      // Only navigate away if it was a Hold (not a Send).
       if (!sendToWorkstations) {
-        // Hold: go back to tables
         resetAfterCheckout();
         navigate('/tables');
       }
-      // Send to workstations: stay on POS, cart remains, order ID is set
     } catch (error) {
       console.error(error);
       alert('Error saving order');
@@ -158,7 +142,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
   // ── Open / update a bar tab ──────────────────────────────────────────────────
   const handleOpenTab = async (tabName?: string) => {
-    if (cart.length === 0 || !selectedCustomerId) return;
+    if (cart.length === 0 || !selectedCustomerId || !tenantId) return;
     setIsProcessing(true);
     try {
       const saleData: any = {
@@ -173,22 +157,16 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         isTab: true,
         tabName: tabName || null,
         customerId: selectedCustomerId,
-        userId: user?.uid || null,
         staffId: currentUserStaff?.id || null,
-        updatedAt: serverTimestamp(),
+        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
       };
-      if (pointsDiscount > 0) saleData.pointsDiscount = pointsDiscount;
 
-      let savedId = activeOrderId;
       if (activeOrderId) {
-        await updateDoc(getTenantDoc(db, tenantId, 'sales', activeOrderId), saleData);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
       } else {
-        saleData.createdAt = serverTimestamp();
-        const ref = await addDoc(getTenantCollection(db, tenantId, 'sales'), saleData);
-        savedId = ref.id;
-        setActiveOrderId(savedId);
+        const created = await createSale(tenantId, saleData);
+        setActiveOrderId(created.id);
       }
-      // Stay on POS — tab is saved, cart remains for adding more items
     } catch (err) {
       console.error('Failed to open tab:', err);
       alert('Error saving tab');
@@ -196,8 +174,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       setIsProcessing(false);
     }
   };
+
   const handleCheckout = async (method: 'cash' | 'payfast' | 'card') => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || !tenantId) return;
     setIsProcessing(true);
 
     try {
@@ -211,12 +190,10 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         paymentMethod: method,
         status: method === 'payfast' ? 'pending' : 'completed',
         customerId: selectedCustomerId || null,
-        userId: user?.uid || null,
         staffId: currentUserStaff?.id || null,
+        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
+        ...(activeTableNumber ? { tableNumber: activeTableNumber } : {}),
       };
-      if (pointsDiscount > 0) saleData.pointsDiscount = pointsDiscount;
-      if (!activeOrderId) saleData.createdAt = serverTimestamp();
-      if (activeTableNumber) saleData.tableNumber = activeTableNumber;
 
       if (method === 'cash' || method === 'card') {
         saleData.tenderedAmount = Number(tenderedAmount || 0);
@@ -231,43 +208,38 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
       let saleId = '';
       if (activeOrderId) {
-        await updateDoc(getTenantDoc(db, tenantId, 'sales', activeOrderId), saleData);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
         saleId = activeOrderId;
       } else {
-        const ref = await addDoc(getTenantCollection(db, tenantId, 'sales'), saleData);
-        saleId = ref.id;
+        const created = await createSale(tenantId, saleData);
+        saleId = created.id;
       }
 
       if (method === 'cash' || method === 'card') {
         // Update loyalty points
         await updateLoyaltyPoints(cartTotalAfterDiscount);
 
-        // Update cash session
-        if (activeSession) {
-          const updates: any = {};
+        // Update cash session totals
+        if (activeSession?.id) {
+          const sessionUpdates: any = {};
           if (method === 'cash') {
-            updates.expectedCash = increment(cartTotalAfterDiscount);
+            sessionUpdates.expectedCashDelta = cartTotalAfterDiscount;
           } else if (method === 'card') {
-            if (cardOverageAction === 'cashout') updates.expectedCash = increment(-(saleData.cashOutAmount || 0));
-            else if (cardOverageAction === 'tip' && saleData.tipAmount > 0) updates.accumulatedTips = increment(saleData.tipAmount);
+            if (cardOverageAction === 'cashout') sessionUpdates.expectedCashDelta = -(saleData.cashOutAmount || 0);
+            else if (cardOverageAction === 'tip' && saleData.tipAmount > 0) sessionUpdates.tipsDelta = saleData.tipAmount;
           }
-          if (Object.keys(updates).length > 0) {
-            await updateDoc(getTenantDoc(db, tenantId, 'cashSessions', activeSession.id), updates);
+          if (Object.keys(sessionUpdates).length > 0) {
+            await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}`, sessionUpdates)
+              .catch(e => console.warn('Failed to update session:', e));
           }
         }
 
         // Update staff metrics
-        if (currentUserStaff?.id && tenantId) {
-          try {
-            const metricsUpdate: any = { 'metrics.totalOrdersHandled': increment(1) };
-            if (saleData.tipAmount > 0) {
-              metricsUpdate['metrics.totalTips'] = increment(saleData.tipAmount);
-              metricsUpdate['metrics.totalTipsRounded'] = increment(Math.round(saleData.tipAmount));
-            }
-            await updateDoc(getTenantDoc(db, tenantId, 'staff', currentUserStaff.id), metricsUpdate);
-          } catch (e) {
-            console.warn('Failed to update staff metrics:', e);
-          }
+        if (currentUserStaff?.id) {
+          const metricsUpdate: any = { metricsOrdersDelta: 1 };
+          if (saleData.tipAmount > 0) metricsUpdate.metricsTipsDelta = saleData.tipAmount;
+          await updateStaff(tenantId, currentUserStaff.id, metricsUpdate)
+            .catch(e => console.warn('Failed to update staff metrics:', e));
         }
 
         resetAfterCheckout();
@@ -325,28 +297,26 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         paymentMethod: 'wallet',
         status: 'completed',
         customerId: selectedCustomerId || null,
-        userId: user?.uid || null,
         staffId: currentUserStaff.id,
         tenderedAmount: cartTotalAfterDiscount,
         changeAmount: 0,
+        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
+        ...(activeTableNumber ? { tableNumber: activeTableNumber } : {}),
       };
-      if (pointsDiscount > 0) saleData.pointsDiscount = pointsDiscount;
-      if (!activeOrderId) saleData.createdAt = serverTimestamp();
-      if (activeTableNumber) saleData.tableNumber = activeTableNumber;
 
       let saleId = '';
       if (activeOrderId) {
-        await updateDoc(getTenantDoc(db, tenantId, 'sales', activeOrderId), saleData);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
         saleId = activeOrderId;
       } else {
-        const ref = await addDoc(getTenantCollection(db, tenantId, 'sales'), saleData);
-        saleId = ref.id;
+        const created = await createSale(tenantId, saleData);
+        saleId = created.id;
       }
 
       // Deduct from staff wallet + update metrics
-      await updateDoc(getTenantDoc(db, tenantId, 'staff', currentUserStaff.id), {
+      await updateStaff(tenantId, currentUserStaff.id, {
         walletBalance: balance - cartTotalAfterDiscount,
-        'metrics.totalOrdersHandled': increment(1),
+        metricsOrdersDelta: 1,
       });
 
       // Award loyalty points

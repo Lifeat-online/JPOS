@@ -175,12 +175,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   <div className="font-bold text-sm leading-tight mb-0.5 text-slate-900 dark:text-white truncate">{product.name}</div>
                   <div className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">{product.category}</div>
                   <div className="lg:hidden flex items-baseline gap-2 mt-1">
-                     <span className="font-extrabold text-primary">R{product.price.toFixed(2)}</span>
+                     <span className="font-extrabold text-primary">R{Number(product.price).toFixed(2)}</span>
                      <span className="text-[8px] font-black text-slate-300 dark:text-slate-600">{product.stock} Units</span>
                   </div>
                 </div>
                 <div className="hidden lg:flex items-end justify-between w-full mt-2">
-                  <div className="font-extrabold text-lg text-primary tracking-tight">R{product.price.toFixed(2)}</div>
+                  <div className="font-extrabold text-lg text-primary tracking-tight">R{Number(product.price).toFixed(2)}</div>
                   <div className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${product.stock < 10 ? 'bg-red-50 text-red-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                     {product.stock}
                   </div>
@@ -254,7 +254,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <div key={item.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl flex items-center justify-between border border-slate-100 dark:border-slate-800/60 shadow-sm transition-all hover:border-primary/20">
                       <div className="flex-1 pr-4 min-w-0">
                         <p className="font-bold text-slate-900 dark:text-white text-sm truncate">{item.name}</p>
-                        <p className="text-xs font-black text-primary mt-0.5">R{(item.price * item.quantity).toFixed(2)}</p>
+                        <p className="text-xs font-black text-primary mt-0.5">R{(Number(item.price) * Number(item.quantity)).toFixed(2)}</p>
                       </div>
                       <div className="flex items-center gap-4 bg-slate-50 dark:bg-[#0B1120] rounded-xl p-1 shrink-0">
                         <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-lg text-xs font-black shadow-sm active:scale-90">-</button>
@@ -289,7 +289,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                               onClick={onClearPointsDiscount}
                               className="text-[9px] font-bold text-red-500 hover:underline"
                             >
-                              Remove discount (−R{pointsDiscount.toFixed(2)})
+                              Remove discount (−R{Number(pointsDiscount).toFixed(2)})
                             </button>
                           ) : canRedeem ? (
                             <button
@@ -310,11 +310,11 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   </div>
                   <div className="text-right">
                     {pointsDiscount > 0 && (
-                      <div className="text-xs font-bold text-slate-400 line-through">R{(cartTotal + pointsDiscount).toFixed(2)}</div>
+                      <div className="text-xs font-bold text-slate-400 line-through">R{(Number(cartTotal) + Number(pointsDiscount)).toFixed(2)}</div>
                     )}
-                    <span className="font-black text-4xl text-slate-900 dark:text-white tracking-tighter">R{cartTotal.toFixed(2)}</span>
+                    <span className="font-black text-4xl text-slate-900 dark:text-white tracking-tighter">R{Number(cartTotal).toFixed(2)}</span>
                     {pointsDiscount > 0 && (
-                      <div className="text-[10px] font-bold text-emerald-500">−R{pointsDiscount.toFixed(2)} discount applied</div>
+                      <div className="text-[10px] font-bold text-emerald-500">−R{Number(pointsDiscount).toFixed(2)} discount applied</div>
                     )}
                   </div>
                 </div>
@@ -356,7 +356,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <Wallet className="w-4 h-4" />
                     Pay with Wallet
                     <span className="ml-auto bg-white/20 px-2 py-0.5 rounded-lg text-[10px]">
-                      R{(currentUserStaff.walletBalance || 0).toFixed(2)} available
+                      R{Number(currentUserStaff.walletBalance || 0).toFixed(2)} available
                     </span>
                   </button>
                 )}

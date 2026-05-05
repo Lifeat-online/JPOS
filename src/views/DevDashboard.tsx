@@ -1,5 +1,5 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
-import { User } from 'firebase/auth';
+import React, { useState, useEffect, useMemo } from 'react';
+import { JwtUser } from '../hooks/useAuth';
 import {
   Product, Customer, Staff, Sale, AppConfig, Workstation,
 } from '../types';
@@ -21,7 +21,7 @@ interface LogEntry {
 }
 
 interface DevDashboardProps {
-  user: User;
+  user: JwtUser;
   tenantId: string | null;
   products: Product[];
   customers: Customer[];
@@ -653,7 +653,7 @@ export function DevDashboard({
                 { label: 'Customers', value: customers.length, color: 'emerald' },
                 { label: 'Staff', value: staff.length, color: 'orange' },
                 { label: 'Sales', value: sales.length, color: 'pink' },
-                { label: 'Revenue', value: `R${totalRevenue.toFixed(2)}`, color: 'green' },
+                { label: 'Revenue', value: `R${Number(totalRevenue || 0).toFixed(2)}`, color: 'green' },
               ].map(({ label, value, color }) => (
                 <div key={label} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm">
                   <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">{label}</div>
@@ -845,7 +845,7 @@ export function DevDashboard({
                         <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                           <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{truncateId(p.id)}</td>
                           <td className="px-4 py-2.5 font-semibold text-slate-800 dark:text-white">{p.name}</td>
-                          <td className="px-4 py-2.5 text-right text-slate-700 dark:text-slate-300">R{p.price.toFixed(2)}</td>
+                          <td className="px-4 py-2.5 text-right text-slate-700 dark:text-slate-300">R{Number(p.price || 0).toFixed(2)}</td>
                           <td className="px-4 py-2.5 text-right">
                             <span className={`font-bold ${p.stock === 0 ? 'text-red-500' : p.minStock && p.stock < p.minStock ? 'text-amber-500' : 'text-emerald-600'}`}>
                               {p.stock}
@@ -963,7 +963,7 @@ export function DevDashboard({
                                 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
                               }`}>{s.status}</span>
                             </td>
-                            <td className="px-4 py-2.5 text-right font-bold text-slate-800 dark:text-white">R{s.total.toFixed(2)}</td>
+                            <td className="px-4 py-2.5 text-right font-bold text-slate-800 dark:text-white">R{Number(s.total || 0).toFixed(2)}</td>
                             <td className="px-4 py-2.5 text-slate-600 dark:text-slate-400">{s.paymentMethod}</td>
                             <td className="px-4 py-2.5 text-slate-500 text-xs">{createdAt.toLocaleString()}</td>
                             <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{s.staffId ? truncateId(s.staffId) : '—'}</td>

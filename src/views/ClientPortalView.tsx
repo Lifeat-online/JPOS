@@ -1,18 +1,16 @@
 import React, { useState } from 'react';
-import { User } from 'firebase/auth';
+import { JwtUser } from '../hooks/useAuth';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Wallet, ShoppingBag, Star, Clock, CheckCircle2, XCircle,
   DollarSign, Loader2, LogOut, Moon, Sun, ChevronDown, ChevronUp,
   Receipt, Gift, User as UserIcon,
 } from 'lucide-react';
-import { addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { apiPut, createCustomerPayoutRequest } from '../api';
 import { Customer, Sale, PayoutRequest } from '../types';
-import { getTenantCollection, getTenantDoc } from '../tenantHelper';
 
 interface ClientPortalViewProps {
-  user: User;
+  user: JwtUser;
   customer: Customer;
   tenantId: string;
   sales: Sale[];
@@ -23,14 +21,14 @@ interface ClientPortalViewProps {
   businessName?: string;
 }
 
-function formatDate(ts: any): string {
-  if (!ts) return '—';
-  const d = ts.toDate ? ts.toDate() : new Date(ts);
+function formatDate(date: any): string {
+  if (!date) return '—';
+  const d = new Date(date);
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function formatCurrency(amount: number, currency = 'R') {
-  return `${currency}${amount.toFixed(2)}`;
+function formatCurrency(amount: any, currency = 'R') {
+  return `${currency}${Number(amount || 0).toFixed(2)}`;
 }
 
 const statusColors: Record<string, string> = {
@@ -67,26 +65,27 @@ export function ClientPortalView({
     if (!amount || amount <= 0 || amount > walletBalance) return;
     setPayoutProcessing(true);
     try {
-      // Deduct from wallet
-      await updateDoc(getTenantDoc(db, tenantId, 'customers', customer.id), {
+      // 1. Deduct from wallet
+      await apiPut(`/api/mariadb/tenants/${tenantId}/customers/${customer.id}`, {
         walletBalance: walletBalance - amount,
       });
-      // Create payout request
-      await addDoc(getTenantCollection(db, tenantId, 'customerPayoutRequests'), {
+
+      // 2. Create payout request
+      await createCustomerPayoutRequest(tenantId, {
         customerId: customer.id,
         customerName: customer.name,
         customerEmail: customer.email,
         amount,
         note: payoutNote || null,
         status: 'pending',
-        createdAt: serverTimestamp(),
       });
+
       setPayoutSuccess(`Payout of ${formatCurrency(amount)} requested successfully.`);
       setPayoutAmount('');
       setPayoutNote('');
       setTimeout(() => setPayoutSuccess(''), 6000);
     } catch (err) {
-      console.error(err);
+      console.error('Payout request failed:', err);
     }
     setPayoutProcessing(false);
   };

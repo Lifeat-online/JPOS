@@ -13,7 +13,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
   const taxInclusive = sale.taxInclusive !== undefined ? sale.taxInclusive : config?.business?.taxInclusive !== false;
   const subtotal = sale.subtotal ?? sale.total;
   const taxAmount = sale.taxAmount ?? (taxRate ? (taxInclusive ? subtotal - subtotal / (1 + taxRate / 100) : subtotal * (taxRate / 100)) : 0);
-  const createdAt = sale.createdAt?.toDate ? sale.createdAt.toDate() : new Date();
+  const createdAt = sale.createdAt ? new Date(sale.createdAt) : new Date();
 
   return (
     <div className="receipt-print-only fixed inset-0 bg-white text-black z-[9999] hidden p-4 flex-col text-[12px] font-mono leading-tight max-w-[80mm] mx-auto">
@@ -51,7 +51,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
           <div key={idx} className="flex justify-between mb-1">
             <span className="flex-1 pr-2 truncate">{item.name}</span>
             <span className="w-8 text-right">{item.quantity}</span>
-            <span className="w-20 text-right">{currency}{(item.price * item.quantity).toFixed(2)}</span>
+            <span className="w-20 text-right">{currency}{(Number(item.price || 0) * Number(item.quantity || 0)).toFixed(2)}</span>
           </div>
         ))}
       </div>
@@ -64,38 +64,38 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
           <>
             <div className="flex justify-between text-[11px]">
               <span>Subtotal {taxInclusive ? '(incl. tax)' : ''}</span>
-              <span>{currency}{subtotal.toFixed(2)}</span>
+              <span>{currency}{Number(subtotal || 0).toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-[11px]">
               <span>{taxName} ({taxRate}%){taxInclusive ? ' incl.' : ''}</span>
-              <span>{currency}{taxAmount.toFixed(2)}</span>
+              <span>{currency}{Number(taxAmount || 0).toFixed(2)}</span>
             </div>
           </>
         )}
         {sale.pointsDiscount !== undefined && sale.pointsDiscount > 0 && (
           <div className="flex justify-between text-[11px]">
             <span>Points Discount</span>
-            <span>-{currency}{sale.pointsDiscount.toFixed(2)}</span>
+            <span>-{currency}{Number(sale.pointsDiscount || 0).toFixed(2)}</span>
           </div>
         )}
         <div className="flex justify-between font-bold text-sm border-t border-black pt-1 mt-1">
           <span>TOTAL DUE</span>
-          <span>{currency}{sale.total.toFixed(2)}</span>
+          <span>{currency}{Number(sale.total || 0).toFixed(2)}</span>
         </div>
         <div className="flex justify-between">
           <span>TENDERED ({sale.paymentMethod.toUpperCase()})</span>
-          <span>{currency}{(sale.tenderedAmount || sale.total).toFixed(2)}</span>
+          <span>{currency}{Number(sale.tenderedAmount || sale.total || 0).toFixed(2)}</span>
         </div>
         {sale.changeAmount !== undefined && sale.changeAmount > 0 && (
           <div className="flex justify-between font-bold">
             <span>CHANGE</span>
-            <span>{currency}{sale.changeAmount.toFixed(2)}</span>
+            <span>{currency}{Number(sale.changeAmount || 0).toFixed(2)}</span>
           </div>
         )}
         {sale.tipAmount !== undefined && sale.tipAmount > 0 && (
           <div className="flex justify-between">
             <span>TIP</span>
-            <span>{currency}{sale.tipAmount.toFixed(2)}</span>
+            <span>{currency}{Number(sale.tipAmount || 0).toFixed(2)}</span>
           </div>
         )}
       </div>

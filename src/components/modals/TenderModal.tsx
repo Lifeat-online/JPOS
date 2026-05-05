@@ -43,7 +43,7 @@ export const TenderModal: React.FC<TenderModalProps> = ({
         <div className="space-y-4">
           <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl flex justify-between items-center border border-slate-100 dark:border-slate-700">
             <span className="text-sm font-black text-slate-500 uppercase tracking-widest">Total Due</span>
-            <span className="text-2xl font-black text-primary">R{cartTotal.toFixed(2)}</span>
+            <span className="text-2xl font-black text-primary">R{Number(cartTotal || 0).toFixed(2)}</span>
           </div>
 
           <div>
@@ -61,13 +61,13 @@ export const TenderModal: React.FC<TenderModalProps> = ({
           {method === 'cash' ? (
             <div className={`p-4 rounded-xl flex justify-between items-center border ${canConfirm ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-400' : 'bg-slate-50 border-slate-200 text-slate-800 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200'}`}>
               <span className="text-sm font-black uppercase tracking-widest">Change</span>
-              <span className="text-2xl font-black">R{overage.toFixed(2)}</span>
+              <span className="text-2xl font-black">R{Number(overage || 0).toFixed(2)}</span>
             </div>
           ) : (
             <div className="space-y-4">
               <div className={`p-4 rounded-xl flex justify-between items-center border ${overage > 0 ? 'bg-purple-50 border-purple-200 text-purple-800 dark:bg-purple-900/20 dark:border-purple-800 dark:text-purple-400' : 'bg-slate-50 border-slate-200 text-slate-800 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200'}`}>
                 <span className="text-sm font-black uppercase tracking-widest">Overage</span>
-                <span className="text-2xl font-black">R{overage.toFixed(2)}</span>
+                <span className="text-2xl font-black">R{Number(overage || 0).toFixed(2)}</span>
               </div>
               {overage > 0 && (
                 <div className="flex bg-slate-100 dark:bg-[#0B1120] p-1.5 rounded-xl border border-slate-200 dark:border-slate-700/60">

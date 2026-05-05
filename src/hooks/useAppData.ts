@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { Product, Customer, Staff, Sale, AppConfig, Workstation } from '../types';
+import { JwtUser as User } from './useAuth';
+import { Product, Customer, Staff, Sale, AppConfig, Workstation, RestaurantTable, TableSection } from '../types';
 import { usePosStore } from '../store/usePosStore';
 import {
   getUserByUid,
@@ -12,6 +12,8 @@ import {
   getTenantWorkstations,
   getTenantConfig,
   getOpenCashSession,
+  getTenantTableSections,
+  getTenantRestaurantTables,
 } from '../api';
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -31,6 +33,8 @@ export function useAppData(user: User | null) {
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const [activeSession, setActiveSession] = useState<any | null>(null);
+  const [tableSections, setTableSections] = useState<TableSection[]>([]);
+  const [restaurantTables, setRestaurantTables] = useState<RestaurantTable[]>([]);
 
   const [tenantLoading, setTenantLoading] = useState(true);
   const [configLoading, setConfigLoading] = useState(true);
@@ -98,83 +102,98 @@ export function useAppData(user: User | null) {
   }, [user, staff, isStaffLoading]);
 
   useEffect(() => {
+    if (!tenantId) {
+      setProducts([]);
+      return;
+    }
     let active = true;
     async function loadProducts() {
-      if (!tenantId) {
-        setProducts([]);
-        return;
-      }
       try {
-        const fetched = await getTenantProducts(tenantId);
+        const fetched = await getTenantProducts(tenantId!);
         if (!active) return;
-        setProducts(fetched);
+        const sanitized = (fetched || []).map((p: any) => ({
+          ...p,
+          price: Number(p.price || 0),
+          costPrice: p.costPrice ? Number(p.costPrice) : undefined,
+          stock: Number(p.stock || 0),
+          minStock: p.minStock ? Number(p.minStock) : undefined,
+        }));
+        setProducts(sanitized);
       } catch (err) {
         console.error('Products load error:', err);
-        if (active) setProducts([]);
       }
     }
     loadProducts();
-    return () => { active = false; };
+    const interval = setInterval(loadProducts, 30000);
+    return () => { active = false; clearInterval(interval); };
   }, [tenantId]);
 
   useEffect(() => {
+    if (!tenantId) {
+      setCustomers([]);
+      return;
+    }
     let active = true;
     async function loadCustomers() {
-      if (!tenantId) {
-        setCustomers([]);
-        return;
-      }
       try {
-        const fetched = await getTenantCustomers(tenantId);
+        const fetched = await getTenantCustomers(tenantId!);
         if (!active) return;
-        setCustomers(fetched);
+        const sanitized = (fetched || []).map((c: any) => ({
+          ...c,
+          loyaltyPoints: Number(c.loyaltyPoints || 0),
+          walletBalance: Number(c.walletBalance || 0),
+        }));
+        setCustomers(sanitized);
       } catch (err) {
         console.error('Customers load error:', err);
-        if (active) setCustomers([]);
       }
     }
     loadCustomers();
-    return () => { active = false; };
+    const interval = setInterval(loadCustomers, 30000);
+    return () => { active = false; clearInterval(interval); };
   }, [tenantId]);
 
   useEffect(() => {
+    if (!tenantId) {
+      setStaff([]);
+      setIsStaffLoading(false);
+      return;
+    }
     let active = true;
     async function loadStaff() {
-      if (!tenantId) {
-        setStaff([]);
-        setIsStaffLoading(false);
-        return;
-      }
-      setIsStaffLoading(true);
       try {
-        const fetched = await getTenantStaff(tenantId);
+        const fetched = await getTenantStaff(tenantId!);
         if (!active) return;
-        setStaff(fetched);
+        const sanitized = (fetched || []).map((s: any) => ({
+          ...s,
+          payRate: s.payRate ? Number(s.payRate) : undefined,
+          walletBalance: Number(s.walletBalance || 0),
+          metrics: typeof s.metrics === 'string' ? JSON.parse(s.metrics) : s.metrics,
+          badges: typeof s.badges === 'string' ? JSON.parse(s.badges) : s.badges,
+        }));
+        setStaff(sanitized);
       } catch (err) {
         console.error('Staff load error:', err);
-        if (active) setStaff([]);
       } finally {
         if (active) setIsStaffLoading(false);
       }
     }
     loadStaff();
-    return () => { active = false; };
+    const interval = setInterval(loadStaff, 60000); // Staff changes less frequently
+    return () => { active = false; clearInterval(interval); };
   }, [tenantId]);
 
   useEffect(() => {
+    if (!tenantId) {
+      setConfigLoading(false);
+      return;
+    }
     let active = true;
     async function loadConfig() {
-      if (!tenantId) {
-        setConfigLoading(false);
-        return;
-      }
-      setConfigLoading(true);
       try {
-        const fetched = await getTenantConfig(tenantId);
+        const fetched = await getTenantConfig(tenantId!);
         if (!active) return;
-        if (fetched) {
-          setConfig(fetched);
-        }
+        if (fetched) setConfig(fetched);
       } catch (err) {
         console.error('Config load error:', err);
       } finally {
@@ -182,72 +201,131 @@ export function useAppData(user: User | null) {
       }
     }
     loadConfig();
-    return () => { active = false; };
+    const interval = setInterval(loadConfig, 120000); // Config changes very rarely
+    return () => { active = false; clearInterval(interval); };
   }, [tenantId]);
 
   useEffect(() => {
+    if (!tenantId) {
+      setSales([]);
+      return;
+    }
     let active = true;
     async function loadSales() {
-      if (!tenantId) {
-        setSales([]);
-        return;
-      }
       try {
-        const fetched = await getTenantSales(tenantId);
+        const fetched = await getTenantSales(tenantId!);
         if (!active) return;
-        setSales(fetched);
+        const sanitized = (fetched || []).map((s: any) => ({
+          ...s,
+          total: Number(s.total || 0),
+          subtotal: s.subtotal ? Number(s.subtotal) : undefined,
+          taxAmount: s.taxAmount ? Number(s.taxAmount) : undefined,
+          taxRate: s.taxRate ? Number(s.taxRate) : undefined,
+          tenderedAmount: s.tenderedAmount ? Number(s.tenderedAmount) : undefined,
+          changeAmount: s.changeAmount ? Number(s.changeAmount) : undefined,
+          tipAmount: s.tipAmount ? Number(s.tipAmount) : undefined,
+          cashOutAmount: s.cashOutAmount ? Number(s.cashOutAmount) : undefined,
+          pointsDiscount: s.pointsDiscount ? Number(s.pointsDiscount) : undefined,
+          items: (s.items || []).map((item: any) => ({
+            ...item,
+            price: Number(item.price || 0),
+            quantity: Number(item.quantity || 0),
+          })),
+        }));
+        setSales(sanitized);
       } catch (err) {
         console.error('Sales load error:', err);
-        if (active) setSales([]);
       }
     }
     loadSales();
-    return () => { active = false; };
+    const interval = setInterval(loadSales, 15000); // Sales change frequently
+    return () => { active = false; clearInterval(interval); };
   }, [tenantId]);
 
   useEffect(() => {
+    if (!tenantId) {
+      setWorkstations([]);
+      return;
+    }
     let active = true;
     async function loadWorkstations() {
-      if (!tenantId) {
-        setWorkstations([]);
-        return;
-      }
       try {
-        const fetched = await getTenantWorkstations(tenantId);
+        const fetched = await getTenantWorkstations(tenantId!);
         if (!active) return;
-        setWorkstations(fetched);
+        setWorkstations(fetched || []);
       } catch (err) {
         console.error('Workstations load error:', err);
-        if (active) setWorkstations([]);
       }
     }
     loadWorkstations();
-    return () => { active = false; };
+    const interval = setInterval(loadWorkstations, 30000);
+    return () => { active = false; clearInterval(interval); };
   }, [tenantId]);
 
   useEffect(() => {
+    if (!currentUserStaff || !tenantId) {
+      setActiveSession(null);
+      return;
+    }
     let active = true;
     async function loadActiveSession() {
-      if (!currentUserStaff || !tenantId) {
-        setActiveSession(null);
-        return;
-      }
       try {
-        const fetched = await getOpenCashSession(tenantId, currentUserStaff.id);
+        const fetched = await getOpenCashSession(tenantId!, currentUserStaff!.id);
         if (!active) return;
         setActiveSession(fetched);
       } catch (err) {
         console.error('Active session load error:', err);
-        if (active) setActiveSession(null);
       }
     }
     loadActiveSession();
-    return () => { active = false; };
+    const interval = setInterval(loadActiveSession, 60000);
+    return () => { active = false; clearInterval(interval); };
   }, [currentUserStaff, tenantId]);
+
+  useEffect(() => {
+    if (!tenantId) {
+      setTableSections([]);
+      return;
+    }
+    let active = true;
+    async function loadSections() {
+      try {
+        const fetched = await getTenantTableSections(tenantId!);
+        if (!active) return;
+        setTableSections(fetched || []);
+      } catch (err) {
+        console.error('Table sections load error:', err);
+      }
+    }
+    loadSections();
+    const interval = setInterval(loadSections, 60000);
+    return () => { active = false; clearInterval(interval); };
+  }, [tenantId]);
+
+  useEffect(() => {
+    if (!tenantId) {
+      setRestaurantTables([]);
+      return;
+    }
+    let active = true;
+    async function loadTables() {
+      try {
+        const fetched = await getTenantRestaurantTables(tenantId!);
+        if (!active) return;
+        setRestaurantTables(fetched || []);
+      } catch (err) {
+        console.error('Restaurant tables load error:', err);
+      }
+    }
+    loadTables();
+    const interval = setInterval(loadTables, 30000);
+    return () => { active = false; clearInterval(interval); };
+  }, [tenantId]);
 
   return {
     products, customers, staff, sales, config, setConfig,
     workstations, activeSession, currentUserStaff, currentUserRole,
+    tableSections, restaurantTables,
     tenantLoading, configLoading, isStaffLoading,
   };
 }

@@ -12,11 +12,7 @@ import {
 import { BarChart3 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  addDoc, updateDoc, serverTimestamp, deleteDoc,
-} from 'firebase/firestore';
-import { db } from './firebase';
-import { getTenantCollection, getTenantDoc } from './tenantHelper';
+import { apiPost, apiPut, apiDelete, getRestaurantTables, getTableSections, seedProducts, clearAllSales } from './api';
 
 import { useAuth } from './hooks/useAuth';
 import { useAppData } from './hooks/useAppData';
@@ -24,6 +20,7 @@ import { useCheckout } from './hooks/useCheckout';
 import { usePosStore } from './store/usePosStore';
 
 import { WelcomeView } from './components/WelcomeView';
+import { LoginModal } from './components/LoginModal';
 import { SetupWizard } from './components/SetupWizard';
 import { PointOfSaleView } from './views/PointOfSaleView';
 import { HistoryView } from './views/HistoryView';
@@ -383,18 +380,31 @@ export default function App() {
   const location = useLocation();
   const view = location.pathname.substring(1) || 'pos';
 
-  const { user, authLoading, login, logout } = useAuth();
+  const { user, authLoading, login, logout, error: authError, clearError } = useAuth();
   const clientPortal = useClientPortal(user);
 
   // Track which login mode was chosen so we can route correctly
   const [loginMode, setLoginMode] = useState<'staff' | 'client' | null>(null);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
 
-  const handleStaffLogin = async () => { setLoginMode('staff'); await login(); };
+  const handleStaffLogin = () => { setLoginMode('staff'); clearError(); setLoginModalOpen(true); };
   const handleClientLogin = async () => { setLoginMode('client'); await login(); };
   const handleLogout = async () => { setLoginMode(null); await logout(); navigate('/'); };
+
+  // Called by LoginModal on form submit
+  const handleLoginSubmit = async (email: string, password: string) => {
+    setLoginLoading(true);
+    await login({ email, password });
+    setLoginLoading(false);
+    // Modal stays open on error; useAuth sets authError.
+    // On success user becomes non-null, App re-renders past the WelcomeView.
+    if (!authError) setLoginModalOpen(false);
+  };
   const {
     products, customers, staff, sales, config, setConfig,
     workstations, activeSession, currentUserStaff, currentUserRole,
+    tableSections, restaurantTables,
     tenantLoading, configLoading, isStaffLoading,
   } = useAppData(user);
 
@@ -456,7 +466,7 @@ export default function App() {
     if (user && tenantId && currentUserRole && products.length === 0) {
       const seed = async () => {
         for (const p of INITIAL_PRODUCTS) {
-          await addDoc(getTenantCollection(db, tenantId, 'products'), { ...p, createdAt: serverTimestamp() });
+          await apiPost(`/api/mariadb/tenants/${tenantId}/products`, { ...p, createdAt: new Date().toISOString() });
         }
       };
       seed().catch(console.error);
@@ -547,7 +557,7 @@ export default function App() {
   // CRUD handlers
   const saveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!productModal.product) return;
+    if (!productModal.product || !tenantId) return;
     setIsProcessingCrud(true);
     try {
       const { id, ...data } = productModal.product;
@@ -557,12 +567,12 @@ export default function App() {
         costPrice: Number(data.costPrice) || 0,
         stock: Number(data.stock) || 0,
         minStock: Number(data.minStock) || 10,
-        updatedAt: serverTimestamp(),
+        updatedAt: new Date().toISOString(),
       };
       if (id) {
-        await updateDoc(getTenantDoc(db, tenantId, 'products', id), cleanData);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/products/${id}`, cleanData);
       } else {
-        await addDoc(getTenantCollection(db, tenantId, 'products'), { ...cleanData, createdAt: serverTimestamp() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/products`, { ...cleanData, createdAt: new Date().toISOString() });
       }
       setProductModal({ isOpen: false, product: null });
     } catch (err) {
@@ -573,14 +583,14 @@ export default function App() {
 
   const saveCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerModal.customer) return;
+    if (!customerModal.customer || !tenantId) return;
     setIsProcessingCrud(true);
     try {
       const { id, ...data } = customerModal.customer;
       if (id) {
-        await updateDoc(getTenantDoc(db, tenantId, 'customers', id), data);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/customers/${id}`, data);
       } else {
-        await addDoc(getTenantCollection(db, tenantId, 'customers'), { ...data, createdAt: serverTimestamp() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/customers`, { ...data, createdAt: new Date().toISOString() });
       }
       setCustomerModal({ isOpen: false, customer: null });
     } catch (err) {
@@ -591,12 +601,12 @@ export default function App() {
 
   const saveStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!staffModal.staff) return;
+    if (!staffModal.staff || !tenantId) return;
     setIsProcessingCrud(true);
     try {
       const { id, ...data } = staffModal.staff;
       if (id) {
-        await updateDoc(getTenantDoc(db, tenantId, 'staff', id), { ...data, updatedAt: serverTimestamp() });
+        await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${id}`, { ...data, updatedAt: new Date().toISOString() });
       } else {
         const existing = staff.find(s => s.email.toLowerCase() === data.email?.toLowerCase());
         if (existing) {
@@ -604,7 +614,7 @@ export default function App() {
           setIsProcessingCrud(false);
           return;
         }
-        await addDoc(getTenantCollection(db, tenantId, 'staff'), { ...data, status: 'active', createdAt: serverTimestamp() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/staff`, { ...data, status: 'active', createdAt: new Date().toISOString() });
       }
       setStaffModal({ isOpen: false, staff: null });
     } catch (err) {
@@ -614,9 +624,10 @@ export default function App() {
   };
 
   const deleteStaff = async (id: string) => {
+    if (!tenantId) return;
     setIsProcessingCrud(true);
     try {
-      await deleteDoc(getTenantDoc(db, tenantId, 'staff', id));
+      await apiDelete(`/api/mariadb/tenants/${tenantId}/staff/${id}`);
       setStaffToDelete(null);
     } catch (err) {
       console.error('Failed to delete staff:', err);
@@ -634,12 +645,23 @@ export default function App() {
   }
 
   if (!user) {
-    return <WelcomeView
-      onLogin={handleStaffLogin}
-      onClientLogin={handleClientLogin}
-      isDarkMode={isDarkMode}
-      toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-    />;
+    return (
+      <>
+        <WelcomeView
+          onLogin={handleStaffLogin}
+          onClientLogin={handleClientLogin}
+          isDarkMode={isDarkMode}
+          toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+        />
+        <LoginModal
+          isOpen={loginModalOpen}
+          onClose={() => { setLoginModalOpen(false); clearError(); }}
+          onSubmit={handleLoginSubmit}
+          error={authError}
+          isLoading={loginLoading}
+        />
+      </>
+    );
   }
 
   // If user logged in via client portal and we found their customer record, show portal
@@ -866,6 +888,8 @@ export default function App() {
         {view === 'tables' && (
           <TablesView
             sales={sales}
+            tableSections={tableSections}
+            restaurantTables={restaurantTables}
             onSelectTable={(table, order) => {
               setActiveTableNumber(table);
               if (order) {
@@ -928,15 +952,11 @@ export default function App() {
             onSeedProducts={async () => {
               if (!tenantId) return;
               const { INITIAL_PRODUCTS } = await import('./constants');
-              for (const p of INITIAL_PRODUCTS) {
-                await addDoc(getTenantCollection(db, tenantId, 'products'), { ...p, createdAt: serverTimestamp() });
-              }
+              await seedProducts(tenantId, INITIAL_PRODUCTS);
             }}
             onClearSales={async () => {
               if (!tenantId) return;
-              const { getDocs, deleteDoc } = await import('firebase/firestore');
-              const snap = await getDocs(getTenantCollection(db, tenantId, 'sales'));
-              await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+              await clearAllSales(tenantId);
             }}
           />
         )}

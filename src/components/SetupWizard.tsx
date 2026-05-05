@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Building2, Save } from 'lucide-react';
-import { doc, updateDoc, setDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
-import { AppConfig, Staff } from '../types';
-import { User } from 'firebase/auth';
+import { setupTenant } from '../api';
+import { AppConfig } from '../types';
 
 interface SetupWizardProps {
-  user: User;
+  user: { uid: string; email: string; displayName: string | null };
   config: AppConfig;
 }
 
@@ -25,56 +23,37 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
   const handleSave = async (isSkipping: boolean = false) => {
     setIsSaving(true);
     try {
-      // Create first admin staff user
-      const tenantRef = await addDoc(collection(db, 'tenants'), {
-        name: isSkipping ? 'My Business' : formData.businessName,
-        createdAt: serverTimestamp()
-      });
-      // Link user to tenant
-      await setDoc(doc(db, 'users', user.uid), {
-        tenantId: tenantRef.id,
-        email: user.email,
-        name: user.displayName || user.email?.split('@')[0] || 'User',
-        createdAt: serverTimestamp()
-      });
-      // Create first staff user — dev role for the hardcoded dev email, admin otherwise
-      const DEV_EMAIL = 'jameskoen78@gmail.com';
-      const assignedRole = user.email === DEV_EMAIL ? 'dev' : 'admin';
-      await setDoc(doc(db, 'tenants', tenantRef.id, 'staff', user.uid), {
-        name: user.displayName || user.email?.split('@')[0] || 'Admin',
-        email: user.email,
-        role: assignedRole,
-        status: 'active',
-        createdAt: serverTimestamp()
-      } as Staff);
-
-      // Save config
-      const newConfig: AppConfig = {
+      const businessName = isSkipping ? 'My Business' : formData.businessName;
+      
+      const setupConfig: AppConfig = {
         ...config,
         setupCompleted: true,
-        business: isSkipping ? { name: 'My Business' } : {
-          name: formData.businessName,
-          logoUrl: formData.logoUrl,
-          address: formData.address,
-          currency: formData.currency,
+        business: {
+          name: businessName,
+          logoUrl: formData.logoUrl || '',
+          address: formData.address || '',
+          currency: formData.currency || 'R',
           taxRate: formData.taxRate ? parseFloat(formData.taxRate) : undefined,
         }
       };
-      
-      const configRef = doc(db, 'tenants', tenantRef.id, 'settings', 'app');
-      await setDoc(configRef, newConfig, { merge: true });
 
-      // Seed a default Kitchen workstation so restaurant mode works out of the box
-      await addDoc(collection(db, 'tenants', tenantRef.id, 'workstations'), {
-        name: 'Kitchen',
-        type: 'kitchen',
-        status: 'active',
-        createdAt: serverTimestamp(),
+      await setupTenant({
+        businessName,
+        user: {
+          uid: user.uid,
+          email: user.email!,
+          displayName: user.displayName || user.email?.split('@')[0] || 'User'
+        },
+        config: setupConfig
       });
+
+      // After setup, the App component will re-render and useAppData will find the new tenant.
+      // We might need a hard reload or a state update to trigger the transition.
+      window.location.reload();
 
     } catch (error) {
       console.error("Failed to complete setup:", error);
-      alert("Failed to save setup. Please try again or check permissions.");
+      alert("Failed to save setup. Please try again.");
     } finally {
       setIsSaving(false);
     }

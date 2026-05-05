@@ -96,7 +96,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                       <TabletSmartphone className="w-4 h-4 text-indigo-500" />
                       <span className="text-xs font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-widest">Open Tab</span>
                     </div>
-                    <span className="font-black text-indigo-700 dark:text-indigo-400 text-sm">R{openTab.total.toFixed(2)}</span>
+                    <span className="font-black text-indigo-700 dark:text-indigo-400 text-sm">R{Number(openTab.total || 0).toFixed(2)}</span>
                   </button>
                 )}
 

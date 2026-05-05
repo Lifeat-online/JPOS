@@ -1,11 +1,9 @@
 import { usePosStore } from '../store/usePosStore';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
 import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2 } from 'lucide-react';
-import { getTenantDoc, getTenantCollection } from '../tenantHelper';
-import { setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, serverTimestamp, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
+import { apiGet, apiPut, apiPost, apiDelete } from '../api';
 
 export function SettingsView({ config, setConfig }: { config: AppConfig, setConfig: (c: AppConfig) => void }) {
   const tenantId = usePosStore(state => state.tenantId);
@@ -21,15 +19,34 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const [wsModal, setWsModal] = useState<{ isOpen: boolean; ws: Partial<Workstation> | null }>({ isOpen: false, ws: null });
   const [wsSaving, setWsSaving] = useState(false);
 
-  useEffect(() => {
+  // ── Tables & Sections state ──────────────────────────────────────────────────
+  const [sections, setSections] = useState<TableSection[]>([]);
+  const [tables, setTables] = useState<RestaurantTable[]>([]);
+  const [sectionModal, setSectionModal] = useState<{ isOpen: boolean; section: Partial<TableSection> | null }>({ isOpen: false, section: null });
+  const [tableModal, setTableModal] = useState<{ isOpen: boolean; table: Partial<RestaurantTable> | null }>({ isOpen: false, table: null });
+  const [tableSaving, setTableSaving] = useState(false);
+
+  const fetchData = useCallback(async () => {
     if (!tenantId) return;
-    const unsub = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'workstations')),
-      snap => setWorkstations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Workstation))),
-      err => console.error('Workstations subscription error:', err)
-    );
-    return () => unsub();
+    try {
+      const [ws, sects, tabs] = await Promise.all([
+        apiGet<Workstation[]>(`/api/mariadb/tenants/${tenantId}/workstations`),
+        apiGet<TableSection[]>(`/api/mariadb/tenants/${tenantId}/table-sections`),
+        apiGet<RestaurantTable[]>(`/api/mariadb/tenants/${tenantId}/restaurant-tables`),
+      ]);
+      setWorkstations(ws || []);
+      setSections(sects || []);
+      setTables(tabs || []);
+    } catch (err) {
+      console.error('Settings data fetch error:', err);
+    }
   }, [tenantId]);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   const saveWorkstation = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,10 +55,11 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     try {
       const data = { name: wsModal.ws.name, type: wsModal.ws.type || 'kitchen', status: wsModal.ws.status || 'active' };
       if (wsModal.ws.id) {
-        await updateDoc(getTenantDoc(db, tenantId, 'workstations', wsModal.ws.id), data);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/workstations/${wsModal.ws.id}`, data);
       } else {
-        await addDoc(getTenantCollection(db, tenantId, 'workstations'), { ...data, createdAt: serverTimestamp() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/workstations`, data);
       }
+      await fetchData();
       setWsModal({ isOpen: false, ws: null });
     } catch (err) { console.error(err); }
     setWsSaving(false);
@@ -49,30 +67,11 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
 
   const deleteWorkstation = async (id: string) => {
     if (!tenantId || !confirm('Delete this workstation?')) return;
-    await deleteDoc(getTenantDoc(db, tenantId, 'workstations', id));
+    try {
+      await apiDelete(`/api/mariadb/tenants/${tenantId}/workstations/${id}`);
+      await fetchData();
+    } catch (err) { console.error(err); }
   };
-
-  // ── Tables & Sections state ──────────────────────────────────────────────────
-  const [sections, setSections] = useState<TableSection[]>([]);
-  const [tables, setTables] = useState<RestaurantTable[]>([]);
-  const [sectionModal, setSectionModal] = useState<{ isOpen: boolean; section: Partial<TableSection> | null }>({ isOpen: false, section: null });
-  const [tableModal, setTableModal] = useState<{ isOpen: boolean; table: Partial<RestaurantTable> | null }>({ isOpen: false, table: null });
-  const [tableSaving, setTableSaving] = useState(false);
-
-  useEffect(() => {
-    if (!tenantId) return;
-    const unsubSections = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'tableSections'), orderBy('order', 'asc')),
-      snap => setSections(snap.docs.map(d => ({ id: d.id, ...d.data() } as TableSection))),
-      err => console.error('Sections error:', err)
-    );
-    const unsubTables = onSnapshot(
-      query(getTenantCollection(db, tenantId, 'restaurantTables'), orderBy('id', 'asc')),
-      snap => setTables(snap.docs.map(d => ({ id: d.id, ...d.data() } as RestaurantTable))),
-      err => console.error('Tables error:', err)
-    );
-    return () => { unsubSections(); unsubTables(); };
-  }, [tenantId]);
 
   const saveSection = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,10 +80,11 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     try {
       const data = { name: sectionModal.section.name, color: sectionModal.section.color || 'blue', order: sectionModal.section.order ?? sections.length };
       if (sectionModal.section.id) {
-        await updateDoc(getTenantDoc(db, tenantId, 'tableSections', sectionModal.section.id), data);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/table-sections/${sectionModal.section.id}`, data);
       } else {
-        await addDoc(getTenantCollection(db, tenantId, 'tableSections'), { ...data, createdAt: serverTimestamp() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/table-sections`, data);
       }
+      await fetchData();
       setSectionModal({ isOpen: false, section: null });
     } catch (err) { console.error(err); }
     setTableSaving(false);
@@ -102,12 +102,11 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
         status: tableModal.table.status || 'active',
       };
       if (tableModal.table.id) {
-        await updateDoc(getTenantDoc(db, tenantId, 'restaurantTables', tableModal.table.id), data);
+        await apiPut(`/api/mariadb/tenants/${tenantId}/restaurant-tables/${tableModal.table.id}`, data);
       } else {
-        // Generate a table ID from the label
-        const tableId = tableModal.table.label.replace(/\s+/g, '-').toUpperCase();
-        await setDoc(getTenantDoc(db, tenantId, 'restaurantTables', tableId), { ...data, id: tableId, createdAt: serverTimestamp() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/restaurant-tables`, data);
       }
+      await fetchData();
       setTableModal({ isOpen: false, table: null });
     } catch (err) { console.error(err); }
     setTableSaving(false);
@@ -115,20 +114,25 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
 
   const deleteSection = async (id: string) => {
     if (!tenantId || !confirm('Delete this section? Tables in it will also be removed.')) return;
-    const sectionTables = tables.filter(t => t.sectionId === id);
-    await Promise.all(sectionTables.map(t => deleteDoc(getTenantDoc(db, tenantId, 'restaurantTables', t.id))));
-    await deleteDoc(getTenantDoc(db, tenantId, 'tableSections', id));
+    try {
+      await apiDelete(`/api/mariadb/tenants/${tenantId}/table-sections/${id}`);
+      await fetchData();
+    } catch (err) { console.error(err); }
   };
 
   const deleteTable = async (id: string) => {
     if (!tenantId || !confirm('Delete this table?')) return;
-    await deleteDoc(getTenantDoc(db, tenantId, 'restaurantTables', id));
+    try {
+      await apiDelete(`/api/mariadb/tenants/${tenantId}/restaurant-tables/${id}`);
+      await fetchData();
+    } catch (err) { console.error(err); }
   };
 
   const handleSave = async () => {
+    if (!tenantId) return;
     setIsSaving(true);
     try {
-      await setDoc(getTenantDoc(db, tenantId, "settings", "app"), formData, { merge: true });
+      await apiPut(`/api/mariadb/tenants/${tenantId}/settings/app`, formData);
       setConfig(formData);
       alert("Settings saved successfully!");
     } catch (e) {
@@ -283,7 +287,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
             </button>
           )}
           {config.business?.isRestaurantMode && (
-            <button
+            <button 
               onClick={() => setActiveTab('tables')}
               className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'tables' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
             >

@@ -170,9 +170,32 @@ export async function getWorkstationsByTenant(tenantId: string) {
 }
 
 export async function getActiveSalesByTenant(tenantId: string) {
-  return query(
+  const sales = await query<any>(
     `
-      SELECT *
+      SELECT
+        id,
+        tenant_id AS tenantId,
+        customer_id AS customerId,
+        user_id AS userId,
+        staff_id AS staffId,
+        total,
+        subtotal,
+        tax_amount AS taxAmount,
+        tax_rate AS taxRate,
+        tax_inclusive AS taxInclusive,
+        payment_method AS paymentMethod,
+        tendered_amount AS tenderedAmount,
+        change_amount AS changeAmount,
+        tip_amount AS tipAmount,
+        cash_out_amount AS cashOutAmount,
+        points_discount AS pointsDiscount,
+        status,
+        payfast_payment_id,
+        table_number AS tableNumber,
+        is_tab AS isTab,
+        tab_name AS tabName,
+        created_at AS createdAt,
+        updated_at AS updatedAt
       FROM sales
       WHERE tenant_id = ?
         AND status IN ('completed','pending','open','kitchen')
@@ -181,9 +204,33 @@ export async function getActiveSalesByTenant(tenantId: string) {
     `,
     [tenantId]
   );
+
+  // Fetch items for each sale
+  for (const sale of sales) {
+    sale.items = await query(
+      `SELECT
+         id,
+         product_id AS productId,
+         product_name AS name,
+         price,
+         quantity,
+         status,
+         workstation_id AS workstationId,
+         ordered_at AS orderedAt,
+         accepted_at AS acceptedAt,
+         ready_at AS readyAt,
+         delivered_at AS deliveredAt,
+         action_staff_id AS actionStaffId
+       FROM sale_items
+       WHERE sale_id = ?`,
+      [sale.id]
+    );
+  }
+
+  return sales;
 }
 
-export async function getOpenCashSessionByStaff(tenantId: string, staffId: string) {
+export async function getOpenCashSessionByStaff(tenant_id: string, staff_id: string) {
   const rows = await query(
     `SELECT *
      FROM cash_sessions
@@ -191,7 +238,127 @@ export async function getOpenCashSessionByStaff(tenantId: string, staffId: strin
        AND staff_id = ?
        AND status = 'open'
      LIMIT 1`,
-    [tenantId, staffId]
+    [tenant_id, staff_id]
   );
   return rows.length > 0 ? rows[0] : null;
+}
+
+export async function getPayoutRequestsByTenant(tenant_id: string) {
+  return query(
+    `SELECT
+       id,
+       tenant_id AS tenantId,
+       staff_id AS staffId,
+       staff_name AS staffName,
+       amount,
+       status,
+       created_at AS createdAt,
+       processed_at AS processedAt,
+       processed_by AS processedBy,
+       note
+     FROM payout_requests
+     WHERE tenant_id = ?
+     ORDER BY created_at DESC`,
+    [tenant_id]
+  );
+}
+
+export async function getCustomerPayoutRequestsByTenant(tenant_id: string) {
+  return query(
+    `SELECT
+       id,
+       tenant_id AS tenantId,
+       customer_id AS customerId,
+       customer_name AS customerName,
+       customer_email AS customerEmail,
+       amount,
+       status,
+       created_at AS createdAt,
+       processed_at AS processedAt,
+       processed_by AS processedBy,
+       note
+     FROM customer_payout_requests
+     WHERE tenant_id = ?
+     ORDER BY created_at DESC`,
+    [tenant_id]
+  );
+}
+
+export async function getMessagesByTenant(tenantId: string, limit = 100) {
+  return query(
+    `SELECT
+       id,
+       tenant_id AS tenantId,
+       channel,
+       sender_id AS senderId,
+       sender_name AS senderName,
+       sender_role AS senderRole,
+       text,
+       created_at AS createdAt,
+       read_by AS readBy,
+       is_dev_broadcast AS isDevBroadcast,
+       is_system AS isSystem
+     FROM messages
+     WHERE tenant_id = ?
+     ORDER BY created_at DESC
+     LIMIT ?`,
+    [tenantId, limit]
+  );
+}
+
+export async function getMessagesByChannel(tenantId: string, channel: string, limit = 100) {
+  return query(
+    `SELECT
+       id,
+       tenant_id AS tenantId,
+       channel,
+       sender_id AS senderId,
+       sender_name AS senderName,
+       sender_role AS senderRole,
+       text,
+       created_at AS createdAt,
+       read_by AS readBy,
+       is_dev_broadcast AS isDevBroadcast,
+       is_system AS isSystem
+     FROM messages
+     WHERE tenant_id = ? AND channel = ?
+     ORDER BY created_at ASC
+     LIMIT ?`,
+    [tenantId, channel, limit]
+  );
+}
+
+export async function getTableSectionsByTenant(tenantId: string) {
+  return query(
+    `SELECT
+       id,
+       tenant_id AS tenantId,
+       name,
+       color,
+       \`order\`,
+       created_at AS createdAt,
+       updated_at AS updatedAt
+     FROM table_sections
+     WHERE tenant_id = ?
+     ORDER BY \`order\` ASC`,
+    [tenantId]
+  );
+}
+
+export async function getRestaurantTablesByTenant(tenantId: string) {
+  return query(
+    `SELECT
+       id,
+       tenant_id AS tenantId,
+       label,
+       section_id AS sectionId,
+       capacity,
+       status,
+       created_at AS createdAt,
+       updated_at AS updatedAt
+     FROM restaurant_tables
+     WHERE tenant_id = ?
+     ORDER BY label ASC`,
+    [tenantId]
+  );
 }
