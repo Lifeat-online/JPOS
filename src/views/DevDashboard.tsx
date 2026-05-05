@@ -4,105 +4,15 @@ import {
   Product, Customer, Staff, Sale, AppConfig, Workstation,
 } from '../types';
 import {
-  Terminal, Database, Shield, Activity, ScrollText, Zap,
+  Terminal, Database, Shield, Activity, Zap,
   Copy, CheckCircle2, XCircle, AlertTriangle, ExternalLink,
   Download, Trash2, RefreshCw, Code2, Server, Wifi, FlaskConical,
 } from 'lucide-react';
 
-// ─── Firebase project constants ────────────────────────────────────────────────
-const FB_PROJECT_ID = 'curious-clone-471818-s2';
-const FB_DATABASE_ID = 'ai-studio-0ac21e09-3745-4e89-b194-009ff74c301f';
-const FB_AUTH_DOMAIN = 'curious-clone-471818-s2.firebaseapp.com';
+// ─── App constants ────────────────────────────────────────────────────
 const APP_VERSION = String('0.0.1');
 
-const FIRESTORE_RULES = `rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-
-    function isSignedIn() {
-      return request.auth != null;
-    }
-    function isOwner(uid) {
-      return isSignedIn() && request.auth.uid == uid;
-    }
-    function isStaffOf(tenantId) {
-      return isSignedIn() &&
-        exists(/databases/$(database)/documents/tenants/$(tenantId)/staff/$(request.auth.uid));
-    }
-    function staffRole(tenantId) {
-      return get(/databases/$(database)/documents/tenants/$(tenantId)/staff/$(request.auth.uid)).data.role;
-    }
-    function isAdminOf(tenantId) {
-      return isStaffOf(tenantId) && staffRole(tenantId) == 'admin';
-    }
-    function isManagerOrAdminOf(tenantId) {
-      return isStaffOf(tenantId) && staffRole(tenantId) in ['admin', 'manager'];
-    }
-
-    match /{document=**} {
-      allow read, write: if false;
-    }
-    match /users/{userId} {
-      allow read, write: if isOwner(userId);
-    }
-    match /tenants/{tenantId} {
-      allow create: if isSignedIn();
-      allow read: if isStaffOf(tenantId);
-      allow update: if isAdminOf(tenantId);
-
-      match /staff/{staffId} {
-        allow read: if isStaffOf(tenantId);
-        allow create: if isSignedIn() && (isAdminOf(tenantId) || staffId == request.auth.uid);
-        allow update: if isAdminOf(tenantId) || isOwner(staffId);
-        allow delete: if isAdminOf(tenantId);
-      }
-      match /settings/{docId} {
-        allow read: if isStaffOf(tenantId);
-        allow write: if isAdminOf(tenantId) ||
-          (isSignedIn() && exists(/databases/$(database)/documents/tenants/$(tenantId)/staff/$(request.auth.uid)));
-      }
-      match /products/{productId} {
-        allow read: if isStaffOf(tenantId);
-        allow create, delete: if isManagerOrAdminOf(tenantId);
-        allow update: if isManagerOrAdminOf(tenantId) ||
-          (isStaffOf(tenantId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'updatedAt']));
-      }
-      match /sales/{saleId} {
-        allow read: if isStaffOf(tenantId);
-        allow create: if isStaffOf(tenantId);
-        allow update: if isStaffOf(tenantId);
-        allow delete: if isAdminOf(tenantId);
-      }
-      match /customers/{customerId} {
-        allow read: if isStaffOf(tenantId);
-        allow create, update, delete: if isManagerOrAdminOf(tenantId);
-      }
-      match /cashSessions/{sessionId} {
-        allow read, write: if isStaffOf(tenantId);
-      }
-      match /cashTransactions/{txId} {
-        allow read, write: if isStaffOf(tenantId);
-      }
-      match /vendors/{vendorId} {
-        allow read: if isStaffOf(tenantId);
-        allow write: if isManagerOrAdminOf(tenantId);
-      }
-      match /purchaseOrders/{poId} {
-        allow read: if isStaffOf(tenantId);
-        allow write: if isManagerOrAdminOf(tenantId);
-      }
-      match /workstations/{wsId} {
-        allow read: if isStaffOf(tenantId);
-        allow write: if isAdminOf(tenantId);
-      }
-      match /payoutRequests/{requestId} {
-        allow read, write: if isStaffOf(tenantId);
-      }
-    }
-  }
-}`;
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────────────────
 interface LogEntry {
   id: number;
   timestamp: Date;
@@ -123,7 +33,7 @@ interface DevDashboardProps {
   onClearSales?: () => void;
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────
 function truncateId(id: string, len = 12): string {
   return id.length > len ? id.slice(0, len) + '…' : id;
 }
@@ -189,7 +99,7 @@ function isNewerVersion(current: string, latest: string) {
   return false;
 }
 
-// ─── Test Suite Types ──────────────────────────────────────────────────────────
+// ─── Test Suite Types ──────────────────────────────────────────────────
 type TestStatus = 'idle' | 'running' | 'pass' | 'fail' | 'warn';
 interface TestResult { status: TestStatus; detail?: string; }
 interface TestDef {
@@ -207,7 +117,7 @@ interface TestDef {
   }) => { status: 'pass' | 'fail' | 'warn'; detail?: string };
 }
 
-// ─── Main Component ────────────────────────────────────────────────────────────
+// ─── Main Component ────────────────────────────────────────────────────
 export function DevDashboard({
   user,
   tenantId,
@@ -220,7 +130,7 @@ export function DevDashboard({
   onSeedProducts,
   onClearSales,
 }: DevDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'rules' | 'health' | 'console' | 'actions' | 'tests'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'health' | 'console' | 'actions' | 'tests'>('overview');
   const [dataSubTab, setDataSubTab] = useState<'products' | 'customers' | 'staff' | 'sales' | 'workstations'>('products');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logCounter, setLogCounter] = useState(0);
@@ -323,9 +233,9 @@ export function DevDashboard({
     }
   };
 
-  // ── Test suite state ─────────────────────────────────────────────────────────
+  // ── Test suite state ─────────────────────────────────────────────────
   const TEST_DEFINITIONS: TestDef[] = [
-    // ── Data Integrity ──────────────────────────────────────────────────────
+    // ── Data Integrity ──────────────────────────────────────────────
     {
       id: 'products_have_names', name: 'Products have names', group: 'data_integrity',
       description: 'All products have non-empty names',
@@ -411,7 +321,7 @@ export function DevDashboard({
           : { status: 'warn', detail: `${mismatched} sale(s) with total mismatch (may include discounts/tips)` };
       },
     },
-    // ── Configuration ───────────────────────────────────────────────────────
+    // ── Configuration ───────────────────────────────────────────────
     {
       id: 'setup_completed', name: 'Setup completed', group: 'configuration',
       description: 'config.setupCompleted is true',
@@ -467,7 +377,7 @@ export function DevDashboard({
         ? { status: 'pass', detail: `Currency: ${config.business.currency}` }
         : { status: 'warn', detail: 'Currency is not configured' },
     },
-    // ── Business Logic ──────────────────────────────────────────────────────
+    // ── Business Logic ──────────────────────────────────────────────
     {
       id: 'loyalty_config_valid', name: 'Loyalty config valid', group: 'business_logic',
       description: 'If loyalty enabled, points config must be set',
@@ -531,7 +441,7 @@ export function DevDashboard({
         return { status: 'pass', detail: 'Cash session data not available in props (check CashManagementView)' };
       },
     },
-    // ── Performance ─────────────────────────────────────────────────────────
+    // ── Performance ─────────────────────────────────────────────────
     {
       id: 'product_count', name: 'Product count', group: 'performance',
       description: 'Pass if < 500, warn if 500–1000, fail if > 1000',
@@ -617,7 +527,7 @@ export function DevDashboard({
     };
   }, [testResults]);
 
-  // ── Console log capture ──────────────────────────────────────────────────────
+  // ── Console log capture ──────────────────────────────────────────────
   useEffect(() => {
     const origError = console.error.bind(console);
     const origWarn = console.warn.bind(console);
@@ -645,24 +555,13 @@ export function DevDashboard({
     };
   }, []);
 
-  // ── Derived stats ────────────────────────────────────────────────────────────
+  // ── Derived stats ────────────────────────────────────────────────────
   const totalRevenue = useMemo(
     () => sales.filter(s => s.status === 'completed').reduce((acc, s) => acc + s.total, 0),
     [sales],
   );
 
-  const firebaseConfig = useMemo(() => ({
-    projectId: FB_PROJECT_ID,
-    appId: '1:633658015180:web:a7519e8c4d7d3d45f53169',
-    apiKey: 'AIzaSyCfHpTsIhKoiDU5zQZO2NzSAyvKyQBVsB4',
-    authDomain: FB_AUTH_DOMAIN,
-    firestoreDatabaseId: FB_DATABASE_ID,
-    storageBucket: 'curious-clone-471818-s2.firebasestorage.app',
-    messagingSenderId: '633658015180',
-    measurementId: '',
-  }), []);
-
-  // ── Data health ──────────────────────────────────────────────────────────────
+  // ── Data health ──────────────────────────────────────────────────────
   const dataHealth = useMemo(() => {
     const noBarcode = products.filter(p => !p.barcode).length;
     const zeroStock = products.filter(p => p.stock === 0).length;
@@ -677,7 +576,7 @@ export function DevDashboard({
     return { noBarcode, zeroStock, belowMin, noRole, stalePending };
   }, [products, staff, sales]);
 
-  // ── Export JSON ──────────────────────────────────────────────────────────────
+  // ── Export JSON ──────────────────────────────────────────────────────
   const handleExport = () => {
     const data = { products, customers, staff, sales, workstations, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -689,11 +588,10 @@ export function DevDashboard({
     URL.revokeObjectURL(url);
   };
 
-  // ── Tab definitions ──────────────────────────────────────────────────────────
+  // ── Tab definitions ──────────────────────────────────────────────────
   const tabs = [
     { id: 'overview', label: 'Overview', icon: Server },
     { id: 'data', label: 'Data Explorer', icon: Database },
-    { id: 'rules', label: 'Firestore Rules', icon: Shield },
     { id: 'health', label: 'App Health', icon: Activity },
     { id: 'console', label: `Console${logs.length > 0 ? ` (${logs.length})` : ''}`, icon: Terminal },
     { id: 'actions', label: 'Quick Actions', icon: Zap },
@@ -736,9 +634,9 @@ export function DevDashboard({
       {/* ── Tab Content ── */}
       <div className="flex-1 overflow-y-auto p-4 lg:p-6">
 
-        {/* ════════════════════════════════════════════════════════════════
+        {/* ═══════════════════════════════════════════════════════════════
             TAB 1 — OVERVIEW
-        ════════════════════════════════════════════════════════════════ */}
+        ═══════════════════════════════════════════════════════════════ */}
         {activeTab === 'overview' && (
           <div className="space-y-6 max-w-5xl mx-auto">
             {/* DEV MODE badge */}
@@ -765,18 +663,18 @@ export function DevDashboard({
             </div>
 
             <div className="grid lg:grid-cols-2 gap-4">
-              {/* Firebase project info */}
+              {/* Server Info */}
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
                 <div className="flex items-center gap-2 mb-4">
                   <Server className="w-4 h-4 text-orange-500" />
-                  <h3 className="font-black text-slate-800 dark:text-white">Firebase Project</h3>
+                  <h3 className="font-black text-slate-800 dark:text-white">Server Info</h3>
                 </div>
                 <div className="space-y-2 text-sm">
                   {[
-                    { label: 'Project ID', value: FB_PROJECT_ID },
-                    { label: 'Database ID', value: FB_DATABASE_ID },
-                    { label: 'Auth Domain', value: FB_AUTH_DOMAIN },
                     { label: 'App Version', value: APP_VERSION },
+                    { label: 'Database', value: 'MariaDB' },
+                    { label: 'Web Server', value: 'Nginx' },
+                    { label: 'Environment', value: import.meta.env.MODE || 'development' },
                   ].map(({ label, value }) => (
                     <div key={label} className="flex items-start justify-between gap-2 py-1.5 border-b border-slate-100 dark:border-slate-800 last:border-0">
                       <span className="text-slate-500 font-medium shrink-0">{label}</span>
@@ -895,9 +793,9 @@ export function DevDashboard({
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════
+        {/* ═══════════════════════════════════════════════════════════════
             TAB 2 — DATA EXPLORER
-        ════════════════════════════════════════════════════════════════ */}
+        ═══════════════════════════════════════════════════════════════ */}
         {activeTab === 'data' && (
           <div className="space-y-4 max-w-6xl mx-auto">
             {/* Sub-tabs */}
@@ -1115,41 +1013,9 @@ export function DevDashboard({
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════
-            TAB 3 — FIRESTORE RULES
-        ════════════════════════════════════════════════════════════════ */}
-        {activeTab === 'rules' && (
-          <div className="space-y-4 max-w-4xl mx-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="font-black text-slate-800 dark:text-white text-lg">firestore.rules</h3>
-              <CopyBtn text={FIRESTORE_RULES} label="Copy Rules" />
-            </div>
-            <div className="bg-slate-900 rounded-2xl border border-slate-700 overflow-hidden shadow-xl">
-              <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 border-b border-slate-700">
-                <div className="w-3 h-3 rounded-full bg-red-500" />
-                <div className="w-3 h-3 rounded-full bg-amber-500" />
-                <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                <span className="ml-2 text-xs text-slate-400 font-mono">firestore.rules</span>
-              </div>
-              <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed whitespace-pre">
-                {FIRESTORE_RULES}
-              </pre>
-            </div>
-            <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-              <div className="text-sm text-amber-700 dark:text-amber-300">
-                <span className="font-bold">Deploy via: </span>
-                <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1.5 py-0.5 rounded text-xs">
-                  npx firebase-tools deploy --only firestore:rules
-                </code>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ════════════════════════════════════════════════════════════════
-            TAB 4 — APP HEALTH
-        ════════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════
+            TAB 3 — APP HEALTH
+        ═══════════════════════════════════════════════════════════════ */}
         {activeTab === 'health' && (
           <div className="space-y-5 max-w-3xl mx-auto">
             {/* Connection status */}
@@ -1160,7 +1026,7 @@ export function DevDashboard({
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Firestore Connected</span>
+                <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">MariaDB Connected</span>
                 <span className="text-xs text-slate-400 ml-2">(data is loading successfully)</span>
               </div>
             </div>
@@ -1235,9 +1101,9 @@ export function DevDashboard({
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════
-            TAB 7 — TEST SUITE
-        ════════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════
+            TAB 4 — TEST SUITE
+        ═══════════════════════════════════════════════════════════════ */}
         {activeTab === 'tests' && (
           <div className="space-y-5 max-w-4xl mx-auto">
             {/* Header row */}
@@ -1359,9 +1225,9 @@ export function DevDashboard({
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════
+        {/* ═══════════════════════════════════════════════════════════════
             TAB 5 — CONSOLE / LOGS
-        ════════════════════════════════════════════════════════════════ */}
+        ═══════════════════════════════════════════════════════════════ */}
         {activeTab === 'console' && (
           <div className="space-y-3 max-w-5xl mx-auto">
             <div className="flex items-center justify-between">
@@ -1410,9 +1276,9 @@ export function DevDashboard({
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════
+        {/* ═══════════════════════════════════════════════════════════════
             TAB 6 — QUICK ACTIONS
-        ════════════════════════════════════════════════════════════════ */}
+        ═══════════════════════════════════════════════════════════════ */}
         {activeTab === 'actions' && (
           <div className="space-y-5 max-w-2xl mx-auto">
             {/* Seed products */}
@@ -1501,40 +1367,39 @@ export function DevDashboard({
               </button>
             </div>
 
-            {/* Copy Firebase config */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <Copy className="w-4 h-4 text-violet-500" />
-                <h4 className="font-black text-slate-800 dark:text-white">Copy Firebase Config</h4>
-              </div>
-              <p className="text-sm text-slate-500 mb-4">Copy the firebase-applet-config.json contents to clipboard.</p>
-              <CopyBtn text={JSON.stringify(firebaseConfig, null, 2)} label="Copy Firebase Config" />
-            </div>
-
-            {/* External links */}
+            {/* Server Links */}
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-4">
                 <ExternalLink className="w-4 h-4 text-slate-500" />
-                <h4 className="font-black text-slate-800 dark:text-white">Firebase Console Links</h4>
+                <h4 className="font-black text-slate-800 dark:text-white">Server Links</h4>
               </div>
               <div className="flex flex-wrap gap-3">
                 <a
-                  href={`https://console.firebase.google.com/project/${FB_PROJECT_ID}`}
+                  href="http://localhost:3000"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/40 active:scale-95 transition-all"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 active:scale-95 transition-all"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  Firebase Console
+                  Nginx (Port 3000)
                 </a>
                 <a
-                  href={`https://console.firebase.google.com/project/${FB_PROJECT_ID}/firestore/databases/${FB_DATABASE_ID}/data`}
+                  href="http://localhost:5173"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/40 active:scale-95 transition-all"
                 >
+                  <ExternalLink className="w-4 h-4" />
+                  Vite Dev Server
+                </a>
+                <a
+                  href="http://localhost:3306"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/40 active:scale-95 transition-all"
+                >
                   <Database className="w-4 h-4" />
-                  View Firestore
+                  MariaDB
                 </a>
               </div>
             </div>

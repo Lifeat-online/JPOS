@@ -1,7 +1,7 @@
-# MariaDB/Nginx Migration - Phase 1 Complete ✅
+# MariaDB/Nginx Migration - Phase 1 & 2 Complete ✅
 
 ## Overview
-Successfully migrated the data layer from Firebase Firestore to MariaDB with a complete REST API backend while maintaining frontend compatibility with Firebase Auth.
+Successfully migrated the data layer from Firebase Firestore to MariaDB with a complete REST API backend, and implemented JWT-based authentication system.
 
 ## Architecture Changes
 
@@ -14,11 +14,11 @@ Firebase Client SDK (Auth + Firestore)
 Firebase Backend
 ```
 
-### After (MariaDB + REST)
+### After (MariaDB + REST + JWT Auth)
 ```
-React Frontend (still uses Firebase Auth for login)
-    ↓ (REST API calls)
-Express Server (Node.js)
+React Frontend (JWT-based auth)
+    ↓ (REST API calls with Bearer token)
+Express Server (Node.js) + JWT Middleware
     ↓ (mysql2 with connection pool)
 MariaDB Database
 ```
@@ -75,65 +75,103 @@ MariaDB Database
 - `PUT /api/mariadb/tenants/:tenantId/sales/:id` (update status)
 
 ### Frontend Hook Migrations
-1. **useAppData.ts** - Migrated all data loading from Firestore subscriptions to REST API:
-   - Product loading
-   - Customer loading
-   - Staff loading
-   - Sales loading
-   - Workstations loading
-   - Config loading
-   - Cash session lookup
+1. **useAppData.ts** - Migrated all data loading from Firestore subscriptions to REST API
+2. **useBusinessPage.ts** - Migrated public page data fetching
 
-2. **useBusinessPage.ts** - Migrated public page data fetching:
-   - Slug to tenant ID resolution
-   - Config loading
+---
+
+## Phase 2: JWT Authentication ✅ COMPLETED
+
+### New Files Created
+1. **server/auth-middleware.ts** - JWT middleware and token management
+   - `generateAccessToken()` - Creates short-lived access tokens (8h default)
+   - `generateRefreshToken()` - Creates long-lived refresh tokens (7d default)
+   - `verifyToken()` - Verifies and decodes JWT tokens
+   - `requireAuth()` - Middleware to protect routes
+   - `optionalAuth()` - Middleware for optional authentication
+
+2. **server/auth-handler.ts** - Auth endpoint handlers
+   - `handleLogin()` - Email/password login with bcrypt verification
+   - `handleLogout()` - Logout endpoint (client discards token)
+   - `handleRefreshToken()` - Refresh expired access tokens
+   - `handleGetMe()` - Get current user info from token
+   - `handleSetupPassword()` - Admin sets staff password (bcrypt hashed)
+
+3. **server/migrate-add-password-hash.sql** - Database migration
+   - Adds `password_hash` column to `staff` table
+
+### Auth Endpoints Added to server.ts
+- `POST /api/auth/login` - Login with email/password
+- `POST /api/auth/logout` - Logout (client discards token)
+- `POST /api/auth/refresh` - Refresh access token
+- `GET /api/auth/me` - Get current user info (protected)
+- `POST /api/auth/setup-password` - Set staff password (admin only)
+
+### Dependencies Installed
+- `jsonwebtoken` - JWT token generation and verification
+- `bcryptjs` - Password hashing (client-side compatible)
+- `@types/jsonwebtoken` - TypeScript types
+- `@types/bcryptjs` - TypeScript types
+
+### Environment Configuration
+Updated `.env.example` with:
+```
+JWT_SECRET="your-super-secret-jwt-key-change-in-production"
+JWT_EXPIRES_IN="8h"
+REFRESH_TOKEN_EXPIRES_IN="7d"
+```
 
 ### Key Features
-✅ **Multi-tenant support** - All data queries filtered by tenant_id  
-✅ **Type safety** - Full TypeScript type definitions  
-✅ **Error handling** - Proper HTTP status codes and error messages  
-✅ **Connection pooling** - MariaDB pool with 10 connections  
-✅ **Input validation** - Type checking via TypeScript  
-✅ **Prepared statements** - mysql2 parameterized queries prevent SQL injection  
-✅ **JSON field support** - MariaDB JSON columns for complex data  
+✅ **JWT-based authentication** - Stateless auth with access + refresh tokens  
+✅ **Password hashing** - Bcrypt with 10 salt rounds  
+✅ **Protected routes** - `requireAuth` middleware for API protection  
+✅ **Token refresh** - Automatic token renewal mechanism  
+✅ **Multi-tenant aware** - Tokens include tenant_id and role  
+
+---
 
 ## Current Limitations
-⚠️ **Still using Firebase Auth** - User identity/login via Firebase (can be migrated in Phase 2)  
-⚠️ **No session management** - No auth tokens yet, relying on Firebase client auth  
+⚠️ **Frontend still uses Firebase Auth** - Need to migrate `useAuth.ts` to JWT  
 ⚠️ **No data seeding** - Need to populate initial test data  
 ⚠️ **No transaction support** - Sales with items need atomic operations  
+⚠️ **No CSRF protection** - Consider adding for production  
 
-## Phase 2: Auth & Session Management (NEXT)
+---
+
+## Phase 3: Frontend Auth Migration (NEXT)
 
 ### Tasks
-- [ ] Create session token system (JWT or similar)
-- [ ] Implement `POST /api/auth/login` endpoint
-- [ ] Implement `POST /api/auth/logout` endpoint
-- [ ] Add session middleware for protected routes
-- [ ] Migrate `useAuth` hook from Firebase to session-based
-- [ ] Add CSRF protection
-- [ ] Implement token refresh mechanism
+- [ ] Migrate `useAuth.ts` hook from Firebase to JWT session-based
+- [ ] Update `src/api.ts` to include Authorization header
+- [ ] Add token storage (localStorage/sessionStorage) to frontend
+- [ ] Implement token refresh logic in frontend
+- [ ] Create login page component
+- [ ] Seed test user data with passwords
 
 ### Dependencies
-- JWT library (jsonwebtoken)
-- Session middleware (express-session or custom)
+- Update frontend to use `/api/auth/login` instead of Firebase popup
+- Store JWT tokens in frontend
+- Add Bearer token to API requests
 
-## Phase 3: Testing & Data Seeding
+---
+
+## Phase 4: Testing & Data Seeding
 
 ### Data Population
 - [ ] Create seed script for test tenants
-- [ ] Create test users and staff
+- [ ] Create test users and staff with passwords
 - [ ] Create sample products and customers
 - [ ] Create sample sales transactions
 
 ### Testing
-- [ ] Unit tests for adapter functions
-- [ ] Integration tests for API endpoints
+- [ ] Unit tests for auth middleware
+- [ ] Integration tests for auth endpoints
 - [ ] Multi-tenant isolation tests
-- [ ] Load testing for concurrent requests
 - [ ] End-to-end tests with UI
 
-## Phase 4: Advanced Operations
+---
+
+## Phase 5: Advanced Operations
 
 ### Transactions
 - [ ] Create sale with sale_items atomically
@@ -145,12 +183,9 @@ MariaDB Database
 - [ ] Batch update prices
 - [ ] Export/import customers
 
-### Audit Logging
-- [ ] Log all data modifications
-- [ ] Track who made changes and when
-- [ ] Compliance reporting
+---
 
-## Phase 5: Deployment
+## Phase 6: Deployment
 
 ### Nginx Configuration
 - Static file serving (dist/)
@@ -164,6 +199,8 @@ MariaDB Database
 - Nginx reverse proxy
 - Environment variables for credentials
 
+---
+
 ## Performance Metrics
 
 **Database**
@@ -171,64 +208,55 @@ MariaDB Database
 - Query type: Parameterized (safe)
 - Indexes: On tenant_id, slug, email, status
 
+**Authentication**
+- JWT access token expiry: 8 hours
+- JWT refresh token expiry: 7 days
+- Password hashing: bcrypt (10 rounds)
+
 **Frontend**
 - Data loading: Concurrent REST calls
 - Caching: Browser cache + Zustand store
 - Bundle size: Monitor with build output
 
-## Rollback Plan
+---
 
+## Manual Steps Required
+
+### 1. Run Database Migration
+Execute this SQL on your MariaDB database:
+```sql
+ALTER TABLE staff ADD COLUMN password_hash VARCHAR(255) AFTER email;
+```
+
+### 2. Set JWT Secret
+Update your `.env` file with a strong JWT secret:
+```
+JWT_SECRET=your-actual-secret-key-min-32-chars
+```
+
+### 3. Create Test User
+After starting the server, set up a password for a staff member:
+- Use the `/api/auth/setup-password` endpoint (requires admin auth)
+- Or directly update the database with a bcrypt hash
+
+---
+
+## Rollback Plan
 If migration encounters issues:
 1. Firebase branch still exists at `firebase-v1-preserve`
 2. Can revert to Firebase in `useAppData.ts` and `useBusinessPage.ts`
 3. Dual-write possibility during transition period
 
-## Known Issues
-- Port 24678 (Vite HMR) conflicts if multiple dev instances
-- Need to kill node processes before restart
-- Embedded git repo warning (Jimmy's POS folder)
+---
 
 ## Next Immediate Steps
-
-1. **Implement Session Auth** (Phase 2)
-   - Create JWT-based session system
-   - Build login/logout endpoints
-   - Secure protected routes
-
-2. **Seed Test Data**
-   - Create test tenant
-   - Add test users (admin, cashier, manager)
-   - Add products and customers
-   - Verify API operations work
-
-3. **Integration Testing**
-   - Test all CRUD endpoints
-   - Test multi-tenant isolation
-   - Test error scenarios
-
-4. **Performance Testing**
-   - Load test with concurrent requests
-   - Monitor DB connection pool
-   - Check query performance
-
-## Files Modified
-- server.ts (added 40+ endpoints)
-- src/api.ts (created with 25+ functions)
-- src/hooks/useAppData.ts (complete rewrite)
-- src/hooks/useBusinessPage.ts (complete rewrite)
-- package.json (added mysql2, db:init script)
-- .env.example (added DB_* variables)
-
-## Commit Hash
-`7c8031d - feat: implement MariaDB CRUD endpoints and REST API layer`
-
-## Validation Status
-✅ TypeScript compilation: PASS  
-✅ Dev server: RUNNING  
-✅ Frontend loads: YES  
-✅ No runtime errors: YES  
+1. **Run DB migration** - Add `password_hash` column to staff table
+2. **Set JWT secret** - Update `.env` with strong secret
+3. **Migrate frontend auth** - Update `useAuth.ts` to use JWT
+4. **Add token management** - Store/refresh tokens in frontend
+5. **Seed test data** - Create test users with passwords
 
 ---
 
 **Last Updated:** 2026-05-04  
-**Status:** Phase 1 Complete, Ready for Phase 2  
+**Status:** Phase 1 & 2 Complete, Ready for Phase 3 (Frontend Auth Migration) ✅
