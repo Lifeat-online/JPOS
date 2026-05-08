@@ -4,6 +4,8 @@ import path from "path";
 import cors from "cors";
 import bodyParser from "body-parser";
 import crypto from "crypto";
+import { existsSync } from "fs";
+import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import { query } from "./db.ts";
 import {
@@ -70,6 +72,9 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const UPDATE_GIT_URL = "https://github.com/Lifeat-online/JPOS.git";
+const UPDATE_REPO = "Lifeat-online/JPOS";
 
 let PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID || "10000100";
 let PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY || "46f0cd694581a";
@@ -138,7 +143,7 @@ export async function createApp() {
       return res.status(403).json({ error: "Update checks are disabled in production." });
     }
 
-    const repo = "Lifeat-online/Jimmy-s-POS";
+    const repo = UPDATE_REPO;
     const githubToken = process.env.GITHUB_TOKEN || null;
     const url = `https://api.github.com/repos/${repo}/releases/latest`;
 
@@ -201,7 +206,89 @@ export async function createApp() {
       return res.status(403).json({ error: "Updates are disabled in production." });
     }
 
-    res.status(501).json({ error: "Update endpoint not available in test mode." });
+    if (isTest) {
+      return res.status(501).json({ error: "Update endpoint not available in test mode." });
+    }
+
+    const projectRoot = path.resolve(__dirname, "..");
+    const gitDir = path.join(projectRoot, ".git");
+    if (!existsSync(gitDir)) {
+      return res.status(400).json({ error: "Project is not a git repository (.git not found)." });
+    }
+
+    const runGit = (args: string[]) => {
+      const result = spawnSync("git", args, { cwd: projectRoot, encoding: "utf8" });
+      const stdout = typeof result.stdout === "string" ? result.stdout : "";
+      const stderr = typeof result.stderr === "string" ? result.stderr : "";
+      const output = `${stdout}${stderr}`.trim();
+
+      if (result.error) {
+        return { ok: false as const, status: null as number | null, output: output || result.error.message };
+      }
+      if (typeof result.status === "number" && result.status !== 0) {
+        return { ok: false as const, status: result.status, output };
+      }
+      return { ok: true as const, status: 0, output };
+    };
+
+    const steps: string[] = [];
+    const record = (cmd: string, output: string) => {
+      steps.push(`$ git ${cmd}${output ? `\n${output}` : ""}`.trim());
+    };
+
+    try {
+      const getOrigin = runGit(["remote", "get-url", "origin"]);
+      record("remote get-url origin", getOrigin.output);
+
+      if (!getOrigin.ok) {
+        const addOrigin = runGit(["remote", "add", "origin", UPDATE_GIT_URL]);
+        record(`remote add origin ${UPDATE_GIT_URL}`, addOrigin.output);
+        if (!addOrigin.ok) {
+          return res.status(500).json({ success: false, error: "Failed to add origin remote.", output: steps.join("\n\n") });
+        }
+      } else {
+        const setOrigin = runGit(["remote", "set-url", "origin", UPDATE_GIT_URL]);
+        record(`remote set-url origin ${UPDATE_GIT_URL}`, setOrigin.output);
+        if (!setOrigin.ok) {
+          return res.status(500).json({ success: false, error: "Failed to set origin remote URL.", output: steps.join("\n\n") });
+        }
+      }
+
+      const fetchAll = runGit(["fetch", "--all", "--prune"]);
+      record("fetch --all --prune", fetchAll.output);
+      if (!fetchAll.ok) {
+        return res.status(500).json({ success: false, error: "Git fetch failed.", output: steps.join("\n\n") });
+      }
+
+      const branch = runGit(["branch", "--show-current"]);
+      record("branch --show-current", branch.output);
+
+      if (branch.ok && branch.output) {
+        const upstream = runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+        record("rev-parse --abbrev-ref --symbolic-full-name @{u}", upstream.output);
+        if (!upstream.ok) {
+          const setUpstream = runGit(["branch", "--set-upstream-to", `origin/${branch.output}`, branch.output]);
+          record(`branch --set-upstream-to origin/${branch.output} ${branch.output}`, setUpstream.output);
+          if (!setUpstream.ok) {
+            return res.status(500).json({ success: false, error: "Failed to set upstream branch.", output: steps.join("\n\n") });
+          }
+        }
+      }
+
+      const pull = runGit(["pull", "--ff-only"]);
+      record("pull --ff-only", pull.output);
+      if (!pull.ok) {
+        return res.status(500).json({ success: false, error: "Git pull failed.", output: steps.join("\n\n") });
+      }
+
+      return res.json({ success: true, output: steps.join("\n\n") });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: err?.message || "Update failed.",
+        output: steps.join("\n\n"),
+      });
+    }
   });
 
   app.get("/api/mariadb/users/:uid", optionalAuth, async (req, res) => {

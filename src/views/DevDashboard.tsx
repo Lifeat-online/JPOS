@@ -141,7 +141,7 @@ export function DevDashboard({
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [updateOutput, setUpdateOutput] = useState<string | null>(null);
 
-  const GITHUB_REPO = 'Lifeat-online/Jimmy-s-POS';
+  const GITHUB_REPO = 'Lifeat-online/JPOS';
 
   const currentVersionLabel = APP_VERSION === '0.0.0' ? 'unknown' : APP_VERSION;
   const canApplyUpdate = latestRelease !== null;
