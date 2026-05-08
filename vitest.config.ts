@@ -4,29 +4,12 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+    exclude: ['tests/e2e/**/*'],
     environment: 'jsdom',
     setupFiles: 'tests/setupTests.ts',
     coverage: {
       reporter: ['text', 'lcov'],
-      all: true,
       include: ['src/**/*.{ts,tsx}', 'server/**/*.{ts}'],
     },
-    globals: true,
   },
-  projects: [
-    {
-      name: 'frontend',
-      test: {
-        environment: 'jsdom',
-        include: ['tests/frontend/**/*.{test,spec}.{ts,tsx}'],
-      },
-    },
-    {
-      name: 'backend',
-      test: {
-        environment: 'node',
-        include: ['tests/backend/**/*.{test,spec}.{ts,tsx}'],
-      },
-    },
-  ],
 });

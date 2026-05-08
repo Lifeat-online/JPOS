@@ -12,6 +12,7 @@ interface SetupWizardProps {
 export function SetupWizard({ user, config }: SetupWizardProps) {
   const [step, setStep] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     businessName: config.business?.name || '',
     logoUrl: config.business?.logoUrl || '',
@@ -20,11 +21,13 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
     taxRate: config.business?.taxRate?.toString() || '15',
   });
 
+  const isBusinessValid = Boolean(formData.businessName.trim());
+
   const handleSave = async (isSkipping: boolean = false) => {
+    setSaveError(null);
     setIsSaving(true);
     try {
-      const businessName = isSkipping ? 'My Business' : formData.businessName;
-      
+      const businessName = isSkipping ? 'My Business' : formData.businessName.trim();
       const setupConfig: AppConfig = {
         ...config,
         setupCompleted: true,
@@ -41,19 +44,16 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
         businessName,
         user: {
           uid: user.uid,
-          email: user.email!,
-          displayName: user.displayName || user.email?.split('@')[0] || 'User'
+          email: user.email,
+          displayName: user.displayName || user.email.split('@')[0] || 'User'
         },
         config: setupConfig
       });
 
-      // After setup, the App component will re-render and useAppData will find the new tenant.
-      // We might need a hard reload or a state update to trigger the transition.
       window.location.reload();
-
-    } catch (error) {
-      console.error("Failed to complete setup:", error);
-      alert("Failed to save setup. Please try again.");
+    } catch (error: any) {
+      console.error('Failed to complete setup:', error);
+      setSaveError('Unable to save setup. Please check your connection and try again.');
     } finally {
       setIsSaving(false);
     }
@@ -86,8 +86,9 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
         <div className="p-8 space-y-6 overflow-y-auto">
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-slate-500">Business Name</label>
+              <label htmlFor="business-name" className="text-xs font-black uppercase tracking-widest text-slate-500">Business Name</label>
               <input 
+                id="business-name"
                 type="text" 
                 value={formData.businessName}
                 onChange={e => setFormData({...formData, businessName: e.target.value})}
@@ -98,8 +99,9 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
             </div>
             
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-slate-500">Logo URL (Optional)</label>
+              <label htmlFor="logo-url" className="text-xs font-black uppercase tracking-widest text-slate-500">Logo URL (Optional)</label>
               <input 
+                id="logo-url"
                 type="url" 
                 value={formData.logoUrl}
                 onChange={e => setFormData({...formData, logoUrl: e.target.value})}
@@ -109,8 +111,9 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-slate-500">Physical Address (Optional)</label>
+              <label htmlFor="business-address" className="text-xs font-black uppercase tracking-widest text-slate-500">Physical Address (Optional)</label>
               <input 
+                id="business-address"
                 type="text" 
                 value={formData.address}
                 onChange={e => setFormData({...formData, address: e.target.value})}
@@ -121,8 +124,9 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-500">Currency Symbol</label>
+                <label htmlFor="currency-symbol" className="text-xs font-black uppercase tracking-widest text-slate-500">Currency Symbol</label>
                 <input 
+                  id="currency-symbol"
                   type="text" 
                   value={formData.currency}
                   onChange={e => setFormData({...formData, currency: e.target.value})}
@@ -131,8 +135,9 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-500">Tax Rate % (Optional)</label>
+                <label htmlFor="tax-rate" className="text-xs font-black uppercase tracking-widest text-slate-500">Tax Rate % (Optional)</label>
                 <input 
+                  id="tax-rate"
                   type="number" 
                   value={formData.taxRate}
                   onChange={e => setFormData({...formData, taxRate: e.target.value})}
@@ -143,9 +148,15 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
             </div>
           </div>
 
+          {saveError ? (
+            <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm font-medium">
+              {saveError}
+            </div>
+          ) : null}
+
           <button 
             onClick={() => handleSave(false)}
-            disabled={!formData.businessName || isSaving}
+            disabled={!isBusinessValid || isSaving}
             className="w-full py-4 bg-primary text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-primary/20"
           >
             {isSaving ? (

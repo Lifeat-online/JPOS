@@ -22,7 +22,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 // Login endpoint handler
 export async function handleLogin(req: Request, res: Response) {
   try {
-    const { email, password, tenantId } = req.body;
+    const { email, password, tenantId } = (req.body ?? {}) as any;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
@@ -123,9 +123,19 @@ export async function handleRefreshToken(req: Request, res: Response) {
       return res.status(401).json({ error: 'Invalid or expired refresh token' });
     }
 
+    // Create clean payload without exp property for new tokens
+    const cleanPayload: AuthTokenPayload = {
+      uid: payload.uid,
+      email: payload.email,
+      name: payload.name,
+      tenantId: payload.tenantId,
+      role: payload.role,
+      staffId: payload.staffId
+    };
+
     // Generate new access token
-    const newAccessToken = generateAccessToken(payload);
-    const newRefreshToken = generateRefreshToken(payload);
+    const newAccessToken = generateAccessToken(cleanPayload);
+    const newRefreshToken = generateRefreshToken(cleanPayload);
 
     res.json({
       accessToken: newAccessToken,

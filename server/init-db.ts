@@ -12,10 +12,21 @@ async function runSchema() {
   }
 
   const sql = fs.readFileSync(schemaPath, "utf8");
-  const statements = sql
-    .split(/;\s*\n/)
+  const sqlWithoutLineComments = sql
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) return true;
+      if (trimmed.startsWith("--")) return false;
+      if (trimmed.startsWith("#")) return false;
+      return true;
+    })
+    .join("\n");
+
+  const statements = sqlWithoutLineComments
+    .split(/;\s*(?:\r?\n|$)/)
     .map((stmt) => stmt.trim())
-    .filter((stmt) => stmt.length > 0 && !stmt.startsWith("--"));
+    .filter((stmt) => stmt.length > 0);
 
   for (const statement of statements) {
     console.log("Executing:", statement.split("\n")[0]);

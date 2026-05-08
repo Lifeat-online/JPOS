@@ -5,6 +5,8 @@ import { createApp } from '../../server/app.ts';
 let app: any;
 
 beforeAll(async () => {
+  // Set test environment to avoid Vite dev server issues
+  process.env.NODE_ENV = 'test';
   app = await createApp();
 });
 

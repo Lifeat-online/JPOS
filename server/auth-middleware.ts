@@ -1,5 +1,5 @@
-import jwt, { SignOptions, VerifyOptions } from 'jsonwebtoken';
-import { Request, Response, NextFunction } from 'express';
+import jwt, { type SignOptions, type VerifyOptions } from 'jsonwebtoken';
+import type { Request, Response, NextFunction } from 'express';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '8h') as SignOptions['expiresIn'];
@@ -21,7 +21,7 @@ declare global {
   }
 }
 
-export interface AuthTokenPayload {
+export type AuthTokenPayload = {
   uid: string;
   email: string;
   name: string;

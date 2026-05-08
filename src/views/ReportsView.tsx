@@ -98,8 +98,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ sales }) => {
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm">
             <h3 className="text-lg font-black mb-6">Revenue (Last 7 Days)</h3>
-            <div className="h-80 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="w-full min-w-0">
+              <ResponsiveContainer width="100%" height={320} minWidth={0} minHeight={0}>
                 <LineChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
                   <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -115,8 +115,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ sales }) => {
 
           <div className="bg-white dark:bg-slate-900 p-6 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm">
             <h3 className="text-lg font-black mb-6">Top Products (Units Sold)</h3>
-            <div className="h-80 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="w-full min-w-0">
+              <ResponsiveContainer width="100%" height={320} minWidth={0} minHeight={0}>
                 <PieChart>
                   <Pie
                     data={topProducts}

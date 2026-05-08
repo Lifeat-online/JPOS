@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "jimmy-pos",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -17,7 +17,6 @@
     "test:watch": "cross-env NODE_ENV=test vitest"
   },
   "dependencies": {
-    "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
@@ -35,16 +34,15 @@
     "mysql2": "^3.22.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-is": "^19.0.0",
     "react-router-dom": "^7.14.2",
     "recharts": "^3.8.1",
-    "vite": "^6.2.0",
-    "vite-plugin-pwa": "^1.2.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@playwright/test": "^1.41.0",
     "@testing-library/jest-dom": "^6.0.0",
-    "@testing-library/react": "^15.0.0",
+    "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",

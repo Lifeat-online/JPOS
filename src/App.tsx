@@ -8,11 +8,12 @@ import {
   LayoutGrid, History as HistoryIcon, Settings, Package, Banknote,
   Users, UserCog, Moon, Sun, ShoppingCart, AlertCircle, ChefHat, Utensils, Trophy,
   ChevronDown, LogOut, Wallet, TabletSmartphone, Maximize2, Minimize2, Monitor, Download,
+  Activity,
 } from 'lucide-react';
 import { BarChart3 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { apiPost, apiPut, apiDelete, getRestaurantTables, getTableSections, seedProducts, clearAllSales } from './api';
+import { apiPost, apiPut, apiDelete, seedProducts, clearAllSales } from './api';
 
 import { useAuth } from './hooks/useAuth';
 import { useAppData } from './hooks/useAppData';
@@ -28,6 +29,7 @@ import { InventoryView } from './views/InventoryView';
 import { CustomersView } from './views/CustomersView';
 import { StaffView } from './views/StaffView';
 import { ReportsView } from './views/ReportsView';
+import { LiveView } from './views/LiveView';
 import { SettingsView } from './components/SettingsView';
 import { CashManagementView } from './components/CashManagementView';
 import { StaffProfileView } from './components/StaffProfileView';
@@ -521,6 +523,7 @@ export default function App() {
     const secondary: { id: string; icon: React.ElementType; label: string; group?: string }[] = [
       { id: 'cash', icon: Banknote, label: 'Cash Mgmt', group: 'Operations' },
       ...(isAdminOrManager ? [
+        { id: 'live', icon: Activity, label: 'Live', group: 'Operations' },
         { id: 'inventory', icon: Package, label: 'Inventory', group: 'Operations' },
         { id: 'customers', icon: Users, label: 'Customers', group: 'Operations' },
       ] : []),
@@ -871,6 +874,7 @@ export default function App() {
             }}
           />
         )}
+        {view === 'live' && <LiveView tenantId={tenantId} />}
         {view === 'reports' && <ReportsView sales={sales} />}
         {view === 'staff' && (
           <StaffView

@@ -47,7 +47,7 @@ describe('auth-handler', () => {
 
   it('refreshes tokens with valid refresh token', async () => {
     const payload = { uid: 'staff_1', email: 'test@example.com', name: 'Test User', tenantId: 'tenant_1', role: 'admin', staffId: 'staff_1' };
-    const { generateAccessToken, generateRefreshToken } = await import('../../server/auth-middleware.ts');
+    const { generateRefreshToken } = await import('../../server/auth-middleware.ts');
     const refreshToken = generateRefreshToken(payload);
 
     const req: any = { body: { refreshToken } };

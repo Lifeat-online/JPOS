@@ -261,3 +261,81 @@ export interface Message {
   isSystemNotification?: boolean;
   tenantId?: string;
 }
+
+export interface LiveRegisterStats {
+  cashSessionId: string;
+  staffId: string;
+  staffName: string;
+  openedAt: any;
+  openingFloat: number;
+  expectedCash: number;
+  actualCash: number;
+  accumulatedTips: number;
+  netTips: number;
+  completedCount: number;
+  completedRevenue: number;
+  activeOrders: number;
+  lastSaleAt?: any;
+  cashRevenue: number;
+  cardRevenue: number;
+  walletRevenue: number;
+}
+
+export interface LiveTotals {
+  activeOrdersCount: number;
+  openTabsCount: number;
+  lastHour: { completedCount: number; completedRevenue: number };
+  today: { completedCount: number; completedRevenue: number };
+}
+
+export interface LiveRestaurantTables {
+  activeTableCount: number;
+  openTableCount: number;
+  openTables: Array<{
+    tableNumber: string;
+    activeOrders: number;
+    oldestOrderAt?: any;
+    activeOrderValue: number;
+  }>;
+}
+
+export interface LiveStaffPerformanceRow {
+  staffId: string;
+  staffName: string;
+  staffRole: string;
+  completedCount: number;
+  completedRevenue: number;
+  activeOrders: number;
+  lastSaleAt?: any;
+}
+
+export interface LiveWorkstationQueueRow {
+  workstationId: string;
+  workstationName: string;
+  workstationType: string;
+  pendingCount: number;
+  acceptedCount: number;
+  readyCount: number;
+  queueCount: number;
+  oldestOrderedAt?: any;
+  oldestAgeSeconds: number;
+  avgPrepSecondsLast2h: number;
+}
+
+export interface LiveRestaurantStats {
+  tables: LiveRestaurantTables;
+  staffPerformance: LiveStaffPerformanceRow[];
+  workstationQueues: LiveWorkstationQueueRow[];
+}
+
+export interface LiveTenantStats {
+  tenantId: string;
+  isRestaurantMode: boolean;
+  serverTime: string;
+  retail: {
+    openRegisterCount: number;
+    registers: LiveRegisterStats[];
+  };
+  totals: LiveTotals;
+  restaurant: LiveRestaurantStats | null;
+}

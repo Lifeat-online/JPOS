@@ -71,6 +71,15 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
   const [closingBreakdown, setClosingBreakdown] = useState<Record<string, number>>({});
   const [closeNotes, setCloseNotes] = useState("");
 
+  const toNumber = (value: unknown): number => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+
   const activeSession = sessions.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id);
   const newFloat = Object.entries(openingBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
   const closeAmount = Object.entries(closingBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
@@ -82,7 +91,16 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
       if (currentUserStaff?.role === 'cashier') {
         data = data.filter(s => s.staffId === currentUserStaff.id);
       }
-      setSessions(data || []);
+      const normalized = (data || []).map(s => ({
+        ...s,
+        openingFloat: toNumber((s as any).openingFloat),
+        expectedCash: toNumber((s as any).expectedCash),
+        actualCash: toNumber((s as any).actualCash),
+        difference: toNumber((s as any).difference),
+        accumulatedTips: toNumber((s as any).accumulatedTips),
+        netTips: toNumber((s as any).netTips),
+      })) as CashSession[];
+      setSessions(normalized);
     } catch (err) {
       console.error('CashSessions fetch error:', err);
     } finally {
@@ -123,8 +141,8 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
     if (!activeSession || !tenantId) return;
     setIsProcessing(true);
     try {
-      const difference = closeAmount - activeSession.expectedCash;
-      let netTips = activeSession.accumulatedTips || 0;
+      const difference = closeAmount - toNumber((activeSession as any).expectedCash);
+      let netTips = toNumber((activeSession as any).accumulatedTips);
       if (difference < 0) {
         netTips = Math.max(0, netTips + difference);
       }
@@ -182,19 +200,19 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
               </form>
             ) : (
               <form onSubmit={closeRegister} className="space-y-6">
-                <div className={`grid ${(activeSession.accumulatedTips || 0) > 0 ? 'grid-cols-3' : 'grid-cols-2'} gap-4`}>
+                <div className={`grid ${toNumber((activeSession as any).accumulatedTips) > 0 ? 'grid-cols-3' : 'grid-cols-2'} gap-4`}>
                   <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Starting Float</p>
-                    <p className="text-xl font-black">R{(activeSession.openingFloat || 0).toFixed(2)}</p>
+                    <p className="text-xl font-black">R{toNumber((activeSession as any).openingFloat).toFixed(2)}</p>
                   </div>
                   <div className="p-4 bg-primary/10 rounded-2xl border border-primary/20">
                     <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">Expected Cash</p>
-                    <p className="text-xl font-black text-primary">R{(activeSession.expectedCash || 0).toFixed(2)}</p>
+                    <p className="text-xl font-black text-primary">R{toNumber((activeSession as any).expectedCash).toFixed(2)}</p>
                   </div>
-                  {((activeSession.accumulatedTips || 0) > 0) && (
+                  {(toNumber((activeSession as any).accumulatedTips) > 0) && (
                     <div className="p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20">
                       <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Tips</p>
-                      <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">R{(activeSession.accumulatedTips || 0).toFixed(2)}</p>
+                      <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">R{toNumber((activeSession as any).accumulatedTips).toFixed(2)}</p>
                     </div>
                   )}
                 </div>
@@ -227,7 +245,7 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
                 {sessions.filter(s => s.status === 'closed').slice(0, 50).map(s => {
                    const opened = new Date(s.openedAt);
                    const closed = s.closedAt ? new Date(s.closedAt) : new Date();
-                   const diff = s.difference || 0;
+                   const diff = toNumber((s as any).difference);
                    return (
                      <div key={s.id} className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
                         <div className="flex justify-between items-start mb-4">
@@ -242,19 +260,19 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
                         <div className="flex gap-4 text-sm font-medium border-t border-slate-200 dark:border-slate-700/60 pt-4">
                            <div className="flex-1">
                              <span className="text-slate-400 mr-2 text-[10px] uppercase tracking-widest block mb-1">Float</span> 
-                             <span className="font-bold">R{(s.openingFloat || 0).toFixed(2)}</span>
+                             <span className="font-bold">R{toNumber((s as any).openingFloat).toFixed(2)}</span>
                            </div>
                            <div className="flex-1">
                              <span className="text-slate-400 mr-2 text-[10px] uppercase tracking-widest block mb-1">Expected</span> 
-                             <span className="font-bold">R{(s.expectedCash || 0).toFixed(2)}</span>
+                             <span className="font-bold">R{toNumber((s as any).expectedCash).toFixed(2)}</span>
                            </div>
                            <div className="flex-1">
                              <span className="text-slate-400 mr-2 text-[10px] uppercase tracking-widest block mb-1">Actual</span> 
-                             <span className="font-bold">R{(s.actualCash || 0).toFixed(2)}</span>
+                             <span className="font-bold">R{toNumber((s as any).actualCash).toFixed(2)}</span>
                            </div>
                            <div className="flex-1">
                              <span className="text-emerald-500 mr-2 text-[10px] uppercase tracking-widest block mb-1">Tips</span> 
-                             <span className="font-bold text-emerald-600 dark:text-emerald-400">R{(s.netTips || 0).toFixed(2)}</span>
+                             <span className="font-bold text-emerald-600 dark:text-emerald-400">R{toNumber((s as any).netTips).toFixed(2)}</span>
                            </div>
                         </div>
                      </div>

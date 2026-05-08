@@ -1,0 +1,24 @@
+// Re-export types from src/types.ts for server usage
+// This file ensures TypeScript types are available in the server runtime
+export type {
+  Product,
+  Workstation,
+  CartItem,
+  OrderItem,
+  Sale,
+  Staff,
+  Customer,
+  BusinessSettings,
+  CategoryTree,
+  AppConfig,
+  Vendor,
+  POItem,
+  PurchaseOrder,
+  CashSession,
+  CashTransaction,
+  RestaurantTable,
+  TableSection,
+  PayoutRequest,
+  Message,
+  MessageChannel,
+} from "../src/types.ts";

@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback } from 'react';
 export interface JwtUser {
   id: string;
   email: string;
+  emailVerified?: boolean;
   name: string;
   role: string;
   tenantId: string;

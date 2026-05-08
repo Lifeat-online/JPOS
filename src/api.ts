@@ -131,6 +131,10 @@ export function getTenantSales(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/sales`);
 }
 
+export function getTenantLiveStats(tenantId: string) {
+  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/live`);
+}
+
 export function getTenantTableSections(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/table-sections`);
 }

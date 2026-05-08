@@ -11,7 +11,7 @@ describe('LoginModal', () => {
     renderWithRouter(<LoginModal isOpen={true} onClose={onClose} onSubmit={onSubmit} error={null} isLoading={false} />);
 
     fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'user@example.com' } });
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'secret123' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret123' } });
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     expect(onSubmit).toHaveBeenCalledWith('user@example.com', 'secret123');

@@ -1,6 +1,5 @@
 import dotenv from "dotenv";
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import cors from "cors";
 import bodyParser from "body-parser";
@@ -290,10 +289,280 @@ export async function createApp() {
     }
   });
 
+  app.post("/api/mariadb/tenants/:tenantId/sales", requireAuth, async (req, res) => {
+    try {
+      const sale = await createSale(req.params.tenantId, req.body);
+      res.json(sale);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/sales/:saleId", requireAuth, async (req, res) => {
+    try {
+      const sale = await getSaleById(req.params.tenantId, req.params.saleId);
+      if (!sale) {
+        res.status(404).json({ error: "Sale not found" });
+        return;
+      }
+      res.json(sale);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/sales/:saleId", requireAuth, async (req, res) => {
+    try {
+      const status = req.body?.status;
+      if (typeof status !== "string" || status.trim().length === 0) {
+        res.status(400).json({ error: "Missing status" });
+        return;
+      }
+      const sale = await updateSaleStatus(req.params.tenantId, req.params.saleId, status as any);
+      res.json(sale);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.put("/api/mariadb/tenants/:tenantId/sales/:saleId/items/:itemId", requireAuth, async (req, res) => {
     try {
       await updateSaleItem(req.params.tenantId, req.params.saleId, req.params.itemId, req.body);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/live", requireAuth, async (req, res) => {
+    try {
+      const tenantId = req.params.tenantId;
+      const toNumber = (value: unknown): number => {
+        if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+        if (typeof value === "string") {
+          const parsed = parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+        return 0;
+      };
+
+      const cfg = await getAppConfigByTenant(tenantId);
+      const isRestaurantMode = Boolean(cfg?.business?.isRestaurantMode);
+
+      const registerRows = await query<any>(
+        `
+          SELECT
+            cs.id AS cashSessionId,
+            cs.staff_id AS staffId,
+            cs.staff_name AS staffName,
+            cs.opened_at AS openedAt,
+            cs.opening_float AS openingFloat,
+            cs.expected_cash AS expectedCash,
+            cs.actual_cash AS actualCash,
+            cs.accumulated_tips AS accumulatedTips,
+            cs.net_tips AS netTips,
+            SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
+            SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
+            SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
+            MAX(s.created_at) AS lastSaleAt,
+            SUM(CASE WHEN s.status = 'completed' AND s.payment_method = 'cash' THEN s.total ELSE 0 END) AS cashRevenue,
+            SUM(CASE WHEN s.status = 'completed' AND s.payment_method IN ('card','payfast') THEN s.total ELSE 0 END) AS cardRevenue,
+            SUM(CASE WHEN s.status = 'completed' AND s.payment_method = 'wallet' THEN s.total ELSE 0 END) AS walletRevenue
+          FROM cash_sessions cs
+          LEFT JOIN sales s
+            ON s.tenant_id = cs.tenant_id
+           AND s.staff_id = cs.staff_id
+           AND s.created_at >= cs.opened_at
+          WHERE cs.tenant_id = ?
+            AND cs.status = 'open'
+          GROUP BY cs.id
+          ORDER BY cs.opened_at ASC
+        `,
+        [tenantId]
+      );
+
+      const registers = registerRows.map((r: any) => ({
+        cashSessionId: String(r.cashSessionId),
+        staffId: String(r.staffId),
+        staffName: String(r.staffName || ""),
+        openedAt: r.openedAt,
+        openingFloat: toNumber(r.openingFloat),
+        expectedCash: toNumber(r.expectedCash),
+        actualCash: toNumber(r.actualCash),
+        accumulatedTips: toNumber(r.accumulatedTips),
+        netTips: toNumber(r.netTips),
+        completedCount: toNumber(r.completedCount),
+        completedRevenue: toNumber(r.completedRevenue),
+        activeOrders: toNumber(r.activeOrders),
+        lastSaleAt: r.lastSaleAt,
+        cashRevenue: toNumber(r.cashRevenue),
+        cardRevenue: toNumber(r.cardRevenue),
+        walletRevenue: toNumber(r.walletRevenue),
+      }));
+
+      const salesSummaryRows = await query<any>(
+        `
+          SELECT
+            SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
+            SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN 1 ELSE 0 END) AS lastHourCompletedCount,
+            SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN total ELSE 0 END) AS lastHourCompletedRevenue,
+            SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) AS todayCompletedCount,
+            SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN total ELSE 0 END) AS todayCompletedRevenue,
+            SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
+          FROM sales
+          WHERE tenant_id = ?
+        `,
+        [tenantId]
+      );
+      const salesSummary = salesSummaryRows[0] || {};
+
+      let restaurant: any = null;
+      if (isRestaurantMode) {
+        const tableRows = await query<any>(
+          `
+            SELECT
+              s.table_number AS tableNumber,
+              COUNT(*) AS activeOrders,
+              MIN(s.created_at) AS oldestOrderAt,
+              SUM(s.total) AS activeOrderValue
+            FROM sales s
+            WHERE s.tenant_id = ?
+              AND s.table_number IS NOT NULL
+              AND s.table_number <> ''
+              AND s.status IN ('open','kitchen','pending')
+            GROUP BY s.table_number
+            ORDER BY oldestOrderAt ASC
+          `,
+          [tenantId]
+        );
+
+        const activeTablesCountRows = await query<any>(
+          `SELECT COUNT(*) AS activeTableCount FROM restaurant_tables WHERE tenant_id = ? AND status = 'active'`,
+          [tenantId]
+        );
+
+        const staffRows = await query<any>(
+          `
+            SELECT
+              st.id AS staffId,
+              st.name AS staffName,
+              st.role AS staffRole,
+              SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
+              SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
+              SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
+              MAX(s.created_at) AS lastSaleAt
+            FROM staff st
+            LEFT JOIN sales s
+              ON s.tenant_id = st.tenant_id
+             AND s.staff_id = st.id
+             AND s.created_at >= (NOW() - INTERVAL 60 MINUTE)
+            WHERE st.tenant_id = ?
+              AND st.status = 'active'
+            GROUP BY st.id
+            ORDER BY completedRevenue DESC, completedCount DESC
+          `,
+          [tenantId]
+        );
+
+        const workstationRows = await query<any>(
+          `
+            SELECT
+              w.id AS workstationId,
+              w.name AS workstationName,
+              w.type AS workstationType,
+              SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
+              SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS acceptedCount,
+              SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS readyCount,
+              MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS oldestOrderedAt,
+              AVG(
+                CASE
+                  WHEN si.ordered_at IS NOT NULL
+                   AND si.ready_at IS NOT NULL
+                   AND si.ordered_at >= (NOW() - INTERVAL 2 HOUR)
+                  THEN TIMESTAMPDIFF(SECOND, si.ordered_at, si.ready_at)
+                  ELSE NULL
+                END
+              ) AS avgPrepSecondsLast2h
+            FROM workstations w
+            LEFT JOIN sale_items si
+              ON si.workstation_id = w.id
+            LEFT JOIN sales s
+              ON s.id = si.sale_id
+             AND s.tenant_id = w.tenant_id
+            WHERE w.tenant_id = ?
+              AND w.status = 'active'
+            GROUP BY w.id
+            ORDER BY (pendingCount + acceptedCount) DESC, w.name ASC
+          `,
+          [tenantId]
+        );
+
+        restaurant = {
+          tables: {
+            activeTableCount: toNumber(activeTablesCountRows?.[0]?.activeTableCount),
+            openTableCount: tableRows.length,
+            openTables: tableRows.map((t: any) => ({
+              tableNumber: String(t.tableNumber),
+              activeOrders: toNumber(t.activeOrders),
+              oldestOrderAt: t.oldestOrderAt,
+              activeOrderValue: toNumber(t.activeOrderValue),
+            })),
+          },
+          staffPerformance: staffRows.map((s: any) => ({
+            staffId: String(s.staffId),
+            staffName: String(s.staffName || ""),
+            staffRole: String(s.staffRole || ""),
+            completedCount: toNumber(s.completedCount),
+            completedRevenue: toNumber(s.completedRevenue),
+            activeOrders: toNumber(s.activeOrders),
+            lastSaleAt: s.lastSaleAt,
+          })),
+          workstationQueues: workstationRows.map((w: any) => {
+            const oldestOrderedAt = w.oldestOrderedAt;
+            const oldestAgeSeconds = oldestOrderedAt
+              ? Math.max(0, Math.floor((Date.now() - new Date(oldestOrderedAt).getTime()) / 1000))
+              : 0;
+            const pendingCount = toNumber(w.pendingCount);
+            const acceptedCount = toNumber(w.acceptedCount);
+            const readyCount = toNumber(w.readyCount);
+            return {
+              workstationId: String(w.workstationId),
+              workstationName: String(w.workstationName || ""),
+              workstationType: String(w.workstationType || ""),
+              pendingCount,
+              acceptedCount,
+              readyCount,
+              queueCount: pendingCount + acceptedCount,
+              oldestOrderedAt,
+              oldestAgeSeconds,
+              avgPrepSecondsLast2h: toNumber(w.avgPrepSecondsLast2h),
+            };
+          }),
+        };
+      }
+
+      res.json({
+        tenantId,
+        isRestaurantMode,
+        serverTime: new Date().toISOString(),
+        retail: {
+          openRegisterCount: registers.length,
+          registers,
+        },
+        totals: {
+          activeOrdersCount: toNumber(salesSummary.activeOrdersCount),
+          openTabsCount: toNumber(salesSummary.openTabsCount),
+          lastHour: {
+            completedCount: toNumber(salesSummary.lastHourCompletedCount),
+            completedRevenue: toNumber(salesSummary.lastHourCompletedRevenue),
+          },
+          today: {
+            completedCount: toNumber(salesSummary.todayCompletedCount),
+            completedRevenue: toNumber(salesSummary.todayCompletedRevenue),
+          },
+        },
+        restaurant,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -553,10 +822,37 @@ export async function createApp() {
 
   app.get("/api/mariadb/tenants/:tenantId/cash-sessions", optionalAuth, async (req, res) => {
     try {
+      const toNumber = (value: unknown): number => {
+        if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+        if (typeof value === "string") {
+          const parsed = parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+        return 0;
+      };
+
       const staffId = req.query.staffId as string;
       if (staffId) {
-        const session = await getOpenCashSessionByStaff(req.params.tenantId, staffId);
-        return res.json(session || null);
+        const r: any = await getOpenCashSessionByStaff(req.params.tenantId, staffId);
+        if (!r) return res.json(null);
+        return res.json({
+          id: r.id,
+          tenantId: r.tenant_id,
+          staffId: r.staff_id,
+          staffName: r.staff_name,
+          openedAt: r.opened_at,
+          closedAt: r.closed_at,
+          openingFloat: toNumber(r.opening_float),
+          expectedCash: toNumber(r.expected_cash),
+          actualCash: toNumber(r.actual_cash),
+          difference: toNumber(r.difference),
+          accumulatedTips: toNumber(r.accumulated_tips),
+          netTips: toNumber(r.net_tips),
+          status: r.status,
+          notes: r.notes,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        });
       }
 
       const limit = parseInt(req.query.limit as string) || 50;
@@ -572,12 +868,12 @@ export async function createApp() {
         staffName: r.staff_name,
         openedAt: r.opened_at,
         closedAt: r.closed_at,
-        openingFloat: r.opening_float,
-        expectedCash: r.expected_cash,
-        actualCash: r.actual_cash,
-        difference: r.difference,
-        accumulatedTips: r.accumulated_tips,
-        netTips: r.net_tips,
+        openingFloat: toNumber(r.opening_float),
+        expectedCash: toNumber(r.expected_cash),
+        actualCash: toNumber(r.actual_cash),
+        difference: toNumber(r.difference),
+        accumulatedTips: toNumber(r.accumulated_tips),
+        netTips: toNumber(r.net_tips),
         status: r.status,
         notes: r.notes,
         createdAt: r.created_at,
@@ -705,15 +1001,33 @@ export async function createApp() {
   });
 
   if (!isProduction && !isTest) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else if (isProduction) {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    const rawBasePath = process.env.BASE_PATH || process.env.VITE_BASE_PATH || '/';
+    const basePath =
+      rawBasePath && rawBasePath !== '/'
+        ? `/${rawBasePath.replace(/^\/+|\/+$/g, '')}`
+        : '';
+
+    const distDir = path.resolve(__dirname, '..', 'dist');
+    const staticMountPath = basePath || '/';
+
+    app.use(staticMountPath, express.static(distDir));
+
+    if (basePath) {
+      app.get('/', (req, res) => {
+        res.redirect(302, `${basePath}/`);
+      });
+    }
+
+    app.get(staticMountPath === '/' ? '*' : `${staticMountPath}/*`, (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.sendFile(path.join(distDir, 'index.html'));
     });
   }
 

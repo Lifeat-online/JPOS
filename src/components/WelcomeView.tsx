@@ -19,7 +19,7 @@ interface WelcomeViewProps {
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 24 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.5, delay, ease: 'easeOut' },
+  transition: { duration: 0.5, delay },
 });
 
 const features = [

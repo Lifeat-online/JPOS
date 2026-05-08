@@ -4,9 +4,23 @@ import App from './App.tsx';
 import { BrowserRouter } from 'react-router-dom';
 import './index.css';
 
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    regs.forEach((r) => r.unregister());
+  });
+  if ('caches' in window) {
+    caches.keys().then((keys) => {
+      keys.forEach((k) => caches.delete(k));
+    });
+  }
+}
+
+const baseUrl = import.meta.env.BASE_URL || '/';
+const routerBasename = baseUrl === '/' ? '/' : baseUrl.replace(/\/$/, '');
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={routerBasename}>
       <App />
     </BrowserRouter>
   </StrictMode>,

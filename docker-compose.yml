@@ -1,0 +1,91 @@
+name: jims-pos
+
+services:
+  # MariaDB Database
+  mariadb:
+    image: mariadb:11
+    container_name: jimmy-pos-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_DATABASE:-jimmy_pos}
+      MYSQL_USER: ${MARIADB_USER:-pos_user}
+      MYSQL_PASSWORD: ${MARIADB_PASSWORD:-pospassword}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    networks:
+      - pos-network
+    restart: unless-stopped
+
+  # POS Application (Node.js + React)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
+    container_name: jimmy-pos-app
+    depends_on:
+      - mariadb
+    environment:
+      # Database
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_USER: ${MARIADB_USER:-pos_user}
+      DB_PASSWORD: ${MARIADB_PASSWORD:-pospassword}
+      DB_DATABASE: ${DB_DATABASE:-jimmy_pos}
+      DB_CONNECTION_LIMIT: 10
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      REFRESH_TOKEN_EXPIRES_IN: ${REFRESH_TOKEN_EXPIRES_IN:-7d}
+
+      # PayFast (optional)
+      PAYFAST_MERCHANT_ID: ${PAYFAST_MERCHANT_ID:-10000100}
+      PAYFAST_MERCHANT_KEY: ${PAYFAST_MERCHANT_KEY:-46f0cd694581a}
+      PAYFAST_PASSPHRASE: ${PAYFAST_PASSPHRASE:-jt7v60h69n8a1}
+      PAYFAST_SANDBOX: ${PAYFAST_SANDBOX:-true}
+
+      # App Config
+      NODE_ENV: production
+      BASE_PATH: ${BASE_PATH:-/}
+      VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - pos-network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: jimmy-pos-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx-docker.conf:/etc/nginx/nginx.conf:ro
+      - nginx_cache:/var/cache/nginx
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - app
+    networks:
+      - pos-network
+    restart: unless-stopped
+
+volumes:
+  mariadb_data:
+    driver: local
+  nginx_cache:
+    driver: local
+  nginx_logs:
+    driver: local
+
+networks:
+  pos-network:
+    driver: bridge

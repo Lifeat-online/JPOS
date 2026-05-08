@@ -14,3 +14,12 @@ ui-debug.log
 auth-debug.log
 firebase-export-*/
 .firebase/
+
+# Temp directories
+temp/
+logs/
+test-results/
+.kilo/
+
+# Metadata
+metadata.json

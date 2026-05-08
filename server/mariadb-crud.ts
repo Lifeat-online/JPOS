@@ -1,5 +1,9 @@
 import pool, { query, getConnection } from "./db.ts";
-import { Product, Customer, Staff, Sale, Workstation, AppConfig } from "../src/types.ts";
+import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem } from "./types.ts";
+
+const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID || "10000100";
+const PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY || "46f0cd694581a";
+const PAYFAST_PASSPHRASE = process.env.PAYFAST_PASSPHRASE || "jt7v60h69n8a1";
 
 // ─────────────────────────────────────────────────────────────────────────
 // CREATE Operations
@@ -521,11 +525,11 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
           [
             itemId,
             id,
-            item.productId || null,
+            item.id || null,
             item.name,
             item.price,
             item.quantity,
-            item.status || "pending",
+            (item as OrderItem).status || "pending",
             item.workstationId || null,
           ]
         );
@@ -810,9 +814,14 @@ export async function markMessageRead(
 export async function setupTenant(data: {
   businessName: string;
   user: { uid: string; email: string; displayName: string };
-  config: any;
+  config?: any;
 }): Promise<{ tenantId: string }> {
   const tenantId = `tnt_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const config = data.config || {};
+  const businessConfig = {
+    ...config.business,
+    name: data.businessName,
+  };
   
   const conn = await pool.getConnection();
   try {
@@ -834,7 +843,7 @@ export async function setupTenant(data: {
     
     // 3. Create staff (admin)
     const DEV_EMAIL = 'jameskoen78@gmail.com';
-    const assignedRole = data.user.email === DEV_EMAIL ? 'dev' : 'admin';
+    const assignedRole = String(data.user.email || '').trim().toLowerCase() === DEV_EMAIL ? 'dev' : 'admin';
     await conn.query(
       `INSERT INTO staff (id, tenant_id, name, email, role, status, created_at, updated_at) 
        VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())
@@ -842,11 +851,32 @@ export async function setupTenant(data: {
       [data.user.uid, tenantId, data.user.displayName, data.user.email, assignedRole]
     );
 
-    // 4. Create config
+    // 4. Create config and mark setup completed
     await conn.query(
-      `INSERT INTO app_settings (tenant_id, business, setup_completed, created_at, updated_at) 
-       VALUES (?, ?, 0, NOW(), NOW())`,
-      [tenantId, JSON.stringify({ name: data.businessName })]
+      `INSERT INTO app_settings (
+        tenant_id,
+        payfast_merchant_id,
+        payfast_merchant_key,
+        payfast_passphrase,
+        payfast_sandbox,
+        business,
+        categories,
+        slug,
+        setup_completed,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        tenantId,
+        config.payfastMerchantId || PAYFAST_MERCHANT_ID,
+        config.payfastMerchantKey || PAYFAST_MERCHANT_KEY,
+        config.payfastPassphrase || PAYFAST_PASSPHRASE,
+        config.payfastSandbox ? 1 : 0,
+        JSON.stringify(businessConfig),
+        config.categories ? JSON.stringify(config.categories) : null,
+        config.slug || null,
+        1,
+      ]
     );
 
     // 5. Create default workstation

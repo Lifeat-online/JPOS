@@ -21,6 +21,7 @@ CREATE TABLE users (
   email VARCHAR(255) NOT NULL,
   name VARCHAR(255) NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL
 );
 
@@ -80,6 +81,7 @@ CREATE TABLE staff (
   name VARCHAR(255) NOT NULL,
   role ENUM('admin','cashier','manager','dev') DEFAULT 'cashier',
   email VARCHAR(255) NOT NULL,
+  password_hash VARCHAR(255),
   phone VARCHAR(64),
   status ENUM('active','inactive') DEFAULT 'active',
   assigned_sections JSON DEFAULT JSON_ARRAY(),
@@ -274,4 +276,17 @@ CREATE TABLE restaurant_tables (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+INSERT INTO tenants (id, name) VALUES ('default', 'Default Tenant');
+
+INSERT INTO staff (id, tenant_id, name, role, email, password_hash, status)
+VALUES (
+  'admin',
+  'default',
+  'Admin',
+  'dev',
+  'jameskoen78@gmail.com',
+  '$2b$10$cllz1VjHJl97oeAyzvZWsOpYd66l7kaOXG977GZ6yDT6C58SgMf9S',
+  'active'
 );

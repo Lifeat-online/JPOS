@@ -7,11 +7,17 @@ export default defineConfig({
     timeout: 5000,
   },
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: 'http://127.0.0.1:3000',
     headless: true,
     viewport: { width: 1280, height: 720 },
     actionTimeout: 5000,
     ignoreHTTPSErrors: true,
+  },
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://127.0.0.1:3000',
+    timeout: 120 * 1000,
+    reuseExistingServer: true,
   },
   projects: [
     {
