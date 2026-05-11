@@ -23,7 +23,7 @@ FROM node:23-alpine
 WORKDIR /app
 
 # Install dumb-init to handle signals properly
-RUN apk add --no-cache dumb-init
+RUN apk add --no-cache dumb-init git openssh-client
 
 # Copy package files from builder
 COPY --from=builder /app/package*.json ./

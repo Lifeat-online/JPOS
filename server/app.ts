@@ -4,10 +4,11 @@ import path from "path";
 import cors from "cors";
 import bodyParser from "body-parser";
 import crypto from "crypto";
-import { existsSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { spawnSync } from "child_process";
+import os from "os";
 import { fileURLToPath } from "url";
-import { query } from "./db.ts";
+import { getConnection, query } from "./db.ts";
 import {
   getProductsByTenant,
   getTenantIdBySlug,
@@ -66,7 +67,7 @@ import {
   handleGetMe,
   handleSetupPassword,
 } from "./auth-handler.ts";
-import { requireAuth, optionalAuth } from "./auth-middleware.ts";
+import { generateAccessToken, generateRefreshToken, requireAuth, optionalAuth, type AuthTokenPayload } from "./auth-middleware.ts";
 
 dotenv.config();
 
@@ -74,7 +75,104 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const UPDATE_GIT_URL = "https://github.com/Lifeat-online/JPOS.git";
+const UPDATE_SSH_URL = "git@github.com:Lifeat-online/JPOS.git";
 const UPDATE_REPO = "Lifeat-online/JPOS";
+const BUILD_ID = "jpos-update-2026-05-10-1";
+const DEV_BOOTSTRAP_EMAIL = "jameskoen78@gmail.com";
+const DEV_BOOTSTRAP_TENANT_ID = "default";
+const DEV_BOOTSTRAP_TENANT_NAME = "Default Tenant";
+const DEV_BOOTSTRAP_STAFF_ID = "admin";
+const DEV_BOOTSTRAP_NAME = "Admin";
+
+let RUNTIME_GITHUB_TOKEN: string | null = null;
+const SSH_DIR = path.join(os.homedir(), ".ssh");
+const SSH_KEY_PATH = path.join(SSH_DIR, "jpos_github_key");
+const SSH_KNOWN_HOSTS_PATH = path.join(SSH_DIR, "known_hosts");
+
+function hasSshKeyConfigured() {
+  return existsSync(SSH_KEY_PATH);
+}
+
+function getEffectiveGithubToken() {
+  return RUNTIME_GITHUB_TOKEN || process.env.GITHUB_TOKEN || null;
+}
+
+function normalizeRole(role: unknown) {
+  return String(role || "").toLowerCase();
+}
+
+function canManageUpdates(role: unknown) {
+  const r = normalizeRole(role);
+  return r === "admin" || r === "dev";
+}
+
+function parseVersionSegments(version: string) {
+  return version
+    .replace(/^[^0-9]*/, "")
+    .split(/[\.\-\+]/)
+    .map((segment) => Number(segment.replace(/[^0-9]/g, "")) || 0);
+}
+
+function compareVersions(a: string, b: string) {
+  const ap = parseVersionSegments(a);
+  const bp = parseVersionSegments(b);
+  const max = Math.max(ap.length, bp.length);
+  for (let i = 0; i < max; i += 1) {
+    const av = ap[i] ?? 0;
+    const bv = bp[i] ?? 0;
+    if (av > bv) return 1;
+    if (av < bv) return -1;
+  }
+  return 0;
+}
+
+function runGit(
+  projectRoot: string,
+  args: string[],
+  opts?: { ssh?: boolean; token?: string | null }
+) {
+  const env = { ...process.env } as Record<string, string | undefined>;
+  const token = opts?.token ?? null;
+  const useSsh = opts?.ssh === true;
+
+  const finalArgs = [...args];
+  if (!useSsh && token) {
+    const basic = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
+    finalArgs.unshift("http.extraheader=AUTHORIZATION: basic " + basic);
+    finalArgs.unshift("-c");
+  }
+
+  if (useSsh) {
+    env.GIT_SSH_COMMAND =
+      `ssh -i ${SSH_KEY_PATH} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${SSH_KNOWN_HOSTS_PATH}`;
+  }
+
+  const result = spawnSync("git", finalArgs, { cwd: projectRoot, encoding: "utf8", env });
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr : "";
+  const output = `${stdout}${stderr}`.trim();
+
+  if (result.error) {
+    return { ok: false as const, status: null as number | null, output: output || result.error.message };
+  }
+  if (typeof result.status === "number" && result.status !== 0) {
+    return { ok: false as const, status: result.status, output };
+  }
+  return { ok: true as const, status: 0, output };
+}
+
+function listRemoteTags(projectRoot: string, remoteUrl: string, opts?: { ssh?: boolean; token?: string | null }) {
+  const res = runGit(projectRoot, ["ls-remote", "--tags", "--refs", remoteUrl], opts);
+  if (!res.ok) return { ok: false as const, tags: [] as string[], output: res.output };
+  const tags = res.output
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split(/\s+/)[1] || "")
+    .filter((ref) => ref.startsWith("refs/tags/"))
+    .map((ref) => ref.replace("refs/tags/", ""));
+  return { ok: true as const, tags, output: res.output };
+}
 
 let PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID || "10000100";
 let PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY || "46f0cd694581a";
@@ -129,7 +227,92 @@ export async function createApp() {
   app.use(bodyParser.urlencoded({ extended: true }));
 
   app.get("/api/health", (req, res) => {
+    res.setHeader("X-JPOS-Build", BUILD_ID);
+    res.setHeader("X-JPOS-Update-Repo", UPDATE_REPO);
+    res.setHeader("X-JPOS-Update-Git", UPDATE_GIT_URL);
     res.json({ status: "ok" });
+  });
+
+  app.post("/api/dev/bootstrap-login", async (req, res) => {
+    const conn = await getConnection();
+    try {
+      await conn.beginTransaction();
+
+      await conn.execute(
+        `INSERT INTO tenants (id, name, created_at, updated_at)
+         VALUES (?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE name = VALUES(name), updated_at = NOW()`,
+        [DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_TENANT_NAME]
+      );
+
+      await conn.execute(
+        `INSERT INTO app_settings (tenant_id, setup_completed, business, created_at, updated_at)
+         VALUES (?, TRUE, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE setup_completed = TRUE, updated_at = NOW()`,
+        [DEV_BOOTSTRAP_TENANT_ID, JSON.stringify({ name: DEV_BOOTSTRAP_TENANT_NAME })]
+      );
+
+      await conn.execute(
+        `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), email = VALUES(email), name = VALUES(name), updated_at = NOW()`,
+        [DEV_BOOTSTRAP_STAFF_ID, DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_EMAIL, DEV_BOOTSTRAP_NAME]
+      );
+
+      await conn.execute(
+        `INSERT INTO staff (id, tenant_id, name, role, email, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'dev', ?, 'active', NOW(), NOW())
+         ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), name = VALUES(name), role = 'dev', email = VALUES(email), status = 'active', updated_at = NOW()`,
+        [DEV_BOOTSTRAP_STAFF_ID, DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_NAME, DEV_BOOTSTRAP_EMAIL]
+      );
+
+      const [workstationCountRows] = await conn.execute<any[]>(
+        `SELECT COUNT(*) AS c FROM workstations WHERE tenant_id = ?`,
+        [DEV_BOOTSTRAP_TENANT_ID]
+      );
+      const workstationCount = Number(workstationCountRows?.[0]?.c || 0);
+      if (workstationCount === 0) {
+        await conn.execute(
+          `INSERT INTO workstations (id, tenant_id, name, type, status, created_at, updated_at)
+           VALUES (?, ?, 'Kitchen', 'kitchen', 'active', NOW(), NOW())`,
+          ["ws_default_kitchen", DEV_BOOTSTRAP_TENANT_ID]
+        );
+      }
+
+      await conn.commit();
+
+      const payload: AuthTokenPayload = {
+        uid: DEV_BOOTSTRAP_STAFF_ID,
+        email: DEV_BOOTSTRAP_EMAIL,
+        name: DEV_BOOTSTRAP_NAME,
+        tenantId: DEV_BOOTSTRAP_TENANT_ID,
+        role: "dev",
+        staffId: DEV_BOOTSTRAP_STAFF_ID,
+      };
+
+      const accessToken = generateAccessToken(payload);
+      const refreshToken = generateRefreshToken(payload);
+
+      return res.json({
+        accessToken,
+        refreshToken,
+        user: {
+          id: DEV_BOOTSTRAP_STAFF_ID,
+          email: DEV_BOOTSTRAP_EMAIL,
+          name: DEV_BOOTSTRAP_NAME,
+          role: "dev",
+          tenantId: DEV_BOOTSTRAP_TENANT_ID,
+          tenantName: DEV_BOOTSTRAP_TENANT_NAME,
+        },
+      });
+    } catch (err: any) {
+      try {
+        await conn.rollback();
+      } catch {}
+      return res.status(500).json({ error: err?.message || "Bootstrap login failed" });
+    } finally {
+      conn.release();
+    }
   });
 
   app.post("/api/auth/login", handleLogin);
@@ -138,13 +321,180 @@ export async function createApp() {
   app.get("/api/auth/me", requireAuth, handleGetMe);
   app.post("/api/auth/setup-password", requireAuth, handleSetupPassword);
 
-  app.get("/api/dev/check-updates", async (req, res) => {
-    if (process.env.NODE_ENV === "production") {
-      return res.status(403).json({ error: "Update checks are disabled in production." });
+  app.get("/api/dev/git-auth/status", requireAuth, async (req, res) => {
+    if (!canManageUpdates(req.user?.role)) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
+    const hasSsh = hasSshKeyConfigured();
+    const hasToken = !!getEffectiveGithubToken();
+    const hasKnownHosts = existsSync(SSH_KNOWN_HOSTS_PATH);
+    let publicKey: string | null = null;
+    if (hasSsh) {
+      const pub = spawnSync("ssh-keygen", ["-y", "-f", SSH_KEY_PATH], { encoding: "utf8" });
+      const pubOut = `${pub.stdout || ""}`.trim();
+      if (!pub.error && pub.status === 0 && pubOut) publicKey = pubOut;
+    }
+    return res.json({ hasSsh, hasToken, hasKnownHosts, sshKeyPath: hasSsh ? SSH_KEY_PATH : null, publicKey });
+  });
+
+  app.post("/api/dev/git-auth/token", requireAuth, async (req, res) => {
+    if (!canManageUpdates(req.user?.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    RUNTIME_GITHUB_TOKEN = token.length > 0 ? token : null;
+    return res.json({ success: true, hasToken: !!RUNTIME_GITHUB_TOKEN });
+  });
+
+  app.post("/api/dev/git-auth/ssh", requireAuth, async (req, res) => {
+    if (!canManageUpdates(req.user?.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const privateKey = typeof req.body?.privateKey === "string" ? req.body.privateKey.trim() : "";
+    const knownHosts = typeof req.body?.knownHosts === "string" ? req.body.knownHosts.trim() : "";
+
+    try {
+      mkdirSync(SSH_DIR, { recursive: true });
+    } catch {}
+
+    if (!privateKey) {
+      try {
+        rmSync(SSH_KEY_PATH, { force: true });
+      } catch {}
+      return res.json({ success: true, hasSsh: false });
+    }
+
+    try {
+      writeFileSync(SSH_KEY_PATH, privateKey.endsWith("\n") ? privateKey : `${privateKey}\n`, { encoding: "utf8" });
+      chmodSync(SSH_KEY_PATH, 0o600);
+
+      const pub = spawnSync("ssh-keygen", ["-y", "-f", SSH_KEY_PATH], { encoding: "utf8" });
+      const pubOut = `${pub.stdout || ""}`.trim();
+      const pubErr = `${pub.stderr || ""}`.trim();
+      if (pub.error || pub.status !== 0 || !pubOut) {
+        try {
+          rmSync(SSH_KEY_PATH, { force: true });
+        } catch {}
+        return res.status(400).json({ error: pubErr || "Invalid SSH private key." });
+      }
+
+      if (knownHosts) {
+        writeFileSync(SSH_KNOWN_HOSTS_PATH, knownHosts.endsWith("\n") ? knownHosts : `${knownHosts}\n`, { encoding: "utf8" });
+      } else {
+        const scan = spawnSync("ssh-keyscan", ["github.com"], { encoding: "utf8" });
+        const out = `${scan.stdout || ""}${scan.stderr || ""}`.trim();
+        if (!scan.error && scan.status === 0 && out) {
+          writeFileSync(SSH_KNOWN_HOSTS_PATH, out.endsWith("\n") ? out : `${out}\n`, { encoding: "utf8" });
+        }
+      }
+
+      try {
+        chmodSync(SSH_KNOWN_HOSTS_PATH, 0o644);
+      } catch {}
+
+      return res.json({
+        success: true,
+        hasSsh: true,
+        hasKnownHosts: existsSync(SSH_KNOWN_HOSTS_PATH),
+        publicKey: pubOut,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || "Failed to save SSH key." });
+    }
+  });
+
+  app.post("/api/dev/git-auth/ssh/generate", requireAuth, async (req, res) => {
+    if (!canManageUpdates(req.user?.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const force = req.body?.force === true;
+
+    try {
+      mkdirSync(SSH_DIR, { recursive: true });
+    } catch {}
+
+    if (existsSync(SSH_KEY_PATH) && !force) {
+      return res.status(409).json({ error: "SSH key already exists." });
+    }
+
+    if (force) {
+      try {
+        rmSync(SSH_KEY_PATH, { force: true });
+      } catch {}
+    }
+
+    const gen = spawnSync("ssh-keygen", ["-t", "ed25519", "-N", "", "-f", SSH_KEY_PATH, "-C", "jpos-updater"], { encoding: "utf8" });
+    if (gen.error || gen.status !== 0) {
+      const out = `${gen.stdout || ""}${gen.stderr || ""}`.trim();
+      return res.status(500).json({ error: out || "Failed to generate SSH key." });
+    }
+
+    try {
+      chmodSync(SSH_KEY_PATH, 0o600);
+    } catch {}
+
+    const pub = spawnSync("ssh-keygen", ["-y", "-f", SSH_KEY_PATH], { encoding: "utf8" });
+    const pubOut = `${pub.stdout || ""}`.trim();
+    if (pub.error || pub.status !== 0 || !pubOut) {
+      try {
+        rmSync(SSH_KEY_PATH, { force: true });
+      } catch {}
+      const out = `${pub.stdout || ""}${pub.stderr || ""}`.trim();
+      return res.status(500).json({ error: out || "Failed to derive public key." });
+    }
+
+    if (!existsSync(SSH_KNOWN_HOSTS_PATH)) {
+      const scan = spawnSync("ssh-keyscan", ["github.com"], { encoding: "utf8" });
+      const out = `${scan.stdout || ""}${scan.stderr || ""}`.trim();
+      if (!scan.error && scan.status === 0 && out) {
+        try {
+          writeFileSync(SSH_KNOWN_HOSTS_PATH, out.endsWith("\n") ? out : `${out}\n`, { encoding: "utf8" });
+          chmodSync(SSH_KNOWN_HOSTS_PATH, 0o644);
+        } catch {}
+      }
+    }
+
+    return res.json({
+      success: true,
+      publicKey: pubOut,
+      hasKnownHosts: existsSync(SSH_KNOWN_HOSTS_PATH),
+    });
+  });
+
+  app.post("/api/dev/git-auth/test", requireAuth, async (req, res) => {
+    if (!canManageUpdates(req.user?.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const projectRoot = path.resolve(__dirname, "..");
+    const token = getEffectiveGithubToken();
+    const hasSsh = hasSshKeyConfigured();
+
+    const results: any[] = [];
+
+    if (hasSsh) {
+      const r = runGit(projectRoot, ["ls-remote", "--heads", UPDATE_SSH_URL], { ssh: true });
+      results.push({ method: "ssh", ok: r.ok, output: r.ok ? "ok" : r.output });
+    }
+
+    if (token) {
+      const r = runGit(projectRoot, ["ls-remote", "--heads", UPDATE_GIT_URL], { token });
+      results.push({ method: "token", ok: r.ok, output: r.ok ? "ok" : r.output });
+    } else {
+      const r = runGit(projectRoot, ["ls-remote", "--heads", UPDATE_GIT_URL]);
+      results.push({ method: "https", ok: r.ok, output: r.ok ? "ok" : r.output });
+    }
+
+    return res.json({ success: true, results });
+  });
+
+  app.get("/api/dev/check-updates", optionalAuth, async (req, res) => {
     const repo = UPDATE_REPO;
-    const githubToken = process.env.GITHUB_TOKEN || null;
+    const githubToken = getEffectiveGithubToken();
     const url = `https://api.github.com/repos/${repo}/releases/latest`;
 
     try {
@@ -162,31 +512,42 @@ export async function createApp() {
       const responseText = await githubResponse.text();
 
       if (!githubResponse.ok) {
-        if (githubResponse.status === 404) {
-          const tagsUrl = `https://api.github.com/repos/${repo}/tags`;
-          const tagsResponse = await fetch(tagsUrl, { headers });
+        const projectRoot = path.resolve(__dirname, "..");
+        const primary = req.query?.primary === "token" ? "token" : "ssh";
+        const methods = primary === "ssh" ? ["ssh", "https"] : ["https", "ssh"];
+        const token = githubToken;
 
-          if (tagsResponse.ok) {
-            const tagsText = await tagsResponse.text();
-            try {
-              const tags = JSON.parse(tagsText);
-              if (Array.isArray(tags) && tags.length > 0) {
-                return res.json({
-                  latestVersion: tags[0].name,
-                  latestUrl: tags[0].zipball_url || `https://github.com/${repo}/releases/tag/${tags[0].name}`,
-                  notes: '',
-                  publishedAt: null,
-                });
-              }
-            } catch (parseErr) {
-              // Tags endpoint parse failed
+        for (const m of methods) {
+          if (m === "ssh" && hasSshKeyConfigured()) {
+            const tags = listRemoteTags(projectRoot, UPDATE_SSH_URL, { ssh: true });
+            if (tags.ok && tags.tags.length > 0) {
+              const latest = tags.tags.sort((a, b) => compareVersions(b, a))[0];
+              return res.json({
+                latestVersion: latest,
+                latestUrl: `https://github.com/${repo}/releases/tag/${latest}`,
+                notes: "",
+                publishedAt: null,
+                source: "git-ssh",
+              });
             }
           }
 
-          return res.status(404).json({ error: "Repository not found or no releases available." });
+          if (m === "https") {
+            const tags = listRemoteTags(projectRoot, UPDATE_GIT_URL, { token });
+            if (tags.ok && tags.tags.length > 0) {
+              const latest = tags.tags.sort((a, b) => compareVersions(b, a))[0];
+              return res.json({
+                latestVersion: latest,
+                latestUrl: `https://github.com/${repo}/releases/tag/${latest}`,
+                notes: "",
+                publishedAt: null,
+                source: token ? "git-token" : "git-https",
+              });
+            }
+          }
         }
 
-        return res.status(githubResponse.status).json({ error: responseText });
+        return res.json({ error: responseText || "Failed to check for updates.", upstreamStatus: githubResponse.status });
       }
 
       const latestData = JSON.parse(responseText);
@@ -195,17 +556,14 @@ export async function createApp() {
         latestUrl: latestData.html_url,
         notes: latestData.body || '',
         publishedAt: latestData.published_at,
+        source: "github-release",
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || "Failed to check for updates" });
     }
   });
 
-  app.post("/api/dev/update", async (req, res) => {
-    if (process.env.NODE_ENV === "production") {
-      return res.status(403).json({ error: "Updates are disabled in production." });
-    }
-
+  app.post("/api/dev/update", optionalAuth, async (req, res) => {
     if (isTest) {
       return res.status(501).json({ error: "Update endpoint not available in test mode." });
     }
@@ -216,79 +574,73 @@ export async function createApp() {
       return res.status(400).json({ error: "Project is not a git repository (.git not found)." });
     }
 
-    const runGit = (args: string[]) => {
-      const result = spawnSync("git", args, { cwd: projectRoot, encoding: "utf8" });
-      const stdout = typeof result.stdout === "string" ? result.stdout : "";
-      const stderr = typeof result.stderr === "string" ? result.stderr : "";
-      const output = `${stdout}${stderr}`.trim();
+    const token = getEffectiveGithubToken();
+    const hasSsh = hasSshKeyConfigured();
+    const primary = typeof req.body?.primary === "string" && req.body.primary === "token" ? "token" : "ssh";
+    const methods = primary === "ssh" ? ["ssh", "https"] : ["https", "ssh"];
 
-      if (result.error) {
-        return { ok: false as const, status: null as number | null, output: output || result.error.message };
-      }
-      if (typeof result.status === "number" && result.status !== 0) {
-        return { ok: false as const, status: result.status, output };
-      }
-      return { ok: true as const, status: 0, output };
-    };
+    const attempt = (method: "ssh" | "https") => {
+      const steps: string[] = [];
+      const record = (cmd: string, output: string) => {
+        steps.push(`$ git ${cmd}${output ? `\n${output}` : ""}`.trim());
+      };
 
-    const steps: string[] = [];
-    const record = (cmd: string, output: string) => {
-      steps.push(`$ git ${cmd}${output ? `\n${output}` : ""}`.trim());
-    };
+      const auth =
+        method === "ssh"
+          ? ({ ssh: true } as const)
+          : token
+            ? ({ token } as const)
+            : ({} as const);
 
-    try {
-      const getOrigin = runGit(["remote", "get-url", "origin"]);
-      record("remote get-url origin", getOrigin.output);
+      const remoteUrl = method === "ssh" ? UPDATE_SSH_URL : UPDATE_GIT_URL;
 
-      if (!getOrigin.ok) {
-        const addOrigin = runGit(["remote", "add", "origin", UPDATE_GIT_URL]);
-        record(`remote add origin ${UPDATE_GIT_URL}`, addOrigin.output);
-        if (!addOrigin.ok) {
-          return res.status(500).json({ success: false, error: "Failed to add origin remote.", output: steps.join("\n\n") });
-        }
-      } else {
-        const setOrigin = runGit(["remote", "set-url", "origin", UPDATE_GIT_URL]);
-        record(`remote set-url origin ${UPDATE_GIT_URL}`, setOrigin.output);
-        if (!setOrigin.ok) {
-          return res.status(500).json({ success: false, error: "Failed to set origin remote URL.", output: steps.join("\n\n") });
-        }
+      const setOrigin = runGit(projectRoot, ["remote", "set-url", "origin", remoteUrl], auth);
+      record(`remote set-url origin ${method === "ssh" ? "ssh" : "https"}`, setOrigin.output);
+      if (!setOrigin.ok) {
+        const addOrigin = runGit(projectRoot, ["remote", "add", "origin", remoteUrl], auth);
+        record(`remote add origin ${method === "ssh" ? "ssh" : "https"}`, addOrigin.output);
+        if (!addOrigin.ok) return { ok: false as const, steps, error: "Failed to set origin remote URL." };
       }
 
-      const fetchAll = runGit(["fetch", "--all", "--prune"]);
-      record("fetch --all --prune", fetchAll.output);
-      if (!fetchAll.ok) {
-        return res.status(500).json({ success: false, error: "Git fetch failed.", output: steps.join("\n\n") });
-      }
+      const fetchOrigin = runGit(projectRoot, ["fetch", "--prune", "origin"], auth);
+      record("fetch --prune origin", fetchOrigin.output);
+      if (!fetchOrigin.ok) return { ok: false as const, steps, error: "Git fetch failed." };
 
-      const branch = runGit(["branch", "--show-current"]);
+      const branch = runGit(projectRoot, ["branch", "--show-current"], auth);
       record("branch --show-current", branch.output);
 
-      if (branch.ok && branch.output) {
-        const upstream = runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+      const currentBranch = branch.ok ? branch.output.trim() : "";
+      if (currentBranch) {
+        const upstream = runGit(projectRoot, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], auth);
         record("rev-parse --abbrev-ref --symbolic-full-name @{u}", upstream.output);
         if (!upstream.ok) {
-          const setUpstream = runGit(["branch", "--set-upstream-to", `origin/${branch.output}`, branch.output]);
-          record(`branch --set-upstream-to origin/${branch.output} ${branch.output}`, setUpstream.output);
-          if (!setUpstream.ok) {
-            return res.status(500).json({ success: false, error: "Failed to set upstream branch.", output: steps.join("\n\n") });
-          }
+          const setUpstream = runGit(projectRoot, ["branch", "--set-upstream-to", `origin/${currentBranch}`, currentBranch], auth);
+          record(`branch --set-upstream-to origin/${currentBranch} ${currentBranch}`, setUpstream.output);
+          if (!setUpstream.ok) return { ok: false as const, steps, error: "Failed to set upstream branch." };
         }
       }
 
-      const pull = runGit(["pull", "--ff-only"]);
+      const pull = runGit(projectRoot, ["pull", "--ff-only"], auth);
       record("pull --ff-only", pull.output);
-      if (!pull.ok) {
-        return res.status(500).json({ success: false, error: "Git pull failed.", output: steps.join("\n\n") });
-      }
+      if (!pull.ok) return { ok: false as const, steps, error: "Git pull failed." };
 
-      return res.json({ success: true, output: steps.join("\n\n") });
-    } catch (err: any) {
-      return res.status(500).json({
-        success: false,
-        error: err?.message || "Update failed.",
-        output: steps.join("\n\n"),
-      });
+      return { ok: true as const, steps };
+    };
+
+    const failures: any[] = [];
+
+    for (const m of methods) {
+      if (m === "ssh" && !hasSsh) continue;
+      const r = attempt(m as "ssh" | "https");
+      if (r.ok) return res.json({ success: true, method: m, output: r.steps.join("\n\n") });
+      failures.push({ method: m, error: (r as any).error || "failed", output: r.steps.join("\n\n") });
     }
+
+    return res.status(500).json({
+      success: false,
+      error: "Update failed using available authentication methods.",
+      failures,
+    });
   });
 
   app.get("/api/mariadb/users/:uid", optionalAuth, async (req, res) => {

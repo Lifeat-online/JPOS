@@ -7,9 +7,18 @@ describe('WelcomeView', () => {
   it('renders buttons and toggles dark mode', () => {
     const onLogin = vi.fn();
     const onClientLogin = vi.fn();
+    const onDevQuickLogin = vi.fn();
     const toggleDarkMode = vi.fn();
 
-    renderWithRouter(<WelcomeView onLogin={onLogin} onClientLogin={onClientLogin} isDarkMode={false} toggleDarkMode={toggleDarkMode} />);
+    renderWithRouter(
+      <WelcomeView
+        onLogin={onLogin}
+        onClientLogin={onClientLogin}
+        onDevQuickLogin={onDevQuickLogin}
+        isDarkMode={false}
+        toggleDarkMode={toggleDarkMode}
+      />
+    );
 
     expect(screen.getByRole('button', { name: /Staff Login/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Toggle dark mode/i })).toBeInTheDocument();

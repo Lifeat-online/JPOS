@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { JwtUser } from '../hooks/useAuth';
+import { getAccessToken, JwtUser } from '../hooks/useAuth';
 import {
   Product, Customer, Staff, Sale, AppConfig, Workstation,
 } from '../types';
@@ -140,11 +140,179 @@ export function DevDashboard({
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'current' | 'updating' | 'error'>('idle');
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [updateOutput, setUpdateOutput] = useState<string | null>(null);
+  const [gitPrimary, setGitPrimary] = useState<'ssh' | 'token'>('ssh');
+  const [gitAuthStatus, setGitAuthStatus] = useState<{ hasSsh: boolean; hasToken: boolean; hasKnownHosts: boolean; sshKeyPath: string | null; publicKey: string | null } | null>(null);
+  const [gitTokenInput, setGitTokenInput] = useState('');
+  const [gitSshKeyInput, setGitSshKeyInput] = useState('');
+  const [gitKnownHostsInput, setGitKnownHostsInput] = useState('');
+  const [gitAuthMessage, setGitAuthMessage] = useState<string | null>(null);
+  const [gitAuthBusy, setGitAuthBusy] = useState(false);
 
   const GITHUB_REPO = 'Lifeat-online/JPOS';
 
   const currentVersionLabel = APP_VERSION === '0.0.0' ? 'unknown' : APP_VERSION;
   const canApplyUpdate = latestRelease !== null;
+
+  const refreshGitAuthStatus = async () => {
+    const token = getAccessToken();
+    const res = await fetch('/api/dev/git-auth/status', {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    const data = await res.json().catch(() => null);
+    if (res.ok && data) setGitAuthStatus(data);
+  };
+
+  useEffect(() => {
+    refreshGitAuthStatus().catch(() => {});
+  }, []);
+
+  const saveGitToken = async () => {
+    setGitAuthBusy(true);
+    setGitAuthMessage(null);
+    try {
+      const token = getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch('/api/dev/git-auth/token', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ token: gitTokenInput }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setGitAuthMessage(data.error || 'Failed to save token.');
+        return;
+      }
+      setGitTokenInput('');
+      await refreshGitAuthStatus();
+      setGitAuthMessage('Token saved (runtime).');
+    } finally {
+      setGitAuthBusy(false);
+    }
+  };
+
+  const clearGitToken = async () => {
+    setGitAuthBusy(true);
+    setGitAuthMessage(null);
+    try {
+      const token = getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch('/api/dev/git-auth/token', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ token: '' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setGitAuthMessage(data.error || 'Failed to clear token.');
+        return;
+      }
+      setGitTokenInput('');
+      await refreshGitAuthStatus();
+      setGitAuthMessage('Token cleared.');
+    } finally {
+      setGitAuthBusy(false);
+    }
+  };
+
+  const saveSshKey = async () => {
+    setGitAuthBusy(true);
+    setGitAuthMessage(null);
+    try {
+      const token = getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch('/api/dev/git-auth/ssh', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ privateKey: gitSshKeyInput, knownHosts: gitKnownHostsInput }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setGitAuthMessage(data.error || 'Failed to save SSH key.');
+        return;
+      }
+      setGitSshKeyInput('');
+      setGitKnownHostsInput('');
+      await refreshGitAuthStatus();
+      setGitAuthMessage(data.publicKey ? 'SSH key saved. Add the public key to GitHub Deploy Keys.' : 'SSH key saved (runtime).');
+    } finally {
+      setGitAuthBusy(false);
+    }
+  };
+
+  const clearSshKey = async () => {
+    setGitAuthBusy(true);
+    setGitAuthMessage(null);
+    try {
+      const token = getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch('/api/dev/git-auth/ssh', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ privateKey: '' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setGitAuthMessage(data.error || 'Failed to clear SSH key.');
+        return;
+      }
+      setGitSshKeyInput('');
+      setGitKnownHostsInput('');
+      await refreshGitAuthStatus();
+      setGitAuthMessage('SSH key cleared.');
+    } finally {
+      setGitAuthBusy(false);
+    }
+  };
+
+  const generateSshKey = async () => {
+    setGitAuthBusy(true);
+    setGitAuthMessage(null);
+    try {
+      const token = getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch('/api/dev/git-auth/ssh/generate', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ force: false }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setGitAuthMessage(data.error || 'Failed to generate SSH key.');
+        return;
+      }
+      await refreshGitAuthStatus();
+      setGitAuthMessage('SSH key generated. Add the public key to GitHub Deploy Keys.');
+    } finally {
+      setGitAuthBusy(false);
+    }
+  };
+
+  const testGitAuth = async () => {
+    setGitAuthBusy(true);
+    setGitAuthMessage(null);
+    try {
+      const token = getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch('/api/dev/git-auth/test', { method: 'POST', headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setGitAuthMessage(data.error || 'Auth test failed.');
+        return;
+      }
+      const summary = Array.isArray(data.results)
+        ? data.results.map((r: any) => `${r.method}: ${r.ok ? 'ok' : 'fail'}`).join(' | ')
+        : 'ok';
+      setGitAuthMessage(`Test: ${summary}`);
+    } finally {
+      setGitAuthBusy(false);
+    }
+  };
 
   const handleCheckForUpdates = async () => {
     setUpdateStatus('checking');
@@ -152,9 +320,13 @@ export function DevDashboard({
     setUpdateOutput(null);
 
     try {
-      const response = await fetch('/api/dev/check-updates');
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
+      const token = getAccessToken();
+      const response = await fetch(`/api/dev/check-updates?primary=${gitPrimary}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.error) {
+        const errorBody = data ?? {};
         setUpdateStatus('error');
         
         if (errorBody.error?.includes('Repository not found')) {
@@ -170,8 +342,6 @@ export function DevDashboard({
         }
         return;
       }
-
-      const data = await response.json();
       if (!data.latestVersion) {
         setUpdateStatus('current');
         setUpdateMessage('No release information found on GitHub. Create a release/tag on your repository to enable updates.');
@@ -214,7 +384,14 @@ export function DevDashboard({
     setUpdateOutput(null);
 
     try {
-      const response = await fetch('/api/dev/update', { method: 'POST' });
+      const token = getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch('/api/dev/update', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ primary: gitPrimary }),
+      });
       const data = await response.json();
       if (!response.ok || !data.success) {
         setUpdateStatus('error');
@@ -726,6 +903,143 @@ export function DevDashboard({
                     <li>Set in environment: <code className="bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded">export GITHUB_TOKEN=ghp_...</code> (Linux/Mac) or system environment (Windows)</li>
                     <li>Restart the dev server</li>
                   </ol>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 dark:bg-slate-950 p-3 border border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-widest text-slate-500 font-semibold">Git Access</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Primary: <span className="font-mono">{gitPrimary.toUpperCase()}</span> (other acts as backup if configured)
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className={`px-2 py-1 rounded-full border ${gitAuthStatus?.hasSsh ? 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500'}`}>
+                        SSH {gitAuthStatus?.hasSsh ? 'ON' : 'OFF'}
+                      </span>
+                      <span className={`px-2 py-1 rounded-full border ${gitAuthStatus?.hasToken ? 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500'}`}>
+                        Token {gitAuthStatus?.hasToken ? 'ON' : 'OFF'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setGitPrimary('ssh')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${gitPrimary === 'ssh' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/50'}`}
+                    >
+                      SSH priority
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGitPrimary('token')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${gitPrimary === 'token' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/50'}`}
+                    >
+                      Token priority
+                    </button>
+                    <button
+                      type="button"
+                      onClick={testGitAuth}
+                      disabled={gitAuthBusy}
+                      className="ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Test
+                    </button>
+                  </div>
+
+                  {gitAuthMessage ? (
+                    <div className="mt-2 text-xs text-slate-600 dark:text-slate-400 whitespace-pre-line">{gitAuthMessage}</div>
+                  ) : null}
+
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3">
+                      <div className="text-xs font-bold uppercase tracking-widest text-slate-500">Token</div>
+                      <input
+                        value={gitTokenInput}
+                        onChange={(e) => setGitTokenInput(e.target.value)}
+                        type="password"
+                        placeholder="ghp_... / github_pat_..."
+                        className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-violet-500"
+                      />
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={saveGitToken}
+                          disabled={gitAuthBusy || gitTokenInput.trim().length === 0}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearGitToken}
+                          disabled={gitAuthBusy}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3">
+                      <div className="text-xs font-bold uppercase tracking-widest text-slate-500">SSH Key</div>
+                      <textarea
+                        value={gitSshKeyInput}
+                        onChange={(e) => setGitSshKeyInput(e.target.value)}
+                        rows={4}
+                        placeholder="Paste private key (BEGIN ... PRIVATE KEY)"
+                        className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-violet-500 font-mono"
+                      />
+                      <textarea
+                        value={gitKnownHostsInput}
+                        onChange={(e) => setGitKnownHostsInput(e.target.value)}
+                        rows={2}
+                        placeholder="known_hosts (optional) — leave empty to auto-scan github.com"
+                        className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-xs text-slate-700 dark:text-slate-300 outline-none focus:ring-2 focus:ring-violet-500 font-mono"
+                      />
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={generateSshKey}
+                          disabled={gitAuthBusy}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Generate
+                        </button>
+                        <button
+                          type="button"
+                          onClick={saveSshKey}
+                          disabled={gitAuthBusy || gitSshKeyInput.trim().length === 0}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearSshKey}
+                          disabled={gitAuthBusy}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      {gitAuthStatus?.publicKey ? (
+                        <div className="mt-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">Public Key (GitHub Deploy Key)</div>
+                            <CopyBtn text={gitAuthStatus.publicKey} label="Copy key" />
+                          </div>
+                          <div className="mt-2 font-mono text-[11px] text-slate-700 dark:text-slate-300 break-all select-all">
+                            {gitAuthStatus.publicKey}
+                          </div>
+                        </div>
+                      ) : null}
+                      {gitAuthStatus?.sshKeyPath ? (
+                        <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Saved in container at <span className="font-mono">{gitAuthStatus.sshKeyPath}</span></div>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid gap-2 sm:grid-cols-2">

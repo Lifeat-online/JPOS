@@ -393,6 +393,30 @@ export default function App() {
   const handleStaffLogin = () => { setLoginMode('staff'); clearError(); setLoginModalOpen(true); };
   const handleClientLogin = async () => { setLoginMode('client'); await login(); };
   const handleLogout = async () => { setLoginMode(null); await logout(); navigate('/'); };
+  const handleDevQuickLogin = async () => {
+    try {
+      const res = await fetch('/api/dev/bootstrap-login', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Dev seed + login failed');
+        return;
+      }
+
+      const userToStore = {
+        ...data.user,
+        uid: data.user.id,
+        displayName: data.user.name,
+        photoURL: null,
+      };
+
+      localStorage.setItem('jpos_access_token', data.accessToken);
+      localStorage.setItem('jpos_refresh_token', data.refreshToken);
+      localStorage.setItem('jpos_user', JSON.stringify(userToStore));
+      window.location.reload();
+    } catch (err: any) {
+      alert(err?.message || 'Dev seed + login failed');
+    }
+  };
 
   // Called by LoginModal on form submit
   const handleLoginSubmit = async (email: string, password: string) => {
@@ -653,6 +677,7 @@ export default function App() {
         <WelcomeView
           onLogin={handleStaffLogin}
           onClientLogin={handleClientLogin}
+          onDevQuickLogin={handleDevQuickLogin}
           isDarkMode={isDarkMode}
           toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
         />
