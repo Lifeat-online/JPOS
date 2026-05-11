@@ -286,7 +286,7 @@ export async function createApp() {
         [DEV_BOOTSTRAP_STAFF_ID, DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_NAME, DEV_BOOTSTRAP_EMAIL, passwordHash]
       );
 
-      const [workstationCountRows] = await conn.execute<any[]>(
+      const [workstationCountRows] = await conn.execute<{ c: number }>(
         `SELECT COUNT(*) AS c FROM workstations WHERE tenant_id = ?`,
         [DEV_BOOTSTRAP_TENANT_ID]
       );
