@@ -66,6 +66,7 @@ import {
   handleRefreshToken,
   handleGetMe,
   handleSetupPassword,
+  hashPassword,
 } from "./auth-handler.ts";
 import { generateAccessToken, generateRefreshToken, requireAuth, optionalAuth, type AuthTokenPayload } from "./auth-middleware.ts";
 
@@ -238,6 +239,8 @@ export async function createApp() {
     try {
       await conn.beginTransaction();
 
+      const passwordHash = await hashPassword("devpassword");
+
       await conn.execute(
         `INSERT INTO tenants (id, name, created_at, updated_at)
          VALUES (?, ?, NOW(), NOW())
@@ -260,10 +263,10 @@ export async function createApp() {
       );
 
       await conn.execute(
-        `INSERT INTO staff (id, tenant_id, name, role, email, status, created_at, updated_at)
-         VALUES (?, ?, ?, 'dev', ?, 'active', NOW(), NOW())
-         ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), name = VALUES(name), role = 'dev', email = VALUES(email), status = 'active', updated_at = NOW()`,
-        [DEV_BOOTSTRAP_STAFF_ID, DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_NAME, DEV_BOOTSTRAP_EMAIL]
+        `INSERT INTO staff (id, tenant_id, name, role, email, password_hash, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'dev', ?, ?, 'active', NOW(), NOW())
+         ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), name = VALUES(name), role = 'dev', email = VALUES(email), password_hash = VALUES(password_hash), status = 'active', updated_at = NOW()`,
+        [DEV_BOOTSTRAP_STAFF_ID, DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_NAME, DEV_BOOTSTRAP_EMAIL, passwordHash]
       );
 
       const [workstationCountRows] = await conn.execute<any[]>(
@@ -566,6 +569,10 @@ export async function createApp() {
   app.post("/api/dev/update", optionalAuth, async (req, res) => {
     if (isTest) {
       return res.status(501).json({ error: "Update endpoint not available in test mode." });
+    }
+
+    if (process.env.NODE_ENV === "production") {
+      return res.status(403).json({ error: "Updates disabled in production" });
     }
 
     const projectRoot = path.resolve(__dirname, "..");
