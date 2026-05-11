@@ -3,7 +3,12 @@ let appPromise: Promise<any> | null = null;
 export default async function handler(req: any, res: any) {
   try {
     if (!appPromise) {
-      const mod = await import("../server/app.ts");
+      let mod: any;
+      try {
+        mod = await import("../server/app.ts");
+      } catch {
+        mod = await import("../server/app.js");
+      }
       appPromise = mod.createApp();
     }
     const app = await appPromise;
