@@ -1,4 +1,4 @@
-import pool, { query, getConnection } from "./db.ts";
+import { getConnection, isPostgres, query } from "./db.ts";
 import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem } from "./types.ts";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID || "10000100";
@@ -116,8 +116,9 @@ export async function createTableSection(
   section: any
 ): Promise<any> {
   const id = `sec_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const orderCol = isPostgres() ? '"order"' : "`order`";
   await query(
-    `INSERT INTO table_sections (id, tenant_id, name, color, \`order\`, created_at, updated_at)
+    `INSERT INTO table_sections (id, tenant_id, name, color, ${orderCol}, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
     [id, tenantId, section.name, section.color || null, section.order || 0]
   );
@@ -387,7 +388,8 @@ export async function updateTableSection(
     values.push(updates.color);
   }
   if (updates.order !== undefined) {
-    fields.push("`order` = ?");
+    const orderCol = isPostgres() ? '"order"' : "`order`";
+    fields.push(`${orderCol} = ?`);
     values.push(updates.order);
   }
 
@@ -799,15 +801,28 @@ export async function markMessageRead(
   messageId: string,
   userId: string
 ): Promise<void> {
-  // Use JSON_ARRAY_APPEND if supported, or JSON_MERGE_PRESERVE
-  // MariaDB 10.2+ JSON support
+  const rows = await query<{ read_by: any }>(
+    `SELECT read_by FROM messages WHERE tenant_id = ? AND id = ? LIMIT 1`,
+    [tenantId, messageId]
+  );
+  if (rows.length === 0) return;
+
+  const raw = rows[0].read_by;
+  let readBy: string[] = [];
+  if (Array.isArray(raw)) {
+    readBy = raw.map(String);
+  } else if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) readBy = parsed.map(String);
+    } catch {}
+  }
+
+  if (!readBy.includes(userId)) readBy.push(userId);
+
   await query(
-    `UPDATE messages
-     SET read_by = JSON_ARRAY_APPEND(read_by, '$', ?),
-         created_at = created_at -- prevent updating created_at if OnUpdate was set (it's not but safe)
-     WHERE tenant_id = ? AND id = ?
-       AND NOT JSON_CONTAINS(read_by, JSON_QUOTE(?))`,
-    [userId, tenantId, messageId, userId]
+    `UPDATE messages SET read_by = ? WHERE tenant_id = ? AND id = ?`,
+    [JSON.stringify(readBy), tenantId, messageId]
   );
 }
 
@@ -823,9 +838,10 @@ export async function setupTenant(data: {
     name: data.businessName,
   };
   
-  const conn = await pool.getConnection();
+  const conn = await getConnection();
   try {
     await conn.beginTransaction();
+    const pg = isPostgres();
 
     // 1. Create tenant
     await conn.query(
@@ -835,9 +851,13 @@ export async function setupTenant(data: {
 
     // 2. Create or update user association
     await conn.query(
-      `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at) 
-       VALUES (?, ?, ?, ?, NOW(), NOW())
-       ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), name = VALUES(name), updated_at = NOW()`,
+      pg
+        ? `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at)
+           VALUES (?, ?, ?, ?, NOW(), NOW())
+           ON CONFLICT (uid) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, name = EXCLUDED.name, updated_at = NOW()`
+        : `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at) 
+           VALUES (?, ?, ?, ?, NOW(), NOW())
+           ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), name = VALUES(name), updated_at = NOW()`,
       [data.user.uid, tenantId, data.user.email, data.user.displayName]
     );
     
@@ -845,9 +865,13 @@ export async function setupTenant(data: {
     const DEV_EMAIL = 'jameskoen78@gmail.com';
     const assignedRole = String(data.user.email || '').trim().toLowerCase() === DEV_EMAIL ? 'dev' : 'admin';
     await conn.query(
-      `INSERT INTO staff (id, tenant_id, name, email, role, status, created_at, updated_at) 
-       VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())
-       ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), role = VALUES(role), updated_at = NOW()`,
+      pg
+        ? `INSERT INTO staff (id, tenant_id, name, email, role, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())
+           ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, role = EXCLUDED.role, updated_at = NOW()`
+        : `INSERT INTO staff (id, tenant_id, name, email, role, status, created_at, updated_at) 
+           VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())
+           ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), role = VALUES(role), updated_at = NOW()`,
       [data.user.uid, tenantId, data.user.displayName, data.user.email, assignedRole]
     );
 
@@ -898,7 +922,7 @@ export async function setupTenant(data: {
 }
 
 export async function clearAllSales(tenantId: string): Promise<void> {
-  const conn = await pool.getConnection();
+  const conn = await getConnection();
   try {
     await conn.beginTransaction();
     // Delete items first due to FK
@@ -914,7 +938,7 @@ export async function clearAllSales(tenantId: string): Promise<void> {
 }
 
 export async function seedProducts(tenantId: string, products: any[]): Promise<void> {
-  const conn = await pool.getConnection();
+  const conn = await getConnection();
   try {
     await conn.beginTransaction();
     for (const p of products) {

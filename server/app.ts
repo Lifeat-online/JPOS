@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { spawnSync } from "child_process";
 import os from "os";
 import { fileURLToPath } from "url";
-import { getConnection, query } from "./db.ts";
+import { getConnection, isPostgres, query } from "./db.ts";
 import {
   getProductsByTenant,
   getTenantIdBySlug,
@@ -240,32 +240,49 @@ export async function createApp() {
       await conn.beginTransaction();
 
       const passwordHash = await hashPassword("devpassword");
+      const pg = isPostgres();
 
       await conn.execute(
-        `INSERT INTO tenants (id, name, created_at, updated_at)
-         VALUES (?, ?, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE name = VALUES(name), updated_at = NOW()`,
+        pg
+          ? `INSERT INTO tenants (id, name, created_at, updated_at)
+             VALUES (?, ?, NOW(), NOW())
+             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`
+          : `INSERT INTO tenants (id, name, created_at, updated_at)
+             VALUES (?, ?, NOW(), NOW())
+             ON DUPLICATE KEY UPDATE name = VALUES(name), updated_at = NOW()`,
         [DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_TENANT_NAME]
       );
 
       await conn.execute(
-        `INSERT INTO app_settings (tenant_id, setup_completed, business, created_at, updated_at)
-         VALUES (?, TRUE, ?, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE setup_completed = TRUE, updated_at = NOW()`,
+        pg
+          ? `INSERT INTO app_settings (tenant_id, setup_completed, business, created_at, updated_at)
+             VALUES (?, 1, ?, NOW(), NOW())
+             ON CONFLICT (tenant_id) DO UPDATE SET setup_completed = 1, business = EXCLUDED.business, updated_at = NOW()`
+          : `INSERT INTO app_settings (tenant_id, setup_completed, business, created_at, updated_at)
+             VALUES (?, 1, ?, NOW(), NOW())
+             ON DUPLICATE KEY UPDATE setup_completed = 1, updated_at = NOW()`,
         [DEV_BOOTSTRAP_TENANT_ID, JSON.stringify({ name: DEV_BOOTSTRAP_TENANT_NAME })]
       );
 
       await conn.execute(
-        `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), email = VALUES(email), name = VALUES(name), updated_at = NOW()`,
+        pg
+          ? `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at)
+             VALUES (?, ?, ?, ?, NOW(), NOW())
+             ON CONFLICT (uid) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, email = EXCLUDED.email, name = EXCLUDED.name, updated_at = NOW()`
+          : `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at)
+             VALUES (?, ?, ?, ?, NOW(), NOW())
+             ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), email = VALUES(email), name = VALUES(name), updated_at = NOW()`,
         [DEV_BOOTSTRAP_STAFF_ID, DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_EMAIL, DEV_BOOTSTRAP_NAME]
       );
 
       await conn.execute(
-        `INSERT INTO staff (id, tenant_id, name, role, email, password_hash, status, created_at, updated_at)
-         VALUES (?, ?, ?, 'dev', ?, ?, 'active', NOW(), NOW())
-         ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), name = VALUES(name), role = 'dev', email = VALUES(email), password_hash = VALUES(password_hash), status = 'active', updated_at = NOW()`,
+        pg
+          ? `INSERT INTO staff (id, tenant_id, name, role, email, password_hash, status, created_at, updated_at)
+             VALUES (?, ?, ?, 'dev', ?, ?, 'active', NOW(), NOW())
+             ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, name = EXCLUDED.name, role = 'dev', email = EXCLUDED.email, password_hash = EXCLUDED.password_hash, status = 'active', updated_at = NOW()`
+          : `INSERT INTO staff (id, tenant_id, name, role, email, password_hash, status, created_at, updated_at)
+             VALUES (?, ?, ?, 'dev', ?, ?, 'active', NOW(), NOW())
+             ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), name = VALUES(name), role = 'dev', email = VALUES(email), password_hash = VALUES(password_hash), status = 'active', updated_at = NOW()`,
         [DEV_BOOTSTRAP_STAFF_ID, DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_NAME, DEV_BOOTSTRAP_EMAIL, passwordHash]
       );
 
@@ -846,18 +863,31 @@ export async function createApp() {
         walletRevenue: toNumber(r.walletRevenue),
       }));
 
+      const pg = isPostgres();
       const salesSummaryRows = await query<any>(
-        `
-          SELECT
-            SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
-            SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN 1 ELSE 0 END) AS lastHourCompletedCount,
-            SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN total ELSE 0 END) AS lastHourCompletedRevenue,
-            SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) AS todayCompletedCount,
-            SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN total ELSE 0 END) AS todayCompletedRevenue,
-            SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
-          FROM sales
-          WHERE tenant_id = ?
-        `,
+        pg
+          ? `
+              SELECT
+                SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
+                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN 1 ELSE 0 END) AS lastHourCompletedCount,
+                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN total ELSE 0 END) AS lastHourCompletedRevenue,
+                SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN 1 ELSE 0 END) AS todayCompletedCount,
+                SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN total ELSE 0 END) AS todayCompletedRevenue,
+                SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
+              FROM sales
+              WHERE tenant_id = ?
+            `
+          : `
+              SELECT
+                SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
+                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN 1 ELSE 0 END) AS lastHourCompletedCount,
+                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN total ELSE 0 END) AS lastHourCompletedRevenue,
+                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) AS todayCompletedCount,
+                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN total ELSE 0 END) AS todayCompletedRevenue,
+                SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
+              FROM sales
+              WHERE tenant_id = ?
+            `,
         [tenantId]
       );
       const salesSummary = salesSummaryRows[0] || {};
@@ -888,58 +918,108 @@ export async function createApp() {
         );
 
         const staffRows = await query<any>(
-          `
-            SELECT
-              st.id AS staffId,
-              st.name AS staffName,
-              st.role AS staffRole,
-              SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
-              SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
-              SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
-              MAX(s.created_at) AS lastSaleAt
-            FROM staff st
-            LEFT JOIN sales s
-              ON s.tenant_id = st.tenant_id
-             AND s.staff_id = st.id
-             AND s.created_at >= (NOW() - INTERVAL 60 MINUTE)
-            WHERE st.tenant_id = ?
-              AND st.status = 'active'
-            GROUP BY st.id
-            ORDER BY completedRevenue DESC, completedCount DESC
-          `,
+          pg
+            ? `
+                SELECT
+                  st.id AS staffId,
+                  st.name AS staffName,
+                  st.role AS staffRole,
+                  SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
+                  SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
+                  MAX(s.created_at) AS lastSaleAt
+                FROM staff st
+                LEFT JOIN sales s
+                  ON s.tenant_id = st.tenant_id
+                 AND s.staff_id = st.id
+                 AND s.created_at >= (NOW() - INTERVAL '60 minutes')
+                WHERE st.tenant_id = ?
+                  AND st.status = 'active'
+                GROUP BY st.id
+                ORDER BY completedRevenue DESC, completedCount DESC
+              `
+            : `
+                SELECT
+                  st.id AS staffId,
+                  st.name AS staffName,
+                  st.role AS staffRole,
+                  SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
+                  SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
+                  MAX(s.created_at) AS lastSaleAt
+                FROM staff st
+                LEFT JOIN sales s
+                  ON s.tenant_id = st.tenant_id
+                 AND s.staff_id = st.id
+                 AND s.created_at >= (NOW() - INTERVAL 60 MINUTE)
+                WHERE st.tenant_id = ?
+                  AND st.status = 'active'
+                GROUP BY st.id
+                ORDER BY completedRevenue DESC, completedCount DESC
+              `,
           [tenantId]
         );
 
         const workstationRows = await query<any>(
-          `
-            SELECT
-              w.id AS workstationId,
-              w.name AS workstationName,
-              w.type AS workstationType,
-              SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
-              SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS acceptedCount,
-              SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS readyCount,
-              MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS oldestOrderedAt,
-              AVG(
-                CASE
-                  WHEN si.ordered_at IS NOT NULL
-                   AND si.ready_at IS NOT NULL
-                   AND si.ordered_at >= (NOW() - INTERVAL 2 HOUR)
-                  THEN TIMESTAMPDIFF(SECOND, si.ordered_at, si.ready_at)
-                  ELSE NULL
-                END
-              ) AS avgPrepSecondsLast2h
-            FROM workstations w
-            LEFT JOIN sale_items si
-              ON si.workstation_id = w.id
-            LEFT JOIN sales s
-              ON s.id = si.sale_id
-             AND s.tenant_id = w.tenant_id
-            WHERE w.tenant_id = ?
-              AND w.status = 'active'
-            GROUP BY w.id
-            ORDER BY (pendingCount + acceptedCount) DESC, w.name ASC
-          `,
+          pg
+            ? `
+                SELECT
+                  w.id AS workstationId,
+                  w.name AS workstationName,
+                  w.type AS workstationType,
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS acceptedCount,
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS readyCount,
+                  MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS oldestOrderedAt,
+                  AVG(
+                    CASE
+                      WHEN si.ordered_at IS NOT NULL
+                       AND si.ready_at IS NOT NULL
+                       AND si.ordered_at >= (NOW() - INTERVAL '2 hours')
+                      THEN EXTRACT(EPOCH FROM (si.ready_at - si.ordered_at))
+                      ELSE NULL
+                    END
+                  ) AS avgPrepSecondsLast2h
+                FROM workstations w
+                LEFT JOIN sale_items si
+                  ON si.workstation_id = w.id
+                LEFT JOIN sales s
+                  ON s.id = si.sale_id
+                 AND s.tenant_id = w.tenant_id
+                WHERE w.tenant_id = ?
+                  AND w.status = 'active'
+                GROUP BY w.id
+                ORDER BY (pendingCount + acceptedCount) DESC, w.name ASC
+              `
+            : `
+                SELECT
+                  w.id AS workstationId,
+                  w.name AS workstationName,
+                  w.type AS workstationType,
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS acceptedCount,
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS readyCount,
+                  MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS oldestOrderedAt,
+                  AVG(
+                    CASE
+                      WHEN si.ordered_at IS NOT NULL
+                       AND si.ready_at IS NOT NULL
+                       AND si.ordered_at >= (NOW() - INTERVAL 2 HOUR)
+                      THEN TIMESTAMPDIFF(SECOND, si.ordered_at, si.ready_at)
+                      ELSE NULL
+                    END
+                  ) AS avgPrepSecondsLast2h
+                FROM workstations w
+                LEFT JOIN sale_items si
+                  ON si.workstation_id = w.id
+                LEFT JOIN sales s
+                  ON s.id = si.sale_id
+                 AND s.tenant_id = w.tenant_id
+                WHERE w.tenant_id = ?
+                  AND w.status = 'active'
+                GROUP BY w.id
+                ORDER BY (pendingCount + acceptedCount) DESC, w.name ASC
+              `,
           [tenantId]
         );
 

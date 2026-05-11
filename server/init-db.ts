@@ -1,12 +1,16 @@
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
-import { query } from "./db.ts";
+import { isPostgres, query } from "./db.ts";
 
 dotenv.config();
 
 async function runSchema() {
-  const schemaPath = path.join(process.cwd(), "db", "schema.sql");
+  const schemaPath = path.join(
+    process.cwd(),
+    "db",
+    isPostgres() ? "schema.postgres.sql" : "schema.sql"
+  );
   if (!fs.existsSync(schemaPath)) {
     throw new Error(`Schema file not found: ${schemaPath}`);
   }

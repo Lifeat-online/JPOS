@@ -1,4 +1,4 @@
-import { query } from "./db.ts";
+import { isPostgres, query } from "./db.ts";
 
 export async function getTenantIdBySlug(slug: string) {
   const rows = await query<{ tenant_id: string }>(
@@ -92,13 +92,19 @@ export async function getAppConfigByTenant(tenantId: string) {
   }
 
   const row = rows[0];
+  const business =
+    typeof row.business === "string" ? (row.business ? JSON.parse(row.business) : undefined) : (row.business ?? undefined);
+  const categories =
+    typeof row.categories === "string"
+      ? (row.categories ? JSON.parse(row.categories) : undefined)
+      : (row.categories ?? undefined);
   return {
     payfastMerchantId: row.payfast_merchant_id,
     payfastMerchantKey: row.payfast_merchant_key,
     payfastPassphrase: row.payfast_passphrase,
     payfastSandbox: Boolean(row.payfast_sandbox),
-    business: row.business ? JSON.parse(row.business) : undefined,
-    categories: row.categories ? JSON.parse(row.categories) : undefined,
+    business,
+    categories,
     slug: row.slug || undefined,
     setupCompleted: Boolean(row.setup_completed),
   };
@@ -329,18 +335,19 @@ export async function getMessagesByChannel(tenantId: string, channel: string, li
 }
 
 export async function getTableSectionsByTenant(tenantId: string) {
+  const orderCol = isPostgres() ? '"order"' : "`order`";
   return query(
     `SELECT
        id,
        tenant_id AS tenantId,
        name,
        color,
-       \`order\`,
+       ${orderCol},
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM table_sections
      WHERE tenant_id = ?
-     ORDER BY \`order\` ASC`,
+     ORDER BY ${orderCol} ASC`,
     [tenantId]
   );
 }
