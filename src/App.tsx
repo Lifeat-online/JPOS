@@ -395,10 +395,20 @@ export default function App() {
   const handleLogout = async () => { setLoginMode(null); await logout(); navigate('/'); };
   const handleDevQuickLogin = async () => {
     try {
-      const res = await fetch('/api/dev/bootstrap-login', { method: 'POST' });
+      const rawApiBase = (import.meta as any).env?.VITE_API_BASE_URL;
+      const apiBase = typeof rawApiBase === 'string' ? rawApiBase.replace(/\/+$/g, '') : '';
+      const url = apiBase ? `${apiBase}/api/dev/bootstrap-login` : '/api/dev/bootstrap-login';
+
+      const res = await fetch(url, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(data.error || 'Dev seed + login failed');
+        if (res.status === 404) {
+          alert(
+            'Dev seed + login failed: backend endpoint not found.\n\nThis button requires the Node/MariaDB backend to be running behind /api.\nIf you are on a frontend-only deployment (e.g. Vercel), set VITE_API_BASE_URL to your backend origin and redeploy.'
+          );
+          return;
+        }
+        alert(data.error || `Dev seed + login failed (${res.status})`);
         return;
       }
 
@@ -414,7 +424,9 @@ export default function App() {
       localStorage.setItem('jpos_user', JSON.stringify(userToStore));
       window.location.reload();
     } catch (err: any) {
-      alert(err?.message || 'Dev seed + login failed');
+      alert(
+        `${err?.message || 'Dev seed + login failed'}\n\nIf you are on a frontend-only deployment, point the app at your backend with VITE_API_BASE_URL.`
+      );
     }
   };
 
