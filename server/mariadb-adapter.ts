@@ -1,4 +1,4 @@
-import { isPostgres, query } from "./db.ts";
+import { isPostgres, query } from "./db.js";
 
 export async function getTenantIdBySlug(slug: string) {
   const rows = await query<{ tenant_id: string }>(

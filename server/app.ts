@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { spawnSync } from "child_process";
 import os from "os";
 import { fileURLToPath } from "url";
-import { getConnection, isPostgres, query } from "./db.ts";
+import { getConnection, isPostgres, query } from "./db.js";
 import {
   getProductsByTenant,
   getTenantIdBySlug,
@@ -26,7 +26,7 @@ import {
   getMessagesByChannel,
   getTableSectionsByTenant,
   getRestaurantTablesByTenant,
-} from "./mariadb-adapter.ts";
+} from "./mariadb-adapter.js";
 import {
   createProduct,
   updateProduct,
@@ -59,7 +59,7 @@ import {
   clearAllSales,
   seedProducts,
   updateAppConfig,
-} from "./mariadb-crud.ts";
+} from "./mariadb-crud.js";
 import {
   handleLogin,
   handleLogout,
@@ -67,8 +67,8 @@ import {
   handleGetMe,
   handleSetupPassword,
   hashPassword,
-} from "./auth-handler.ts";
-import { generateAccessToken, generateRefreshToken, requireAuth, optionalAuth, type AuthTokenPayload } from "./auth-middleware.ts";
+} from "./auth-handler.js";
+import { generateAccessToken, generateRefreshToken, requireAuth, optionalAuth, type AuthTokenPayload } from "./auth-middleware.js";
 
 dotenv.config();
 

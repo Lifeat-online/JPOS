@@ -5,7 +5,7 @@ export default async function handler(req: any, res: any) {
     if (!appPromise) {
       let mod: any;
       try {
-        mod = await import("../server/app.ts");
+        mod = await import("../server/app.js");
       } catch {
         mod = await import("../server/app.js");
       }

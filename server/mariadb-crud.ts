@@ -1,5 +1,5 @@
-import { getConnection, isPostgres, query } from "./db.ts";
-import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem } from "./types.ts";
+import { getConnection, isPostgres, query } from "./db.js";
+import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem } from "./types.js";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID || "10000100";
 const PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY || "46f0cd694581a";

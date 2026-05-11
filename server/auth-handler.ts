@@ -1,12 +1,12 @@
 import bcrypt from 'bcryptjs';
 import { Request, Response } from 'express';
-import { query, getConnection } from './db.ts';
+import { query, getConnection } from './db.js';
 import { 
   generateAccessToken, 
   generateRefreshToken, 
   verifyToken, 
   AuthTokenPayload 
-} from './auth-middleware.ts';
+} from './auth-middleware.js';
 
 // Hash password for storage
 export async function hashPassword(password: string): Promise<string> {

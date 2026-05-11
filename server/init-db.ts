@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
-import { isPostgres, query } from "./db.ts";
+import { isPostgres, query } from "./db.js";
 
 dotenv.config();
 
