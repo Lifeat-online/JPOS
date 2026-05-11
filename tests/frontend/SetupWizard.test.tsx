@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderWithRouter } from './test-utils.tsx';
-import * as api from '../../src/api.ts';
+import * as api from '../../src/api.js';
 import { SetupWizard } from '../../src/components/SetupWizard.tsx';
 
 const user = {

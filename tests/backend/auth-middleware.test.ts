@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { generateAccessToken, generateRefreshToken, verifyToken, requireAuth, optionalAuth } from '../../server/auth-middleware.ts';
+import { generateAccessToken, generateRefreshToken, verifyToken, requireAuth, optionalAuth } from '../../server/auth-middleware.js';
 
 describe('auth-middleware', () => {
   it('generates and verifies access tokens', () => {

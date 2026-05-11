@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as dbModule from '../../server/db.ts';
-import { createProduct, updateProduct, deleteProduct } from '../../server/mariadb-crud.ts';
+import * as dbModule from '../../server/db.js';
+import { createProduct, updateProduct, deleteProduct } from '../../server/mariadb-crud.js';
 
-vi.mock('../../server/db.ts', () => ({
+vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
 }));
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { createApp } from '../../server/app.ts';
+import { createApp } from '../../server/app.js';
 
 let app: any;
 

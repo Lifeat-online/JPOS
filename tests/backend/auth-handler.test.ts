@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { handleLogin, handleLogout, handleRefreshToken, handleGetMe, hashPassword } from '../../server/auth-handler.ts';
-import * as dbModule from '../../server/db.ts';
+import { handleLogin, handleLogout, handleRefreshToken, handleGetMe, hashPassword } from '../../server/auth-handler.js';
+import * as dbModule from '../../server/db.js';
 
-vi.mock('../../server/db.ts', () => ({
+vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
 }));
 
