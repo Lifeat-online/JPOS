@@ -234,6 +234,20 @@ export async function createApp() {
     res.json({ status: "ok" });
   });
 
+  app.get("/api/dev/db-test", async (req, res) => {
+    try {
+      const conn = await getConnection();
+      try {
+        const rows = await conn.query("SELECT 1 as val");
+        res.json({ status: "ok", postgres: isPostgres(), rows });
+      } finally {
+        conn.release();
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message, stack: err.stack });
+    }
+  });
+
   app.post("/api/dev/bootstrap-login", async (req, res) => {
     const conn = await getConnection();
     try {
