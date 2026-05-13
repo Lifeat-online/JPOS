@@ -1570,18 +1570,27 @@ export async function createApp() {
 
     app.get(staticMountPath === '/' ? '*' : `${staticMountPath}/*`, (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
-      res.sendFile(path.join(distDir, 'index.html'));
+      res.sendFile(path.join(distDir, 'index.html'), (err) => {
+        if (err) {
+          console.error("sendFile error:", err);
+          if (!res.headersSent) {
+            res.status(500).send(`Error loading index.html from ${distDir}`);
+          }
+        }
+      });
     });
   }
 
   return app;
 }
 
-export async function startServer() {
-  const app = await createApp();
-  const PORT = Number(process.env.PORT || 8080);
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-    console.log(`MariaDB-connected POS system ready`);
-  });
-}
+  export async function startServer() {
+    const app = await createApp();
+    const PORT = Number(process.env.PORT || 8080);
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://0.0.0.0:${PORT}`);
+      console.log(`MariaDB-connected POS system ready`);
+      console.log(`__dirname is: ${__dirname}`);
+      console.log(`distDir is: ${path.resolve(__dirname, '..', 'dist')}`);
+    });
+  }
