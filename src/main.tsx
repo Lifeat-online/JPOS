@@ -1,19 +1,11 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import { registerSW } from 'virtual:pwa-register';
 import App from './App.tsx';
 import { BrowserRouter } from 'react-router-dom';
 import './index.css';
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then((regs) => {
-    regs.forEach((r) => r.unregister());
-  });
-  if ('caches' in window) {
-    caches.keys().then((keys) => {
-      keys.forEach((k) => caches.delete(k));
-    });
-  }
-}
+registerSW({ immediate: true });
 
 const baseUrl = import.meta.env.BASE_URL || '/';
 const routerBasename = baseUrl === '/' ? '/' : baseUrl.replace(/\/$/, '');
