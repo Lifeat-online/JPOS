@@ -114,11 +114,16 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     try {
       const saleData: any = {
         items: stampOrderItems(cart),
-        total: cartTotal,
+        total: Number(cartTotalAfterDiscount) || 0,
+        subtotal: Number(cartSubtotal) || 0,
+        taxAmount: Number(taxAmount) || 0,
+        taxRate: taxRate || null,
+        taxInclusive,
         paymentMethod: 'pending',
         status: sendToWorkstations ? 'kitchen' : 'open',
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
+        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
       };
       if (activeTableNumber) saleData.tableNumber = activeTableNumber;
 
@@ -150,9 +155,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     try {
       const saleData: any = {
         items: stampOrderItems(cart),
-        total: cartTotalAfterDiscount,
-        subtotal: cartSubtotal,
-        taxAmount: taxAmount || null,
+        total: Number(cartTotalAfterDiscount) || 0,
+        subtotal: Number(cartSubtotal) || 0,
+        taxAmount: Number(taxAmount) || 0,
         taxRate: taxRate || null,
         taxInclusive,
         paymentMethod: 'pending',
@@ -187,9 +192,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     try {
       const saleData: any = {
         items: stampOrderItems(cart, true),
-        total: cartTotalAfterDiscount,
-        subtotal: cartSubtotal,
-        taxAmount: taxAmount || null,
+        total: Number(cartTotalAfterDiscount) || 0,
+        subtotal: Number(cartSubtotal) || 0,
+        taxAmount: Number(taxAmount) || 0,
         taxRate: taxRate || null,
         taxInclusive,
         paymentMethod: method,
@@ -296,9 +301,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     try {
       const saleData: any = {
         items: stampOrderItems(cart, true),
-        total: cartTotalAfterDiscount,
-        subtotal: cartSubtotal,
-        taxAmount: taxAmount || null,
+        total: Number(cartTotalAfterDiscount) || 0,
+        subtotal: Number(cartSubtotal) || 0,
+        taxAmount: Number(taxAmount) || 0,
         taxRate: taxRate || null,
         taxInclusive,
         paymentMethod: 'wallet',

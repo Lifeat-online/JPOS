@@ -527,7 +527,8 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
           [
             itemId,
             id,
-            item.id || null,
+            // Fallback: CartItems use .id for the product, while existing OrderItems use .productId
+            item.productId || item.id || null,
             item.name,
             item.price,
             item.quantity,
@@ -672,10 +673,10 @@ export async function updateSale(
             item.quantity || 0,
             item.status || "pending",
             item.workstationId || null,
-            item.orderedAt || null,
-            item.acceptedAt || null,
-            item.readyAt || null,
-            item.deliveredAt || null,
+            item.orderedAt ? new Date(item.orderedAt) : null,
+            item.acceptedAt ? new Date(item.acceptedAt) : null,
+            item.readyAt ? new Date(item.readyAt) : null,
+            item.deliveredAt ? new Date(item.deliveredAt) : null,
             item.actionStaffId || null,
           ]
         );
