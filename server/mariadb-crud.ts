@@ -548,6 +548,154 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
   }
 }
 
+function generateSaleItemId() {
+  return `item_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+}
+
+export async function updateSale(
+  tenantId: string,
+  saleId: string,
+  updates: Partial<Sale>
+): Promise<Sale> {
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const fields: string[] = [];
+    const values: any[] = [];
+
+    if (updates.customerId !== undefined) {
+      fields.push("customer_id = ?");
+      values.push(updates.customerId || null);
+    }
+    if (updates.userId !== undefined) {
+      fields.push("user_id = ?");
+      values.push(updates.userId || null);
+    }
+    if (updates.staffId !== undefined) {
+      fields.push("staff_id = ?");
+      values.push(updates.staffId || null);
+    }
+    if (updates.total !== undefined) {
+      fields.push("total = ?");
+      values.push(updates.total || 0);
+    }
+    if (updates.subtotal !== undefined) {
+      fields.push("subtotal = ?");
+      values.push(updates.subtotal || 0);
+    }
+    if (updates.taxAmount !== undefined) {
+      fields.push("tax_amount = ?");
+      values.push(updates.taxAmount || 0);
+    }
+    if (updates.taxRate !== undefined) {
+      fields.push("tax_rate = ?");
+      values.push(updates.taxRate || 0);
+    }
+    if (updates.taxInclusive !== undefined) {
+      fields.push("tax_inclusive = ?");
+      values.push(updates.taxInclusive ? 1 : 0);
+    }
+    if (updates.paymentMethod !== undefined) {
+      fields.push("payment_method = ?");
+      values.push(updates.paymentMethod);
+    }
+    if (updates.tenderedAmount !== undefined) {
+      fields.push("tendered_amount = ?");
+      values.push(updates.tenderedAmount || 0);
+    }
+    if (updates.changeAmount !== undefined) {
+      fields.push("change_amount = ?");
+      values.push(updates.changeAmount || 0);
+    }
+    if (updates.tipAmount !== undefined) {
+      fields.push("tip_amount = ?");
+      values.push(updates.tipAmount || 0);
+    }
+    if (updates.cashOutAmount !== undefined) {
+      fields.push("cash_out_amount = ?");
+      values.push(updates.cashOutAmount || 0);
+    }
+    if (updates.pointsDiscount !== undefined) {
+      fields.push("points_discount = ?");
+      values.push(updates.pointsDiscount || 0);
+    }
+    if (updates.status !== undefined) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.payfast_payment_id !== undefined) {
+      fields.push("payfast_payment_id = ?");
+      values.push(updates.payfast_payment_id || null);
+    }
+    if (updates.tableNumber !== undefined) {
+      fields.push("table_number = ?");
+      values.push(updates.tableNumber || null);
+    }
+    if (updates.isTab !== undefined) {
+      fields.push("is_tab = ?");
+      values.push(updates.isTab ? 1 : 0);
+    }
+    if (updates.tabName !== undefined) {
+      fields.push("tab_name = ?");
+      values.push(updates.tabName || null);
+    }
+
+    if (fields.length > 0) {
+      fields.push("updated_at = NOW()");
+      values.push(tenantId, saleId);
+      await conn.query(
+        `UPDATE sales SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`,
+        values
+      );
+    }
+
+    if (updates.items !== undefined) {
+      await conn.query(`DELETE FROM sale_items WHERE sale_id = ?`, [saleId]);
+
+      for (const rawItem of updates.items) {
+        const item = rawItem as OrderItem & { productId?: string };
+        const saleItemId = item.id && item.productId ? item.id : generateSaleItemId();
+        const productId = item.productId || item.id || null;
+        await conn.query(
+          `INSERT INTO sale_items (
+            id, sale_id, product_id, product_name, price, quantity, status,
+            workstation_id, ordered_at, accepted_at, ready_at, delivered_at,
+            action_staff_id, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          [
+            saleItemId,
+            saleId,
+            productId,
+            item.name,
+            item.price || 0,
+            item.quantity || 0,
+            item.status || "pending",
+            item.workstationId || null,
+            item.orderedAt || null,
+            item.acceptedAt || null,
+            item.readyAt || null,
+            item.deliveredAt || null,
+            item.actionStaffId || null,
+          ]
+        );
+      }
+    }
+
+    await conn.commit();
+    const sale = await getSaleById(tenantId, saleId);
+    if (!sale) {
+      throw new Error(`Sale ${saleId} not found after update`);
+    }
+    return sale;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 export async function updateSaleItem(
   tenantId: string,
   saleId: string,
@@ -591,16 +739,7 @@ export async function updateSaleStatus(
   saleId: string,
   status: Sale["status"]
 ): Promise<Sale> {
-  await query(
-    `UPDATE sales SET status = ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
-    [status, tenantId, saleId]
-  );
-
-  const rows = await query(`SELECT * FROM sales WHERE tenant_id = ? AND id = ?`, [
-    tenantId,
-    saleId,
-  ]);
-  return rows[0] as Sale;
+  return updateSale(tenantId, saleId, { status });
 }
 
 export async function getSaleById(tenantId: string, saleId: string): Promise<Sale | null> {

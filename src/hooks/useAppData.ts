@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { JwtUser as User } from './useAuth';
 import { Product, Customer, Staff, Sale, AppConfig, Workstation, RestaurantTable, TableSection } from '../types';
 import { usePosStore } from '../store/usePosStore';
@@ -42,6 +42,36 @@ export function useAppData(user: User | null) {
 
   const [currentUserStaff, setCurrentUserStaff] = useState<Staff | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'manager' | 'cashier' | null>(null);
+
+  const loadSales = useCallback(async () => {
+    if (!tenantId) {
+      setSales([]);
+      return;
+    }
+    try {
+      const fetched = await getTenantSales(tenantId);
+      const sanitized = (fetched || []).map((s: any) => ({
+        ...s,
+        total: Number(s.total || 0),
+        subtotal: s.subtotal ? Number(s.subtotal) : undefined,
+        taxAmount: s.taxAmount ? Number(s.taxAmount) : undefined,
+        taxRate: s.taxRate ? Number(s.taxRate) : undefined,
+        tenderedAmount: s.tenderedAmount ? Number(s.tenderedAmount) : undefined,
+        changeAmount: s.changeAmount ? Number(s.changeAmount) : undefined,
+        tipAmount: s.tipAmount ? Number(s.tipAmount) : undefined,
+        cashOutAmount: s.cashOutAmount ? Number(s.cashOutAmount) : undefined,
+        pointsDiscount: s.pointsDiscount ? Number(s.pointsDiscount) : undefined,
+        items: (s.items || []).map((item: any) => ({
+          ...item,
+          price: Number(item.price || 0),
+          quantity: Number(item.quantity || 0),
+        })),
+      }));
+      setSales(sanitized);
+    } catch (err) {
+      console.error('Sales load error:', err);
+    }
+  }, [tenantId]);
 
   useEffect(() => {
     let active = true;
@@ -206,41 +236,12 @@ export function useAppData(user: User | null) {
   }, [tenantId]);
 
   useEffect(() => {
-    if (!tenantId) {
-      setSales([]);
-      return;
-    }
-    let active = true;
-    async function loadSales() {
-      try {
-        const fetched = await getTenantSales(tenantId!);
-        if (!active) return;
-        const sanitized = (fetched || []).map((s: any) => ({
-          ...s,
-          total: Number(s.total || 0),
-          subtotal: s.subtotal ? Number(s.subtotal) : undefined,
-          taxAmount: s.taxAmount ? Number(s.taxAmount) : undefined,
-          taxRate: s.taxRate ? Number(s.taxRate) : undefined,
-          tenderedAmount: s.tenderedAmount ? Number(s.tenderedAmount) : undefined,
-          changeAmount: s.changeAmount ? Number(s.changeAmount) : undefined,
-          tipAmount: s.tipAmount ? Number(s.tipAmount) : undefined,
-          cashOutAmount: s.cashOutAmount ? Number(s.cashOutAmount) : undefined,
-          pointsDiscount: s.pointsDiscount ? Number(s.pointsDiscount) : undefined,
-          items: (s.items || []).map((item: any) => ({
-            ...item,
-            price: Number(item.price || 0),
-            quantity: Number(item.quantity || 0),
-          })),
-        }));
-        setSales(sanitized);
-      } catch (err) {
-        console.error('Sales load error:', err);
-      }
-    }
-    loadSales();
-    const interval = setInterval(loadSales, 15000); // Sales change frequently
-    return () => { active = false; clearInterval(interval); };
-  }, [tenantId]);
+    void loadSales();
+    const interval = setInterval(() => {
+      void loadSales();
+    }, 15000); // Sales change frequently
+    return () => { clearInterval(interval); };
+  }, [loadSales]);
 
   useEffect(() => {
     if (!tenantId) {
@@ -326,6 +327,7 @@ export function useAppData(user: User | null) {
     products, customers, staff, sales, config, setConfig,
     workstations, activeSession, currentUserStaff, currentUserRole,
     tableSections, restaurantTables,
+    refreshSales: loadSales,
     tenantLoading, configLoading, isStaffLoading,
   };
 }

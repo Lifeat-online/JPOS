@@ -8,10 +8,11 @@ interface TablesViewProps {
   sales: Sale[];
   tableSections: TableSection[];
   restaurantTables: RestaurantTable[];
+  onSalesUpdated?: () => Promise<void>;
   onSelectTable: (tableNumber: string, existingSale?: Sale) => void;
 }
 
-export function TablesView({ sales, tableSections, restaurantTables, onSelectTable }: TablesViewProps) {
+export function TablesView({ sales, tableSections, restaurantTables, onSalesUpdated, onSelectTable }: TablesViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>('all');
@@ -49,6 +50,10 @@ export function TablesView({ sales, tableSections, restaurantTables, onSelectTab
         status: 'delivered',
         deliveredAt: new Date().toISOString()
       });
+    }
+
+    if (onSalesUpdated) {
+      await onSalesUpdated();
     }
   };
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sale, OrderItem, Workstation, Staff } from '../types';
 import { ChefHat, CheckCircle2, Clock, Play } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
@@ -8,11 +8,24 @@ interface WorkstationViewProps {
   sales: Sale[];
   workstations: Workstation[];
   currentUserStaff: Staff | null;
+  onSalesUpdated?: () => Promise<void>;
 }
 
-export function WorkstationView({ sales, workstations, currentUserStaff }: WorkstationViewProps) {
+export function WorkstationView({ sales, workstations, currentUserStaff, onSalesUpdated }: WorkstationViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
   const [activeWorkstationId, setActiveWorkstationId] = useState<string>(workstations[0]?.id || '');
+
+  useEffect(() => {
+    if (workstations.length === 0) {
+      if (activeWorkstationId) setActiveWorkstationId('');
+      return;
+    }
+
+    const workstationStillExists = workstations.some(w => w.id === activeWorkstationId);
+    if (!workstationStillExists) {
+      setActiveWorkstationId(workstations[0].id);
+    }
+  }, [workstations, activeWorkstationId]);
 
   const handleItemStatusUpdate = async (
     saleId: string,
@@ -46,6 +59,10 @@ export function WorkstationView({ sales, workstations, currentUserStaff }: Works
           isDevBroadcast: false,
           isSystemNotification: true,
         });
+      }
+
+      if (onSalesUpdated) {
+        await onSalesUpdated();
       }
     } catch (e) {
       console.error('Failed to update item status:', e);

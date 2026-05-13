@@ -47,6 +47,7 @@ import {
   updateRestaurantTable,
   deleteRestaurantTable,
   createSale,
+  updateSale,
   updateSaleStatus,
   updateSaleItem,
   getSaleById,
@@ -698,12 +699,12 @@ export async function createApp() {
 
   app.put("/api/mariadb/tenants/:tenantId/sales/:saleId", requireAuth, async (req, res) => {
     try {
-      const status = req.body?.status;
-      if (typeof status !== "string" || status.trim().length === 0) {
-        res.status(400).json({ error: "Missing status" });
+      const hasPayload = req.body && typeof req.body === "object" && Object.keys(req.body).length > 0;
+      if (!hasPayload) {
+        res.status(400).json({ error: "Missing sale updates" });
         return;
       }
-      const sale = await updateSaleStatus(req.params.tenantId, req.params.saleId, status as any);
+      const sale = await updateSale(req.params.tenantId, req.params.saleId, req.body);
       res.json(sale);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

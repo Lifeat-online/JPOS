@@ -15,9 +15,10 @@ interface CheckoutDeps {
   customers: Customer[];
   activeSession: any | null;
   config: AppConfig;
+  refreshSales: () => Promise<void>;
 }
 
-export function useCheckout({ user, tenantId, currentUserStaff, customers, activeSession, config }: CheckoutDeps) {
+export function useCheckout({ user, tenantId, currentUserStaff, customers, activeSession, config, refreshSales }: CheckoutDeps) {
   const {
     cart, clearCart,
     selectedCustomerId, setSelectedCustomerId,
@@ -128,6 +129,8 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         setActiveOrderId(created.id);
       }
 
+      await refreshSales();
+
       if (!sendToWorkstations) {
         resetAfterCheckout();
         navigate('/tables');
@@ -167,6 +170,8 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         const created = await createSale(tenantId, saleData);
         setActiveOrderId(created.id);
       }
+
+      await refreshSales();
     } catch (err) {
       console.error('Failed to open tab:', err);
       alert('Error saving tab');
@@ -214,6 +219,8 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         const created = await createSale(tenantId, saleData);
         saleId = created.id;
       }
+
+      await refreshSales();
 
       if (method === 'cash' || method === 'card') {
         // Update loyalty points
@@ -312,6 +319,8 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         const created = await createSale(tenantId, saleData);
         saleId = created.id;
       }
+
+      await refreshSales();
 
       // Deduct from staff wallet + update metrics
       await updateStaff(tenantId, currentUserStaff.id, {

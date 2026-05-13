@@ -406,6 +406,7 @@ export default function App() {
     products, customers, staff, sales, config, setConfig,
     workstations, activeSession, currentUserStaff, currentUserRole,
     tableSections, restaurantTables,
+    refreshSales,
     tenantLoading, configLoading, isStaffLoading,
   } = useAppData(user);
 
@@ -430,7 +431,7 @@ export default function App() {
     usePosStore.getState().setWorkstations(workstations);
   }, [workstations]);
 
-  const checkout = useCheckout({ user, tenantId, currentUserStaff, customers, activeSession, config });
+  const checkout = useCheckout({ user, tenantId, currentUserStaff, customers, activeSession, config, refreshSales });
 
   // Messaging
   const messaging = useMessaging({ user, tenantId, currentUserStaff, staff });
@@ -893,6 +894,7 @@ export default function App() {
             sales={sales}
             tableSections={tableSections}
             restaurantTables={restaurantTables}
+            onSalesUpdated={refreshSales}
             onSelectTable={(table, order) => {
               setActiveTableNumber(table);
               if (order) {
@@ -940,6 +942,7 @@ export default function App() {
             sales={sales}
             workstations={workstations}
             currentUserStaff={currentUserStaff}
+            onSalesUpdated={refreshSales}
           />
         )}
         {view === 'dev' && isDev && user && (
