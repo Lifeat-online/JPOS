@@ -220,6 +220,12 @@ function generatePayFastSignature(data: any, passphrase?: string) {
 
 export async function createApp() {
   const app = express();
+  
+  // Force production mode if running on Railway
+  if (process.env.RAILWAY_ENVIRONMENT_ID || process.env.RAILWAY_PROJECT_ID) {
+    process.env.NODE_ENV = "production";
+  }
+  
   const isProduction = process.env.NODE_ENV === "production";
   const isTest = process.env.VITEST === "1" || process.env.NODE_ENV === "test";
 
