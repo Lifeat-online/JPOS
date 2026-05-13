@@ -7,11 +7,14 @@ import { isPostgres, query } from "./db.js";
 dotenv.config();
 
 export async function initDb() {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const schemaPath = path.join(
-    process.cwd(),
+    currentDir,
+    "..",
     "db",
     isPostgres() ? "schema.postgres.sql" : "schema.sql"
   );
+  
   if (!fs.existsSync(schemaPath)) {
     throw new Error(`Schema file not found: ${schemaPath}`);
   }
