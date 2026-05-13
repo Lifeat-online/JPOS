@@ -39,67 +39,85 @@ const fadeUp = (delay = 0) => ({
 });
 
 const navLinks = [
-  { label: 'Why It Wins', href: '#why-it-wins' },
+  { label: 'Features', href: '#features' },
   { label: 'Industries', href: '#industries' },
-  { label: 'Results', href: '#results' },
+  { label: 'Setup', href: '#setup' },
   { label: 'FAQ', href: '#faq' },
 ];
 
 const proofStats = [
-  { value: 'Faster', label: 'service during peak trade' },
-  { value: 'Clearer', label: 'stock visibility for owners' },
-  { value: 'Stronger', label: 'repeat-customer retention' },
-  { value: 'Tighter', label: 'cash and staff control' },
+  { value: 'Faster', label: 'checkout with cleaner payment handling' },
+  { value: 'Smarter', label: 'inventory visibility that protects margin' },
+  { value: 'Stronger', label: 'customer loyalty and repeat spend' },
+  { value: 'Sharper', label: 'operations across cash, staff, and reporting' },
 ];
 
-const painPoints = [
+const heroHighlights = [
   {
     icon: ShoppingCart,
-    title: 'Queues move too slowly',
-    desc: 'Every delay at the till costs you sales, frustrates customers, and makes busy periods feel chaotic.',
+    title: 'Faster checkout',
+    desc: 'Serve more customers with a polished till experience built for pace.',
   },
   {
     icon: Package,
-    title: 'Stock goes missing',
-    desc: 'When inventory is not visible in real time, margin leaks quietly through missed counts and poor timing.',
-  },
-  {
-    icon: Users,
-    title: 'Managers run blind',
-    desc: 'If performance, cash, and customer behaviour are hard to read, growth decisions become guesswork.',
-  },
-];
-
-const valueCards = [
-  {
-    icon: Zap,
-    title: 'Sell Faster',
-    desc: 'Give teams a checkout flow that feels instant, polished, and easy to learn.',
-  },
-  {
-    icon: CreditCard,
-    title: 'Take Every Payment',
-    desc: 'Handle the payment mix modern customers expect without slowing the queue.',
-  },
-  {
-    icon: BarChart3,
-    title: 'Run On Real Numbers',
-    desc: 'Make better decisions with live visibility into sales, performance, and trade patterns.',
-  },
-  {
-    icon: Package,
-    title: 'Control Stock',
-    desc: 'Track products, spot issues early, and protect margin before problems get expensive.',
+    title: 'Sharper stock control',
+    desc: 'Stay on top of products, counts, and movement before profit leaks away.',
   },
   {
     icon: Gift,
-    title: 'Bring Customers Back',
-    desc: 'Turn one-time visits into repeat spend with loyalty and customer history.',
+    title: 'Better repeat business',
+    desc: 'Turn everyday visits into loyalty with customer-aware selling tools.',
+  },
+];
+
+const featureCards = [
+  {
+    icon: Zap,
+    title: 'Checkout That Feels Premium',
+    desc: 'Speed through transactions with a terminal designed to feel effortless for staff and customers alike.',
   },
   {
-    icon: Banknote,
-    title: 'Protect Cash',
-    desc: 'Create a cleaner, more accountable cash workflow from open to close.',
+    icon: CreditCard,
+    title: 'Flexible Payments',
+    desc: 'Take cash, card, wallets, and modern payment flows without breaking momentum at the counter.',
+  },
+  {
+    icon: Package,
+    title: 'Inventory And Product Control',
+    desc: 'Manage product ranges, monitor stock levels, and keep merchandising decisions tied to live movement.',
+  },
+  {
+    icon: Users,
+    title: 'Staff And Permission Layers',
+    desc: 'Give every team member the right level of access while keeping accountability clear behind the scenes.',
+  },
+  {
+    icon: Gift,
+    title: 'Customer Loyalty',
+    desc: 'Track customers, reward repeat spend, and create a more valuable relationship beyond a single sale.',
+  },
+  {
+    icon: BarChart3,
+    title: 'Reporting That Guides Decisions',
+    desc: 'See what is selling, who is performing, and where revenue is coming from while trade is still happening.',
+  },
+];
+
+const showcaseCards = [
+  {
+    icon: ShoppingCart,
+    title: 'Front Counter',
+    desc: 'Clean cart flow, quick item handling, and payment-ready checkout built for busy hours.',
+  },
+  {
+    icon: Package,
+    title: 'Back Office',
+    desc: 'Products, inventory, pricing, staff, and settings managed from a clearer control layer.',
+  },
+  {
+    icon: BarChart3,
+    title: 'Owner Visibility',
+    desc: 'Sales trends, product performance, and operational clarity in a format that feels executive-ready.',
   },
 ];
 
@@ -107,82 +125,82 @@ const industryCards = [
   {
     icon: Store,
     title: 'Retail',
-    desc: 'For fast-moving stores that need speed at the till, clean stock control, and confident reporting.',
+    desc: 'Built for stores that need faster service, stronger inventory control, and reporting that supports daily decisions.',
   },
   {
     icon: Utensils,
     title: 'Restaurants',
-    desc: 'For service teams that need smoother floor operations, cleaner handoffs, and faster table turnover.',
+    desc: 'Built for teams managing tables, kitchen coordination, and a guest experience that cannot afford friction.',
   },
   {
     icon: ChefHat,
     title: 'Takeaways',
-    desc: 'For high-volume food businesses where pace, accuracy, and repeat orders matter every day.',
+    desc: 'Built for high-volume order flow where speed, accuracy, and repeat customer value matter every shift.',
   },
   {
     icon: Building2,
     title: 'Growing Operators',
-    desc: 'For owners who need a sharper customer experience today and a stronger operating system tomorrow.',
+    desc: 'Built for ambitious businesses ready to level up the feel, control, and professionalism of the entire operation.',
   },
 ];
 
-const launchSteps = [
+const setupSteps = [
   {
     step: '01',
-    title: 'Shape the setup',
-    desc: 'Map your business flow, product structure, and team needs so the platform fits the way you trade.',
+    title: 'Sign up',
+    desc: 'Create your entry point and get into the platform with a cleaner, more premium first-run experience.',
   },
   {
     step: '02',
-    title: 'Launch with clarity',
-    desc: 'Bring staff into a clean, intuitive system that feels premium from day one.',
+    title: 'Start setup',
+    desc: 'Configure your business, products, and trading preferences so the POS reflects how you actually operate.',
   },
   {
     step: '03',
-    title: 'Grow with confidence',
-    desc: 'Use better reporting, better customer insight, and better control to scale from a stronger base.',
+    title: 'Go live fast',
+    desc: 'Put your team onto a polished interface that is built to sell, manage, and scale from day one.',
   },
 ];
 
 const trustPillars = [
   {
     icon: Lock,
-    title: 'Built for trust',
-    desc: 'A cleaner front end, clearer workflows, and stronger accountability across the business.',
+    title: 'Luxury-Led UX',
+    desc: 'Higher-end visual polish creates stronger trust before users even touch the product.',
   },
   {
     icon: LayoutGrid,
-    title: 'Built for scale',
-    desc: 'A system that feels premium for one location and still makes sense as operations grow.',
+    title: 'Feature-Rich Foundation',
+    desc: 'The message now leads with real POS capability instead of technical implementation detail.',
   },
   {
     icon: CheckCircle2,
-    title: 'Built for adoption',
-    desc: 'Simple enough for staff to use fast, polished enough for owners to believe in immediately.',
+    title: 'Funnel-Ready CTA Structure',
+    desc: 'Prospects now have clear paths to try the system, sign up, and move into setup with confidence.',
   },
 ];
 
 const faqItems = [
   {
-    question: 'Who is this built for?',
-    answer: 'Jimmy\'s POS is positioned for ambitious operators who want faster service, stronger stock control, and a front-of-house experience that feels more premium.',
+    question: 'What makes Jimmy’s POS different?',
+    answer: 'It combines premium design with the core POS features businesses actually buy for: checkout speed, payments, stock control, customer loyalty, staff access, cash handling, and reporting.',
   },
   {
-    question: 'What makes the landing experience better now?',
-    answer: 'The new front end leads with outcomes, trust, and clear conversion points instead of technical features, so prospects understand value before they see the product details.',
+    question: 'Does it cover more than just checkout?',
+    answer: 'Yes. The page now clearly markets the full system: sales flow, inventory, permissions, customer management, restaurant workflows, and business reporting.',
   },
   {
-    question: 'Can this work for both retail and hospitality?',
-    answer: 'Yes. The messaging now speaks to multiple business types while keeping the presentation polished, focused, and high-conviction.',
+    question: 'Can a new business start setup quickly?',
+    answer: 'Yes. The revised funnel now includes direct paths for sign up, trying the system, and moving straight into setup using the existing onboarding flow.',
   },
   {
-    question: 'What is the main conversion path?',
-    answer: 'The page now guides visitors from attention to trust to value to action, then closes with clear portal access for staff and customer users.',
+    question: 'Who is it ideal for?',
+    answer: 'Retail, restaurants, takeaways, and growth-focused operators who want a faster, more premium operating system for daily trade.',
   },
 ];
 
 const centeredCard =
-  'group relative overflow-hidden rounded-[28px] border border-white/60 dark:border-white/10 bg-white/80 dark:bg-slate-900/70 backdrop-blur-xl shadow-[0_20px_80px_-30px_rgba(15,23,42,0.35)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_30px_100px_-30px_rgba(37,99,235,0.35)]';
+  'group relative overflow-hidden rounded-[32px] border border-white/60 dark:border-white/10 bg-white/80 dark:bg-slate-900/70 backdrop-blur-xl shadow-[0_30px_120px_-40px_rgba(15,23,42,0.35)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_40px_140px_-40px_rgba(37,99,235,0.35)]';
 
 export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode }: WelcomeViewProps) {
   const [openFaq, setOpenFaq] = useState(0);
@@ -196,13 +214,13 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
       </div>
 
       <header className="sticky top-0 z-50 border-b border-slate-200/70 dark:border-slate-800/70 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-18 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-10">
+        <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-10">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 text-white shadow-lg shadow-blue-600/25">
+            <div className="flex h-12 w-12 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 text-white shadow-lg shadow-blue-600/25">
               <Store className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-base font-black tracking-tight text-slate-950 dark:text-white">Jimmy&apos;s POS</p>
+              <p className="text-lg font-black tracking-tight text-slate-950 dark:text-white">Jimmy&apos;s POS</p>
               <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-slate-400 dark:text-slate-500">Premium Commerce</p>
             </div>
           </div>
@@ -236,113 +254,152 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
             </button>
             <button
               onClick={onLogin}
-              className="flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-950/20 transition hover:scale-[1.01] hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+              className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white lg:flex"
             >
               <UserCircle className="h-4 w-4" />
-              <span className="hidden sm:inline">Staff Login</span>
-              <span className="sm:hidden">Login</span>
+              Staff Login
+            </button>
+            <button
+              onClick={onLogin}
+              className="flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-950/20 transition hover:scale-[1.01] hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+            >
+              <Sparkles className="h-4 w-4" />
+              Try Now
             </button>
           </div>
         </div>
       </header>
 
       <main className="flex-1">
-        <section className="relative overflow-hidden px-4 pb-16 pt-10 sm:px-6 lg:px-10 lg:pb-24 lg:pt-16">
-          <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+        <section className="relative overflow-hidden px-4 pb-24 pt-14 sm:px-6 lg:px-10 lg:pb-32 lg:pt-20">
+          <div className="mx-auto grid max-w-7xl items-center gap-14 lg:grid-cols-[1.05fr_0.95fr]">
             <div className="text-center lg:text-left">
               <motion.div
                 {...fadeUp(0)}
-                className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
+                className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-5 py-2.5 text-[11px] font-black uppercase tracking-[0.26em] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                Built To Win Attention And Convert
+                Luxury-Grade POS Experience
               </motion.div>
 
               <motion.h1
                 {...fadeUp(0.08)}
-                className="mx-auto mt-6 max-w-4xl text-5xl font-black tracking-[-0.05em] text-slate-950 dark:text-white sm:text-6xl lg:mx-0 lg:text-7xl"
+                className="mx-auto mt-8 max-w-5xl text-5xl font-black tracking-[-0.06em] text-slate-950 dark:text-white sm:text-6xl lg:mx-0 lg:text-[5.5rem] lg:leading-[0.95]"
               >
-                The POS that makes your business feel
-                <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 bg-clip-text text-transparent"> faster, sharper, and more premium.</span>
+                A point of sale system built to make
+                <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 bg-clip-text text-transparent"> checkout, stock, loyalty, and operations feel world-class.</span>
               </motion.h1>
 
               <motion.p
                 {...fadeUp(0.16)}
-                className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-600 dark:text-slate-300 lg:mx-0 lg:text-xl"
+                className="mx-auto mt-8 max-w-3xl text-lg leading-8 text-slate-600 dark:text-slate-300 lg:mx-0 lg:text-[1.35rem] lg:leading-9"
               >
-                Jimmy&apos;s POS is now framed like a high-conviction sales funnel: it speaks to growth, speed, trust, customer retention, and operational control before it ever talks about software.
+                Jimmy&apos;s POS gives ambitious businesses the features they actually need in one polished system: fast checkout, flexible payments, inventory control, customer loyalty, staff permissions, hospitality workflows, cash management, and reporting that helps you run smarter.
               </motion.p>
 
-              <motion.div {...fadeUp(0.24)} className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center lg:justify-start">
-                <a
-                  href="#why-it-wins"
-                  className="inline-flex items-center justify-center gap-3 rounded-2xl bg-blue-600 px-7 py-4 text-base font-bold text-white shadow-[0_20px_60px_-20px_rgba(37,99,235,0.65)] transition hover:scale-[1.02] hover:bg-blue-500"
+              <motion.div {...fadeUp(0.24)} className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:flex-wrap sm:justify-center lg:justify-start">
+                <button
+                  onClick={onLogin}
+                  className="inline-flex items-center justify-center gap-3 rounded-2xl bg-blue-600 px-8 py-4 text-base font-bold text-white shadow-[0_24px_80px_-24px_rgba(37,99,235,0.75)] transition hover:scale-[1.02] hover:bg-blue-500"
                 >
-                  See Why Clients Switch
+                  Try Now
                   <ArrowRight className="h-5 w-5" />
-                </a>
-                <a
-                  href="#launch"
-                  className="inline-flex items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-7 py-4 text-base font-bold text-slate-900 transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                </button>
+                <button
+                  onClick={onLogin}
+                  className="inline-flex items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-8 py-4 text-base font-bold text-slate-900 transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:hover:border-slate-700 dark:hover:bg-slate-800"
                 >
-                  See The Launch Journey
+                  Start Setup
+                </button>
+                <a
+                  href="#features"
+                  className="inline-flex items-center justify-center gap-3 rounded-2xl bg-slate-950 px-8 py-4 text-base font-bold text-white transition hover:scale-[1.02] hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+                >
+                  Explore Features
                 </a>
               </motion.div>
 
-              <motion.div {...fadeUp(0.32)} className="mt-10 grid gap-4 sm:grid-cols-3">
-                {[
-                  'Better first impressions',
-                  'Stronger conversion flow',
-                  'Clearer high-value messaging',
-                ].map((item) => (
+              <motion.div {...fadeUp(0.32)} className="mt-12 grid gap-4 sm:grid-cols-3">
+                {heroHighlights.map((item) => (
                   <div
-                    key={item}
-                    className="rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-4 text-center text-sm font-semibold text-slate-700 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-200"
+                    key={item.title}
+                    className="rounded-[26px] border border-slate-200/80 bg-white/85 px-5 py-5 text-center shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/70"
                   >
-                    {item}
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-white dark:bg-white dark:text-slate-950">
+                      <item.icon className="h-5 w-5" />
+                    </div>
+                    <p className="mt-4 text-sm font-black uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">{item.title}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{item.desc}</p>
                   </div>
                 ))}
               </motion.div>
             </div>
 
             <motion.div {...fadeUp(0.18)} className="relative mx-auto w-full max-w-xl">
-              <div className="absolute inset-0 rounded-[36px] bg-gradient-to-br from-blue-500/20 via-violet-500/10 to-cyan-400/20 blur-2xl" />
-              <div className="relative rounded-[36px] border border-white/70 bg-white/80 p-5 shadow-[0_40px_120px_-40px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/75">
-                <div className="rounded-[30px] border border-slate-200/80 bg-slate-950 p-6 text-white dark:border-white/10">
+              <motion.div
+                animate={{ y: [0, -10, 0] }}
+                transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+                className="absolute -right-6 top-10 hidden w-44 rounded-[26px] border border-white/60 bg-white/90 p-4 text-center shadow-[0_30px_80px_-35px_rgba(15,23,42,0.4)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/85 lg:block"
+              >
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white">
+                  <CreditCard className="h-5 w-5" />
+                </div>
+                <p className="mt-3 text-[11px] font-black uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Payments</p>
+                <p className="mt-2 text-lg font-black tracking-tight text-slate-950 dark:text-white">Smooth, modern, fast</p>
+              </motion.div>
+
+              <motion.div
+                animate={{ y: [0, 12, 0] }}
+                transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+                className="absolute -left-6 bottom-12 hidden w-48 rounded-[26px] border border-white/60 bg-white/90 p-4 text-center shadow-[0_30px_80px_-35px_rgba(15,23,42,0.4)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/85 lg:block"
+              >
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500 text-white">
+                  <Package className="h-5 w-5" />
+                </div>
+                <p className="mt-3 text-[11px] font-black uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Inventory</p>
+                <p className="mt-2 text-lg font-black tracking-tight text-slate-950 dark:text-white">Clear stock visibility</p>
+              </motion.div>
+
+              <div className="absolute inset-0 rounded-[42px] bg-gradient-to-br from-blue-500/20 via-violet-500/10 to-cyan-400/20 blur-2xl" />
+              <div className="relative rounded-[42px] border border-white/70 bg-white/80 p-6 shadow-[0_50px_140px_-50px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/75">
+                <div className="rounded-[34px] border border-slate-200/80 bg-slate-950 p-7 text-white dark:border-white/10">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-black uppercase tracking-[0.28em] text-blue-300">Today At A Glance</p>
-                      <h3 className="mt-2 text-2xl font-black tracking-tight">Front End That Sells</h3>
+                      <p className="text-xs font-black uppercase tracking-[0.28em] text-blue-300">Luxury POS Suite</p>
+                      <h3 className="mt-2 text-3xl font-black tracking-tight">One system. Every essential feature.</h3>
                     </div>
                     <div className="rounded-2xl bg-white/10 px-3 py-2 text-center">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-300">Focused On</p>
-                      <p className="mt-1 text-sm font-black">Conversion</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-300">Ready To</p>
+                      <p className="mt-1 text-sm font-black">Try Now</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 rounded-[30px] border border-white/10 bg-white/5 p-5">
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      {showcaseCards.map((item) => (
+                        <div key={item.title} className="rounded-[24px] border border-white/10 bg-white/5 px-4 py-5 text-center">
+                          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10">
+                            <item.icon className="h-5 w-5 text-blue-300" />
+                          </div>
+                          <p className="mt-4 text-sm font-black uppercase tracking-[0.18em] text-white">{item.title}</p>
+                          <p className="mt-2 text-xs leading-6 text-slate-300">{item.desc}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
                   <div className="mt-6 grid gap-4 sm:grid-cols-2">
                     {[
-                      { label: 'Hero', value: 'Stronger', tone: 'from-blue-500/25 to-cyan-400/20' },
-                      { label: 'Messaging', value: 'Sharper', tone: 'from-violet-500/25 to-fuchsia-400/20' },
-                      { label: 'Trust', value: 'Clearer', tone: 'from-emerald-500/25 to-green-400/20' },
-                      { label: 'CTA', value: 'Tighter', tone: 'from-amber-500/25 to-orange-400/20' },
+                      { label: 'Open Tabs', value: 'Hospitality-ready' },
+                      { label: 'Cashups', value: 'Manager clarity' },
+                      { label: 'Loyalty', value: 'Repeat spend' },
+                      { label: 'Reports', value: 'Decision-ready' },
                     ].map((item) => (
-                      <div
-                        key={item.label}
-                        className={`rounded-3xl border border-white/10 bg-gradient-to-br ${item.tone} px-5 py-6 text-center`}
-                      >
-                        <p className="text-[11px] font-black uppercase tracking-[0.24em] text-white/70">{item.label}</p>
-                        <p className="mt-3 text-3xl font-black tracking-tight text-white">{item.value}</p>
+                      <div key={item.label} className="rounded-[26px] border border-white/10 bg-gradient-to-br from-white/10 to-white/5 px-5 py-6 text-center">
+                        <p className="text-[11px] font-black uppercase tracking-[0.24em] text-white/65">{item.label}</p>
+                        <p className="mt-3 text-2xl font-black tracking-tight text-white">{item.value}</p>
                       </div>
                     ))}
-                  </div>
-
-                  <div className="mt-5 rounded-[28px] border border-white/10 bg-white/5 p-5 text-center">
-                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-white/10">
-                      <BarChart3 className="h-7 w-7 text-blue-300" />
-                    </div>
-                    <p className="mt-4 text-sm font-black uppercase tracking-[0.24em] text-slate-400">Premium Positioning</p>
-                    <p className="mt-2 text-lg font-bold text-white">Outcome-led copy, centered cards, and a cleaner path from attention to action.</p>
                   </div>
                 </div>
               </div>
@@ -350,75 +407,42 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
           </div>
         </section>
 
-        <section className="px-4 py-6 sm:px-6 lg:px-10">
+        <section className="px-4 py-8 sm:px-6 lg:px-10">
           <div className="mx-auto grid max-w-7xl gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {proofStats.map((stat, index) => (
               <motion.div
                 key={stat.label}
                 {...fadeUp(0.05 * index)}
-                className={`${centeredCard} px-6 py-7 text-center`}
+                className={`${centeredCard} px-6 py-8 text-center`}
               >
                 <p className="text-3xl font-black tracking-tight text-slate-950 dark:text-white">{stat.value}</p>
-                <p className="mt-2 text-sm font-semibold leading-6 text-slate-600 dark:text-slate-300">{stat.label}</p>
+                <p className="mt-3 text-sm font-semibold leading-6 text-slate-600 dark:text-slate-300">{stat.label}</p>
               </motion.div>
             ))}
           </div>
         </section>
 
-        <section id="why-it-wins" className="px-4 py-20 sm:px-6 lg:px-10">
+        <section id="features" className="px-4 py-24 sm:px-6 lg:px-10">
           <div className="mx-auto max-w-7xl">
             <motion.div {...fadeUp(0)} className="mx-auto max-w-3xl text-center">
               <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                 <Zap className="h-3.5 w-3.5" />
-                Why The Pitch Lands Better
+                Core POS Features
               </div>
-              <h2 className="mt-6 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
-                Lead with business pressure. Close with operational relief.
+              <h2 className="mt-7 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
+                Everything a serious POS should do, presented like a premium product.
               </h2>
               <p className="mt-5 text-lg leading-8 text-slate-600 dark:text-slate-300">
-                The redesigned landing page now follows the logic of a premium funnel: identify the pain, show the upside, build trust, and create a confident next step.
+                This pass puts the actual product at the center of the story: checkout, payments, inventory, customer retention, staff control, and reporting are now marketed as the real engine of business growth.
               </p>
             </motion.div>
 
-            <div className="mt-12 grid gap-6 lg:grid-cols-3">
-              {painPoints.map((item, index) => (
+            <div className="mt-16 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {featureCards.map((item, index) => (
                 <motion.div
                   key={item.title}
                   {...fadeUp(0.08 * index)}
-                  className={`${centeredCard} px-8 py-9 text-center`}
-                >
-                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-slate-950 text-white shadow-lg shadow-slate-950/15 dark:bg-white dark:text-slate-950">
-                    <item.icon className="h-7 w-7" />
-                  </div>
-                  <h3 className="mt-6 text-2xl font-black tracking-tight text-slate-950 dark:text-white">{item.title}</h3>
-                  <p className="mt-4 text-sm leading-7 text-slate-600 dark:text-slate-300">{item.desc}</p>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="px-4 py-20 sm:px-6 lg:px-10">
-          <div className="mx-auto max-w-7xl rounded-[36px] border border-slate-200/80 bg-white/85 px-6 py-12 shadow-[0_30px_90px_-30px_rgba(15,23,42,0.2)] backdrop-blur dark:border-slate-800 dark:bg-slate-900/75 sm:px-10 lg:px-12">
-            <motion.div {...fadeUp(0)} className="mx-auto max-w-3xl text-center">
-              <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
-                <Sparkles className="h-3.5 w-3.5" />
-                Outcome-Led Value
-              </div>
-              <h2 className="mt-6 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
-                Everything now points to the result a new client actually wants.
-              </h2>
-              <p className="mt-5 text-lg leading-8 text-slate-600 dark:text-slate-300">
-                Instead of listing technical architecture, the page now sells speed, margin protection, repeat business, and management confidence.
-              </p>
-            </motion.div>
-
-            <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {valueCards.map((item, index) => (
-                <motion.div
-                  key={item.title}
-                  {...fadeUp(0.06 * index)}
-                  className={`${centeredCard} px-8 py-9 text-center`}
+                  className={`${centeredCard} px-8 py-10 text-center`}
                 >
                   <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-600/20">
                     <item.icon className="h-7 w-7" />
@@ -431,18 +455,51 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
           </div>
         </section>
 
-        <section id="industries" className="bg-slate-950 px-4 py-24 text-white sm:px-6 lg:px-10">
+        <section className="px-4 py-24 sm:px-6 lg:px-10">
+          <div className="mx-auto max-w-7xl rounded-[36px] border border-slate-200/80 bg-white/85 px-6 py-12 shadow-[0_30px_90px_-30px_rgba(15,23,42,0.2)] backdrop-blur dark:border-slate-800 dark:bg-slate-900/75 sm:px-10 lg:px-12">
+            <motion.div {...fadeUp(0)} className="mx-auto max-w-3xl text-center">
+              <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                <Sparkles className="h-3.5 w-3.5" />
+                Richer Product Story
+              </div>
+              <h2 className="mt-6 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
+                The product now looks as capable as the feature set behind it.
+              </h2>
+              <p className="mt-5 text-lg leading-8 text-slate-600 dark:text-slate-300">
+                Bigger type, wider spacing, deeper shadows, and richer mockups make the system feel more expensive, more established, and more ready for serious operators.
+              </p>
+            </motion.div>
+
+            <div className="mt-14 grid gap-5 md:grid-cols-3">
+              {showcaseCards.map((item, index) => (
+                <motion.div
+                  key={item.title}
+                  {...fadeUp(0.06 * index)}
+                  className={`${centeredCard} px-8 py-10 text-center`}
+                >
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-slate-950 text-white shadow-lg shadow-slate-950/15 dark:bg-white dark:text-slate-950">
+                    <item.icon className="h-7 w-7" />
+                  </div>
+                  <h3 className="mt-6 text-2xl font-black tracking-tight text-slate-950 dark:text-white">{item.title}</h3>
+                  <p className="mt-4 text-sm leading-7 text-slate-600 dark:text-slate-300">{item.desc}</p>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="industries" className="bg-slate-950 px-4 py-28 text-white sm:px-6 lg:px-10">
           <div className="mx-auto max-w-7xl">
             <motion.div {...fadeUp(0)} className="mx-auto max-w-3xl text-center">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-blue-300">
                 <Store className="h-3.5 w-3.5" />
-                Designed For Real Trade
+                Built For Real Operators
               </div>
               <h2 className="mt-6 text-4xl font-black tracking-tight text-white sm:text-5xl">
-                A premium story for the businesses most likely to buy.
+                Purpose-built for the businesses that need more than a basic till.
               </h2>
               <p className="mt-5 text-lg leading-8 text-slate-300">
-                The message now feels more relevant to operators who care about service speed, cleaner systems, and a customer experience that reflects their brand.
+                Whether the pressure is queue speed, table flow, stock visibility, or repeat spend, Jimmy&apos;s POS now presents itself like the control centre for modern trade.
               </p>
             </motion.div>
 
@@ -464,15 +521,15 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
           </div>
         </section>
 
-        <section id="results" className="px-4 py-24 sm:px-6 lg:px-10">
+        <section id="results" className="px-4 py-28 sm:px-6 lg:px-10">
           <div className="mx-auto max-w-7xl">
             <motion.div {...fadeUp(0)} className="mx-auto max-w-3xl text-center">
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
                 <BarChart3 className="h-3.5 w-3.5" />
-                What Better Positioning Communicates
+                Why This Lands Better
               </div>
               <h2 className="mt-6 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
-                A cleaner promise. A stronger impression. A sharper path to yes.
+                Stronger typography, stronger visuals, stronger product positioning.
               </h2>
             </motion.div>
 
@@ -482,10 +539,10 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                   <ShieldCheck className="h-7 w-7" />
                 </div>
                 <h3 className="mt-6 text-3xl font-black tracking-tight text-slate-950 dark:text-white">
-                  The page now sells confidence before functionality.
+                  The page now markets a premium POS system, not just a software project.
                 </h3>
                 <p className="mx-auto mt-5 max-w-2xl text-base leading-8 text-slate-600 dark:text-slate-300">
-                  New prospects first see premium visual polish, clearer hierarchy, stronger copy, and a story about outcomes. Product detail becomes support for the sale, not the headline.
+                  Prospects first meet a high-end commerce brand, then quickly understand the full feature set: checkout, inventory, loyalty, hospitality tools, cash control, reporting, and a clear path to getting started.
                 </p>
               </motion.div>
 
@@ -508,23 +565,23 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
           </div>
         </section>
 
-        <section id="launch" className="px-4 py-24 sm:px-6 lg:px-10">
+        <section id="setup" className="px-4 py-28 sm:px-6 lg:px-10">
           <div className="mx-auto max-w-7xl rounded-[40px] bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 px-6 py-14 text-white shadow-[0_40px_120px_-40px_rgba(15,23,42,0.7)] sm:px-10 lg:px-12">
             <motion.div {...fadeUp(0)} className="mx-auto max-w-3xl text-center">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-blue-300">
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                Launch Journey
+                Start Fast
               </div>
               <h2 className="mt-6 text-4xl font-black tracking-tight sm:text-5xl">
-                A premium funnel needs a premium finish.
+                Sign up, try the system, and move straight into setup.
               </h2>
               <p className="mt-5 text-lg leading-8 text-slate-300">
-                The closing sequence now reassures visitors that the product is not just attractive. It is organised, thoughtful, and ready to support growth.
+                The funnel now ends with clear next steps for prospects who are ready to act, while still keeping portal access available for returning users.
               </p>
             </motion.div>
 
             <div className="mt-12 grid gap-6 lg:grid-cols-3">
-              {launchSteps.map((item, index) => (
+              {setupSteps.map((item, index) => (
                 <motion.div
                   key={item.step}
                   {...fadeUp(0.08 * index)}
@@ -537,6 +594,22 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                   <p className="mt-4 text-sm leading-7 text-slate-300">{item.desc}</p>
                 </motion.div>
               ))}
+            </div>
+
+            <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+              <button
+                onClick={onLogin}
+                className="inline-flex items-center justify-center gap-3 rounded-2xl bg-white px-8 py-4 text-base font-black text-slate-950 transition hover:scale-[1.02] hover:bg-slate-100"
+              >
+                Sign Up
+                <ArrowRight className="h-5 w-5" />
+              </button>
+              <button
+                onClick={onLogin}
+                className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/20 bg-blue-600/30 px-8 py-4 text-base font-black text-white transition hover:scale-[1.02] hover:bg-blue-500/40"
+              >
+                Start Setup
+              </button>
             </div>
           </div>
         </section>
@@ -589,10 +662,10 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                 Ready To Close The Loop
               </div>
               <h2 className="mt-6 text-4xl font-black tracking-tight sm:text-5xl">
-                A better front end now makes the product feel more valuable before a word is spoken.
+                A premium POS deserves a premium first impression and a faster path to action.
               </h2>
               <p className="mx-auto mt-5 max-w-3xl text-lg leading-8 text-blue-100">
-                The landing page now behaves like a proper high-end acquisition surface: premium aesthetics, clearer persuasion, centered cards, and a tighter path to action.
+                This second pass pushes harder on brand polish, feature marketing, richer mockups, and clear CTAs for trying the product, signing up, and moving into setup.
               </p>
 
               <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -600,12 +673,18 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                   onClick={onLogin}
                   className="inline-flex items-center justify-center gap-3 rounded-2xl bg-white px-8 py-4 text-base font-black text-blue-700 transition hover:scale-[1.02] hover:bg-blue-50"
                 >
-                  Staff Login
+                  Try Now
                   <ArrowRight className="h-5 w-5" />
                 </button>
                 <button
-                  onClick={onClientLogin}
+                  onClick={onLogin}
                   className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/25 bg-white/10 px-8 py-4 text-base font-black text-white transition hover:scale-[1.02] hover:bg-white/20"
+                >
+                  Start Setup
+                </button>
+                <button
+                  onClick={onClientLogin}
+                  className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/25 bg-transparent px-8 py-4 text-base font-black text-white transition hover:scale-[1.02] hover:bg-white/10"
                 >
                   <ShoppingBag className="h-5 w-5" />
                   Customer Portal
@@ -626,7 +705,13 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Sharper systems. Better trade.</p>
               </div>
             </div>
-            <p>Built to help serious operators look sharper, serve faster, and grow with more control.</p>
+            <button
+              onClick={onLogin}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+            >
+              <UserCircle className="h-4 w-4" />
+              Staff Login
+            </button>
           </div>
         </footer>
       </main>

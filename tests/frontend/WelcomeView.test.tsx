@@ -19,13 +19,20 @@ describe('WelcomeView', () => {
     );
 
     const staffLoginButtons = screen.getAllByRole('button', { name: /Staff Login/i });
+    const tryNowButtons = screen.getAllByRole('button', { name: /Try Now/i });
+    const startSetupButtons = screen.getAllByRole('button', { name: /Start Setup/i });
 
     expect(staffLoginButtons).toHaveLength(2);
-    expect(screen.getByText(/The POS that makes your business feel/i)).toBeInTheDocument();
+    expect(tryNowButtons[0]).toBeInTheDocument();
+    expect(startSetupButtons[0]).toBeInTheDocument();
+    expect(screen.getByText(/A point of sale system built to make/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Toggle dark mode/i })).toBeInTheDocument();
 
-    fireEvent.click(staffLoginButtons[0]);
+    fireEvent.click(tryNowButtons[0]);
     expect(onLogin).toHaveBeenCalled();
+
+    fireEvent.click(startSetupButtons[0]);
+    expect(onLogin).toHaveBeenCalledTimes(2);
 
     fireEvent.click(screen.getByRole('button', { name: /My Account/i }));
     expect(onClientLogin).toHaveBeenCalled();
