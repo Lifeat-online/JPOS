@@ -1,21 +1,21 @@
 -- MariaDB schema for Jimmy's POS
 -- Use MariaDB 10.2+ for JSON support
 
-CREATE TABLE tenants (
+CREATE TABLE IF NOT EXISTS tenants (
   id VARCHAR(64) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-CREATE TABLE slugs (
+CREATE TABLE IF NOT EXISTS slugs (
   slug VARCHAR(255) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   uid VARCHAR(128) PRIMARY KEY,
   tenant_id VARCHAR(64),
   email VARCHAR(255) NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE users (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL
 );
 
-CREATE TABLE app_settings (
+CREATE TABLE IF NOT EXISTS app_settings (
   tenant_id VARCHAR(64) PRIMARY KEY,
   payfast_merchant_id VARCHAR(128) DEFAULT '10000100',
   payfast_merchant_key VARCHAR(128) DEFAULT '46f0cd694581a',
@@ -40,7 +40,7 @@ CREATE TABLE app_settings (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   name VARCHAR(255) NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE products (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE customers (
+CREATE TABLE IF NOT EXISTS customers (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   name VARCHAR(255) NOT NULL,
@@ -75,7 +75,7 @@ CREATE TABLE customers (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE staff (
+CREATE TABLE IF NOT EXISTS staff (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   name VARCHAR(255) NOT NULL,
@@ -99,7 +99,7 @@ CREATE TABLE staff (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE workstations (
+CREATE TABLE IF NOT EXISTS workstations (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   name VARCHAR(255) NOT NULL,
@@ -110,7 +110,7 @@ CREATE TABLE workstations (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE sales (
+CREATE TABLE IF NOT EXISTS sales (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   customer_id VARCHAR(64),
@@ -137,7 +137,7 @@ CREATE TABLE sales (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE sale_items (
+CREATE TABLE IF NOT EXISTS sale_items (
   id VARCHAR(64) PRIMARY KEY,
   sale_id VARCHAR(64) NOT NULL,
   product_id VARCHAR(64),
@@ -156,7 +156,7 @@ CREATE TABLE sale_items (
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
 );
 
-CREATE TABLE cash_sessions (
+CREATE TABLE IF NOT EXISTS cash_sessions (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   staff_id VARCHAR(64) NOT NULL,
@@ -176,7 +176,7 @@ CREATE TABLE cash_sessions (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE customer_payout_requests (
+CREATE TABLE IF NOT EXISTS customer_payout_requests (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   customer_id VARCHAR(64),
@@ -192,7 +192,7 @@ CREATE TABLE customer_payout_requests (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   channel VARCHAR(255) NOT NULL,
@@ -207,7 +207,7 @@ CREATE TABLE messages (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE purchase_orders (
+CREATE TABLE IF NOT EXISTS purchase_orders (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   vendor_id VARCHAR(64),
@@ -223,7 +223,7 @@ CREATE TABLE purchase_orders (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE vendors (
+CREATE TABLE IF NOT EXISTS vendors (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   name VARCHAR(255) NOT NULL,
@@ -237,7 +237,7 @@ CREATE TABLE vendors (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE payout_requests (
+CREATE TABLE IF NOT EXISTS payout_requests (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   staff_id VARCHAR(64),
@@ -255,7 +255,7 @@ CREATE TABLE payout_requests (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE table_sections (
+CREATE TABLE IF NOT EXISTS table_sections (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   name VARCHAR(255) NOT NULL,
@@ -266,7 +266,7 @@ CREATE TABLE table_sections (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
-CREATE TABLE restaurant_tables (
+CREATE TABLE IF NOT EXISTS restaurant_tables (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   label VARCHAR(255) NOT NULL,
