@@ -34,6 +34,9 @@ RUN npm ci --omit=dev
 # Copy built frontend from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy database schemas used by runtime init endpoints
+COPY --from=builder /app/db ./db
+
 # Copy server code and src
 COPY --from=builder /app/server ./server
 COPY --from=builder /app/src ./src

@@ -108,6 +108,24 @@ function canManageUpdates(role: unknown) {
   return r === "admin" || r === "dev";
 }
 
+function isMissingBootstrapSchemaError(err: unknown) {
+  const message = String((err as any)?.message || "").toLowerCase();
+  return (
+    message.includes('relation "tenants" does not exist') ||
+    message.includes("table 'tenants' doesn't exist") ||
+    message.includes("schema file not found")
+  );
+}
+
+async function ensureDevBootstrapSchema() {
+  try {
+    await query("SELECT 1 FROM tenants LIMIT 1");
+  } catch (err) {
+    if (!isMissingBootstrapSchemaError(err)) throw err;
+    await initDb();
+  }
+}
+
 function parseVersionSegments(version: string) {
   return version
     .replace(/^[^0-9]*/, "")
@@ -265,6 +283,7 @@ export async function createApp() {
   });
 
   app.post("/api/dev/bootstrap-login", async (req, res) => {
+    await ensureDevBootstrapSchema();
     const conn = await getConnection();
     try {
       await conn.beginTransaction();
@@ -1605,7 +1624,7 @@ export async function createApp() {
     const PORT = Number(process.env.PORT || 8080);
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://0.0.0.0:${PORT}`);
-      console.log(`MariaDB-connected POS system ready`);
+      console.log(`${isPostgres() ? "Postgres" : "MariaDB"}-connected POS system ready`);
       console.log(`__dirname is: ${__dirname}`);
       console.log(`distDir is: ${path.resolve(__dirname, '..', 'dist')}`);
     });
