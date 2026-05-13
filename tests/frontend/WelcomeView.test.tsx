@@ -18,8 +18,17 @@ describe('WelcomeView', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: /Staff Login/i })).toBeInTheDocument();
+    const staffLoginButtons = screen.getAllByRole('button', { name: /Staff Login/i });
+
+    expect(staffLoginButtons).toHaveLength(2);
+    expect(screen.getByText(/The POS that makes your business feel/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Toggle dark mode/i })).toBeInTheDocument();
+
+    fireEvent.click(staffLoginButtons[0]);
+    expect(onLogin).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /My Account/i }));
+    expect(onClientLogin).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /Toggle dark mode/i }));
     expect(toggleDarkMode).toHaveBeenCalled();
