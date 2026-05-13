@@ -103,7 +103,9 @@ export async function query<T = any>(sql: string, params: any[] = []) {
     return res.rows as T[];
   }
 
-  if (!mariaPool) throw new Error("Database connection not initialized.");
+  if (!mariaPool) {
+    throw new Error("MariaDB connection not initialized. Check your environment variables (DATABASE_URL missing).");
+  }
   const [rows] = await mariaPool.execute(sql, params);
   return rows as T[];
 }
@@ -138,7 +140,9 @@ export async function getConnection() {
     return conn;
   }
 
-  if (!mariaPool) throw new Error("Database connection not initialized.");
+  if (!mariaPool) {
+    throw new Error("MariaDB connection not initialized. Check your environment variables (DATABASE_URL missing).");
+  }
   const mariaConn = await mariaPool.getConnection();
   const conn: DbConnection = {
     async beginTransaction() {
