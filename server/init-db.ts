@@ -1,11 +1,12 @@
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { isPostgres, query } from "./db.js";
 
 dotenv.config();
 
-async function runSchema() {
+export async function initDb() {
   const schemaPath = path.join(
     process.cwd(),
     "db",
@@ -38,12 +39,14 @@ async function runSchema() {
   }
 }
 
-runSchema()
-  .then(() => {
-    console.log("Database schema initialized successfully.");
-    process.exit(0);
-  })
-  .catch((err) => {
-    console.error("Failed to initialize database schema:", err);
-    process.exit(1);
-  });
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  initDb()
+    .then(() => {
+      console.log("Database schema initialized successfully.");
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error("Failed to initialize database schema:", err);
+      process.exit(1);
+    });
+}

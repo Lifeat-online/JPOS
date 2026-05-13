@@ -9,6 +9,7 @@ import { spawnSync } from "child_process";
 import os from "os";
 import { fileURLToPath } from "url";
 import { getConnection, isPostgres, query } from "./db.js";
+import { initDb } from "./init-db.js";
 import {
   getProductsByTenant,
   getTenantIdBySlug,
@@ -249,6 +250,15 @@ export async function createApp() {
       } finally {
         conn.release();
       }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message, stack: err.stack });
+    }
+  });
+
+  app.post("/api/dev/init-db", async (req, res) => {
+    try {
+      await initDb();
+      res.json({ success: true, message: "Database schema initialized successfully" });
     } catch (err: any) {
       res.status(500).json({ error: err.message, stack: err.stack });
     }
