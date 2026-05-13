@@ -8,8 +8,12 @@ dotenv.config();
 
 export async function initDb() {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  // In production (dist/server), the db folder is at ../../db
+  // In dev (server), the db folder is at ../db
+  const isProd = currentDir.includes("dist");
   const schemaPath = path.join(
     currentDir,
+    isProd ? ".." : "",
     "..",
     "db",
     isPostgres() ? "schema.postgres.sql" : "schema.sql"
