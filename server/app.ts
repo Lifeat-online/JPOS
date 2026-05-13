@@ -67,9 +67,8 @@ import {
   handleRefreshToken,
   handleGetMe,
   handleSetupPassword,
-  hashPassword,
 } from "./auth-handler.js";
-import { generateAccessToken, generateRefreshToken, requireAuth, optionalAuth, type AuthTokenPayload } from "./auth-middleware.js";
+import { requireAuth, optionalAuth } from "./auth-middleware.js";
 
 dotenv.config();
 
@@ -80,12 +79,6 @@ const UPDATE_GIT_URL = "https://github.com/Lifeat-online/JPOS.git";
 const UPDATE_SSH_URL = "git@github.com:Lifeat-online/JPOS.git";
 const UPDATE_REPO = "Lifeat-online/JPOS";
 const BUILD_ID = "jpos-update-2026-05-10-1";
-const DEV_BOOTSTRAP_EMAIL = "jameskoen78@gmail.com";
-const DEV_BOOTSTRAP_TENANT_ID = "default";
-const DEV_BOOTSTRAP_TENANT_NAME = "Default Tenant";
-const DEV_BOOTSTRAP_STAFF_ID = "admin";
-const DEV_BOOTSTRAP_NAME = "Admin";
-
 let RUNTIME_GITHUB_TOKEN: string | null = null;
 const SSH_DIR = path.join(os.homedir(), ".ssh");
 const SSH_KEY_PATH = path.join(SSH_DIR, "jpos_github_key");
@@ -106,24 +99,6 @@ function normalizeRole(role: unknown) {
 function canManageUpdates(role: unknown) {
   const r = normalizeRole(role);
   return r === "admin" || r === "dev";
-}
-
-function isMissingBootstrapSchemaError(err: unknown) {
-  const message = String((err as any)?.message || "").toLowerCase();
-  return (
-    message.includes('relation "tenants" does not exist') ||
-    message.includes("table 'tenants' doesn't exist") ||
-    message.includes("schema file not found")
-  );
-}
-
-async function ensureDevBootstrapSchema() {
-  try {
-    await query("SELECT 1 FROM tenants LIMIT 1");
-  } catch (err) {
-    if (!isMissingBootstrapSchemaError(err)) throw err;
-    await initDb();
-  }
 }
 
 function parseVersionSegments(version: string) {
@@ -279,108 +254,6 @@ export async function createApp() {
       res.json({ success: true, message: "Database schema initialized successfully" });
     } catch (err: any) {
       res.status(500).json({ error: err.message, stack: err.stack });
-    }
-  });
-
-  app.post("/api/dev/bootstrap-login", async (req, res) => {
-    await ensureDevBootstrapSchema();
-    const conn = await getConnection();
-    try {
-      await conn.beginTransaction();
-
-      const passwordHash = await hashPassword("devpassword");
-      const pg = isPostgres();
-
-      await conn.execute(
-        pg
-          ? `INSERT INTO tenants (id, name, created_at, updated_at)
-             VALUES (?, ?, NOW(), NOW())
-             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`
-          : `INSERT INTO tenants (id, name, created_at, updated_at)
-             VALUES (?, ?, NOW(), NOW())
-             ON DUPLICATE KEY UPDATE name = VALUES(name), updated_at = NOW()`,
-        [DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_TENANT_NAME]
-      );
-
-      await conn.execute(
-        pg
-          ? `INSERT INTO app_settings (tenant_id, setup_completed, business, created_at, updated_at)
-             VALUES (?, 1, ?, NOW(), NOW())
-             ON CONFLICT (tenant_id) DO UPDATE SET setup_completed = 1, business = EXCLUDED.business, updated_at = NOW()`
-          : `INSERT INTO app_settings (tenant_id, setup_completed, business, created_at, updated_at)
-             VALUES (?, 1, ?, NOW(), NOW())
-             ON DUPLICATE KEY UPDATE setup_completed = 1, updated_at = NOW()`,
-        [DEV_BOOTSTRAP_TENANT_ID, JSON.stringify({ name: DEV_BOOTSTRAP_TENANT_NAME })]
-      );
-
-      await conn.execute(
-        pg
-          ? `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at)
-             VALUES (?, ?, ?, ?, NOW(), NOW())
-             ON CONFLICT (uid) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, email = EXCLUDED.email, name = EXCLUDED.name, updated_at = NOW()`
-          : `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at)
-             VALUES (?, ?, ?, ?, NOW(), NOW())
-             ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), email = VALUES(email), name = VALUES(name), updated_at = NOW()`,
-        [DEV_BOOTSTRAP_STAFF_ID, DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_EMAIL, DEV_BOOTSTRAP_NAME]
-      );
-
-      await conn.execute(
-        pg
-          ? `INSERT INTO staff (id, tenant_id, name, role, email, password_hash, status, created_at, updated_at)
-             VALUES (?, ?, ?, 'dev', ?, ?, 'active', NOW(), NOW())
-             ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, name = EXCLUDED.name, role = 'dev', email = EXCLUDED.email, password_hash = EXCLUDED.password_hash, status = 'active', updated_at = NOW()`
-          : `INSERT INTO staff (id, tenant_id, name, role, email, password_hash, status, created_at, updated_at)
-             VALUES (?, ?, ?, 'dev', ?, ?, 'active', NOW(), NOW())
-             ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), name = VALUES(name), role = 'dev', email = VALUES(email), password_hash = VALUES(password_hash), status = 'active', updated_at = NOW()`,
-        [DEV_BOOTSTRAP_STAFF_ID, DEV_BOOTSTRAP_TENANT_ID, DEV_BOOTSTRAP_NAME, DEV_BOOTSTRAP_EMAIL, passwordHash]
-      );
-
-      const [workstationCountRows] = await conn.execute<{ c: number }>(
-        `SELECT COUNT(*) AS c FROM workstations WHERE tenant_id = ?`,
-        [DEV_BOOTSTRAP_TENANT_ID]
-      );
-      const workstationCount = Number(workstationCountRows?.[0]?.c || 0);
-      if (workstationCount === 0) {
-        await conn.execute(
-          `INSERT INTO workstations (id, tenant_id, name, type, status, created_at, updated_at)
-           VALUES (?, ?, 'Kitchen', 'kitchen', 'active', NOW(), NOW())`,
-          ["ws_default_kitchen", DEV_BOOTSTRAP_TENANT_ID]
-        );
-      }
-
-      await conn.commit();
-
-      const payload: AuthTokenPayload = {
-        uid: DEV_BOOTSTRAP_STAFF_ID,
-        email: DEV_BOOTSTRAP_EMAIL,
-        name: DEV_BOOTSTRAP_NAME,
-        tenantId: DEV_BOOTSTRAP_TENANT_ID,
-        role: "dev",
-        staffId: DEV_BOOTSTRAP_STAFF_ID,
-      };
-
-      const accessToken = generateAccessToken(payload);
-      const refreshToken = generateRefreshToken(payload);
-
-      return res.json({
-        accessToken,
-        refreshToken,
-        user: {
-          id: DEV_BOOTSTRAP_STAFF_ID,
-          email: DEV_BOOTSTRAP_EMAIL,
-          name: DEV_BOOTSTRAP_NAME,
-          role: "dev",
-          tenantId: DEV_BOOTSTRAP_TENANT_ID,
-          tenantName: DEV_BOOTSTRAP_TENANT_NAME,
-        },
-      });
-    } catch (err: any) {
-      try {
-        await conn.rollback();
-      } catch {}
-      return res.status(500).json({ error: err?.message || "Bootstrap login failed" });
-    } finally {
-      conn.release();
     }
   });
 

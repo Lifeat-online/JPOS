@@ -12,7 +12,6 @@ import {
 interface WelcomeViewProps {
   onLogin: () => void;
   onClientLogin: () => void;
-  onDevQuickLogin: () => void;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
 }
@@ -155,7 +154,7 @@ const pwaFeatures = [
   { icon: TabletSmartphone, title: 'Any Device', desc: 'Optimised for tablets, phones, and desktop workstations.' },
 ];
 
-export function WelcomeView({ onLogin, onClientLogin, onDevQuickLogin, isDarkMode, toggleDarkMode }: WelcomeViewProps) {
+export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode }: WelcomeViewProps) {
   return (
     <div className={`min-h-screen w-full flex flex-col font-sans ${isDarkMode ? 'dark bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'}`}>
 
@@ -179,13 +178,6 @@ export function WelcomeView({ onLogin, onClientLogin, onDevQuickLogin, isDarkMod
           >
             <ShoppingBag className="w-4 h-4" />
             My Account
-          </button>
-          <button
-            onClick={onDevQuickLogin}
-            className="hidden sm:flex px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 rounded-xl font-bold hover:bg-amber-200 dark:hover:bg-amber-900/50 transition text-sm items-center gap-2 border border-amber-200 dark:border-amber-800"
-          >
-            <Lock className="w-4 h-4" />
-            Dev Seed + Login
           </button>
           <button
             onClick={onLogin}
@@ -235,13 +227,6 @@ export function WelcomeView({ onLogin, onClientLogin, onDevQuickLogin, isDarkMod
               >
                 <ShoppingBag className="w-5 h-5" />
                 Customer Portal
-              </button>
-              <button
-                onClick={onDevQuickLogin}
-                className="px-8 py-4 bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-100 border-2 border-amber-200 dark:border-amber-800 rounded-2xl font-bold hover:bg-amber-200 dark:hover:bg-amber-900/50 active:scale-95 transition-all flex items-center justify-center gap-3 text-base"
-              >
-                <Lock className="w-5 h-5" />
-                Dev Seed + Login
               </button>
             </motion.div>
 

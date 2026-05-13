@@ -7,14 +7,12 @@ describe('WelcomeView', () => {
   it('renders buttons and toggles dark mode', () => {
     const onLogin = vi.fn();
     const onClientLogin = vi.fn();
-    const onDevQuickLogin = vi.fn();
     const toggleDarkMode = vi.fn();
 
     renderWithRouter(
       <WelcomeView
         onLogin={onLogin}
         onClientLogin={onClientLogin}
-        onDevQuickLogin={onDevQuickLogin}
         isDarkMode={false}
         toggleDarkMode={toggleDarkMode}
       />

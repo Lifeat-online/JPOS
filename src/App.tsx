@@ -393,43 +393,6 @@ export default function App() {
   const handleStaffLogin = () => { setLoginMode('staff'); clearError(); setLoginModalOpen(true); };
   const handleClientLogin = async () => { setLoginMode('client'); await login(); };
   const handleLogout = async () => { setLoginMode(null); await logout(); navigate('/'); };
-  const handleDevQuickLogin = async () => {
-    try {
-      const rawApiBase = (import.meta as any).env?.VITE_API_BASE_URL;
-      const apiBase = typeof rawApiBase === 'string' ? rawApiBase.replace(/\/+$/g, '') : '';
-      const url = apiBase ? `${apiBase}/api/dev/bootstrap-login` : '/api/dev/bootstrap-login';
-
-      const res = await fetch(url, { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (res.status === 404) {
-          alert(
-            'Dev seed + login failed: backend endpoint not found.\n\nThis button requires the Node/MariaDB backend to be running behind /api.\nIf you are on a frontend-only deployment (e.g. Vercel), set VITE_API_BASE_URL to your backend origin and redeploy.'
-          );
-          return;
-        }
-        alert(data.error || `Dev seed + login failed (${res.status})`);
-        return;
-      }
-
-      const userToStore = {
-        ...data.user,
-        uid: data.user.id,
-        displayName: data.user.name,
-        photoURL: null,
-      };
-
-      localStorage.setItem('jpos_access_token', data.accessToken);
-      localStorage.setItem('jpos_refresh_token', data.refreshToken);
-      localStorage.setItem('jpos_user', JSON.stringify(userToStore));
-      window.location.reload();
-    } catch (err: any) {
-      alert(
-        `${err?.message || 'Dev seed + login failed'}\n\nIf you are on a frontend-only deployment, point the app at your backend with VITE_API_BASE_URL.`
-      );
-    }
-  };
-
   // Called by LoginModal on form submit
   const handleLoginSubmit = async (email: string, password: string) => {
     setLoginLoading(true);
@@ -689,7 +652,6 @@ export default function App() {
         <WelcomeView
           onLogin={handleStaffLogin}
           onClientLogin={handleClientLogin}
-          onDevQuickLogin={handleDevQuickLogin}
           isDarkMode={isDarkMode}
           toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
         />
