@@ -3,6 +3,7 @@ import { Sale, OrderItem, Workstation, Staff } from '../types';
 import { ChefHat, CheckCircle2, Clock, Play } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { apiPost, apiPut } from '../api';
+import { getDate } from '../utils/date';
 
 interface WorkstationViewProps {
   sales: Sale[];
@@ -90,7 +91,11 @@ export function WorkstationView({ sales, workstations, currentUserStaff, onSales
         return o.workstationId === activeWorkstationId && (o.status === 'pending' || o.status === 'accepted');
       })
     )
-    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    .sort((a, b) => {
+      const ta = getDate(a.createdAt).getTime();
+      const tb = getDate(b.createdAt).getTime();
+      return (isNaN(ta) ? 0 : ta) - (isNaN(tb) ? 0 : tb);
+    });
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-slate-50 dark:bg-[#0B1120]">
@@ -140,7 +145,7 @@ export function WorkstationView({ sales, workstations, currentUserStaff, onSales
                       </h3>
                       <div className="text-[10px] uppercase font-bold tracking-widest text-white/80 flex items-center gap-1.5">
                         <Clock className="w-3 h-3" />
-                        {order.createdAt ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Now'}
+                        {order.createdAt ? getDate(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Now'}
                       </div>
                     </div>
                     <div className="text-xl font-black bg-white/20 px-3 py-1 rounded-xl">

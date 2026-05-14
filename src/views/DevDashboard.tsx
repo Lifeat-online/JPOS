@@ -8,6 +8,7 @@ import {
   Copy, CheckCircle2, XCircle, AlertTriangle, ExternalLink,
   Download, Trash2, RefreshCw, Code2, Server, Wifi, FlaskConical,
 } from 'lucide-react';
+import { getDate } from '../utils/date';
 
 // ─── App constants ────────────────────────────────────────────────────
 const APP_VERSION = String('0.0.1');
@@ -747,7 +748,7 @@ export function DevDashboard({
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     const stalePending = sales.filter(s => {
       if (s.status !== 'pending') return false;
-      const d = s.createdAt?.toDate ? s.createdAt.toDate() : new Date(s.createdAt || Date.now());
+      const d = getDate(s.createdAt);
       return d.getTime() < oneHourAgo;
     }).length;
     return { noBarcode, zeroStock, belowMin, noRole, stalePending };
@@ -1266,16 +1267,7 @@ export function DevDashboard({
                       )}
                       {sales.map(s => {
                         const rawDate = s.createdAt;
-                        let createdAt = new Date(NaN);
-                        if (rawDate) {
-                          if (typeof rawDate.toDate === 'function') {
-                            createdAt = rawDate.toDate();
-                          } else if (typeof rawDate === 'string' && !rawDate.includes('T')) {
-                            createdAt = new Date(rawDate.replace(' ', 'T') + 'Z');
-                          } else {
-                            createdAt = new Date(rawDate);
-                          }
-                        }
+                        const createdAt = getDate(rawDate);
                         
                         const isValid = !isNaN(createdAt.getTime());
                         const dateDisplay = isValid ? createdAt.toLocaleString() : `Invalid: ${String(rawDate)}`;

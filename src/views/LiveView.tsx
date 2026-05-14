@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Activity, Banknote, ChefHat, RefreshCw, Timer, Users, Utensils } from 'lucide-react';
 import { getTenantLiveStats } from '../api';
 import { LiveTenantStats } from '../types';
+import { getDate } from '../utils/date';
 
 export function LiveView({ tenantId }: { tenantId: string | null }) {
   const [data, setData] = useState<LiveTenantStats | null>(null);
@@ -36,13 +37,15 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
   const fmtMoney = (value: number) => `R${(Number.isFinite(value) ? value : 0).toFixed(2)}`;
   const fmtTime = (value: any) => {
     if (!value) return '—';
-    const d = value?.toDate ? value.toDate() : new Date(value);
+    const d = getDate(value);
+    
     if (Number.isNaN(d.getTime())) return '—';
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
   const fmtDateTime = (value: any) => {
     if (!value) return '—';
-    const d = value?.toDate ? value.toDate() : new Date(value);
+    const d = getDate(value);
+
     if (Number.isNaN(d.getTime())) return '—';
     return d.toLocaleString([], { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   };

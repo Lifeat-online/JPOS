@@ -3,6 +3,7 @@ import { Sale } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
 import { TrendingUp, Users, Presentation, DollarSign } from 'lucide-react';
 import { format, subDays, isSameDay } from 'date-fns';
+import { getDate } from '../utils/date';
 
 interface ReportsViewProps {
   sales: Sale[];
@@ -21,8 +22,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ sales }) => {
   const dailyData = Array.from({ length: 7 }).map((_, i) => {
     const d = subDays(new Date(), 6 - i);
     const daySales = completedSales.filter(sale => {
-      const saleDate = sale.createdAt?.toDate ? sale.createdAt.toDate() : new Date(sale.createdAt);
-      return isSameDay(saleDate, d);
+      const saleDate = getDate(sale.createdAt);
+      return !isNaN(saleDate.getTime()) && isSameDay(saleDate, d);
     });
     return {
       name: format(d, 'EEE'),

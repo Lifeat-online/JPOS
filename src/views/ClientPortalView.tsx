@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { apiPut, createCustomerPayoutRequest } from '../api';
 import { Customer, Sale, PayoutRequest } from '../types';
+import { getDate } from '../utils/date';
 
 interface ClientPortalViewProps {
   user: JwtUser;
@@ -23,7 +24,9 @@ interface ClientPortalViewProps {
 
 function formatDate(date: any): string {
   if (!date) return '—';
-  const d = new Date(date);
+  const d = getDate(date);
+  
+  if (isNaN(d.getTime())) return '—';
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 

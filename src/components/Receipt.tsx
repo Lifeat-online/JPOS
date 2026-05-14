@@ -1,5 +1,6 @@
 import React from 'react';
 import { Sale, AppConfig } from '../types';
+import { getDate } from '../utils/date';
 
 interface ReceiptProps {
   sale: Sale;
@@ -13,7 +14,10 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
   const taxInclusive = sale.taxInclusive !== undefined ? sale.taxInclusive : config?.business?.taxInclusive !== false;
   const subtotal = sale.subtotal ?? sale.total;
   const taxAmount = sale.taxAmount ?? (taxRate ? (taxInclusive ? subtotal - subtotal / (1 + taxRate / 100) : subtotal * (taxRate / 100)) : 0);
-  const createdAt = sale.createdAt ? new Date(sale.createdAt) : new Date();
+
+  const createdAt = getDate(sale.createdAt);
+  const isValidDate = !isNaN(createdAt.getTime());
+  const dateDisplay = isValidDate ? createdAt.toLocaleString() : '';
 
   return (
     <div className="receipt-print-only fixed inset-0 bg-white text-black z-[9999] hidden p-4 flex-col text-[12px] font-mono leading-tight max-w-[80mm] mx-auto">
@@ -28,7 +32,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
         <div className="border-b border-black border-dashed my-2" />
         <p className="font-bold">TAX INVOICE</p>
         <p>Order #{sale.id.slice(-8).toUpperCase()}</p>
-        <p>{createdAt.toLocaleString()}</p>
+        {dateDisplay && <p>{dateDisplay}</p>}
         {sale.tableNumber && <p className="font-bold mt-1">Table {sale.tableNumber}</p>}
       </div>
 

@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { JwtUser } from './useAuth';
 import { Message, Staff } from '../types';
 import { apiGet, apiPost, apiPut } from '../api';
+import { getDate } from '../utils/date';
 
 const POLL_MS = 10_000;
 
@@ -112,9 +113,9 @@ export function useMessaging({ user, tenantId, currentUserStaff, staff }: UseMes
     return messages
       .filter(m => m.channel === channel)
       .sort((a, b) => {
-        const ta = new Date(a.createdAt).getTime();
-        const tb = new Date(b.createdAt).getTime();
-        return ta - tb;
+        const ta = getDate(a.createdAt).getTime();
+        const tb = getDate(b.createdAt).getTime();
+        return (isNaN(ta) ? 0 : ta) - (isNaN(tb) ? 0 : tb);
       });
   }, [messages]);
 

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Search, Users } from 'lucide-react';
 import { Sale, Customer } from '../types';
+import { getDate } from '../utils/date';
 
 interface HistoryViewProps {
   sales: Sale[];
@@ -76,12 +77,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       <td className="px-6 py-4 text-xs font-semibold text-slate-600 dark:text-slate-300 truncate">
                         {(() => {
                           const raw = sale.createdAt;
-                          let d = new Date(NaN);
-                          if (raw) {
-                            if (typeof raw.toDate === 'function') d = raw.toDate();
-                            else if (typeof raw === 'string' && !raw.includes('T')) d = new Date(raw.replace(' ', 'T') + 'Z');
-                            else d = new Date(raw);
-                          }
+                          const d = getDate(raw || Date.now());
                           return !isNaN(d.getTime()) 
                             ? d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
                             : `Invalid: ${String(raw)}`;

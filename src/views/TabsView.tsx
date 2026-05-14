@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sale, Customer } from '../types';
 import { TabletSmartphone, Users, Clock, Plus, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { getDate } from '../utils/date';
 
 interface TabsViewProps {
   sales: Sale[];
@@ -10,13 +11,6 @@ interface TabsViewProps {
 
 export function TabsView({ sales, customers, onResumeTab }: TabsViewProps) {
   const [expandedTab, setExpandedTab] = useState<string | null>(null);
-
-  const getDate = (ts: any) => {
-    if (!ts) return new Date(NaN);
-    if (typeof ts.toDate === 'function') return ts.toDate();
-    if (typeof ts === 'string' && !ts.includes('T')) return new Date(ts.replace(' ', 'T') + 'Z');
-    return new Date(ts);
-  };
 
   const openTabs = sales
     .filter(s => s.isTab && (s.status === 'open' || s.status === 'kitchen'))

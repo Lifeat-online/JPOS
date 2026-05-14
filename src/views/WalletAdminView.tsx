@@ -13,6 +13,7 @@ import {
   createPayoutRequest,
   updateStaff 
 } from '../api';
+import { getDate } from '../utils/date';
 
 interface WalletAdminViewProps {
   staff: Staff[];
@@ -165,7 +166,8 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
 
   const formatDate = (date: any) => {
     if (!date) return '—';
-    const d = new Date(date);
+    const d = getDate(date);
+    
     return isNaN(d.getTime()) ? '—' : d.toLocaleString();
   };
 

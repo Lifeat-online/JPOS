@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Message, Staff } from '../types';
 import { dmChannel } from '../hooks/useMessaging';
+import { getDate } from '../utils/date';
 
 const DEV_EMAIL = 'jameskoen78@gmail.com';
 
@@ -28,7 +29,9 @@ interface MessagingViewProps {
 
 function formatTime(ts: any): string {
   if (!ts) return '';
-  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const d = getDate(ts);
+  
+  if (isNaN(d.getTime())) return '';
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
   return isToday
