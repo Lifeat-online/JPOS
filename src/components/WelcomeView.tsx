@@ -45,11 +45,11 @@ const navLinks = [
   { label: 'FAQ', href: '#faq' },
 ];
 
-const proofStats = [
-  { value: 'Faster', label: 'checkout with cleaner payment handling' },
-  { value: 'Smarter', label: 'inventory visibility that protects margin' },
-  { value: 'Stronger', label: 'customer loyalty and repeat spend' },
-  { value: 'Sharper', label: 'operations across cash, staff, and reporting' },
+const proofStats = [ 
+  { value: 'Instant', label: 'payment processing across cash, card, and wallets' }, 
+  { value: 'Live', label: 'stock tracking that stops costly surprises before they happen' }, 
+  { value: 'Built-in', label: 'customer loyalty that turns one-time buyers into regulars' }, 
+  { value: 'Clear', label: 'daily reports that show exactly where your business stands' }, 
 ];
 
 const heroHighlights = [
@@ -162,41 +162,41 @@ const setupSteps = [
   },
 ];
 
-const trustPillars = [
-  {
-    icon: Lock,
-    title: 'Luxury-Led UX',
-    desc: 'Higher-end visual polish creates stronger trust before users even touch the product.',
-  },
-  {
-    icon: LayoutGrid,
-    title: 'Feature-Rich Foundation',
-    desc: 'The message now leads with real POS capability instead of technical implementation detail.',
-  },
-  {
-    icon: CheckCircle2,
-    title: 'Funnel-Ready CTA Structure',
-    desc: 'Prospects now have clear paths to try the system, sign up, and move into setup with confidence.',
-  },
+const trustPillars = [ 
+  { 
+    icon: Lock, 
+    title: 'Your data stays yours', 
+    desc: 'Role-based access and permission layers mean the right people see the right things — and nothing more.', 
+  }, 
+  { 
+    icon: LayoutGrid, 
+    title: 'Everything in one place', 
+    desc: 'No switching between systems. Sales, stock, staff, loyalty, and reporting all live in a single platform.', 
+  }, 
+  { 
+    icon: CheckCircle2, 
+    title: 'Ready from day one', 
+    desc: 'Set up your products, configure your preferences, and start trading with a system built to scale alongside you.', 
+  }, 
 ];
 
-const faqItems = [
-  {
-    question: 'What makes Jimmy’s POS different?',
-    answer: 'It combines premium design with the core POS features businesses actually buy for: checkout speed, payments, stock control, customer loyalty, staff access, cash handling, and reporting.',
-  },
-  {
-    question: 'Does it cover more than just checkout?',
-    answer: 'Yes. The page now clearly markets the full system: sales flow, inventory, permissions, customer management, restaurant workflows, and business reporting.',
-  },
-  {
-    question: 'Can a new business start setup quickly?',
-    answer: 'Yes. The revised funnel now includes direct paths for sign up, trying the system, and moving straight into setup using the existing onboarding flow.',
-  },
-  {
-    question: 'Who is it ideal for?',
-    answer: 'Retail, restaurants, takeaways, and growth-focused operators who want a faster, more premium operating system for daily trade.',
-  },
+const faqItems = [ 
+  { 
+    question: 'What makes Jimmy\'s POS different from a basic till app?', 
+    answer: 'Jimmy\'s POS combines fast checkout with a full back-office suite — inventory control, customer loyalty, staff permissions, hospitality workflows, cash management, and reporting — all in one system designed to feel premium from the first screen.', 
+  }, 
+  { 
+    question: 'Can I use it for a restaurant or takeaway, not just retail?', 
+    answer: 'Yes. The system includes open tab management, kitchen-ready order flow, and table coordination built specifically for food and beverage operators who cannot afford slowdowns during a busy shift.', 
+  }, 
+  { 
+    question: 'How long does it take to get set up and trading?', 
+    answer: 'Most businesses are live within a single session. Create your account, add your products and pricing, configure your preferences, and your team can start trading on a polished, professional interface the same day.', 
+  }, 
+  { 
+    question: 'Who is Jimmy\'s POS best suited for?', 
+    answer: 'Retailers, restaurants, takeaways, and growth-focused operators who want a faster, more professional operating system — one that handles daily trade while giving the owner clear visibility of every corner of the business.', 
+  }, 
 ];
 
 const centeredCard =
@@ -460,13 +460,13 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
             <motion.div {...fadeUp(0)} className="mx-auto max-w-3xl text-center">
               <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                 <Sparkles className="h-3.5 w-3.5" />
-                Richer Product Story
+                Built For The Counter And The Back Office
               </div>
               <h2 className="mt-6 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
-                The product now looks as capable as the feature set behind it.
+                One system that handles every part of the trading day.
               </h2>
               <p className="mt-5 text-lg leading-8 text-slate-600 dark:text-slate-300">
-                Bigger type, wider spacing, deeper shadows, and richer mockups make the system feel more expensive, more established, and more ready for serious operators.
+                From the first sale of the day to the end-of-day cashup, Jimmy&apos;s POS gives your team the speed they need at the counter and gives you the clarity you need in the back office.
               </p>
             </motion.div>
 
@@ -526,10 +526,10 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
             <motion.div {...fadeUp(0)} className="mx-auto max-w-3xl text-center">
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
                 <BarChart3 className="h-3.5 w-3.5" />
-                Why This Lands Better
+                Why Operators Choose Jimmy's POS
               </div>
               <h2 className="mt-6 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
-                Stronger typography, stronger visuals, stronger product positioning.
+                A system serious enough to run your business on, polished enough to impress your customers.
               </h2>
             </motion.div>
 
@@ -539,10 +539,10 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                   <ShieldCheck className="h-7 w-7" />
                 </div>
                 <h3 className="mt-6 text-3xl font-black tracking-tight text-slate-950 dark:text-white">
-                  The page now markets a premium POS system, not just a software project.
+                  Stop stitching together separate tools. Run everything from one place.
                 </h3>
                 <p className="mx-auto mt-5 max-w-2xl text-base leading-8 text-slate-600 dark:text-slate-300">
-                  Prospects first meet a high-end commerce brand, then quickly understand the full feature set: checkout, inventory, loyalty, hospitality tools, cash control, reporting, and a clear path to getting started.
+                  Jimmy's POS brings checkout speed, payment flexibility, stock control, customer loyalty, staff management, hospitality workflows, and business reporting into a single system — so nothing falls through the cracks during a busy trading day.
                 </p>
               </motion.div>
 
@@ -658,14 +658,14 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
           <div className="mx-auto max-w-5xl rounded-[40px] border border-blue-200 bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 px-6 py-14 text-center text-white shadow-[0_40px_120px_-40px_rgba(37,99,235,0.7)] sm:px-10">
             <motion.div {...fadeUp(0)}>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-white">
-                <Sparkles className="h-3.5 w-3.5" />
-                Ready To Close The Loop
+                <Zap className="h-3.5 w-3.5" />
+                Start Trading Smarter Today
               </div>
               <h2 className="mt-6 text-4xl font-black tracking-tight sm:text-5xl">
-                A premium POS deserves a premium first impression and a faster path to action.
+                Set up once. Sell faster. Run a tighter operation every single day.
               </h2>
               <p className="mx-auto mt-5 max-w-3xl text-lg leading-8 text-blue-100">
-                This second pass pushes harder on brand polish, feature marketing, richer mockups, and clear CTAs for trying the product, signing up, and moving into setup.
+                Jimmy's POS gives your business the checkout speed, stock control, customer loyalty, and reporting clarity that serious operators rely on. Get started in minutes — no IT skills required.
               </p>
 
               <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -702,7 +702,7 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
               </div>
               <div className="text-center sm:text-left">
                 <p className="font-black text-slate-900 dark:text-white">Jimmy&apos;s POS</p>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Sharper systems. Better trade.</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Built for pace. Designed for growth.</p>
               </div>
             </div>
             <button
