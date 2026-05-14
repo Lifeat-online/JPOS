@@ -652,12 +652,34 @@ export async function updateSale(
     }
 
     if (updates.items !== undefined) {
+      // Get existing items to preserve their status and timestamps
+      let existingItems: any[] = [];
+      try {
+        existingItems = await conn.query(`SELECT * FROM sale_items WHERE sale_id = ?`, [saleId]);
+      } catch (error) {
+        console.warn('Failed to fetch existing items:', error);
+      }
+      
+      const existingMap = new Map();
+      for (const ex of existingItems) {
+        existingMap.set(ex.id, ex);
+      }
+
       await conn.query(`DELETE FROM sale_items WHERE sale_id = ?`, [saleId]);
 
       for (const rawItem of updates.items) {
         const item = rawItem as OrderItem & { productId?: string };
         const saleItemId = item.id && item.productId ? item.id : generateSaleItemId();
         const productId = item.productId || item.id || null;
+        
+        // Preserve status and timestamps if it exists
+        const ex = existingMap.get(saleItemId);
+        const finalStatus = ex ? ex.status : (item.status || "pending");
+        const finalOrderedAt = ex?.ordered_at || (item.orderedAt ? new Date(item.orderedAt) : null);
+        const finalAcceptedAt = ex?.accepted_at || (item.acceptedAt ? new Date(item.acceptedAt) : null);
+        const finalReadyAt = ex?.ready_at || (item.readyAt ? new Date(item.readyAt) : null);
+        const finalDeliveredAt = ex?.delivered_at || (item.deliveredAt ? new Date(item.deliveredAt) : null);
+
         await conn.query(
           `INSERT INTO sale_items (
             id, sale_id, product_id, product_name, price, quantity, status,
@@ -671,12 +693,12 @@ export async function updateSale(
             item.name,
             item.price || 0,
             item.quantity || 0,
-            item.status || "pending",
+            finalStatus,
             item.workstationId || null,
-            item.orderedAt ? new Date(item.orderedAt) : null,
-            item.acceptedAt ? new Date(item.acceptedAt) : null,
-            item.readyAt ? new Date(item.readyAt) : null,
-            item.deliveredAt ? new Date(item.deliveredAt) : null,
+            finalOrderedAt,
+            finalAcceptedAt,
+            finalReadyAt,
+            finalDeliveredAt,
             item.actionStaffId || null,
           ]
         );

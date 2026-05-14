@@ -6,7 +6,7 @@ import { useState, useMemo } from 'react';
 import { JwtUser } from './useAuth';
 import { Customer, Staff, AppConfig } from '../types';
 import { usePosStore } from '../store/usePosStore';
-import { apiPost, apiPut, createSale, updateCustomer, updateStaff } from '../api';
+import { apiPost, apiPut, createSale, updateCustomer, updateStaff, getSaleById } from '../api';
 
 interface CheckoutDeps {
   user: JwtUser | null;
@@ -127,11 +127,13 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       };
       if (activeTableNumber) saleData.tableNumber = activeTableNumber;
 
+      let saleId = activeOrderId;
       if (activeOrderId) {
         await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
       } else {
         const created = await createSale(tenantId, saleData);
-        setActiveOrderId(created.id);
+        saleId = created.id;
+        setActiveOrderId(saleId);
       }
 
       await refreshSales();
@@ -139,6 +141,13 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       if (!sendToWorkstations) {
         resetAfterCheckout();
         navigate('/tables');
+      } else if (saleId) {
+        // Fetch fresh sale to update the cart with real sale_item IDs and statuses
+        // This prevents overwriting workstation progress on subsequent saves
+        const freshSale = await getSaleById(tenantId, saleId).catch(() => null);
+        if (freshSale && freshSale.items) {
+          usePosStore.getState().setCart(freshSale.items);
+        }
       }
     } catch (error) {
       console.error(error);
@@ -169,14 +178,24 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
       };
 
+      let saleId = activeOrderId;
       if (activeOrderId) {
         await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
       } else {
         const created = await createSale(tenantId, saleData);
-        setActiveOrderId(created.id);
+        saleId = created.id;
+        setActiveOrderId(saleId);
       }
 
       await refreshSales();
+      
+      // Update cart to sync with real sale_item IDs from the DB
+      if (saleId) {
+        const freshSale = await getSaleById(tenantId, saleId).catch(() => null);
+        if (freshSale && freshSale.items) {
+          usePosStore.getState().setCart(freshSale.items);
+        }
+      }
     } catch (err) {
       console.error('Failed to open tab:', err);
       alert('Error saving tab');
