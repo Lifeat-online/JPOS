@@ -240,19 +240,21 @@ export async function getOpenCashSessionByStaff(tenant_id: string, staff_id: str
   const rows = await query(
     `SELECT
       id,
-      tenant_id AS tenantId,
-      staff_id AS staffId,
-      opening_time AS openingTime,
-      closing_time AS closingTime,
-      opening_balance AS openingBalance,
-      closing_balance AS closingBalance,
-      expected_balance AS expectedBalance,
-      actual_balance AS actualBalance,
+      tenant_id,
+      staff_id,
+      staff_name,
+      opened_at,
+      closed_at,
+      opening_float,
+      expected_cash,
+      actual_cash,
       difference,
+      accumulated_tips,
+      net_tips,
       status,
       notes,
-      created_at AS createdAt,
-      updated_at AS updatedAt
+      created_at,
+      updated_at
      FROM cash_sessions
      WHERE tenant_id = ?
        AND staff_id = ?

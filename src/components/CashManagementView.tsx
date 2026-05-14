@@ -101,6 +101,7 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
         netTips: toNumber((s as any).netTips),
       })) as CashSession[];
       setSessions(normalized);
+      usePosStore.getState().setActiveSession(normalized.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id) || null);
     } catch (err) {
       console.error('CashSessions fetch error:', err);
     } finally {
