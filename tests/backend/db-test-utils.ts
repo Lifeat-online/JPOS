@@ -7,7 +7,7 @@ dotenv.config();
 
 const TEST_DB_NAME = process.env.TEST_DB_NAME || 'jimmy_pos_test';
 
-function getConnectionConfig() {
+export function getConnectionConfig() {
   return {
     host: process.env.DB_HOST || 'localhost',
     port: Number(process.env.DB_PORT || 3306),

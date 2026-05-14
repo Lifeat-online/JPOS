@@ -12,7 +12,7 @@
     "lint": "tsc --noEmit",
     "db:init": "tsx server/init-db.ts",
     "test:unit": "cross-env NODE_ENV=test vitest run",
-    "test:api": "cross-env NODE_ENV=test vitest run tests/backend/auth-middleware.test.ts tests/backend/auth-handler.test.ts tests/backend/api.test.ts tests/backend/mariadb-adapter.test.ts tests/backend/mariadb-crud.test.ts",
+    "test:api": "cross-env NODE_ENV=test vitest run tests/backend/auth-middleware.test.ts tests/backend/auth-handler.test.ts tests/backend/api.test.ts tests/backend/mariadb-adapter.test.ts tests/backend/mariadb-crud.test.ts tests/backend/db-tables.test.ts",
     "test:e2e": "cross-env NODE_ENV=test playwright test",
     "test": "npm run test:unit && npm run test:api",
     "test:watch": "cross-env NODE_ENV=test vitest"
