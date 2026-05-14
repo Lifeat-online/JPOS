@@ -40,6 +40,18 @@ export function useAppData(user: User | null) {
   const [configLoading, setConfigLoading] = useState(true);
   const [isStaffLoading, setIsStaffLoading] = useState(true);
 
+  const [prevTenantId, setPrevTenantId] = useState<string | null>(tenantId);
+  if (tenantId !== prevTenantId) {
+    setPrevTenantId(tenantId);
+    if (tenantId) {
+      setConfigLoading(true);
+      setIsStaffLoading(true);
+    } else {
+      setConfigLoading(false);
+      setIsStaffLoading(false);
+    }
+  }
+
   const [currentUserStaff, setCurrentUserStaff] = useState<Staff | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'manager' | 'cashier' | null>(null);
 
@@ -190,6 +202,7 @@ export function useAppData(user: User | null) {
       return;
     }
     let active = true;
+    setIsStaffLoading(true);
     async function loadStaff() {
       try {
         const fetched = await getTenantStaff(tenantId!);
@@ -221,6 +234,7 @@ export function useAppData(user: User | null) {
       return;
     }
     let active = true;
+    setConfigLoading(true);
     async function loadConfig() {
       try {
         const fetched = await getTenantConfig(tenantId!);

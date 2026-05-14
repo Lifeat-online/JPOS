@@ -721,7 +721,24 @@ export default function App() {
   }
 
   if (!config?.setupCompleted) {
-    return <SetupWizard user={user} config={config} />;
+    if (currentUserRole === 'admin' || currentUserRole === 'dev') {
+      return <SetupWizard user={user} config={config} />;
+    } else {
+      return (
+        <div className="h-screen w-full bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 text-center">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-6">
+            <Building2 className="w-8 h-8 text-amber-500" />
+          </div>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white mb-2">Setup Required</h1>
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-8 max-w-sm">
+            The business setup has not been completed yet. Please ask an administrator to complete the setup.
+          </p>
+          <button onClick={handleLogout} className="px-8 py-3 bg-primary text-white font-bold rounded-xl transition-all hover:bg-primary/90">
+            Sign Out
+          </button>
+        </div>
+      );
+    }
   }
 
   if (currentUserRole === null) {
