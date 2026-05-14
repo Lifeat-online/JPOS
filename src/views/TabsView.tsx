@@ -11,12 +11,19 @@ interface TabsViewProps {
 export function TabsView({ sales, customers, onResumeTab }: TabsViewProps) {
   const [expandedTab, setExpandedTab] = useState<string | null>(null);
 
+  const getDate = (ts: any) => {
+    if (!ts) return new Date(NaN);
+    if (typeof ts.toDate === 'function') return ts.toDate();
+    if (typeof ts === 'string' && !ts.includes('T')) return new Date(ts.replace(' ', 'T') + 'Z');
+    return new Date(ts);
+  };
+
   const openTabs = sales
     .filter(s => s.isTab && (s.status === 'open' || s.status === 'kitchen'))
     .sort((a, b) => {
-      const ta = new Date(a.createdAt).getTime();
-      const tb = new Date(b.createdAt).getTime();
-      return ta - tb; // oldest first
+      const ta = getDate(a.createdAt).getTime();
+      const tb = getDate(b.createdAt).getTime();
+      return (isNaN(ta) ? 0 : ta) - (isNaN(tb) ? 0 : tb); // oldest first
     });
 
   const getCustomer = (customerId?: string) =>
@@ -24,14 +31,16 @@ export function TabsView({ sales, customers, onResumeTab }: TabsViewProps) {
 
   const formatTime = (ts: any) => {
     if (!ts) return '—';
-    const d = ts.toDate ? ts.toDate() : new Date(ts);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const d = getDate(ts);
+    return isNaN(d.getTime()) ? '—' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   const getElapsed = (ts: any) => {
     if (!ts) return '';
-    const d = ts.toDate ? ts.toDate() : new Date(ts);
-    const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+    const d = getDate(ts);
+    const t = d.getTime();
+    if (isNaN(t)) return '?m';
+    const mins = Math.floor((Date.now() - t) / 60000);
     if (mins < 60) return `${mins}m`;
     return `${Math.floor(mins / 60)}h ${mins % 60}m`;
   };

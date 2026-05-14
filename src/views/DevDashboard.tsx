@@ -747,8 +747,8 @@ export function DevDashboard({
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     const stalePending = sales.filter(s => {
       if (s.status !== 'pending') return false;
-      const ts = s.createdAt?.toDate ? s.createdAt.toDate().getTime() : new Date(s.createdAt).getTime();
-      return ts < oneHourAgo;
+      const d = s.createdAt?.toDate ? s.createdAt.toDate() : new Date(s.createdAt || Date.now());
+      return d.getTime() < oneHourAgo;
     }).length;
     return { noBarcode, zeroStock, belowMin, noRole, stalePending };
   }, [products, staff, sales]);
@@ -1265,7 +1265,20 @@ export function DevDashboard({
                         <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">No sales</td></tr>
                       )}
                       {sales.map(s => {
-                        const createdAt = s.createdAt?.toDate ? s.createdAt.toDate() : new Date(s.createdAt);
+                        const rawDate = s.createdAt;
+                        let createdAt = new Date(NaN);
+                        if (rawDate) {
+                          if (typeof rawDate.toDate === 'function') {
+                            createdAt = rawDate.toDate();
+                          } else if (typeof rawDate === 'string' && !rawDate.includes('T')) {
+                            createdAt = new Date(rawDate.replace(' ', 'T') + 'Z');
+                          } else {
+                            createdAt = new Date(rawDate);
+                          }
+                        }
+                        
+                        const isValid = !isNaN(createdAt.getTime());
+                        const dateDisplay = isValid ? createdAt.toLocaleString() : `Invalid: ${String(rawDate)}`;
                         return (
                           <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                             <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{truncateId(s.id)}</td>
@@ -1279,7 +1292,7 @@ export function DevDashboard({
                             </td>
                             <td className="px-4 py-2.5 text-right font-bold text-slate-800 dark:text-white">R{Number(s.total || 0).toFixed(2)}</td>
                             <td className="px-4 py-2.5 text-slate-600 dark:text-slate-400">{s.paymentMethod}</td>
-                            <td className="px-4 py-2.5 text-slate-500 text-xs">{createdAt.toLocaleString()}</td>
+                            <td className="px-4 py-2.5 text-slate-500 text-xs">{dateDisplay}</td>
                             <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{s.staffId ? truncateId(s.staffId) : '—'}</td>
                             <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{s.customerId ? truncateId(s.customerId) : '—'}</td>
                             <td className="px-4 py-2.5"><CopyBtn text={s.id} /></td>

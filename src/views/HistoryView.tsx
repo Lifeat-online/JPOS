@@ -73,7 +73,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     <td className="px-6 py-4 text-xs font-bold text-slate-600 dark:text-slate-300">
                       {sale.customerId ? customers.find(c => c.id === sale.customerId)?.name || 'Deleted' : 'Guest'}
                     </td>
-                    <td className="px-6 py-4 text-xs font-semibold text-slate-600 dark:text-slate-300 truncate">{new Date(sale.createdAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</td>
+                      <td className="px-6 py-4 text-xs font-semibold text-slate-600 dark:text-slate-300 truncate">
+                        {(() => {
+                          const raw = sale.createdAt;
+                          let d = new Date(NaN);
+                          if (raw) {
+                            if (typeof raw.toDate === 'function') d = raw.toDate();
+                            else if (typeof raw === 'string' && !raw.includes('T')) d = new Date(raw.replace(' ', 'T') + 'Z');
+                            else d = new Date(raw);
+                          }
+                          return !isNaN(d.getTime()) 
+                            ? d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+                            : `Invalid: ${String(raw)}`;
+                        })()}
+                      </td>
                     <td className="px-6 py-4 text-xs font-bold uppercase text-slate-500 dark:text-slate-400">{sale.paymentMethod}</td>
                     <td className="px-6 py-4 font-extrabold text-slate-900 dark:text-white">R{Number(sale.total || 0).toFixed(2)}</td>
                     <td className="px-6 py-4">
