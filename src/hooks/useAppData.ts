@@ -198,6 +198,8 @@ export function useAppData(user: User | null) {
           ...s,
           payRate: s.payRate ? Number(s.payRate) : undefined,
           walletBalance: Number(s.walletBalance || 0),
+          assignedSections: typeof s.assignedSections === 'string' ? JSON.parse(s.assignedSections) : (s.assignedSections || []),
+          assignedCategories: typeof s.assignedCategories === 'string' ? JSON.parse(s.assignedCategories) : (s.assignedCategories || []),
           metrics: typeof s.metrics === 'string' ? JSON.parse(s.metrics) : s.metrics,
           badges: typeof s.badges === 'string' ? JSON.parse(s.badges) : s.badges,
         }));
