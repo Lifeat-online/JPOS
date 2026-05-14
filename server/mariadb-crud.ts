@@ -312,7 +312,20 @@ export async function updateCustomer(
       tenantId,
       customerId,
     ]);
-    return rows[0] as Customer;
+    const r = rows[0] as any;
+    return {
+      id: r.id,
+      name: r.name,
+      email: r.email,
+      phone: r.phone,
+      address: r.address,
+      notes: r.notes,
+      loyaltyPoints: r.loyalty_points !== null ? Number(r.loyalty_points) : 0,
+      walletBalance: r.wallet_balance !== null ? Number(r.wallet_balance) : 0,
+      uid: r.uid,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    } as Customer;
   }
 
   await query(
@@ -324,7 +337,20 @@ export async function updateCustomer(
     tenantId,
     customerId,
   ]);
-  return rows[0] as Customer;
+  const r = rows[0] as any;
+  return {
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    phone: r.phone,
+    address: r.address,
+    notes: r.notes,
+    loyaltyPoints: r.loyalty_points !== null ? Number(r.loyalty_points) : 0,
+    walletBalance: r.wallet_balance !== null ? Number(r.wallet_balance) : 0,
+    uid: r.uid,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  } as Customer;
 }
 
 export async function updateStaff(

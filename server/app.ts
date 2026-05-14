@@ -1146,7 +1146,21 @@ export async function createApp() {
       if (!email) return res.status(400).json({ error: "Email is required" });
       const rows = await query("SELECT * FROM customers WHERE email = ?", [email]);
       if (rows.length === 0) return res.json(null);
-      res.json({ customer: rows[0], tenantId: rows[0].tenant_id });
+      const r = rows[0] as any;
+      const customer = {
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        phone: r.phone,
+        address: r.address,
+        notes: r.notes,
+        loyaltyPoints: r.loyalty_points,
+        walletBalance: r.wallet_balance,
+        uid: r.uid,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at
+      };
+      res.json({ customer, tenantId: r.tenant_id });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

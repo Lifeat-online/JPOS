@@ -124,7 +124,7 @@ export async function getAppConfigByTenant(tenantId: string) {
 }
 
 export async function getCustomersByTenant(tenantId: string) {
-  return query(
+  const rows = await query(
     `SELECT
        id,
        name,
@@ -142,6 +142,11 @@ export async function getCustomersByTenant(tenantId: string) {
      ORDER BY name ASC`,
     [tenantId]
   );
+  return rows.map((r: any) => ({
+    ...r,
+    loyaltyPoints: r.loyaltyPoints !== null ? Number(r.loyaltyPoints) : 0,
+    walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
+  }));
 }
 
 export async function getStaffByTenant(tenantId: string) {
