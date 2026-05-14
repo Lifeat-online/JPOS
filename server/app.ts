@@ -791,23 +791,23 @@ export async function createApp() {
         pg
           ? `
               SELECT
-                SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
-                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN 1 ELSE 0 END) AS lastHourCompletedCount,
-                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN total ELSE 0 END) AS lastHourCompletedRevenue,
-                SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN 1 ELSE 0 END) AS todayCompletedCount,
-                SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN total ELSE 0 END) AS todayCompletedRevenue,
-                SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
+                SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS "activeOrdersCount",
+                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN 1 ELSE 0 END) AS "lastHourCompletedCount",
+                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN total ELSE 0 END) AS "lastHourCompletedRevenue",
+                SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN 1 ELSE 0 END) AS "todayCompletedCount",
+                SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN total ELSE 0 END) AS "todayCompletedRevenue",
+                SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS "openTabsCount"
               FROM sales
               WHERE tenant_id = ?
             `
           : `
               SELECT
-                SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
-                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN 1 ELSE 0 END) AS lastHourCompletedCount,
-                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN total ELSE 0 END) AS lastHourCompletedRevenue,
-                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) AS todayCompletedCount,
-                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN total ELSE 0 END) AS todayCompletedRevenue,
-                SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
+                SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS "activeOrdersCount",
+                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN 1 ELSE 0 END) AS "lastHourCompletedCount",
+                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN total ELSE 0 END) AS "lastHourCompletedRevenue",
+                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) AS "todayCompletedCount",
+                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN total ELSE 0 END) AS "todayCompletedRevenue",
+                SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS "openTabsCount"
               FROM sales
               WHERE tenant_id = ?
             `,
@@ -830,7 +830,7 @@ export async function createApp() {
               AND s.table_number <> ''
               AND s.status IN ('open','kitchen','pending')
             GROUP BY s.table_number
-            ORDER BY oldestOrderAt ASC
+            ORDER BY "oldestOrderAt" ASC
           `,
           [tenantId]
         );
@@ -844,13 +844,13 @@ export async function createApp() {
           pg
             ? `
                 SELECT
-                  st.id AS staffId,
-                  st.name AS staffName,
-                  st.role AS staffRole,
-                  SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
-                  SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
-                  MAX(s.created_at) AS lastSaleAt
+                  st.id AS "staffId",
+                  st.name AS "staffName",
+                  st.role AS "staffRole",
+                  SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS "completedCount",
+                  SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS "completedRevenue",
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS "activeOrders",
+                  MAX(s.created_at) AS "lastSaleAt"
                 FROM staff st
                 LEFT JOIN sales s
                   ON s.tenant_id = st.tenant_id
@@ -859,17 +859,17 @@ export async function createApp() {
                 WHERE st.tenant_id = ?
                   AND st.status = 'active'
                 GROUP BY st.id
-                ORDER BY completedRevenue DESC, completedCount DESC
+                ORDER BY "completedRevenue" DESC, "completedCount" DESC
               `
             : `
                 SELECT
-                  st.id AS staffId,
-                  st.name AS staffName,
-                  st.role AS staffRole,
-                  SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
-                  SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
-                  MAX(s.created_at) AS lastSaleAt
+                  st.id AS "staffId",
+                  st.name AS "staffName",
+                  st.role AS "staffRole",
+                  SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS "completedCount",
+                  SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS "completedRevenue",
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS "activeOrders",
+                  MAX(s.created_at) AS "lastSaleAt"
                 FROM staff st
                 LEFT JOIN sales s
                   ON s.tenant_id = st.tenant_id
@@ -878,7 +878,7 @@ export async function createApp() {
                 WHERE st.tenant_id = ?
                   AND st.status = 'active'
                 GROUP BY st.id
-                ORDER BY completedRevenue DESC, completedCount DESC
+                ORDER BY "completedRevenue" DESC, "completedCount" DESC
               `,
           [tenantId]
         );
@@ -887,13 +887,13 @@ export async function createApp() {
           pg
             ? `
                 SELECT
-                  w.id AS workstationId,
-                  w.name AS workstationName,
-                  w.type AS workstationType,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS acceptedCount,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS readyCount,
-                  MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS oldestOrderedAt,
+                  w.id AS "workstationId",
+                  w.name AS "workstationName",
+                  w.type AS "workstationType",
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS "pendingCount",
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS "acceptedCount",
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS "readyCount",
+                  MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS "oldestOrderedAt",
                   AVG(
                     CASE
                       WHEN si.ordered_at IS NOT NULL
@@ -902,7 +902,7 @@ export async function createApp() {
                       THEN EXTRACT(EPOCH FROM (si.ready_at - si.ordered_at))
                       ELSE NULL
                     END
-                  ) AS avgPrepSecondsLast2h
+                  ) AS "avgPrepSecondsLast2h"
                 FROM workstations w
                 LEFT JOIN sale_items si
                   ON si.workstation_id = w.id
@@ -912,17 +912,17 @@ export async function createApp() {
                 WHERE w.tenant_id = ?
                   AND w.status = 'active'
                 GROUP BY w.id
-                ORDER BY (pendingCount + acceptedCount) DESC, w.name ASC
+                ORDER BY ("pendingCount" + "acceptedCount") DESC, w.name ASC
               `
             : `
                 SELECT
-                  w.id AS workstationId,
-                  w.name AS workstationName,
-                  w.type AS workstationType,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS acceptedCount,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS readyCount,
-                  MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS oldestOrderedAt,
+                  w.id AS "workstationId",
+                  w.name AS "workstationName",
+                  w.type AS "workstationType",
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS "pendingCount",
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS "acceptedCount",
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS "readyCount",
+                  MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS "oldestOrderedAt",
                   AVG(
                     CASE
                       WHEN si.ordered_at IS NOT NULL
@@ -931,7 +931,7 @@ export async function createApp() {
                       THEN TIMESTAMPDIFF(SECOND, si.ordered_at, si.ready_at)
                       ELSE NULL
                     END
-                  ) AS avgPrepSecondsLast2h
+                  ) AS "avgPrepSecondsLast2h"
                 FROM workstations w
                 LEFT JOIN sale_items si
                   ON si.workstation_id = w.id
@@ -941,7 +941,7 @@ export async function createApp() {
                 WHERE w.tenant_id = ?
                   AND w.status = 'active'
                 GROUP BY w.id
-                ORDER BY (pendingCount + acceptedCount) DESC, w.name ASC
+                ORDER BY ("pendingCount" + "acceptedCount") DESC, w.name ASC
               `,
           [tenantId]
         );
