@@ -238,7 +238,21 @@ export async function getActiveSalesByTenant(tenantId: string) {
 
 export async function getOpenCashSessionByStaff(tenant_id: string, staff_id: string) {
   const rows = await query(
-    `SELECT *
+    `SELECT
+      id,
+      tenant_id AS tenantId,
+      staff_id AS staffId,
+      opening_time AS openingTime,
+      closing_time AS closingTime,
+      opening_balance AS openingBalance,
+      closing_balance AS closingBalance,
+      expected_balance AS expectedBalance,
+      actual_balance AS actualBalance,
+      difference,
+      status,
+      notes,
+      created_at AS createdAt,
+      updated_at AS updatedAt
      FROM cash_sessions
      WHERE tenant_id = ?
        AND staff_id = ?

@@ -98,7 +98,8 @@ const pgPool = isPostgres()
 
 export async function query<T = any>(sql: string, params: any[] = []) {
   if (pgPool) {
-    const pgSql = toPgPlaceholders(sql);
+    let pgSql = toPgPlaceholders(sql);
+    pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, 'AS "$1"');
     const res = await pgPool.query(pgSql, params);
     return res.rows as T[];
   }
@@ -124,12 +125,14 @@ export async function getConnection() {
         await client.query("ROLLBACK");
       },
       async execute<T = any>(sql: string, params: any[] = []) {
-        const pgSql = toPgPlaceholders(sql);
+        let pgSql = toPgPlaceholders(sql);
+        pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, 'AS "$1"');
         const res = await client.query(pgSql, params);
         return [res.rows as T[]] as const;
       },
       async query<T = any>(sql: string, params: any[] = []) {
-        const pgSql = toPgPlaceholders(sql);
+        let pgSql = toPgPlaceholders(sql);
+        pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, 'AS "$1"');
         const res = await client.query(pgSql, params);
         return [res.rows as T[]] as const;
       },

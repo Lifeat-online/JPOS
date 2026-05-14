@@ -200,10 +200,27 @@ export async function updateProduct(
 
   if (fields.length === 1) {
     // Only updated_at changed
-    const rows = await query(`SELECT * FROM products WHERE tenant_id = ? AND id = ?`, [
-      tenantId,
-      productId,
-    ]);
+    const rows = await query(
+      `SELECT
+        id,
+        tenant_id AS tenantId,
+        name,
+        price,
+        cost_price AS costPrice,
+        section,
+        category,
+        sub_category AS subCategory,
+        stock,
+        min_stock AS minStock,
+        image_url AS imageUrl,
+        barcode,
+        workstation_id AS workstationId,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+      FROM products
+      WHERE tenant_id = ? AND id = ?`,
+      [tenantId, productId]
+    );
     return rows[0] as Product;
   }
 
@@ -212,10 +229,27 @@ export async function updateProduct(
     values
   );
 
-  const rows = await query(`SELECT * FROM products WHERE tenant_id = ? AND id = ?`, [
-    tenantId,
-    productId,
-  ]);
+  const rows = await query(
+    `SELECT
+      id,
+      tenant_id AS tenantId,
+      name,
+      price,
+      cost_price AS costPrice,
+      section,
+      category,
+      sub_category AS subCategory,
+      stock,
+      min_stock AS minStock,
+      image_url AS imageUrl,
+      barcode,
+      workstation_id AS workstationId,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM products
+    WHERE tenant_id = ? AND id = ?`,
+    [tenantId, productId]
+  );
   return rows[0] as Product;
 }
 
@@ -352,10 +386,30 @@ export async function updateStaff(
   values.push(tenantId, staffId);
 
   if (fields.length === 1) {
-    const rows = await query(`SELECT * FROM staff WHERE tenant_id = ? AND id = ?`, [
-      tenantId,
-      staffId,
-    ]);
+    const rows = await query(
+      `SELECT
+        id,
+        name,
+        role,
+        email,
+        phone,
+        status,
+        assigned_sections AS assignedSections,
+        assigned_categories AS assignedCategories,
+        id_number AS idNumber,
+        pay_rate AS payRate,
+        pay_type AS payType,
+        accumulated_leave AS accumulatedLeave,
+        wallet_balance AS walletBalance,
+        metrics,
+        badges,
+        rank,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+      FROM staff
+      WHERE tenant_id = ? AND id = ?`,
+      [tenantId, staffId]
+    );
     return rows[0] as Staff;
   }
 
@@ -364,10 +418,30 @@ export async function updateStaff(
     values
   );
 
-  const rows = await query(`SELECT * FROM staff WHERE tenant_id = ? AND id = ?`, [
-    tenantId,
-    staffId,
-  ]);
+  const rows = await query(
+    `SELECT
+      id,
+      name,
+      role,
+      email,
+      phone,
+      status,
+      assigned_sections AS assignedSections,
+      assigned_categories AS assignedCategories,
+      id_number AS idNumber,
+      pay_rate AS payRate,
+      pay_type AS payType,
+      accumulated_leave AS accumulatedLeave,
+      wallet_balance AS walletBalance,
+      metrics,
+      badges,
+      rank,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM staff
+    WHERE tenant_id = ? AND id = ?`,
+    [tenantId, staffId]
+  );
   return rows[0] as Staff;
 }
 
@@ -766,10 +840,35 @@ export async function updateSaleStatus(
 }
 
 export async function getSaleById(tenantId: string, saleId: string): Promise<Sale | null> {
-  const rows = await query(`SELECT * FROM sales WHERE tenant_id = ? AND id = ?`, [
-    tenantId,
-    saleId,
-  ]);
+  const rows = await query(
+    `SELECT
+      id,
+      tenant_id AS tenantId,
+      customer_id AS customerId,
+      user_id AS userId,
+      staff_id AS staffId,
+      total,
+      subtotal,
+      tax_amount AS taxAmount,
+      tax_rate AS taxRate,
+      tax_inclusive AS taxInclusive,
+      payment_method AS paymentMethod,
+      tendered_amount AS tenderedAmount,
+      change_amount AS changeAmount,
+      tip_amount AS tipAmount,
+      cash_out_amount AS cashOutAmount,
+      points_discount AS pointsDiscount,
+      status,
+      payfast_payment_id,
+      table_number AS tableNumber,
+      is_tab AS isTab,
+      tab_name AS tabName,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM sales
+    WHERE tenant_id = ? AND id = ?`,
+    [tenantId, saleId]
+  );
   
   if (rows.length === 0) return null;
   const sale = rows[0] as Sale;
