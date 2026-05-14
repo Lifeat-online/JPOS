@@ -369,6 +369,10 @@ export async function updateStaff(
     fields.push("wallet_balance = ?");
     values.push(updates.walletBalance);
   }
+  if (updates.walletBalanceDelta !== undefined) {
+    fields.push("wallet_balance = COALESCE(wallet_balance, 0) + ?");
+    values.push(updates.walletBalanceDelta);
+  }
   if (updates.metrics !== undefined) {
     fields.push("metrics = ?");
     values.push(JSON.stringify(updates.metrics));
