@@ -432,8 +432,8 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
               <h2 className="mt-7 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
                 Everything a serious POS should do, presented like a premium product.
               </h2>
-              <p className="mt-5 text-lg leading-8 text-slate-600 dark:text-slate-300">
-                This pass puts the actual product at the center of the story: checkout, payments, inventory, customer retention, staff control, and reporting are now marketed as the real engine of business growth.
+              <p className="mt-6 text-lg leading-8 text-slate-600 dark:text-slate-300">
+                From the first tap at the counter to the last report of the day, every feature in Jimmy's POS is built around one goal: helping your business run faster, tighter, and more profitably.
               </p>
             </motion.div>
 
@@ -499,7 +499,7 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                 Purpose-built for the businesses that need more than a basic till.
               </h2>
               <p className="mt-5 text-lg leading-8 text-slate-300">
-                Whether the pressure is queue speed, table flow, stock visibility, or repeat spend, Jimmy&apos;s POS now presents itself like the control centre for modern trade.
+                Whether the pressure is queue speed, table flow, stock visibility, or repeat spend, Jimmy's POS gives you the tools to stay ahead of it — every shift, every day.
               </p>
             </motion.div>
 
@@ -576,7 +576,7 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                 Sign up, try the system, and move straight into setup.
               </h2>
               <p className="mt-5 text-lg leading-8 text-slate-300">
-                The funnel now ends with clear next steps for prospects who are ready to act, while still keeping portal access available for returning users.
+                No lengthy onboarding. No complicated setup. Just sign up, configure your business, and put your team on a system built to trade from day one.
               </p>
             </motion.div>
 
@@ -622,7 +622,7 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                 FAQ
               </div>
               <h2 className="mt-6 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
-                The story is clearer. The objections are smaller.
+                Answers to the questions we hear most.
               </h2>
             </motion.div>
 

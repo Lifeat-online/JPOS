@@ -50,8 +50,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
   const allowedCategories = useMemo(() => {
     if (!currentUserStaff || currentUserStaff.role !== 'cashier') return CATEGORIES;
-    const hasSectionRestriction = currentUserStaff.assignedSections && currentUserStaff.assignedSections.length > 0;
-    const hasCategoryRestriction = currentUserStaff.assignedCategories && currentUserStaff.assignedCategories.length > 0;
+    const hasSectionRestriction = Array.isArray(currentUserStaff.assignedSections) && currentUserStaff.assignedSections.length > 0;
+    const hasCategoryRestriction = Array.isArray(currentUserStaff.assignedCategories) && currentUserStaff.assignedCategories.length > 0;
     
     if (!hasSectionRestriction && !hasCategoryRestriction) return CATEGORIES;
 
@@ -73,8 +73,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
       if (currentUserStaff && currentUserStaff.role === 'cashier') {
-        const hasSectionRestriction = currentUserStaff.assignedSections && currentUserStaff.assignedSections.length > 0;
-        const hasCategoryRestriction = currentUserStaff.assignedCategories && currentUserStaff.assignedCategories.length > 0;
+        const hasSectionRestriction = Array.isArray(currentUserStaff.assignedSections) && currentUserStaff.assignedSections.length > 0;
+        const hasCategoryRestriction = Array.isArray(currentUserStaff.assignedCategories) && currentUserStaff.assignedCategories.length > 0;
         
         if (hasSectionRestriction || hasCategoryRestriction) {
           const sectionAllowed = hasSectionRestriction && currentUserStaff.assignedSections!.includes(p.section || '');
