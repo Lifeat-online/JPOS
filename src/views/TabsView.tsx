@@ -12,7 +12,7 @@ export function TabsView({ sales, customers, onResumeTab }: TabsViewProps) {
   const [expandedTab, setExpandedTab] = useState<string | null>(null);
 
   const openTabs = sales
-    .filter(s => s.isTab && s.status === 'open')
+    .filter(s => s.isTab && (s.status === 'open' || s.status === 'kitchen'))
     .sort((a, b) => {
       const ta = new Date(a.createdAt).getTime();
       const tb = new Date(b.createdAt).getTime();
