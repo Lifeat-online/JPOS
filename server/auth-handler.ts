@@ -165,10 +165,10 @@ export async function handleGetMe(req: Request, res: Response) {
   });
 }
 
-// Setup password for staff (admin only)
+// Setup password for staff (admin/dev only)
 export async function handleSetupPassword(req: Request, res: Response) {
   try {
-    if (!req.user || req.user.role !== 'admin') {
+    if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'dev')) {
       return res.status(403).json({ error: 'Admin access required' });
     }
 
