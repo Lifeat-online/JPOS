@@ -146,7 +146,12 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         // This prevents overwriting workstation progress on subsequent saves
         const freshSale = await getSaleById(tenantId, saleId).catch(() => null);
         if (freshSale && freshSale.items) {
-          usePosStore.getState().setCart(freshSale.items);
+          const sanitizedItems = freshSale.items.map((item: any) => ({
+            ...item,
+            price: Number(item.price || 0),
+            quantity: Number(item.quantity || 0),
+          }));
+          usePosStore.getState().setCart(sanitizedItems);
         }
       }
     } catch (error) {
@@ -193,7 +198,12 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       if (saleId) {
         const freshSale = await getSaleById(tenantId, saleId).catch(() => null);
         if (freshSale && freshSale.items) {
-          usePosStore.getState().setCart(freshSale.items);
+          const sanitizedItems = freshSale.items.map((item: any) => ({
+            ...item,
+            price: Number(item.price || 0),
+            quantity: Number(item.quantity || 0),
+          }));
+          usePosStore.getState().setCart(sanitizedItems);
         }
       }
     } catch (err) {

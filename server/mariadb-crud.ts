@@ -770,7 +770,31 @@ export async function getSaleById(tenantId: string, saleId: string): Promise<Sal
     tenantId,
     saleId,
   ]);
-  return rows.length > 0 ? (rows[0] as Sale) : null;
+  
+  if (rows.length === 0) return null;
+  const sale = rows[0] as Sale;
+  
+  const items = await query(
+    `SELECT
+       id,
+       product_id AS productId,
+       product_name AS name,
+       price,
+       quantity,
+       status,
+       workstation_id AS workstationId,
+       ordered_at AS orderedAt,
+       accepted_at AS acceptedAt,
+       ready_at AS readyAt,
+       delivered_at AS deliveredAt,
+       action_staff_id AS actionStaffId
+     FROM sale_items
+     WHERE sale_id = ?`,
+    [saleId]
+  );
+  
+  sale.items = items;
+  return sale;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
