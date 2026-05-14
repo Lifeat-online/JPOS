@@ -1371,6 +1371,8 @@ export async function createApp() {
       if (updates.status !== undefined) { fields.push("status = ?"); values.push(updates.status); }
       if (updates.notes !== undefined) { fields.push("notes = ?"); values.push(updates.notes); }
       if (updates.expectedCash !== undefined) { fields.push("expected_cash = ?"); values.push(updates.expectedCash); }
+      if (updates.expectedCashDelta !== undefined) { fields.push("expected_cash = expected_cash + ?"); values.push(updates.expectedCashDelta); }
+      if (updates.tipsDelta !== undefined) { fields.push("accumulated_tips = accumulated_tips + ?"); values.push(updates.tipsDelta); }
 
       if (fields.length > 0) {
         fields.push("updated_at = NOW()");
