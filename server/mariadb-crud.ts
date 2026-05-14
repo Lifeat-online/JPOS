@@ -6,6 +6,20 @@ const PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY || "46f0cd694581a"
 const PAYFAST_PASSPHRASE = process.env.PAYFAST_PASSPHRASE || "jt7v60h69n8a1";
 
 // ─────────────────────────────────────────────────────────────────────────
+// Helper Functions
+// ─────────────────────────────────────────────────────────────────────────
+
+function safeParse(str: any, fallback: any) {
+  if (typeof str !== 'string') return str || fallback;
+  try {
+    return JSON.parse(str || JSON.stringify(fallback));
+  } catch (e) {
+    console.error('Failed to parse JSON field:', str, e);
+    return fallback;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // CREATE Operations
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -414,7 +428,14 @@ export async function updateStaff(
       WHERE tenant_id = ? AND id = ?`,
       [tenantId, staffId]
     );
-    return rows[0] as Staff;
+    const r = rows[0] as any;
+    return {
+      ...r,
+      assignedSections: safeParse(r.assignedSections, []),
+      assignedCategories: safeParse(r.assignedCategories, []),
+      metrics: safeParse(r.metrics, {}),
+      badges: safeParse(r.badges, []),
+    } as Staff;
   }
 
   await query(
@@ -446,7 +467,14 @@ export async function updateStaff(
     WHERE tenant_id = ? AND id = ?`,
     [tenantId, staffId]
   );
-  return rows[0] as Staff;
+  const r = rows[0] as any;
+  return {
+    ...r,
+    assignedSections: safeParse(r.assignedSections, []),
+    assignedCategories: safeParse(r.assignedCategories, []),
+    metrics: safeParse(r.metrics, {}),
+    badges: safeParse(r.badges, []),
+  } as Staff;
 }
 
 export async function updateTableSection(

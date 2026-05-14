@@ -1,5 +1,18 @@
 import { isPostgres, query } from "./db.js";
 
+// ─────────────────────────────────────────────────────────────────────────
+// Helper Functions
+// ─────────────────────────────────────────────────────────────────────────
+
+function safeParse(str: any, fallback: any) {
+  if (typeof str !== 'string') return str || fallback;
+  try {
+    return JSON.parse(str || JSON.stringify(fallback));
+  } catch (e) {
+    console.error('Failed to parse JSON field:', str, e);
+    return fallback;
+  }
+}
 export async function getTenantIdBySlug(slug: string) {
   const rows = await query<{ tenant_id: string }>(
     "SELECT tenant_id FROM slugs WHERE slug = ? LIMIT 1",
@@ -132,7 +145,7 @@ export async function getCustomersByTenant(tenantId: string) {
 }
 
 export async function getStaffByTenant(tenantId: string) {
-  return query(
+  const rows = await query(
     `SELECT
        id,
        name,
@@ -157,6 +170,14 @@ export async function getStaffByTenant(tenantId: string) {
      ORDER BY name ASC`,
     [tenantId]
   );
+  
+  return rows.map((r: any) => ({
+    ...r,
+    assignedSections: safeParse(r.assignedSections, []),
+    assignedCategories: safeParse(r.assignedCategories, []),
+    metrics: safeParse(r.metrics, {}),
+    badges: safeParse(r.badges, []),
+  }));
 }
 
 export async function getWorkstationsByTenant(tenantId: string) {
