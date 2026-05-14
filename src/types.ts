@@ -89,6 +89,7 @@ export interface Staff {
   };
   badges?: string[];
   rank?: string;
+  newPassword?: string;
 }
 
 export interface Customer {

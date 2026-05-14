@@ -112,6 +112,17 @@ export const StaffModal: React.FC<StaffModalProps> = ({
             </div>
           </div>
 
+          <div className="space-y-1">
+            <label className={labelClass}>Password (Optional)</label>
+            <input type="password" minLength={6} className={inputClass}
+              placeholder="Leave blank to keep unchanged"
+              onChange={e => onChange({ ...staff, newPassword: e.target.value })}
+            />
+            <p className="text-[10px] text-slate-500 font-medium italic">
+              Min 6 characters. If set, this staff member can log in using their email and this password.
+            </p>
+          </div>
+
           {staff.role === 'cashier' && (
             <div className="space-y-3 pt-2">
               <label className={labelClass}>Restricted Access (Optional)</label>

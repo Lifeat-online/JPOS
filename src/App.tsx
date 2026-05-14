@@ -607,7 +607,8 @@ export default function App() {
     if (!staffModal.staff || !tenantId) return;
     setIsProcessingCrud(true);
     try {
-      const { id, ...data } = staffModal.staff;
+      const { id, newPassword, ...data } = staffModal.staff;
+      let targetId = id;
       if (id) {
         await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${id}`, { ...data, updatedAt: new Date().toISOString() });
       } else {
@@ -617,8 +618,19 @@ export default function App() {
           setIsProcessingCrud(false);
           return;
         }
-        await apiPost(`/api/mariadb/tenants/${tenantId}/staff`, { ...data, status: 'active', createdAt: new Date().toISOString() });
+        const created = await apiPost(`/api/mariadb/tenants/${tenantId}/staff`, { ...data, status: 'active', createdAt: new Date().toISOString() });
+        targetId = created.id;
       }
+
+      if (newPassword && newPassword.length >= 6) {
+        try {
+          await apiPost('/api/auth/setup-password', { staffId: targetId, password: newPassword });
+        } catch (err: any) {
+          console.error('Failed to set password:', err);
+          alert('Staff saved, but failed to set password: ' + (err.message || 'Unknown error'));
+        }
+      }
+
       setStaffModal({ isOpen: false, staff: null });
     } catch (err) {
       console.error('Failed to save staff:', err);
