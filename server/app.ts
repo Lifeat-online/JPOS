@@ -820,10 +820,10 @@ export async function createApp() {
         const tableRows = await query<any>(
           `
             SELECT
-              s.table_number AS tableNumber,
-              COUNT(*) AS activeOrders,
-              MIN(s.created_at) AS oldestOrderAt,
-              SUM(s.total) AS activeOrderValue
+              s.table_number AS "tableNumber",
+              COUNT(*) AS "activeOrders",
+              MIN(s.created_at) AS "oldestOrderAt",
+              SUM(s.total) AS "activeOrderValue"
             FROM sales s
             WHERE s.tenant_id = ?
               AND s.table_number IS NOT NULL
