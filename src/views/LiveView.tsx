@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Banknote, ChefHat, RefreshCw, Timer, Users, Utensils } from 'lucide-react';
+import { Activity, Banknote, ChefHat, Power, RefreshCw, Timer, Users, Utensils } from 'lucide-react';
 import { getTenantLiveStats } from '../api';
 import { LiveTenantStats } from '../types';
 import { getDate } from '../utils/date';
+import { usePosStore } from '../store/usePosStore';
 
 export function LiveView({ tenantId }: { tenantId: string | null }) {
+  const { isLivePollingEnabled, setIsLivePollingEnabled } = usePosStore();
   const [data, setData] = useState<LiveTenantStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,10 +31,43 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
 
   useEffect(() => {
     if (!canLoad) return;
+    
+    // Initial load
     refresh();
-    const id = window.setInterval(refresh, 5000);
-    return () => window.clearInterval(id);
-  }, [tenantId]);
+
+    let id: number | null = null;
+
+    const startPolling = () => {
+      if (!id && isLivePollingEnabled) {
+        id = window.setInterval(refresh, 5000);
+      }
+    };
+
+    const stopPolling = () => {
+      if (id) {
+        window.clearInterval(id);
+        id = null;
+      }
+    };
+
+    // Only poll if enabled AND tab is visible (extra cost saving)
+    const handleVisibilityChange = () => {
+      if (document.hidden) stopPolling();
+      else startPolling();
+    };
+
+    if (isLivePollingEnabled) {
+      startPolling();
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    } else {
+      stopPolling();
+    }
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [tenantId, isLivePollingEnabled]);
 
   const fmtMoney = (value: number) => `R${(Number.isFinite(value) ? value : 0).toFixed(2)}`;
   const fmtTime = (value: any) => {
@@ -80,26 +115,50 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
   return (
     <div className="flex-1 p-4 lg:p-10 overflow-y-auto bg-slate-50 dark:bg-[#0B1120]">
       <div className="max-w-6xl mx-auto space-y-8">
-        <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h2 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white">Live</h2>
-            <div className="mt-1 text-sm text-slate-500 font-medium">
-              {data?.isRestaurantMode ? 'Restaurant mode' : 'Retail mode'}
-              {lastUpdatedAt ? ` • Updated ${fmtTime(lastUpdatedAt)}` : ''}
+            <div className="mt-1 flex items-center gap-2 text-sm text-slate-500 font-medium">
+              <span>{data?.isRestaurantMode ? 'Restaurant mode' : 'Retail mode'}</span>
+              {lastUpdatedAt && <span>• Updated {fmtTime(lastUpdatedAt)}</span>}
+              {!isLivePollingEnabled && (
+                <span className="flex items-center gap-1.5 px-2 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded-full text-[10px] font-black uppercase tracking-wider border border-amber-100 dark:border-amber-800/50 ml-2">
+                  <Power className="w-2.5 h-2.5" />
+                  Polling Paused
+                </span>
+              )}
             </div>
           </div>
-          <button
-            onClick={refresh}
-            disabled={!canLoad || loading}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-bold text-sm border transition-all ${
-              !canLoad || loading
-                ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-transparent'
-                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
+          
+          <div className="flex items-center gap-4">
+            {/* Polling Switch */}
+            <div className="flex items-center gap-3 px-4 py-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:border-slate-300 dark:hover:border-slate-700">
+              <span className={`text-[10px] font-black uppercase tracking-widest ${isLivePollingEnabled ? 'text-primary' : 'text-slate-400'}`}>
+                Auto-Refresh
+              </span>
+              <button
+                onClick={() => setIsLivePollingEnabled(!isLivePollingEnabled)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isLivePollingEnabled ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-800'}`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isLivePollingEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                />
+              </button>
+            </div>
+
+            <button
+              onClick={refresh}
+              disabled={!canLoad || loading}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-bold text-sm border transition-all ${
+                !canLoad || loading
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-transparent'
+                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
+              }`}
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
         </div>
 
         {!tenantId && (

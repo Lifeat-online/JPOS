@@ -252,11 +252,37 @@ export function useAppData(user: User | null) {
   }, [tenantId]);
 
   useEffect(() => {
+    let interval: number | null = null;
+    
+    const startPolling = () => {
+      if (!interval) {
+        interval = window.setInterval(loadSales, 15000);
+      }
+    };
+    
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) stopPolling();
+      else {
+        void loadSales();
+        startPolling();
+      }
+    };
+
     void loadSales();
-    const interval = setInterval(() => {
-      void loadSales();
-    }, 15000); // Sales change frequently
-    return () => { clearInterval(interval); };
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibility);
+    
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [loadSales]);
 
   useEffect(() => {

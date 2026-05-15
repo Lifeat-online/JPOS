@@ -16,6 +16,7 @@ interface PosState {
   activeTableNumber: string | null;
   activeOrderId: string | null;
   isCartOpen: boolean;
+  isLivePollingEnabled: boolean;
 
   // Actions
   addToCart: (product: Product, workstationId?: string) => void;
@@ -34,6 +35,7 @@ interface PosState {
   /** Replace the cart with a new array */
   setCart: (cart: (CartItem | OrderItem)[]) => void;
   setIsCartOpen: (open: boolean) => void;
+  setIsLivePollingEnabled: (enabled: boolean) => void;
 }
 
 export const usePosStore = create<PosState>((set) => ({
@@ -49,6 +51,7 @@ export const usePosStore = create<PosState>((set) => ({
   activeTableNumber: null,
   activeOrderId: null,
   isCartOpen: false,
+  isLivePollingEnabled: false,
 
   addToCart: (product, workstationId) =>
     set((state) => {
@@ -94,4 +97,5 @@ export const usePosStore = create<PosState>((set) => ({
   setActiveOrderId: (orderId) => set({ activeOrderId: orderId }),
   setCart: (cart) => set({ cart }),
   setIsCartOpen: (open) => set({ isCartOpen: open }),
+  setIsLivePollingEnabled: (enabled) => set({ isLivePollingEnabled: enabled }),
 }));
