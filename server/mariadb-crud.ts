@@ -1,9 +1,13 @@
 import { getConnection, isPostgres, query } from "./db.js";
 import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem } from "./types.js";
 
-const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID || "10000100";
-const PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY || "46f0cd694581a";
-const PAYFAST_PASSPHRASE = process.env.PAYFAST_PASSPHRASE || "jt7v60h69n8a1";
+const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
+const PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY;
+const PAYFAST_PASSPHRASE = process.env.PAYFAST_PASSPHRASE;
+
+if (!PAYFAST_MERCHANT_ID || !PAYFAST_MERCHANT_KEY || !PAYFAST_PASSPHRASE) {
+  console.warn("⚠️  PayFast credentials not configured. Payment processing will fail.");
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helper Functions
@@ -130,7 +134,10 @@ export async function createTableSection(
   section: any
 ): Promise<any> {
   const id = `sec_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-  const orderCol = isPostgres() ? '"order"' : "`order`";
+  // Whitelist column names to prevent SQL injection
+  const orderCol = isPostgres() 
+    ? '"order"' 
+    : '`order`';
   await query(
     `INSERT INTO table_sections (id, tenant_id, name, color, ${orderCol}, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,

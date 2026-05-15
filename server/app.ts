@@ -13,6 +13,8 @@ import { initDb } from "./init-db.js";
 import rateLimit from "express-rate-limit";
 import http from "http";
 import { Server as SocketIOServer } from "socket.io";
+import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, StaffSchema, SaleSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
+import { Request, Response, NextFunction } from "express";
 import {
   getProductsByTenant,
   getTenantIdBySlug,
@@ -73,6 +75,7 @@ import {
   createModifierGroup,
   updateModifierOptions,
   getProductModifiers,
+  deleteModifierGroup,
 } from "./mariadb-crud.js";
 import {
   handleLogin,
@@ -182,10 +185,14 @@ function listRemoteTags(projectRoot: string, remoteUrl: string, opts?: { ssh?: b
   return { ok: true as const, tags, output: res.output };
 }
 
-let PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID || "10000100";
-let PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY || "46f0cd694581a";
-let PAYFAST_PASSPHRASE = process.env.PAYFAST_PASSPHRASE || "jt7v60h69n8a1";
+let PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
+let PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY;
+let PAYFAST_PASSPHRASE = process.env.PAYFAST_PASSPHRASE;
 let PAYFAST_SANDBOX = process.env.PAYFAST_SANDBOX === "true";
+
+if (!PAYFAST_MERCHANT_ID || !PAYFAST_MERCHANT_KEY || !PAYFAST_PASSPHRASE) {
+  console.warn("⚠️  PayFast credentials not configured. Payment processing will fail.");
+}
 
 async function getAppConfig(tenantId: string) {
   try {
@@ -240,6 +247,48 @@ export async function createApp() {
   app.use(bodyParser.json());
   app.use(bodyParser.urlencoded({ extended: true }));
 
+  // Security Headers
+  app.use((req, res, next) => {
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+    
+    if (isProduction) {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    
+    next();
+  });
+
+  // Rate Limiting for auth endpoints
+  const rateLimit = (windowMs: number, max: number) => {
+    const attempts = new Map<string, { count: number; resetTime: number }>();
+    
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const ip = req.ip || req.socket.remoteAddress || 'unknown';
+      const now = Date.now();
+      
+      const record = attempts.get(ip);
+      if (!record || now > record.resetTime) {
+        attempts.set(ip, { count: 1, resetTime: now + windowMs });
+        return next();
+      }
+      
+      record.count++;
+      if (record.count > max) {
+        res.status(429).json({ error: "Too many requests. Please try again later." });
+        return;
+      }
+      
+      next();
+    };
+  };
+
+  // Apply rate limiting to auth endpoints
+  const authRateLimit = rateLimit(15 * 60 * 1000, 5); // 5 attempts per 15 minutes
+
   app.get("/api/health", (req, res) => {
     res.setHeader("X-JPOS-Build", BUILD_ID);
     res.setHeader("X-JPOS-Update-Repo", UPDATE_REPO);
@@ -270,11 +319,11 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/auth/login", handleLogin);
+  app.post("/api/auth/login", authRateLimit, validateSchema(LoginSchema), handleLogin);
   app.post("/api/auth/logout", handleLogout);
-  app.post("/api/auth/refresh", handleRefreshToken);
+  app.post("/api/auth/refresh", authRateLimit, handleRefreshToken);
   app.get("/api/auth/me", requireAuth, handleGetMe);
-  app.post("/api/auth/setup-password", requireAuth, handleSetupPassword);
+  app.post("/api/auth/setup-password", requireAuth, validateSchema(PasswordSetupSchema), handleSetupPassword);
 
   app.get("/api/dev/git-auth/status", requireAuth, async (req, res) => {
     if (!canManageUpdates(req.user?.role)) {
@@ -687,7 +736,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/sales", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/sales", requireAuth, validateSchema(SaleSchema), async (req, res) => {
     try {
       const sale = await createSale(req.params.tenantId, req.body);
       res.json(sale);
@@ -1062,7 +1111,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/table-sections", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/table-sections", requireAuth, validateSchema(TableSectionSchema), async (req, res) => {
     try {
       const data = await createTableSection(req.params.tenantId, req.body);
       res.json(data);
@@ -1071,7 +1120,7 @@ export async function createApp() {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/table-sections/:id", requireAuth, async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/table-sections/:id", requireAuth, validateSchema(TableSectionSchema), async (req, res) => {
     try {
       const data = await updateTableSection(req.params.tenantId, req.params.id, req.body);
       res.json(data);
@@ -1098,7 +1147,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/restaurant-tables", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/restaurant-tables", requireAuth, validateSchema(RestaurantTableSchema), async (req, res) => {
     try {
       const data = await createRestaurantTable(req.params.tenantId, req.body);
       res.json(data);
@@ -1107,7 +1156,7 @@ export async function createApp() {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/restaurant-tables/:id", requireAuth, async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/restaurant-tables/:id", requireAuth, validateSchema(RestaurantTableSchema), async (req, res) => {
     try {
       const data = await updateRestaurantTable(req.params.tenantId, req.params.id, req.body);
       res.json(data);
@@ -1178,7 +1227,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/products", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/products", requireAuth, validateSchema(ProductSchema), async (req, res) => {
     try {
       const data = await createProduct(req.params.tenantId, req.body);
       res.json(data);
@@ -1187,7 +1236,7 @@ export async function createApp() {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/products/:id", requireAuth, async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/products/:id", requireAuth, validateSchema(ProductSchema), async (req, res) => {
     try {
       const data = await updateProduct(req.params.tenantId, req.params.id, req.body);
       res.json(data);
@@ -1205,7 +1254,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/customers", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/customers", requireAuth, validateSchema(CustomerSchema), async (req, res) => {
     try {
       const data = await createCustomer(req.params.tenantId, req.body);
       res.json(data);
@@ -1214,7 +1263,7 @@ export async function createApp() {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, validateSchema(CustomerSchema), async (req, res) => {
     try {
       const data = await updateCustomer(req.params.tenantId, req.params.id, req.body);
       res.json(data);
@@ -1232,7 +1281,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/staff", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/staff", requireAuth, validateSchema(StaffSchema), async (req, res) => {
     try {
       const data = await createStaff(req.params.tenantId, req.body);
       res.json(data);
@@ -1241,7 +1290,7 @@ export async function createApp() {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, validateSchema(StaffSchema), async (req, res) => {
     try {
       const data = await updateStaff(req.params.tenantId, req.params.id, req.body);
       res.json(data);
@@ -1259,7 +1308,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/workstations", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/workstations", requireAuth, validateSchema(WorkstationSchema), async (req, res) => {
     try {
       const data = await createWorkstation(req.params.tenantId, req.body);
       res.json(data);
@@ -1611,6 +1660,20 @@ export async function createApp() {
       });
     });
   }
+
+  // Centralized error handler
+  app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+    console.error("Server error:", err.message);
+    
+    if (res.headersSent) {
+      return next(err);
+    }
+    
+    res.status(500).json({
+      error: isProduction ? "Internal server error" : err.message,
+      ...(isTest ? { stack: err.stack } : {})
+    });
+  });
 
   return app;
 }
