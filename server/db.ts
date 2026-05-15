@@ -99,7 +99,26 @@ const pgPool = isPostgres()
 export async function query<T = any>(sql: string, params: any[] = []) {
   if (pgPool) {
     let pgSql = toPgPlaceholders(sql);
-    pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, 'AS "$1"');
+    // Find all aliases after AS and wrap them in double quotes
+    const aliases: string[] = [];
+    pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match, p1) => {
+      aliases.push(p1);
+      return `AS "${p1}"`;
+    });
+
+    // Also wrap these same aliases if they appear in ORDER BY
+    if (aliases.length > 0) {
+      const orderMatch = pgSql.match(/\b[oO][rR][dD][eE][rR]\s+[bB][yY]\s+([\s\S]+)$/i);
+      if (orderMatch) {
+        let orderPart = orderMatch[1];
+        for (const alias of aliases) {
+          const aliasRegex = new RegExp(`\\b${alias}\\b`, "g");
+          orderPart = orderPart.replace(aliasRegex, `"${alias}"`);
+        }
+        pgSql = pgSql.substring(0, orderMatch.index) + pgSql.substring(orderMatch.index!).replace(orderMatch[1], orderPart);
+      }
+    }
+
     const res = await pgPool.query(pgSql, params);
     return res.rows as T[];
   }
@@ -126,13 +145,43 @@ export async function getConnection() {
       },
       async execute<T = any>(sql: string, params: any[] = []) {
         let pgSql = toPgPlaceholders(sql);
-        pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, 'AS "$1"');
+        const aliases: string[] = [];
+        pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match, p1) => {
+          aliases.push(p1);
+          return `AS "${p1}"`;
+        });
+        if (aliases.length > 0) {
+          const orderMatch = pgSql.match(/\b[oO][rR][dD][eE][rR]\s+[bB][yY]\s+([\s\S]+)$/i);
+          if (orderMatch) {
+            let orderPart = orderMatch[1];
+            for (const alias of aliases) {
+              const aliasRegex = new RegExp(`\\b${alias}\\b`, "g");
+              orderPart = orderPart.replace(aliasRegex, `"${alias}"`);
+            }
+            pgSql = pgSql.substring(0, orderMatch.index) + pgSql.substring(orderMatch.index!).replace(orderMatch[1], orderPart);
+          }
+        }
         const res = await client.query(pgSql, params);
         return [res.rows as T[]] as const;
       },
       async query<T = any>(sql: string, params: any[] = []) {
         let pgSql = toPgPlaceholders(sql);
-        pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, 'AS "$1"');
+        const aliases: string[] = [];
+        pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match, p1) => {
+          aliases.push(p1);
+          return `AS "${p1}"`;
+        });
+        if (aliases.length > 0) {
+          const orderMatch = pgSql.match(/\b[oO][rR][dD][eE][rR]\s+[bB][yY]\s+([\s\S]+)$/i);
+          if (orderMatch) {
+            let orderPart = orderMatch[1];
+            for (const alias of aliases) {
+              const aliasRegex = new RegExp(`\\b${alias}\\b`, "g");
+              orderPart = orderPart.replace(aliasRegex, `"${alias}"`);
+            }
+            pgSql = pgSql.substring(0, orderMatch.index) + pgSql.substring(orderMatch.index!).replace(orderMatch[1], orderPart);
+          }
+        }
         const res = await client.query(pgSql, params);
         return [res.rows as T[]] as const;
       },
