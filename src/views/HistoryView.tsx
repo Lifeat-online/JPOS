@@ -83,7 +83,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                             : `Invalid: ${String(raw)}`;
                         })()}
                       </td>
-                    <td className="px-6 py-4 text-xs font-bold uppercase text-slate-500 dark:text-slate-400">{sale.paymentMethod}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">{sale.paymentMethod}</span>
+                        {sale.payments && sale.payments.length > 1 && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[8px] font-black uppercase tracking-tighter w-fit">
+                            Split ({sale.payments.length})
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-6 py-4 font-extrabold text-slate-900 dark:text-white">R{Number(sale.total || 0).toFixed(2)}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${

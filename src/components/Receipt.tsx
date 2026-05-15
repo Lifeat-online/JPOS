@@ -86,21 +86,56 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
           <span>TOTAL DUE</span>
           <span>{currency}{Number(sale.total || 0).toFixed(2)}</span>
         </div>
-        <div className="flex justify-between">
-          <span>TENDERED ({sale.paymentMethod.toUpperCase()})</span>
-          <span>{currency}{Number(sale.tenderedAmount || sale.total || 0).toFixed(2)}</span>
-        </div>
-        {sale.changeAmount !== undefined && sale.changeAmount > 0 && (
-          <div className="flex justify-between font-bold">
-            <span>CHANGE</span>
-            <span>{currency}{Number(sale.changeAmount || 0).toFixed(2)}</span>
+        
+        {sale.payments && sale.payments.length > 0 ? (
+          <div className="space-y-0.5 mt-2">
+            <p className="text-[10px] font-bold border-b border-black border-dotted pb-0.5 mb-1 uppercase">Payments</p>
+            {sale.payments.map((p, idx) => (
+              <div key={idx} className="space-y-0.5">
+                <div className="flex justify-between text-[11px]">
+                  <span className="uppercase">{p.method} Tendered</span>
+                  <span>{currency}{Number(p.tenderedAmount || p.amount).toFixed(2)}</span>
+                </div>
+                {p.changeAmount > 0 && (
+                  <div className="flex justify-between text-[11px] pl-2">
+                    <span>- Change</span>
+                    <span>{currency}{Number(p.changeAmount).toFixed(2)}</span>
+                  </div>
+                )}
+                {p.tipAmount > 0 && (
+                  <div className="flex justify-between text-[11px] pl-2">
+                    <span>+ Tip</span>
+                    <span>{currency}{Number(p.tipAmount).toFixed(2)}</span>
+                  </div>
+                )}
+                {p.cashOutAmount > 0 && (
+                  <div className="flex justify-between text-[11px] pl-2">
+                    <span>- Cashout</span>
+                    <span>{currency}{Number(p.cashOutAmount).toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        )}
-        {sale.tipAmount !== undefined && sale.tipAmount > 0 && (
-          <div className="flex justify-between">
-            <span>TIP</span>
-            <span>{currency}{Number(sale.tipAmount || 0).toFixed(2)}</span>
-          </div>
+        ) : (
+          <>
+            <div className="flex justify-between">
+              <span>TENDERED ({sale.paymentMethod.toUpperCase()})</span>
+              <span>{currency}{Number(sale.tenderedAmount || sale.total || 0).toFixed(2)}</span>
+            </div>
+            {sale.changeAmount !== undefined && sale.changeAmount > 0 && (
+              <div className="flex justify-between font-bold">
+                <span>CHANGE</span>
+                <span>{currency}{Number(sale.changeAmount || 0).toFixed(2)}</span>
+              </div>
+            )}
+            {sale.tipAmount !== undefined && sale.tipAmount > 0 && (
+              <div className="flex justify-between">
+                <span>TIP</span>
+                <span>{currency}{Number(sale.tipAmount || 0).toFixed(2)}</span>
+              </div>
+            )}
+          </>
         )}
       </div>
 

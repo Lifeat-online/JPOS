@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
-  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Maximize, Lock, X, StickyNote, Wallet, TabletSmartphone
+  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Maximize, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Customer, AppConfig, Staff } from '../types';
@@ -19,6 +19,7 @@ interface PointOfSaleViewProps {
   handleOpenTab: (tabName?: string) => Promise<void>;
   setTenderModal: (modal: { isOpen: boolean, method: 'cash' | 'card' | null }) => void;
   setTenderedAmount: (amount: string) => void;
+  setSplitPaymentModal: (val: boolean) => void;
   categoryTree: any;
   CATEGORIES: string[];
   getCategoryIcon: (cat: string) => string;
@@ -31,7 +32,7 @@ interface PointOfSaleViewProps {
 
 export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   products, customers, isProcessing, setIsProcessing, handleSaveOrder, 
-  handleCheckout, handleWalletCheckout, handleOpenTab, setTenderModal, setTenderedAmount,
+  handleCheckout, handleWalletCheckout, handleOpenTab, setTenderModal, setTenderedAmount, setSplitPaymentModal,
   categoryTree, CATEGORIES, getCategoryIcon, getProductImage, openCashDrawer,
   pointsDiscount, onRedeemPoints, onClearPointsDiscount,
 }) => {
@@ -345,6 +346,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <span className="text-[9px] uppercase tracking-widest">PAYFAST</span>
                   </button>
                 </div>
+
+                <button
+                  disabled={isProcessing || cart.length === 0}
+                  onClick={() => setSplitPaymentModal(true)}
+                  className="w-full mb-4 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 border border-indigo-200 dark:border-indigo-800/50 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
+                >
+                  <Rows className="w-4 h-4" />
+                  Split Payment
+                </button>
 
                 {/* Wallet payment — only shown if staff has a balance */}
                 {currentUserStaff && (currentUserStaff.walletBalance || 0) > 0 && (

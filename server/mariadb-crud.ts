@@ -671,6 +671,28 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
       }
     }
 
+    // Insert payments
+    if (sale.payments && Array.isArray(sale.payments)) {
+      for (const p of sale.payments) {
+        const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        await conn.query(
+          `INSERT INTO sale_payments (
+            id, sale_id, method, amount, tendered_amount, change_amount, tip_amount, cash_out_amount, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          [
+            paymentId,
+            id,
+            p.method,
+            p.amount,
+            p.tenderedAmount || 0,
+            p.changeAmount || 0,
+            p.tipAmount || 0,
+            p.cashOutAmount || 0,
+          ]
+        );
+      }
+    }
+
     await conn.commit();
     return { id, ...sale } as Sale;
   } catch (err) {
@@ -837,6 +859,28 @@ export async function updateSale(
       }
     }
 
+    if (updates.payments !== undefined) {
+      await conn.query(`DELETE FROM sale_payments WHERE sale_id = ?`, [saleId]);
+      for (const p of updates.payments) {
+        const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        await conn.query(
+          `INSERT INTO sale_payments (
+            id, sale_id, method, amount, tendered_amount, change_amount, tip_amount, cash_out_amount, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          [
+            paymentId,
+            saleId,
+            p.method,
+            p.amount,
+            p.tenderedAmount || 0,
+            p.changeAmount || 0,
+            p.tipAmount || 0,
+            p.cashOutAmount || 0,
+          ]
+        );
+      }
+    }
+
     await conn.commit();
     const sale = await getSaleById(tenantId, saleId);
     if (!sale) {
@@ -951,6 +995,24 @@ export async function getSaleById(tenantId: string, saleId: string): Promise<Sal
   );
   
   sale.items = items;
+
+  const payments = await query(
+    `SELECT
+       id,
+       sale_id AS saleId,
+       method,
+       amount,
+       tendered_amount AS tenderedAmount,
+       change_amount AS changeAmount,
+       tip_amount AS tipAmount,
+       cash_out_amount AS cashOutAmount,
+       created_at AS createdAt
+     FROM sale_payments
+     WHERE sale_id = ?`,
+    [saleId]
+  );
+  sale.payments = payments;
+
   return sale;
 }
 

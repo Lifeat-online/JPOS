@@ -35,9 +35,11 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   });
   const [checkoutModal, setCheckoutModal] = useState<{
     isOpen: boolean;
-    paymentMethod: 'cash' | 'payfast' | 'card' | 'wallet' | null;
+    paymentMethod: 'cash' | 'payfast' | 'card' | 'wallet' | 'split' | null;
     saleData?: any;
   }>({ isOpen: false, paymentMethod: null });
+  const [splitPaymentModal, setSplitPaymentModal] = useState(false);
+  const [payments, setPayments] = useState<any[]>([]);
 
   // ── Tax calculations ─────────────────────────────────────────────────────────
   const taxRate = config?.business?.taxRate || 0;
@@ -214,7 +216,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     }
   };
 
-  const handleCheckout = async (method: 'cash' | 'payfast' | 'card') => {
+  const handleCheckout = async (method: 'cash' | 'payfast' | 'card' | 'wallet' | 'split', splitPayments?: any[]) => {
     if (cart.length === 0 || !tenantId) return;
     setIsProcessing(true);
 
@@ -226,7 +228,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         taxAmount: Number(taxAmount) || 0,
         taxRate: taxRate || null,
         taxInclusive,
-        paymentMethod: method,
+        paymentMethod: method === 'split' ? 'pending' : method, // Fallback for legacy
         status: method === 'payfast' ? 'pending' : 'completed',
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
@@ -234,15 +236,27 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         ...(activeTableNumber ? { tableNumber: activeTableNumber } : {}),
       };
 
-      if (method === 'cash' || method === 'card') {
-        saleData.tenderedAmount = Number(tenderedAmount || 0);
-        const overage = Math.max(0, Number(tenderedAmount || 0) - cartTotalAfterDiscount);
-        if (method === 'cash') {
-          saleData.changeAmount = overage;
-        } else {
-          if (cardOverageAction === 'tip') saleData.tipAmount = overage;
-          else saleData.cashOutAmount = overage;
-        }
+      if (method === 'split' && splitPayments) {
+        saleData.payments = splitPayments;
+        // Logic to determine primary payment method for legacy field if needed
+        saleData.paymentMethod = splitPayments.length > 1 ? 'cash' : (splitPayments[0]?.method || 'cash');
+      } else if (method === 'cash' || method === 'card' || method === 'wallet') {
+        const overage = method === 'wallet' ? 0 : Math.max(0, Number(tenderedAmount || 0) - cartTotalAfterDiscount);
+        const p: any = {
+          method: method,
+          amount: cartTotalAfterDiscount,
+          tenderedAmount: Number(tenderedAmount || cartTotalAfterDiscount),
+          changeAmount: method === 'cash' ? overage : 0,
+          tipAmount: (method === 'card' && cardOverageAction === 'tip') ? overage : 0,
+          cashOutAmount: (method === 'card' && cardOverageAction === 'cashout') ? overage : 0,
+        };
+        saleData.payments = [p];
+        
+        // Legacy fields
+        saleData.tenderedAmount = p.tenderedAmount;
+        saleData.changeAmount = p.changeAmount;
+        saleData.tipAmount = p.tipAmount;
+        saleData.cashOutAmount = p.cashOutAmount;
       }
 
       let saleId = '';
@@ -256,39 +270,53 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
       await refreshSales();
 
-      if (method === 'cash' || method === 'card') {
+      if (method !== 'payfast') {
         // Update loyalty points
         await updateLoyaltyPoints(cartTotalAfterDiscount);
 
-        // Update cash session totals
-        if (activeSession?.id) {
-          const sessionUpdates: any = {};
-          if (method === 'cash') {
-            sessionUpdates.expectedCashDelta = cartTotalAfterDiscount;
-          } else if (method === 'card') {
-            if (cardOverageAction === 'cashout') sessionUpdates.expectedCashDelta = -(saleData.cashOutAmount || 0);
-            else if (cardOverageAction === 'tip' && saleData.tipAmount > 0) sessionUpdates.tipsDelta = saleData.tipAmount;
-          }
-          if (Object.keys(sessionUpdates).length > 0) {
-            await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}`, sessionUpdates)
-              .catch(e => console.warn('Failed to update session:', e));
+        // Update cash session totals for each payment
+        if (activeSession?.id && saleData.payments) {
+          for (const payment of saleData.payments) {
+            const sessionUpdates: any = {};
+            if (payment.method === 'cash') {
+              sessionUpdates.expectedCashDelta = payment.amount;
+            } else if (payment.method === 'card') {
+              if (payment.cashOutAmount > 0) sessionUpdates.expectedCashDelta = -(payment.cashOutAmount);
+              else if (payment.tipAmount > 0) sessionUpdates.tipsDelta = payment.tipAmount;
+            }
+            if (Object.keys(sessionUpdates).length > 0) {
+              await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}`, sessionUpdates)
+                .catch(e => console.warn('Failed to update session:', e));
+            }
           }
         }
 
-        // Update staff metrics
-        if (currentUserStaff?.id) {
+        // Update staff metrics (aggregated tips)
+        if (currentUserStaff?.id && saleData.payments) {
+          const totalTips = saleData.payments.reduce((sum: number, p: any) => sum + (p.tipAmount || 0), 0);
           const metricsUpdate: any = { metricsOrdersDelta: 1 };
-          if (saleData.tipAmount > 0) metricsUpdate.metricsTipsDelta = saleData.tipAmount;
+          if (totalTips > 0) metricsUpdate.metricsTipsDelta = totalTips;
           await updateStaff(tenantId, currentUserStaff.id, metricsUpdate)
             .catch(e => console.warn('Failed to update staff metrics:', e));
+        }
+        
+        // Handle Wallet deduction if split contains wallet
+        if (method === 'split' || method === 'wallet') {
+          const walletPayment = saleData.payments.find((p: any) => p.method === 'wallet');
+          if (walletPayment && currentUserStaff) {
+            await updateStaff(tenantId, currentUserStaff.id, {
+              walletBalance: (currentUserStaff.walletBalance || 0) - walletPayment.amount
+            }).catch(e => console.warn('Failed to update wallet balance:', e));
+          }
         }
 
         resetAfterCheckout();
         setTenderModal({ isOpen: false, method: null });
+        setSplitPaymentModal(false);
         setCheckoutModal({ isOpen: true, paymentMethod: method, saleData: { ...saleData, id: saleId } });
         setIsProcessing(false);
       } else {
-        // PayFast redirect
+        // PayFast redirect (PayFast currently doesn't support being part of a split in this implementation)
         const response = await fetch('/api/payfast/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -322,56 +350,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
   // ── Wallet checkout ──────────────────────────────────────────────────────────
   const handleWalletCheckout = async () => {
-    if (cart.length === 0 || !currentUserStaff || !tenantId) return;
-    const balance = currentUserStaff.walletBalance || 0;
-    if (balance < cartTotalAfterDiscount) return;
-
-    setIsProcessing(true);
-    try {
-      const saleData: any = {
-        items: stampOrderItems(cart, true),
-        total: Number(cartTotalAfterDiscount) || 0,
-        subtotal: Number(cartSubtotal) || 0,
-        taxAmount: Number(taxAmount) || 0,
-        taxRate: taxRate || null,
-        taxInclusive,
-        paymentMethod: 'wallet',
-        status: 'completed',
-        customerId: selectedCustomerId || null,
-        staffId: currentUserStaff.id,
-        tenderedAmount: cartTotalAfterDiscount,
-        changeAmount: 0,
-        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
-        ...(activeTableNumber ? { tableNumber: activeTableNumber } : {}),
-      };
-
-      let saleId = '';
-      if (activeOrderId) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
-        saleId = activeOrderId;
-      } else {
-        const created = await createSale(tenantId, saleData);
-        saleId = created.id;
-      }
-
-      await refreshSales();
-
-      // Deduct from staff wallet + update metrics
-      await updateStaff(tenantId, currentUserStaff.id, {
-        walletBalance: balance - cartTotalAfterDiscount,
-        metricsOrdersDelta: 1,
-      });
-
-      // Award loyalty points
-      await updateLoyaltyPoints(cartTotalAfterDiscount);
-
-      resetAfterCheckout();
-      setCheckoutModal({ isOpen: true, paymentMethod: 'wallet', saleData: { ...saleData, id: saleId } });
-    } catch (err) {
-      console.error('Wallet checkout failed:', err);
-    } finally {
-      setIsProcessing(false);
-    }
+    await handleCheckout('wallet');
   };
 
   return {
@@ -381,6 +360,8 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     pointsDiscount, redeemPoints, clearPointsDiscount,
     tenderModal, setTenderModal,
     checkoutModal, setCheckoutModal,
+    splitPaymentModal, setSplitPaymentModal,
+    payments, setPayments,
     cartSubtotal, taxAmount,
     cartTotal: cartTotalAfterDiscount,
     cartTotalBeforeDiscount: cartTotal,

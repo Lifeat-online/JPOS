@@ -266,6 +266,19 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS sale_payments (
+  id TEXT PRIMARY KEY,
+  sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet')),
+  amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tendered_amount NUMERIC(12,2) DEFAULT 0,
+  change_amount NUMERIC(12,2) DEFAULT 0,
+  tip_amount NUMERIC(12,2) DEFAULT 0,
+  cash_out_amount NUMERIC(12,2) DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 INSERT INTO tenants (id, name) VALUES ('default', 'Default Tenant')
 ON CONFLICT (id) DO NOTHING;
 

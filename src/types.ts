@@ -36,6 +36,18 @@ export interface OrderItem extends CartItem {
   actionStaffId?: string;
 }
 
+export interface SalePayment {
+  id: string;
+  saleId: string;
+  method: 'cash' | 'payfast' | 'card' | 'wallet';
+  amount: number;
+  tenderedAmount?: number;
+  changeAmount?: number;
+  tipAmount?: number;
+  cashOutAmount?: number;
+  createdAt: any;
+}
+
 export interface Sale {
   id: string;
   items: (CartItem | OrderItem)[];
@@ -45,10 +57,15 @@ export interface Sale {
   taxRate?: number;
   taxInclusive?: boolean;
   paymentMethod: 'cash' | 'payfast' | 'card' | 'wallet' | 'pending';
+  /** @deprecated use payments array for multi-tender sales */
   tenderedAmount?: number;
+  /** @deprecated use payments array for multi-tender sales */
   changeAmount?: number;
+  /** @deprecated use payments array for multi-tender sales */
   tipAmount?: number;
+  /** @deprecated use payments array for multi-tender sales */
   cashOutAmount?: number;
+  payments?: SalePayment[];
   pointsDiscount?: number;
   status: 'pending' | 'completed' | 'failed' | 'open' | 'kitchen';
   createdAt: any;

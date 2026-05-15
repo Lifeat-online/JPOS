@@ -257,6 +257,22 @@ export async function getActiveSalesByTenant(tenantId: string) {
        WHERE sale_id = ?`,
       [sale.id]
     );
+
+    sale.payments = await query(
+      `SELECT
+         id,
+         sale_id AS saleId,
+         method,
+         amount,
+         tendered_amount AS tenderedAmount,
+         change_amount AS changeAmount,
+         tip_amount AS tipAmount,
+         cash_out_amount AS cashOutAmount,
+         created_at AS createdAt
+       FROM sale_payments
+       WHERE sale_id = ?`,
+      [sale.id]
+    );
   }
 
   return sales;

@@ -49,6 +49,7 @@ import { StaffModal } from './components/modals/StaffModal';
 import { TenderModal } from './components/modals/TenderModal';
 import { CheckoutSuccessModal } from './components/modals/CheckoutSuccessModal';
 import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
+import { SplitPaymentModal } from './components/modals/SplitPaymentModal';
 
 import { Product, Customer, Staff } from './types';
 import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage, INITIAL_PRODUCTS } from './constants';
@@ -855,6 +856,7 @@ export default function App() {
             handleOpenTab={checkout.handleOpenTab}
             setTenderModal={checkout.setTenderModal}
             setTenderedAmount={(v) => checkout.setTenderedAmount(v)}
+            setSplitPaymentModal={checkout.setSplitPaymentModal}
             categoryTree={categoryTree}
             CATEGORIES={CATEGORIES}
             getCategoryIcon={getCategoryIcon}
@@ -1066,6 +1068,17 @@ export default function App() {
             onCardOverageChange={checkout.setCardOverageAction}
             onConfirm={() => checkout.handleCheckout(checkout.tenderModal.method!)}
             onClose={() => checkout.setTenderModal({ isOpen: false, method: null })}
+          />
+        )}
+
+        {checkout.splitPaymentModal && (
+          <SplitPaymentModal
+            isOpen={checkout.splitPaymentModal}
+            cartTotal={checkout.cartTotal}
+            isProcessing={checkout.isProcessing}
+            staffWalletBalance={currentUserStaff?.walletBalance || 0}
+            onConfirm={(payments) => checkout.handleCheckout('split', payments)}
+            onClose={() => checkout.setSplitPaymentModal(false)}
           />
         )}
 
