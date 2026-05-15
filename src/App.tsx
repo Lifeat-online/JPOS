@@ -8,9 +8,8 @@ import {
   LayoutGrid, History as HistoryIcon, Settings, Package, Banknote,
   Users, UserCog, Moon, Sun, ShoppingCart, AlertCircle, ChefHat, Utensils, Trophy,
   ChevronDown, LogOut, Wallet, TabletSmartphone, Maximize2, Minimize2, Monitor, Download,
-  Activity,
+  Activity, Building2, BarChart3, Code2, MessageSquare
 } from 'lucide-react';
-import { BarChart3 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { apiPost, apiPut, apiDelete, seedProducts, clearAllSales } from './api';
@@ -54,7 +53,7 @@ import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
 import { Product, Customer, Staff } from './types';
 import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage, INITIAL_PRODUCTS } from './constants';
 
-import { Code2, MessageSquare } from 'lucide-react';
+
 import { MessagingView } from './views/MessagingView';
 import { useMessaging } from './hooks/useMessaging';
 import { usePWA } from './hooks/usePWA';
