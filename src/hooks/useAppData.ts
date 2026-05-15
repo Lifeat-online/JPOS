@@ -143,12 +143,14 @@ export function useAppData(user: User | null) {
     }
   }, [user, staff, isStaffLoading]);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!tenantId) {
       setProducts([]);
       return;
     }
     let active = true;
+    let interval: number | null = null;
+
     async function loadProducts() {
       try {
         const fetched = await getTenantProducts(tenantId!);
@@ -165,17 +167,32 @@ export function useAppData(user: User | null) {
         console.error('Products load error:', err);
       }
     }
+
+    const start = () => { if (!interval) interval = window.setInterval(loadProducts, 30000); };
+    const stop = () => { if (interval) { clearInterval(interval); interval = null; } };
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else { void loadProducts(); start(); }
+    };
+
     loadProducts();
-    const interval = setInterval(loadProducts, 30000);
-    return () => { active = false; clearInterval(interval); };
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { 
+      active = false; 
+      stop();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [tenantId]);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!tenantId) {
       setCustomers([]);
       return;
     }
     let active = true;
+    let interval: number | null = null;
+
     async function loadCustomers() {
       try {
         const fetched = await getTenantCustomers(tenantId!);
@@ -190,19 +207,34 @@ export function useAppData(user: User | null) {
         console.error('Customers load error:', err);
       }
     }
+
+    const start = () => { if (!interval) interval = window.setInterval(loadCustomers, 30000); };
+    const stop = () => { if (interval) { clearInterval(interval); interval = null; } };
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else { void loadCustomers(); start(); }
+    };
+
     loadCustomers();
-    const interval = setInterval(loadCustomers, 30000);
-    return () => { active = false; clearInterval(interval); };
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { 
+      active = false; 
+      stop();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [tenantId]);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!tenantId) {
       setStaff([]);
       setIsStaffLoading(false);
       return;
     }
     let active = true;
+    let interval: number | null = null;
     setIsStaffLoading(true);
+
     async function loadStaff() {
       try {
         const fetched = await getTenantStaff(tenantId!);
@@ -223,9 +255,22 @@ export function useAppData(user: User | null) {
         if (active) setIsStaffLoading(false);
       }
     }
+
+    const start = () => { if (!interval) interval = window.setInterval(loadStaff, 60000); };
+    const stop = () => { if (interval) { clearInterval(interval); interval = null; } };
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else { void loadStaff(); start(); }
+    };
+
     loadStaff();
-    const interval = setInterval(loadStaff, 60000); // Staff changes less frequently
-    return () => { active = false; clearInterval(interval); };
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { 
+      active = false; 
+      stop();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [tenantId]);
 
   useEffect(() => {
@@ -285,12 +330,14 @@ export function useAppData(user: User | null) {
     };
   }, [loadSales]);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!tenantId) {
       setWorkstations([]);
       return;
     }
     let active = true;
+    let interval: number | null = null;
+
     async function loadWorkstations() {
       try {
         const fetched = await getTenantWorkstations(tenantId!);
@@ -300,9 +347,22 @@ export function useAppData(user: User | null) {
         console.error('Workstations load error:', err);
       }
     }
+
+    const start = () => { if (!interval) interval = window.setInterval(loadWorkstations, 30000); };
+    const stop = () => { if (interval) { clearInterval(interval); interval = null; } };
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else { void loadWorkstations(); start(); }
+    };
+
     loadWorkstations();
-    const interval = setInterval(loadWorkstations, 30000);
-    return () => { active = false; clearInterval(interval); };
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { 
+      active = false; 
+      stop();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [tenantId]);
 
   useEffect(() => {
@@ -345,12 +405,14 @@ export function useAppData(user: User | null) {
     return () => { active = false; clearInterval(interval); };
   }, [tenantId]);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!tenantId) {
       setRestaurantTables([]);
       return;
     }
     let active = true;
+    let interval: number | null = null;
+
     async function loadTables() {
       try {
         const fetched = await getTenantRestaurantTables(tenantId!);
@@ -360,9 +422,22 @@ export function useAppData(user: User | null) {
         console.error('Restaurant tables load error:', err);
       }
     }
+
+    const start = () => { if (!interval) interval = window.setInterval(loadTables, 30000); };
+    const stop = () => { if (interval) { clearInterval(interval); interval = null; } };
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else { void loadTables(); start(); }
+    };
+
     loadTables();
-    const interval = setInterval(loadTables, 30000);
-    return () => { active = false; clearInterval(interval); };
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { 
+      active = false; 
+      stop();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [tenantId]);
 
   return {

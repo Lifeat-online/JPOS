@@ -43,10 +43,36 @@ export function useMessaging({ user, tenantId, currentUserStaff, staff }: UseMes
   }, [user, tenantId]);
 
   useEffect(() => {
+    let interval: number | null = null;
+
+    const start = () => {
+      if (!interval) {
+        interval = window.setInterval(fetchMessages, POLL_MS);
+      }
+    };
+
+    const stop = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else {
+        void fetchMessages();
+        start();
+      }
+    };
+
     fetchMessages();
-    pollingRef.current = setInterval(fetchMessages, POLL_MS);
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
+      stop();
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [fetchMessages]);
 
