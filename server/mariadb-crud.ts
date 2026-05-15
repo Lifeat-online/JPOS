@@ -647,10 +647,12 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
       ]
     );
 
-    // Insert items
+    // Insert items & Deduct stock
     if (sale.items && Array.isArray(sale.items)) {
       for (const item of sale.items) {
-        const itemId = `item_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        const itemId = generateSaleItemId();
+        const productId = item.productId || item.id || null;
+        
         await conn.query(
           `INSERT INTO sale_items (
             id, sale_id, product_id, product_name, price, quantity, status,
@@ -659,8 +661,7 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
           [
             itemId,
             id,
-            // Fallback: CartItems use .id for the product, while existing OrderItems use .productId
-            item.productId || item.id || null,
+            productId,
             item.name,
             item.price,
             item.quantity,
@@ -668,6 +669,36 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
             item.workstationId || null,
           ]
         );
+
+        // 1. Deduct Bulk Stock from Recipe
+        if (productId) {
+          const recipe = await conn.query(
+            `SELECT bulk_item_id, quantity FROM product_recipes WHERE product_id = ?`,
+            [productId]
+          );
+          for (const r of recipe) {
+            await conn.query(
+              `UPDATE bulk_items SET stock = stock - ? WHERE id = ?`,
+              [r.quantity * item.quantity, r.bulk_item_id]
+            );
+          }
+        }
+
+        // 2. Deduct Bulk Stock from Modifiers
+        if (item.selectedModifiers && Array.isArray(item.selectedModifiers)) {
+          for (const mod of item.selectedModifiers) {
+            const opt = await conn.query(
+              `SELECT bulk_item_id, bulk_quantity FROM modifier_options WHERE id = ?`,
+              [mod.optionId]
+            );
+            if (opt.length > 0 && opt[0].bulk_item_id) {
+              await conn.query(
+                `UPDATE bulk_items SET stock = stock - ? WHERE id = ?`,
+                [opt[0].bulk_quantity * item.quantity, opt[0].bulk_item_id]
+              );
+            }
+          }
+        }
       }
     }
 
@@ -1373,4 +1404,142 @@ export async function seedProducts(tenantId: string, products: any[]): Promise<v
   } finally {
     conn.release();
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Inventory Expansion (Bulk Items, Recipes, Modifiers)
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function getBulkItems(tenantId: string): Promise<BulkItem[]> {
+  const rows = await query(
+    `SELECT id, name, unit, stock, min_stock AS minStock, cost_per_unit AS costPerUnit, barcode, created_at AS createdAt, updated_at AS updatedAt
+     FROM bulk_items WHERE tenant_id = ?`,
+    [tenantId]
+  );
+  return rows as BulkItem[];
+}
+
+export async function createBulkItem(tenantId: string, item: Partial<BulkItem>): Promise<BulkItem> {
+  const id = `bulk_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  await query(
+    `INSERT INTO bulk_items (id, tenant_id, name, unit, stock, min_stock, cost_per_unit, barcode, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [id, tenantId, item.name, item.unit || 'items', item.stock || 0, item.minStock || 0, item.costPerUnit || 0, item.barcode || null]
+  );
+  return { id, ...item } as BulkItem;
+}
+
+export async function updateBulkItem(tenantId: string, id: string, updates: Partial<BulkItem>): Promise<void> {
+  const fields: string[] = [];
+  const values: any[] = [];
+  if (updates.name !== undefined) { fields.push("name = ?"); values.push(updates.name); }
+  if (updates.unit !== undefined) { fields.push("unit = ?"); values.push(updates.unit); }
+  if (updates.stock !== undefined) { fields.push("stock = ?"); values.push(updates.stock); }
+  if (updates.minStock !== undefined) { fields.push("min_stock = ?"); values.push(updates.minStock); }
+  if (updates.costPerUnit !== undefined) { fields.push("cost_per_unit = ?"); values.push(updates.costPerUnit); }
+  if (updates.barcode !== undefined) { fields.push("barcode = ?"); values.push(updates.barcode); }
+  if (fields.length === 0) return;
+  fields.push("updated_at = NOW()");
+  values.push(tenantId, id);
+  await query(`UPDATE bulk_items SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`, values);
+}
+
+export async function deleteBulkItem(tenantId: string, id: string): Promise<void> {
+  await query(`DELETE FROM bulk_items WHERE tenant_id = ? AND id = ?`, [tenantId, id]);
+}
+
+export async function updateProductRecipe(productId: string, recipe: RecipeItem[]): Promise<void> {
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(`DELETE FROM product_recipes WHERE product_id = ?`, [productId]);
+    for (const r of recipe) {
+      await conn.query(
+        `INSERT INTO product_recipes (product_id, bulk_item_id, quantity) VALUES (?, ?, ?)`,
+        [productId, r.bulkItemId, r.quantity]
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function getProductRecipe(productId: string): Promise<RecipeItem[]> {
+  const rows = await query(
+    `SELECT r.bulk_item_id AS bulkItemId, r.quantity, b.name AS bulkItemName, b.unit
+     FROM product_recipes r
+     JOIN bulk_items b ON r.bulk_item_id = b.id
+     WHERE r.product_id = ?`,
+    [productId]
+  );
+  return rows as RecipeItem[];
+}
+
+export async function createModifierGroup(productId: string, group: Partial<ModifierGroup>): Promise<string> {
+  const id = `mod_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  await query(
+    `INSERT INTO product_modifiers (id, product_id, name, type, required, min_selection, max_selection, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [id, productId, group.name, group.type || 'single', group.required ? 1 : 0, group.minSelection || 0, group.maxSelection || 1]
+  );
+  return id;
+}
+
+export async function deleteModifierGroup(modifierId: string): Promise<void> {
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(`DELETE FROM modifier_options WHERE modifier_id = ?`, [modifierId]);
+    await conn.query(`DELETE FROM product_modifiers WHERE id = ?`, [modifierId]);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function updateModifierOptions(modifierId: string, options: Partial<ModifierOption>[]): Promise<void> {
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(`DELETE FROM modifier_options WHERE modifier_id = ?`, [modifierId]);
+    for (const opt of options) {
+      const id = `opt_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      await conn.query(
+        `INSERT INTO modifier_options (id, modifier_id, name, price_extra, bulk_item_id, bulk_quantity, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [id, modifierId, opt.name, opt.priceExtra || 0, opt.bulkItemId || null, opt.bulkQuantity || 0]
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function getProductModifiers(productId: string): Promise<ModifierGroup[]> {
+  const groups = await query(
+    `SELECT id, product_id AS productId, name, type, required, min_selection AS minSelection, max_selection AS maxSelection
+     FROM product_modifiers WHERE product_id = ?`,
+    [productId]
+  );
+  
+  for (const g of groups as ModifierGroup[]) {
+    const options = await query(
+      `SELECT id, modifier_id AS modifierId, name, price_extra AS priceExtra, bulk_item_id AS bulkItemId, bulk_quantity AS bulkQuantity
+       FROM modifier_options WHERE modifier_id = ?`,
+      [g.id]
+    );
+    g.options = options as ModifierOption[];
+  }
+  return groups as ModifierGroup[];
 }

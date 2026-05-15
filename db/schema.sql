@@ -290,3 +290,52 @@ VALUES (
   '$2b$10$cllz1VjHJl97oeAyzvZWsOpYd66l7kaOXG977GZ6yDT6C58SgMf9S',
   'active'
 );
+
+CREATE TABLE IF NOT EXISTS bulk_items (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  unit VARCHAR(32) NOT NULL DEFAULT 'items', -- ml, g, kg, items, etc.
+  stock DECIMAL(12,3) DEFAULT 0,
+  min_stock DECIMAL(12,3) DEFAULT 0,
+  cost_per_unit DECIMAL(12,2) DEFAULT 0,
+  barcode VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS product_recipes (
+  product_id VARCHAR(64) NOT NULL,
+  bulk_item_id VARCHAR(64) NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL, -- e.g. 25.000 for ml
+  PRIMARY KEY (product_id, bulk_item_id),
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (bulk_item_id) REFERENCES bulk_items(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS product_modifiers (
+  id VARCHAR(64) PRIMARY KEY,
+  product_id VARCHAR(64) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  type ENUM('single', 'multiple') DEFAULT 'single',
+  required BOOLEAN DEFAULT FALSE,
+  min_selection INT DEFAULT 0,
+  max_selection INT DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS modifier_options (
+  id VARCHAR(64) PRIMARY KEY,
+  modifier_id VARCHAR(64) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  price_extra DECIMAL(12,2) DEFAULT 0,
+  bulk_item_id VARCHAR(64), -- Optional: modifier can also deduct from bulk stock
+  bulk_quantity DECIMAL(12,3) DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (modifier_id) REFERENCES product_modifiers(id) ON DELETE CASCADE,
+  FOREIGN KEY (bulk_item_id) REFERENCES bulk_items(id) ON DELETE SET NULL
+);

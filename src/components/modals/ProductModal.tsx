@@ -4,6 +4,8 @@ import { X, Save, Loader2 } from 'lucide-react';
 import { Product, AppConfig } from '../../types';
 import { DEFAULT_CATEGORY_TREE } from '../../constants';
 import { usePosStore } from '../../store/usePosStore';
+import { RecipeModal } from './RecipeModal';
+import { ModifierModal } from './ModifierModal';
 
 interface ProductModalProps {
   product: Partial<Product> | null;
@@ -17,6 +19,8 @@ interface ProductModalProps {
 export const ProductModal: React.FC<ProductModalProps> = ({
   product, isProcessing, config, onSave, onClose, onChange,
 }) => {
+  const [showRecipe, setShowRecipe] = React.useState(false);
+  const [showModifiers, setShowModifiers] = React.useState(false);
   if (!product) return null;
 
   const workstations = usePosStore(s => s.workstations);
@@ -151,7 +155,6 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               />
             </div>
 
-            {/* Workstation — only shown in restaurant mode */}
             {isRestaurantMode && (
               <div className="space-y-1 md:col-span-2">
                 <label className={labelClass}>Workstation</label>
@@ -172,6 +175,28 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 </p>
               </div>
             )}
+
+            {/* Inventory & Modifiers (Only for existing products) */}
+            {product.id && (
+              <div className="grid grid-cols-2 gap-4 md:col-span-2 pt-4 border-t border-slate-50 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowRecipe(true)}
+                  className="py-4 bg-slate-50 dark:bg-[#0B1120] text-slate-900 dark:text-white rounded-2xl font-black text-[10px] uppercase tracking-widest border border-slate-100 dark:border-slate-800 hover:border-primary transition-all flex items-center justify-center gap-2"
+                >
+                  <div className="w-2 h-2 bg-primary rounded-full" />
+                  Recipe (BOM)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowModifiers(true)}
+                  className="py-4 bg-slate-50 dark:bg-[#0B1120] text-slate-900 dark:text-white rounded-2xl font-black text-[10px] uppercase tracking-widest border border-slate-100 dark:border-slate-800 hover:border-primary transition-all flex items-center justify-center gap-2"
+                >
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                  Modifiers
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 mt-8">
@@ -185,6 +210,22 @@ export const ProductModal: React.FC<ProductModalProps> = ({
           </div>
         </form>
       </motion.div>
+
+      {showRecipe && product.id && (
+        <RecipeModal
+          product={product as Product}
+          onClose={() => setShowRecipe(false)}
+          onSave={() => {}}
+        />
+      )}
+
+      {showModifiers && product.id && (
+        <ModifierModal
+          product={product as Product}
+          onClose={() => setShowModifiers(false)}
+          onSave={() => {}}
+        />
+      )}
     </motion.div>
   );
 };

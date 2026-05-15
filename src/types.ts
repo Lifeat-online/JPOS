@@ -11,6 +11,8 @@ export interface Product {
   imageUrl?: string;
   barcode?: string;
   workstationId?: string;
+  modifiers?: ModifierGroup[];
+  recipe?: RecipeItem[];
 }
 
 export interface Workstation {
@@ -23,6 +25,12 @@ export interface Workstation {
 export interface CartItem extends Product {
   cartItemId?: string;
   quantity: number;
+  selectedModifiers?: {
+    modifierId: string;
+    optionId: string;
+    name: string;
+    priceExtra: number;
+  }[];
 }
 
 /** Item with full restaurant lifecycle tracking */
@@ -356,4 +364,45 @@ export interface LiveTenantStats {
   };
   totals: LiveTotals;
   restaurant: LiveRestaurantStats | null;
+}
+
+// ── Inventory Expansion ────────────────────────────────────────────────────────
+
+export interface BulkItem {
+  id: string;
+  name: string;
+  unit: string; // ml, g, kg, items
+  stock: number;
+  minStock?: number;
+  costPerUnit?: number;
+  barcode?: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface RecipeItem {
+  bulkItemId: string;
+  quantity: number; // deduction quantity
+  bulkItemName?: string; // transient
+  unit?: string; // transient
+}
+
+export interface ModifierOption {
+  id: string;
+  modifierId: string;
+  name: string;
+  priceExtra: number;
+  bulkItemId?: string;
+  bulkQuantity?: number;
+}
+
+export interface ModifierGroup {
+  id: string;
+  productId: string;
+  name: string;
+  type: 'single' | 'multiple';
+  required: boolean;
+  minSelection: number;
+  maxSelection: number;
+  options: ModifierOption[];
 }

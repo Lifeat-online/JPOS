@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
-  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Maximize, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows
+  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Maximize, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Settings
 } from 'lucide-react';
+import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Customer, AppConfig, Staff } from '../types';
 import { CustomerSelector } from '../components/CustomerSelector';
@@ -46,6 +47,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   } = usePosStore();
 
   const [isScanning, setIsScanning] = useState(false);
+  const [modifyingProduct, setModifyingProduct] = useState<Product | null>(null);
+
+  const handleAddToCart = (product: Product) => {
+    if (product.modifiers && product.modifiers.length > 0) {
+      setModifyingProduct(product);
+    } else {
+      addToCart(product);
+    }
+  };
 
   const cartTotal = useMemo(() => cart.reduce((total, item) => total + (item.price * item.quantity), 0), [cart]);
 
@@ -166,7 +176,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => addToCart(product)}
+                onClick={() => handleAddToCart(product)}
                 className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-2xl p-4 flex lg:flex-col justify-between items-center lg:items-start cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800 relative group shadow-sm active:border-primary gap-4 lg:gap-0"
               >
                 <div className="w-12 h-12 lg:w-10 lg:h-10 bg-slate-50 dark:bg-[#0B1120] rounded-xl flex items-center justify-center text-xl lg:text-lg group-hover:scale-110 transition-transform shrink-0 overflow-hidden">
@@ -175,6 +185,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 <div className="flex-1 min-w-0">
                   <div className="font-bold text-sm leading-tight mb-0.5 text-slate-900 dark:text-white truncate">{product.name}</div>
                   <div className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">{product.category}</div>
+                  {product.modifiers && product.modifiers.length > 0 && (
+                    <div className="flex items-center gap-1 mt-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      <span className="text-[8px] font-black text-primary uppercase">Customizable</span>
+                    </div>
+                  )}
                   <div className="lg:hidden flex items-baseline gap-2 mt-1">
                      <span className="font-extrabold text-primary">R{Number(product.price).toFixed(2)}</span>
                      <span className="text-[8px] font-black text-slate-300 dark:text-slate-600">{product.stock} Units</span>
@@ -187,7 +203,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   </div>
                 </div>
                 <div className="absolute top-2 right-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1.5">
-                  <div className="p-1.5 bg-primary/10 text-primary rounded-lg hover:bg-primary hover:text-white transition-all shadow-sm" onClick={(e) => { e.stopPropagation(); addToCart(product); }}>
+                  <div className="p-1.5 bg-primary/10 text-primary rounded-lg hover:bg-primary hover:text-white transition-all shadow-sm" onClick={(e) => { e.stopPropagation(); handleAddToCart(product); }}>
                     <Plus className="w-4 h-4" />
                   </div>
                 </div>
@@ -251,19 +267,32 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <p className="text-xs font-black uppercase tracking-widest">Cart is empty</p>
                   </div>
                 ) : (
-                  cart.map(item => (
-                    <div key={item.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl flex items-center justify-between border border-slate-100 dark:border-slate-800/60 shadow-sm transition-all hover:border-primary/20">
-                      <div className="flex-1 pr-4 min-w-0">
-                        <p className="font-bold text-slate-900 dark:text-white text-sm truncate">{item.name}</p>
-                        <p className="text-xs font-black text-primary mt-0.5">R{(Number(item.price) * Number(item.quantity)).toFixed(2)}</p>
+                  cart.map((item, idx) => {
+                    const cartId = (item as any).cartItemId || item.id;
+                    const modifiers = (item as any).selectedModifiers || [];
+                    return (
+                      <div key={cartId} className="bg-white dark:bg-slate-900 p-4 rounded-2xl flex items-center justify-between border border-slate-100 dark:border-slate-800/60 shadow-sm transition-all hover:border-primary/20">
+                        <div className="flex-1 pr-4 min-w-0">
+                          <p className="font-bold text-slate-900 dark:text-white text-sm truncate">{item.name}</p>
+                          {modifiers.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {modifiers.map((m: any) => (
+                                <span key={m.optionId} className="text-[8px] font-bold bg-slate-50 dark:bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded-md">
+                                  + {m.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <p className="text-xs font-black text-primary mt-1">R{(Number(item.price) * Number(item.quantity)).toFixed(2)}</p>
+                        </div>
+                        <div className="flex items-center gap-4 bg-slate-50 dark:bg-[#0B1120] rounded-xl p-1 shrink-0">
+                          <button onClick={() => updateQuantity(cartId, -1)} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-lg text-xs font-black shadow-sm active:scale-90">-</button>
+                          <span className="font-black text-xs w-4 text-center">{item.quantity}</span>
+                          <button onClick={() => updateQuantity(cartId, 1)} className="w-8 h-8 flex items-center justify-center bg-primary text-white rounded-lg text-xs font-black shadow-sm active:scale-90">+</button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-4 bg-slate-50 dark:bg-[#0B1120] rounded-xl p-1 shrink-0">
-                        <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-lg text-xs font-black shadow-sm active:scale-90">-</button>
-                        <span className="font-black text-xs w-4 text-center">{item.quantity}</span>
-                        <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 flex items-center justify-center bg-primary text-white rounded-lg text-xs font-black shadow-sm active:scale-90">+</button>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 
@@ -424,6 +453,18 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
           </>
         )}
       </AnimatePresence>
+
+      {modifyingProduct && (
+        <ModifierSelectionModal
+          product={modifyingProduct}
+          onClose={() => setModifyingProduct(null)}
+          onConfirm={(selections) => {
+            addToCart(modifyingProduct, undefined, selections);
+            setModifyingProduct(null);
+            setIsCartOpen(true);
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -64,6 +64,15 @@ import {
   clearAllSales,
   seedProducts,
   updateAppConfig,
+  getBulkItems,
+  createBulkItem,
+  updateBulkItem,
+  deleteBulkItem,
+  updateProductRecipe,
+  getProductRecipe,
+  createModifierGroup,
+  updateModifierOptions,
+  getProductModifiers,
 } from "./mariadb-crud.js";
 import {
   handleLogin,
@@ -1442,6 +1451,100 @@ export async function createApp() {
     try {
       const request = await updateCustomerPayoutRequest(req.params.tenantId, req.params.id, req.body);
       res.json(request);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Bulk Items & Inventory Expansion
+  // ─────────────────────────────────────────────────────────────────────────
+
+  app.get("/api/mariadb/tenants/:tenantId/bulk-items", requireAuth, async (req, res) => {
+    try {
+      const items = await getBulkItems(req.params.tenantId);
+      res.json(items);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/bulk-items", requireAuth, async (req, res) => {
+    try {
+      const item = await createBulkItem(req.params.tenantId, req.body);
+      res.json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/bulk-items/:id", requireAuth, async (req, res) => {
+    try {
+      await updateBulkItem(req.params.tenantId, req.params.id, req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/bulk-items/:id", requireAuth, async (req, res) => {
+    try {
+      await deleteBulkItem(req.params.tenantId, req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/products/:productId/recipe", requireAuth, async (req, res) => {
+    try {
+      const recipe = await getProductRecipe(req.params.productId);
+      res.json(recipe);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/products/:productId/recipe", requireAuth, async (req, res) => {
+    try {
+      await updateProductRecipe(req.params.productId, req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/products/:productId/modifiers", requireAuth, async (req, res) => {
+    try {
+      const mods = await getProductModifiers(req.params.productId);
+      res.json(mods);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/products/:productId/modifiers", requireAuth, async (req, res) => {
+    try {
+      const id = await createModifierGroup(req.params.productId, req.body);
+      res.json({ id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/modifiers/:modifierId/options", requireAuth, async (req, res) => {
+    try {
+      await updateModifierOptions(req.params.modifierId, req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mariadb/modifiers/:modifierId", requireAuth, async (req, res) => {
+    try {
+      await deleteModifierGroup(req.params.modifierId);
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

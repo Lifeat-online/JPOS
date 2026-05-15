@@ -278,3 +278,46 @@ VALUES (
   'active'
 )
 ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS bulk_items (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  unit TEXT NOT NULL DEFAULT 'items',
+  stock NUMERIC(12,3) DEFAULT 0,
+  min_stock NUMERIC(12,3) DEFAULT 0,
+  cost_per_unit NUMERIC(12,2) DEFAULT 0,
+  barcode TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS product_recipes (
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  bulk_item_id TEXT NOT NULL REFERENCES bulk_items(id) ON DELETE CASCADE,
+  quantity NUMERIC(12,3) NOT NULL,
+  PRIMARY KEY (product_id, bulk_item_id)
+);
+
+CREATE TABLE IF NOT EXISTS product_modifiers (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT DEFAULT 'single' CHECK (type IN ('single', 'multiple')),
+  required SMALLINT DEFAULT 0 CHECK (required IN (0, 1)),
+  min_selection INTEGER DEFAULT 0,
+  max_selection INTEGER DEFAULT 1,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS modifier_options (
+  id TEXT PRIMARY KEY,
+  modifier_id TEXT NOT NULL REFERENCES product_modifiers(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  price_extra NUMERIC(12,2) DEFAULT 0,
+  bulk_item_id TEXT REFERENCES bulk_items(id) ON DELETE SET NULL,
+  bulk_quantity NUMERIC(12,3) DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);

@@ -19,8 +19,8 @@ interface PosState {
   isLivePollingEnabled: boolean;
 
   // Actions
-  addToCart: (product: Product, workstationId?: string) => void;
-  updateQuantity: (productId: string, delta: number) => void;
+  addToCart: (product: Product, workstationId?: string, selectedModifiers?: { modifierId: string, optionId: string, name: string, priceExtra: number }[]) => void;
+  updateQuantity: (cartItemId: string, delta: number) => void;
   clearCart: () => void;
   setCurrentUserStaff: (staff: Staff | null) => void;
   setConfig: (config: AppConfig | null) => void;
@@ -53,30 +53,43 @@ export const usePosStore = create<PosState>((set) => ({
   isCartOpen: false,
   isLivePollingEnabled: false,
 
-  addToCart: (product, workstationId) =>
+  addToCart: (product, workstationId, selectedModifiers) =>
     set((state) => {
-      const existing = state.cart.find(item => item.id === product.id);
-      if (existing) {
-        return {
-          cart: state.cart.map(item =>
-            item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-          ),
-        };
+      // Find item with SAME product ID and SAME modifiers
+      const existingIdx = state.cart.findIndex(item => {
+        if (item.id !== product.id) return false;
+        const itemMods = (item as CartItem).selectedModifiers || [];
+        const newMods = selectedModifiers || [];
+        if (itemMods.length !== newMods.length) return false;
+        return itemMods.every(m => newMods.some(nm => nm.optionId === m.optionId));
+      });
+
+      if (existingIdx > -1) {
+        const newCart = [...state.cart];
+        newCart[existingIdx] = { ...newCart[existingIdx], quantity: newCart[existingIdx].quantity + 1 };
+        return { cart: newCart };
       }
-      const newItem: OrderItem = {
+
+      // Calculate extra price from modifiers
+      const extraPrice = (selectedModifiers || []).reduce((sum, m) => sum + m.priceExtra, 0);
+
+      const newItem: CartItem = {
         ...product,
+        cartItemId: `item_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        price: product.price + extraPrice,
         quantity: 1,
-        status: 'pending',
         workstationId: workstationId || product.workstationId,
+        selectedModifiers: selectedModifiers || [],
       };
       return { cart: [...state.cart, newItem] };
     }),
 
-  updateQuantity: (productId, delta) =>
+  updateQuantity: (cartItemId, delta) =>
     set((state) => ({
       cart: state.cart
         .map(item => {
-          if (item.id === productId) {
+          const itemCartId = (item as CartItem).cartItemId || item.id;
+          if (itemCartId === cartItemId) {
             return { ...item, quantity: Math.max(0, item.quantity + delta) };
           }
           return item;
