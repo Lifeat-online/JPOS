@@ -96,16 +96,24 @@ export function getAllowedViews(role: StaffRole | null, options: AccessOptions =
   const allowed = new Set<AppView>(ROLE_VIEWS[role] || []);
   if (options.isDev) allowed.add('dev');
 
-  if (role === 'cashier' && options.isRestaurant && options.hasOpenTerminal) {
+  const hasActiveRestaurantTerminal = Boolean(options.isRestaurant && options.hasOpenTerminal);
+
+  if (role === 'cashier' && hasActiveRestaurantTerminal) {
     allowed.add('tables');
     allowed.add('tabs');
+  }
+
+  if (!hasActiveRestaurantTerminal) {
+    allowed.delete('tables');
+    allowed.delete('tabs');
+    allowed.delete('workstation');
   }
 
   if (!options.isRestaurant) {
     allowed.delete('tables');
     allowed.delete('tabs');
     allowed.delete('leaderboard');
-    if (role !== 'chef') allowed.delete('workstation');
+    allowed.delete('workstation');
   }
 
   return allowed;
@@ -143,9 +151,11 @@ export function canLoadDataset(
   options: AccessOptions = {}
 ) {
   if (!role) return false;
+  const hasActiveRestaurantTerminal = Boolean(options.isRestaurant && options.hasOpenTerminal);
+  if ((dataset === 'tables' || dataset === 'workstations') && !hasActiveRestaurantTerminal) return false;
   if (role === 'chef') return dataset === 'staff' || dataset === 'sales' || dataset === 'workstations';
   if (role === 'cashier') {
-    if (dataset === 'tables') return Boolean(options.isRestaurant && options.hasOpenTerminal);
+    if (dataset === 'tables') return hasActiveRestaurantTerminal;
     return ['products', 'customers', 'staff', 'sales', 'config', 'cash'].includes(dataset);
   }
   return true;
