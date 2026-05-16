@@ -173,11 +173,6 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
         netTips,
         notes: closeNotes,
       });
-      if (netTips > 0 && currentUserStaff) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${currentUserStaff.id}`, {
-          walletBalanceDelta: netTips, // Sending as delta for backend increment
-        });
-      }
       await fetchSessions();
       setClosingBreakdown({});
       setCloseNotes('');

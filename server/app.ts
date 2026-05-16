@@ -198,6 +198,60 @@ async function recordCashMovement(tenantId: string, data: any) {
   return { id, ...data };
 }
 
+function toMoneyNumber(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+async function getSessionRecordedTips(tenantId: string, sessionId: string, closedAt: Date) {
+  const rows = await query(
+    `SELECT
+      cs.staff_id AS staffId,
+      cs.status AS currentStatus,
+      cs.net_tips AS previousNetTips,
+      COALESCE((
+        SELECT SUM(sp.tip_amount)
+        FROM sales s
+        INNER JOIN sale_payments sp ON sp.sale_id = s.id
+        WHERE s.tenant_id = cs.tenant_id
+          AND s.staff_id = cs.staff_id
+          AND s.status = 'completed'
+          AND sp.tip_amount > 0
+          AND sp.created_at >= cs.opened_at
+          AND sp.created_at <= ?
+      ), 0) AS paymentTips,
+      COALESCE((
+        SELECT SUM(s.tip_amount)
+        FROM sales s
+        WHERE s.tenant_id = cs.tenant_id
+          AND s.staff_id = cs.staff_id
+          AND s.status = 'completed'
+          AND s.tip_amount > 0
+          AND s.created_at >= cs.opened_at
+          AND s.created_at <= ?
+          AND NOT EXISTS (
+            SELECT 1 FROM sale_payments sp WHERE sp.sale_id = s.id
+          )
+      ), 0) AS legacyTips
+    FROM cash_sessions cs
+    WHERE cs.tenant_id = ? AND cs.id = ?
+    LIMIT 1`,
+    [closedAt, closedAt, tenantId, sessionId]
+  );
+
+  const row = rows[0] as any;
+  if (!row) return null;
+  return {
+    staffId: row.staffId,
+    currentStatus: row.currentStatus,
+    recordedTips: toMoneyNumber(row.paymentTips) + toMoneyNumber(row.legacyTips),
+  };
+}
+
 function parseVersionSegments(version: string) {
   return version
     .replace(/^[^0-9]*/, "")
@@ -1558,6 +1612,28 @@ export async function createApp(io: any = null) {
       ) {
         return res.status(403).json({ error: "Only managers and admins can finalize cash reviews" });
       }
+      const isSubmittingCashUp = updates.status === "closed" || updates.reviewStatus === "submitted";
+      let walletTipsDelta = 0;
+      let walletTipsStaffId: string | null = null;
+      if (isSubmittingCashUp) {
+        const closedAt = updates.closedAt ? new Date(updates.closedAt) : new Date();
+        const tipSummary = await getSessionRecordedTips(req.params.tenantId, req.params.id, closedAt);
+        if (tipSummary) {
+          const difference = updates.difference !== undefined
+            ? toMoneyNumber(updates.difference)
+            : toMoneyNumber(updates.actualCash) - toMoneyNumber(updates.expectedCash);
+          const recordedTips = tipSummary.recordedTips;
+          const netTips = Math.max(0, recordedTips + Math.min(0, difference));
+
+          updates.accumulatedTips = recordedTips;
+          updates.netTips = netTips;
+
+          if (tipSummary.currentStatus !== "closed" && netTips > 0) {
+            walletTipsDelta = netTips;
+            walletTipsStaffId = tipSummary.staffId;
+          }
+        }
+      }
       const fields: string[] = [];
       const values: any[] = [];
 
@@ -1582,10 +1658,28 @@ export async function createApp(io: any = null) {
       if (updates.expectedCashDelta !== undefined) { fields.push("expected_cash = expected_cash + ?"); values.push(updates.expectedCashDelta); }
       if (updates.tipsDelta !== undefined) { fields.push("accumulated_tips = accumulated_tips + ?"); values.push(updates.tipsDelta); }
 
-      if (fields.length > 0) {
-        fields.push("updated_at = NOW()");
-        values.push(req.params.id, req.params.tenantId);
-        await query(`UPDATE cash_sessions SET ${fields.join(", ")} WHERE id = ? AND tenant_id = ?`, values);
+      if (fields.length > 0 || walletTipsDelta > 0) {
+        const conn = await getConnection();
+        try {
+          await conn.beginTransaction();
+          if (fields.length > 0) {
+            fields.push("updated_at = NOW()");
+            values.push(req.params.id, req.params.tenantId);
+            await conn.query(`UPDATE cash_sessions SET ${fields.join(", ")} WHERE id = ? AND tenant_id = ?`, values);
+          }
+          if (walletTipsDelta > 0) {
+            await conn.query(
+              `UPDATE staff SET wallet_balance = COALESCE(wallet_balance, 0) + ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
+              [walletTipsDelta, req.params.tenantId, walletTipsStaffId]
+            );
+          }
+          await conn.commit();
+        } catch (err) {
+          await conn.rollback();
+          throw err;
+        } finally {
+          conn.release();
+        }
       }
       res.json({ success: true });
     } catch (err: any) {
