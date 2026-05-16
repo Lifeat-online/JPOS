@@ -156,6 +156,20 @@ CREATE TABLE IF NOT EXISTS sale_items (
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS sale_payments (
+  id VARCHAR(64) PRIMARY KEY,
+  sale_id VARCHAR(64) NOT NULL,
+  method ENUM('cash','payfast','card','wallet') NOT NULL,
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  tendered_amount DECIMAL(12,2) DEFAULT 0,
+  change_amount DECIMAL(12,2) DEFAULT 0,
+  tip_amount DECIMAL(12,2) DEFAULT 0,
+  cash_out_amount DECIMAL(12,2) DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS cash_sessions (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
