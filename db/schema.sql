@@ -338,11 +338,15 @@ CREATE TABLE IF NOT EXISTS bulk_items (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   name VARCHAR(255) NOT NULL,
+  item_type ENUM('single','bulk') DEFAULT 'single',
   unit VARCHAR(32) NOT NULL DEFAULT 'items', -- ml, g, kg, items, etc.
   stock DECIMAL(12,3) DEFAULT 0,
   min_stock DECIMAL(12,3) DEFAULT 0,
   cost_per_unit DECIMAL(12,2) DEFAULT 0,
   barcode VARCHAR(255),
+  pack_name VARCHAR(64),
+  pack_quantity DECIMAL(12,3) DEFAULT 1,
+  single_unit_name VARCHAR(64) DEFAULT 'item',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE

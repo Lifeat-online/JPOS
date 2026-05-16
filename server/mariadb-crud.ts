@@ -1429,7 +1429,20 @@ export async function seedProducts(tenantId: string, products: any[]): Promise<v
 
 export async function getBulkItems(tenantId: string): Promise<BulkItem[]> {
   const rows = await query(
-    `SELECT id, name, unit, stock, min_stock AS minStock, cost_per_unit AS costPerUnit, barcode, created_at AS createdAt, updated_at AS updatedAt
+    `SELECT
+       id,
+       name,
+       item_type AS itemType,
+       unit,
+       stock,
+       min_stock AS minStock,
+       cost_per_unit AS costPerUnit,
+       barcode,
+       pack_name AS packName,
+       pack_quantity AS packQuantity,
+       single_unit_name AS singleUnitName,
+       created_at AS createdAt,
+       updated_at AS updatedAt
      FROM bulk_items WHERE tenant_id = ?`,
     [tenantId]
   );
@@ -1438,23 +1451,44 @@ export async function getBulkItems(tenantId: string): Promise<BulkItem[]> {
 
 export async function createBulkItem(tenantId: string, item: Partial<BulkItem>): Promise<BulkItem> {
   const id = `bulk_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const itemType = item.itemType === 'bulk' ? 'bulk' : 'single';
   await query(
-    `INSERT INTO bulk_items (id, tenant_id, name, unit, stock, min_stock, cost_per_unit, barcode, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-    [id, tenantId, item.name, item.unit || 'items', item.stock || 0, item.minStock || 0, item.costPerUnit || 0, item.barcode || null]
+    `INSERT INTO bulk_items (
+       id, tenant_id, name, item_type, unit, stock, min_stock, cost_per_unit,
+       barcode, pack_name, pack_quantity, single_unit_name, created_at, updated_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [
+      id,
+      tenantId,
+      item.name,
+      itemType,
+      item.unit || 'items',
+      item.stock || 0,
+      item.minStock || 0,
+      item.costPerUnit || 0,
+      item.barcode || null,
+      itemType === 'bulk' ? (item.packName || 'Case') : null,
+      itemType === 'bulk' ? (item.packQuantity || 1) : 1,
+      item.singleUnitName || 'item'
+    ]
   );
-  return { id, ...item } as BulkItem;
+  return { id, itemType, ...item } as BulkItem;
 }
 
 export async function updateBulkItem(tenantId: string, id: string, updates: Partial<BulkItem>): Promise<void> {
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.name !== undefined) { fields.push("name = ?"); values.push(updates.name); }
+  if (updates.itemType !== undefined) { fields.push("item_type = ?"); values.push(updates.itemType === 'bulk' ? 'bulk' : 'single'); }
   if (updates.unit !== undefined) { fields.push("unit = ?"); values.push(updates.unit); }
   if (updates.stock !== undefined) { fields.push("stock = ?"); values.push(updates.stock); }
   if (updates.minStock !== undefined) { fields.push("min_stock = ?"); values.push(updates.minStock); }
   if (updates.costPerUnit !== undefined) { fields.push("cost_per_unit = ?"); values.push(updates.costPerUnit); }
   if (updates.barcode !== undefined) { fields.push("barcode = ?"); values.push(updates.barcode); }
+  if (updates.packName !== undefined) { fields.push("pack_name = ?"); values.push(updates.packName || null); }
+  if (updates.packQuantity !== undefined) { fields.push("pack_quantity = ?"); values.push(updates.packQuantity || 1); }
+  if (updates.singleUnitName !== undefined) { fields.push("single_unit_name = ?"); values.push(updates.singleUnitName || 'item'); }
   if (fields.length === 0) return;
   fields.push("updated_at = NOW()");
   values.push(tenantId, id);

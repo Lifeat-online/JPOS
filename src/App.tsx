@@ -974,7 +974,6 @@ export default function App() {
             workstations={workstations}
             onSeedProducts={async () => {
               if (!tenantId) return;
-              const { INITIAL_PRODUCTS } = await import('./constants');
               await seedProducts(tenantId, INITIAL_PRODUCTS);
             }}
             onClearSales={async () => {

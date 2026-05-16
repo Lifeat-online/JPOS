@@ -89,5 +89,36 @@ export default defineConfig(({mode}) => {
     preview: {
       allowedHosts: ['jpos-production.up.railway.app'],
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return;
+
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+              return 'vendor-react';
+            }
+            if (id.includes('lucide-react')) {
+              return 'vendor-icons';
+            }
+            if (id.includes('recharts') || id.includes('d3-')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('motion')) {
+              return 'vendor-motion';
+            }
+            if (id.includes('html5-qrcode')) {
+              return 'vendor-scanner';
+            }
+            if (id.includes('socket.io-client') || id.includes('engine.io-client')) {
+              return 'vendor-realtime';
+            }
+            if (id.includes('workbox') || id.includes('vite-plugin-pwa')) {
+              return 'vendor-pwa';
+            }
+          },
+        },
+      },
+    },
   };
 });

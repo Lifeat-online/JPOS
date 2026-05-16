@@ -323,11 +323,15 @@ CREATE TABLE IF NOT EXISTS bulk_items (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  item_type TEXT DEFAULT 'single' CHECK (item_type IN ('single','bulk')),
   unit TEXT NOT NULL DEFAULT 'items',
   stock NUMERIC(12,3) DEFAULT 0,
   min_stock NUMERIC(12,3) DEFAULT 0,
   cost_per_unit NUMERIC(12,2) DEFAULT 0,
   barcode TEXT,
+  pack_name TEXT,
+  pack_quantity NUMERIC(12,3) DEFAULT 1,
+  single_unit_name TEXT DEFAULT 'item',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

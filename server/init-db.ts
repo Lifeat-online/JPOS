@@ -364,6 +364,7 @@ export async function initDb() {
 
   await ensureStaffPermissionsSchema();
   await ensureCashManagementSchema();
+  await ensureBulkInventorySchema();
 }
 
 export async function ensureStaffPermissionsSchema() {
@@ -453,6 +454,32 @@ export async function ensureCashManagementSchema() {
     )
   `);
   await query(`UPDATE cash_sessions SET review_status = IF(status = 'open', 'in_progress', COALESCE(review_status, 'submitted')) WHERE review_status IS NULL`);
+}
+
+export async function ensureBulkInventorySchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE bulk_items ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'single'`);
+    await query(`ALTER TABLE bulk_items ADD COLUMN IF NOT EXISTS pack_name TEXT`);
+    await query(`ALTER TABLE bulk_items ADD COLUMN IF NOT EXISTS pack_quantity NUMERIC(12,3) DEFAULT 1`);
+    await query(`ALTER TABLE bulk_items ADD COLUMN IF NOT EXISTS single_unit_name TEXT DEFAULT 'item'`);
+    await query(`UPDATE bulk_items SET item_type = COALESCE(item_type, 'single'), pack_quantity = COALESCE(pack_quantity, 1), single_unit_name = COALESCE(single_unit_name, 'item')`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE bulk_items ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+
+  await addColumn(`item_type ENUM('single','bulk') DEFAULT 'single' AFTER name`);
+  await addColumn(`pack_name VARCHAR(64) AFTER barcode`);
+  await addColumn(`pack_quantity DECIMAL(12,3) DEFAULT 1 AFTER pack_name`);
+  await addColumn(`single_unit_name VARCHAR(64) DEFAULT 'item' AFTER pack_quantity`);
+  await query(`UPDATE bulk_items SET item_type = COALESCE(item_type, 'single'), pack_quantity = COALESCE(pack_quantity, 1), single_unit_name = COALESCE(single_unit_name, 'item')`);
 }
 
 export async function ensureSalePaymentsTable() {

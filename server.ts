@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const { ensureCashManagementSchema, ensureSalePaymentsTable, ensureStaffRoleSupportsChef, ensureStaffPermissionsSchema } = await import("./server/init-db.js");
+const { ensureBulkInventorySchema, ensureCashManagementSchema, ensureSalePaymentsTable, ensureStaffRoleSupportsChef, ensureStaffPermissionsSchema } = await import("./server/init-db.js");
 await ensureSalePaymentsTable().catch((err: unknown) => {
   console.warn("Failed to ensure sale_payments table:", err);
 });
@@ -14,6 +14,9 @@ await ensureStaffPermissionsSchema().catch((err: unknown) => {
 });
 await ensureCashManagementSchema().catch((err: unknown) => {
   console.warn("Failed to ensure cash management schema:", err);
+});
+await ensureBulkInventorySchema().catch((err: unknown) => {
+  console.warn("Failed to ensure bulk inventory schema:", err);
 });
 
 const { startServer } = await import("./server/app.js");

@@ -406,11 +406,15 @@ export interface LiveTenantStats {
 export interface BulkItem {
   id: string;
   name: string;
+  itemType?: 'single' | 'bulk';
   unit: string; // ml, g, kg, items
   stock: number;
   minStock?: number;
   costPerUnit?: number;
   barcode?: string;
+  packName?: string;
+  packQuantity?: number;
+  singleUnitName?: string;
   createdAt?: any;
   updatedAt?: any;
 }
