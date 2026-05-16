@@ -1,13 +1,31 @@
 import jwt, { type SignOptions, type VerifyOptions } from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-  throw new Error("JWT_SECRET environment variable is required for security");
+const PLACEHOLDER_JWT_SECRET = "REPLACE_WITH_128_CHAR_RANDOM_STRING";
+
+function getJwtSecret() {
+  const jwtSecret = process.env.JWT_SECRET;
+  const isProduction = process.env.NODE_ENV === "production";
+  const isPlaceholder = !jwtSecret || jwtSecret === PLACEHOLDER_JWT_SECRET;
+
+  if (jwtSecret && jwtSecret.length < 32) {
+    throw new Error("JWT_SECRET must be at least 32 characters long");
+  }
+
+  if (isPlaceholder) {
+    if (isProduction) {
+      throw new Error("JWT_SECRET environment variable is required for security");
+    }
+
+    console.warn("JWT_SECRET is not configured. Using an ephemeral development secret.");
+    return `dev-${crypto.randomUUID()}-${crypto.randomUUID()}`;
+  }
+
+  return jwtSecret;
 }
-if (JWT_SECRET.length < 32) {
-  throw new Error("JWT_SECRET must be at least 32 characters long");
-}
+
+const JWT_SECRET = getJwtSecret();
 const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '8h') as SignOptions['expiresIn'];
 const REFRESH_TOKEN_EXPIRES_IN = (process.env.REFRESH_TOKEN_EXPIRES_IN || '7d') as SignOptions['expiresIn'];
 
