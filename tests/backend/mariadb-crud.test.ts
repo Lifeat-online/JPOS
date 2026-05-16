@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { createProduct, updateProduct, deleteProduct, updateSale } from '../../server/mariadb-crud.js';
+import { createProduct, createSale, updateProduct, deleteProduct, updateSale } from '../../server/mariadb-crud.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
@@ -36,10 +36,43 @@ describe('mariadb-crud', () => {
     expect(dbModule.query).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM products'), ['tenant_1', 'prod_1']);
   });
 
+  it('creates a sale without treating transaction row tuples as recipe rows', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('SELECT bulk_item_id')) return Promise.resolve([[]]);
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    const result = await createSale('tenant_1', {
+      customerId: 'cust_1',
+      status: 'open',
+      isTab: true,
+      tabName: 'James Koen',
+      total: 16,
+      subtotal: 16,
+      paymentMethod: 'pending',
+      items: [{ id: 'prod_1', name: 'Bread', price: 16, quantity: 1 } as any],
+    });
+
+    expect(result).toMatchObject({ status: 'open', isTab: true, tabName: 'James Koen' });
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(conn.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE bulk_items SET stock = stock - ?'),
+      expect.anything()
+    );
+  });
+
   it('updates a sale and replaces its items', async () => {
     const conn = {
       beginTransaction: vi.fn().mockResolvedValue(undefined),
-      query: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockResolvedValue([[]]),
       commit: vi.fn().mockResolvedValue(undefined),
       rollback: vi.fn().mockResolvedValue(undefined),
       release: vi.fn(),
@@ -63,9 +96,10 @@ describe('mariadb-crud', () => {
     expect(conn.beginTransaction).toHaveBeenCalled();
     expect(conn.commit).toHaveBeenCalled();
     expect(conn.query).toHaveBeenNthCalledWith(1, expect.stringContaining('UPDATE sales SET'), [25, 'kitchen', 'tenant_1', 'sale_1']);
-    expect(conn.query).toHaveBeenNthCalledWith(2, expect.stringContaining('DELETE FROM sale_items WHERE sale_id = ?'), ['sale_1']);
+    expect(conn.query).toHaveBeenNthCalledWith(2, expect.stringContaining('SELECT * FROM sale_items WHERE sale_id = ?'), ['sale_1']);
+    expect(conn.query).toHaveBeenNthCalledWith(3, expect.stringContaining('DELETE FROM sale_items WHERE sale_id = ?'), ['sale_1']);
     expect(conn.query).toHaveBeenNthCalledWith(
-      3,
+      4,
       expect.stringContaining('INSERT INTO sale_items'),
       expect.arrayContaining(['sale_1', 'prod_1', 'Burger', 25, 1, 'pending'])
     );

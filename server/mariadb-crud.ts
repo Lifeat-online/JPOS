@@ -679,11 +679,11 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
 
         // 1. Deduct Bulk Stock from Recipe
         if (productId) {
-          const recipe = await conn.query(
+          const [recipe] = await conn.query<any>(
             `SELECT bulk_item_id, quantity FROM product_recipes WHERE product_id = ?`,
             [productId]
           );
-          for (const r of recipe as unknown as any[]) {
+          for (const r of recipe) {
             await conn.query(
               `UPDATE bulk_items SET stock = stock - ? WHERE id = ?`,
               [r.quantity * item.quantity, r.bulk_item_id]
@@ -694,10 +694,10 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         // 2. Deduct Bulk Stock from Modifiers
         if (item.selectedModifiers && Array.isArray(item.selectedModifiers)) {
           for (const mod of item.selectedModifiers) {
-            const opt = await conn.query(
+            const [opt] = await conn.query<any>(
               `SELECT bulk_item_id, bulk_quantity FROM modifier_options WHERE id = ?`,
               [mod.optionId]
-            ) as unknown as any[];
+            );
             if (opt.length > 0 && opt[0].bulk_item_id) {
               await conn.query(
                 `UPDATE bulk_items SET stock = stock - ? WHERE id = ?`,
@@ -847,8 +847,8 @@ export async function updateSale(
       // Get existing items to preserve their status and timestamps
       let existingItems: any[] = [];
       try {
-        const result = await conn.query(`SELECT * FROM sale_items WHERE sale_id = ?`, [saleId]);
-        existingItems = Array.isArray(result) ? result : [];
+        const [result] = await conn.query<any>(`SELECT * FROM sale_items WHERE sale_id = ?`, [saleId]);
+        existingItems = result;
       } catch (error) {
         console.warn('Failed to fetch existing items:', error);
       }

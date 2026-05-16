@@ -7,14 +7,16 @@ export function validateSchema(schema: any) {
     try {
       const result = schema.safeParse(req.body);
       if (!result.success) {
+        const issues = result.error.issues ?? result.error.errors ?? [];
         return res.status(400).json({
           error: 'Invalid input',
-          details: result.error.errors.map(e => ({
+          details: issues.map((e: any) => ({
             path: e.path.join('.'),
             message: e.message
           }))
         });
       }
+      req.body = result.data;
       next();
     } catch (err) {
       next(err);
@@ -83,30 +85,30 @@ export const StaffSchema = z.object({
 
 export const SaleSchema = z.object({
   items: z.array(z.object({
-    productId: z.string().optional(),
+    productId: z.string().nullish(),
     name: z.string().min(1),
     price: z.number().min(0),
     quantity: z.number().min(1),
-    status: z.string().optional(),
-    workstationId: z.string().optional()
+    status: z.string().nullish(),
+    workstationId: z.string().nullish()
   })).min(1, { message: 'Sale must have at least one item' }),
   total: z.number().min(0),
   subtotal: z.number().min(0),
-  taxAmount: z.number().min(0).optional(),
-  taxRate: z.number().min(0).optional(),
-  taxInclusive: z.boolean().optional(),
-  paymentMethod: z.enum(['cash', 'payfast', 'card', 'wallet', 'pending']).optional(),
-  tenderedAmount: z.number().min(0).optional(),
-  changeAmount: z.number().min(0).optional(),
-  tipAmount: z.number().min(0).optional(),
-  cashOutAmount: z.number().min(0).optional(),
-  pointsDiscount: z.number().min(0).optional(),
-  status: z.enum(['pending', 'completed', 'failed', 'open', 'kitchen']).optional(),
-  customerId: z.string().optional(),
-  staffId: z.string().optional(),
-  tableNumber: z.string().optional(),
-  isTab: z.boolean().optional(),
-  tabName: z.string().optional()
+  taxAmount: z.number().min(0).nullish(),
+  taxRate: z.number().min(0).nullish(),
+  taxInclusive: z.boolean().nullish(),
+  paymentMethod: z.enum(['cash', 'payfast', 'card', 'wallet', 'pending']).nullish(),
+  tenderedAmount: z.number().min(0).nullish(),
+  changeAmount: z.number().min(0).nullish(),
+  tipAmount: z.number().min(0).nullish(),
+  cashOutAmount: z.number().min(0).nullish(),
+  pointsDiscount: z.number().min(0).nullish(),
+  status: z.enum(['pending', 'completed', 'failed', 'open', 'kitchen']).nullish(),
+  customerId: z.string().nullish(),
+  staffId: z.string().nullish(),
+  tableNumber: z.string().nullish(),
+  isTab: z.boolean().nullish(),
+  tabName: z.string().nullish()
 });
 
 export const WorkstationSchema = z.object({
