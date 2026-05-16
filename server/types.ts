@@ -21,4 +21,8 @@ export type {
   PayoutRequest,
   Message,
   MessageChannel,
+  BulkItem,
+  RecipeItem,
+  ModifierOption,
+  ModifierGroup,
 } from "../src/types.ts";

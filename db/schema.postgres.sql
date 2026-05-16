@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS staff (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  role TEXT DEFAULT 'cashier' CHECK (role IN ('admin','cashier','manager','dev')),
+  role TEXT DEFAULT 'cashier' CHECK (role IN ('admin','cashier','manager','chef','dev')),
   email TEXT NOT NULL,
   password_hash TEXT,
   phone TEXT,

@@ -68,7 +68,7 @@ export const CustomerSchema = z.object({
 
 export const StaffSchema = z.object({
   name: z.string().min(1, { message: 'Staff name is required' }),
-  role: z.enum(['admin', 'cashier', 'manager', 'dev'], { message: 'Invalid role' }),
+  role: z.enum(['admin', 'cashier', 'manager', 'chef', 'dev'], { message: 'Invalid role' }),
   email: z.string().email({ message: 'Invalid email address' }),
   phone: z.string().min(10, { message: 'Phone number must be at least 10 digits' }).optional(),
   status: z.enum(['active', 'inactive']).optional(),

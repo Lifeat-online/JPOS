@@ -29,7 +29,7 @@ export const BulkInventoryView: React.FC = () => {
     setLoading(true);
     try {
       const data = await apiGet(`/api/mariadb/tenants/${tenantId}/bulk-items`);
-      setItems(data);
+      setItems(data as BulkItem[]);
     } catch (err) {
       console.error('Failed to fetch bulk items:', err);
     } finally {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2, Save, FlaskConical, Search, AlertCircle } from 'lucide-react';
+import { X, Plus, Trash2, Save, FlaskConical, Search, AlertCircle, RefreshCcw } from 'lucide-react';
 import { Product, RecipeItem, BulkItem } from '../../types';
 import { apiGet, apiPut } from '../../api';
 
@@ -25,10 +25,10 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
     try {
       const [recipeData, bulkData] = await Promise.all([
         apiGet(`/api/mariadb/products/${product.id}/recipe`),
-        apiGet(`/api/mariadb/tenants/${product.tenantId}/bulk-items`)
+        apiGet(`/api/mariadb/tenants/${(product as any).tenantId}/bulk-items`)
       ]);
-      setRecipe(recipeData || []);
-      setBulkItems(bulkData || []);
+      setRecipe((recipeData as RecipeItem[]) || []);
+      setBulkItems((bulkData as BulkItem[]) || []);
     } catch (err) {
       console.error('Failed to fetch recipe data:', err);
     } finally {

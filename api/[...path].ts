@@ -9,7 +9,10 @@ export default async function handler(req: any, res: any) {
       } catch {
         mod = await import("../server/app.js");
       }
-      appPromise = mod.createApp();
+      // Create app and set up routes
+      const app = mod.createApp();
+      mod.setupRoutes(app, null);
+      appPromise = Promise.resolve(app);
     }
     const app = await appPromise;
     return app(req, res);

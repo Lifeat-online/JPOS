@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Sale, OrderItem, Workstation, Staff } from '../types';
 import { ChefHat, CheckCircle2, Clock, Play } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
@@ -14,19 +14,25 @@ interface WorkstationViewProps {
 
 export function WorkstationView({ sales, workstations, currentUserStaff, onSalesUpdated }: WorkstationViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
-  const [activeWorkstationId, setActiveWorkstationId] = useState<string>(workstations[0]?.id || '');
+  const visibleWorkstations = useMemo(
+    () => currentUserStaff?.role === 'chef'
+      ? workstations.filter(w => w.type === 'kitchen')
+      : workstations,
+    [currentUserStaff?.role, workstations]
+  );
+  const [activeWorkstationId, setActiveWorkstationId] = useState<string>(visibleWorkstations[0]?.id || '');
 
   useEffect(() => {
-    if (workstations.length === 0) {
+    if (visibleWorkstations.length === 0) {
       if (activeWorkstationId) setActiveWorkstationId('');
       return;
     }
 
-    const workstationStillExists = workstations.some(w => w.id === activeWorkstationId);
+    const workstationStillExists = visibleWorkstations.some(w => w.id === activeWorkstationId);
     if (!workstationStillExists) {
-      setActiveWorkstationId(workstations[0].id);
+      setActiveWorkstationId(visibleWorkstations[0].id);
     }
-  }, [workstations, activeWorkstationId]);
+  }, [visibleWorkstations, activeWorkstationId]);
 
   const handleItemStatusUpdate = async (
     saleId: string,
@@ -70,7 +76,7 @@ export function WorkstationView({ sales, workstations, currentUserStaff, onSales
     }
   };
 
-  if (workstations.length === 0) {
+  if (visibleWorkstations.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-8 bg-slate-50 dark:bg-slate-950">
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-10 max-w-md w-full shadow-2xl text-center border border-slate-100 dark:border-slate-800/60">
@@ -114,7 +120,7 @@ export function WorkstationView({ sales, workstations, currentUserStaff, onSales
           onChange={e => setActiveWorkstationId(e.target.value)}
           className="px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold focus:ring-2 focus:ring-primary outline-none text-slate-900 dark:text-white"
         >
-          {workstations.map(w => (
+          {visibleWorkstations.map(w => (
             <option key={w.id} value={w.id}>{w.name}</option>
           ))}
         </select>

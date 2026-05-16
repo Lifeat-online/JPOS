@@ -25,11 +25,11 @@ export const ModifierModal: React.FC<ModifierModalProps> = ({ product, onClose, 
     try {
       const [modsData, bulkData] = await Promise.all([
         apiGet(`/api/mariadb/products/${product.id}/modifiers`),
-        apiGet(`/api/mariadb/tenants/${product.tenantId}/bulk-items`)
+        apiGet(`/api/mariadb/tenants/${(product as any).tenantId}/bulk-items`)
       ]);
-      setGroups(modsData || []);
-      setBulkItems(bulkData || []);
-      if (modsData?.length > 0) setActiveGroupId(modsData[0].id);
+      setGroups((modsData as ModifierGroup[]) || []);
+      setBulkItems((bulkData as BulkItem[]) || []);
+      if (modsData && Array.isArray(modsData) && modsData.length > 0) setActiveGroupId((modsData[0] as ModifierGroup).id);
     } catch (err) {
       console.error('Failed to fetch modifiers:', err);
     } finally {
@@ -39,7 +39,7 @@ export const ModifierModal: React.FC<ModifierModalProps> = ({ product, onClose, 
 
   const handleAddGroup = async () => {
     try {
-      const { id } = await apiPost(`/api/mariadb/products/${product.id}/modifiers`, {
+      const result = await apiPost(`/api/mariadb/products/${product.id}/modifiers`, {
         name: 'New Modifier Group',
         type: 'single',
         required: false,
@@ -47,7 +47,7 @@ export const ModifierModal: React.FC<ModifierModalProps> = ({ product, onClose, 
         maxSelection: 1
       });
       const newGroup: ModifierGroup = {
-        id,
+        id: (result as any).id,
         productId: product.id,
         name: 'New Modifier Group',
         type: 'single',
@@ -57,7 +57,7 @@ export const ModifierModal: React.FC<ModifierModalProps> = ({ product, onClose, 
         options: []
       };
       setGroups([...groups, newGroup]);
-      setActiveGroupId(id);
+      setActiveGroupId((result as any).id);
     } catch (err) {
       console.error('Failed to add group:', err);
     }

@@ -91,7 +91,7 @@ export interface Sale {
 export interface Staff {
   id: string;
   name: string;
-  role: 'admin' | 'cashier' | 'manager' | 'dev';
+  role: 'admin' | 'cashier' | 'manager' | 'chef' | 'dev';
   email: string;
   phone?: string;
   status: 'active' | 'inactive';
@@ -102,6 +102,7 @@ export interface Staff {
   payType?: 'hourly' | 'salary';
   accumulatedLeave?: number;
   walletBalance?: number;
+  walletBalanceDelta?: number;
   createdAt: any;
   metrics?: {
     totalTips?: number;

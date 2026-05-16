@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS staff (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   name VARCHAR(255) NOT NULL,
-  role ENUM('admin','cashier','manager','dev') DEFAULT 'cashier',
+  role ENUM('admin','cashier','manager','chef','dev') DEFAULT 'cashier',
   email VARCHAR(255) NOT NULL,
   password_hash VARCHAR(255),
   phone VARCHAR(64),

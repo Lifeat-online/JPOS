@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS staff (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  role TEXT DEFAULT 'cashier' CHECK (role IN ('admin','cashier','manager','dev')),
+  role TEXT DEFAULT 'cashier' CHECK (role IN ('admin','cashier','manager','chef','dev')),
   email TEXT NOT NULL,
   password_hash TEXT,
   phone TEXT,
@@ -369,6 +369,40 @@ export async function ensureSalePaymentsTable() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
     )
+  `);
+}
+
+export async function ensureStaffRoleSupportsChef() {
+  if (isPostgres()) {
+    await query(`
+      DO $$
+      DECLARE
+        constraint_name text;
+      BEGIN
+        SELECT con.conname INTO constraint_name
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = ANY(con.conkey)
+        WHERE rel.relname = 'staff'
+          AND att.attname = 'role'
+          AND con.contype = 'c'
+        LIMIT 1;
+
+        IF constraint_name IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE staff DROP CONSTRAINT %I', constraint_name);
+        END IF;
+
+        ALTER TABLE staff
+          ADD CONSTRAINT staff_role_check
+          CHECK (role IN ('admin','cashier','manager','chef','dev'));
+      END $$;
+    `);
+    return;
+  }
+
+  await query(`
+    ALTER TABLE staff
+      MODIFY role ENUM('admin','cashier','manager','chef','dev') DEFAULT 'cashier'
   `);
 }
 

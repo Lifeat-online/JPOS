@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { createApp } from '../../server/app.js';
+import { createApp, setupRoutes } from '../../server/app.js';
 
 let app: any;
 
 beforeAll(async () => {
   // Set test environment to avoid Vite dev server issues
   process.env.NODE_ENV = 'test';
-  app = await createApp();
+  app = createApp();
+  setupRoutes(app, null);
 });
 
 describe('api routes', () => {

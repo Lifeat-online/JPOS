@@ -457,9 +457,9 @@ export function DevDashboard({
     },
     {
       id: 'staff_have_roles', name: 'Staff have valid roles', group: 'data_integrity',
-      description: 'All staff have a valid role (admin/manager/cashier/dev)',
+      description: 'All staff have a valid role (admin/manager/cashier/chef/dev)',
       run: ({ staff }) => {
-        const validRoles = ['admin', 'manager', 'cashier', 'dev'];
+        const validRoles = ['admin', 'manager', 'cashier', 'chef', 'dev'];
         const bad = staff.filter(s => !validRoles.includes(s.role)).length;
         return bad === 0
           ? { status: 'pass' }

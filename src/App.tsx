@@ -54,10 +54,11 @@ import { SplitPaymentModal } from './components/modals/SplitPaymentModal';
 import { Product, Customer, Staff } from './types';
 import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage, INITIAL_PRODUCTS } from './constants';
 
-
 import { MessagingView } from './views/MessagingView';
 import { useMessaging } from './hooks/useMessaging';
+import { useSocket } from './hooks/useSocket';
 import { usePWA } from './hooks/usePWA';
+import { buildNavigation, canAccessView, getDefaultView, type StaffRole } from './permissions';
 
 // Hardcoded dev email — only this account gets the dev role
 const DEV_EMAIL = 'jameskoen78@gmail.com';
@@ -436,6 +437,13 @@ export default function App() {
   // Messaging
   const messaging = useMessaging({ user, tenantId, currentUserStaff, staff });
 
+  // WebSocket connection - only active when needed
+  const { socket, isConnected } = useSocket({
+    user,
+    tenantId,
+    tabId: checkout.activeOrderId,
+  });
+
   // PWA + Kiosk
   const { isKioskMode, enterKioskMode, exitKioskMode, isFullscreen, toggleFullscreen, canInstall, isInstalled, installApp } = usePWA();
 
@@ -465,7 +473,7 @@ export default function App() {
 
   // Seed initial products once — only when user is confirmed staff (has a role)
   useEffect(() => {
-    if (user && tenantId && currentUserRole && products.length === 0) {
+    if (user && tenantId && ['admin', 'manager', 'dev'].includes(currentUserRole || '') && products.length === 0) {
       const seed = async () => {
         for (const p of INITIAL_PRODUCTS) {
           await apiPost(`/api/mariadb/tenants/${tenantId}/products`, { ...p, createdAt: new Date().toISOString() });
@@ -504,58 +512,32 @@ export default function App() {
   const isDev = user?.email === DEV_EMAIL;
 
   // Nav items based on role — split into primary (always visible) and secondary (dropdown)
-  const { primaryNav, secondaryNav } = useMemo(() => {
-    const isRestaurant = config.business?.isRestaurantMode;
-    const isAdminOrManager = currentUserRole === 'admin' || currentUserRole === 'manager';
-    const isAdmin = currentUserRole === 'admin';
+  const roleForPermissions = currentUserRole as StaffRole | null;
+  const permissionOptions = useMemo(
+    () => ({ isDev, isRestaurant: Boolean(config.business?.isRestaurantMode) }),
+    [isDev, config.business?.isRestaurantMode]
+  );
 
-    const primary: { id: string; icon: React.ElementType; label: string }[] = [
-      { id: 'pos', icon: LayoutGrid, label: 'Terminal' },
-      ...(isRestaurant ? [
-        { id: 'tables', icon: Utensils, label: 'Tables' },
-        { id: 'tabs', icon: TabletSmartphone, label: 'Tabs' },
-        { id: 'workstation', icon: ChefHat, label: 'Workstation' },
-      ] : []),
-      { id: 'history', icon: HistoryIcon, label: 'History' },
-      { id: 'messages', icon: MessageSquare, label: 'Messages' },
-    ];
-
-    const secondary: { id: string; icon: React.ElementType; label: string; group?: string }[] = [
-      { id: 'cash', icon: Banknote, label: 'Cash Mgmt', group: 'Operations' },
-      ...(isAdminOrManager ? [
-        { id: 'live', icon: Activity, label: 'Live', group: 'Operations' },
-        { id: 'inventory', icon: Package, label: 'Inventory', group: 'Operations' },
-        { id: 'customers', icon: Users, label: 'Customers', group: 'Operations' },
-      ] : []),
-      ...(isAdmin ? [
-        { id: 'staff', icon: Users, label: 'Staff', group: 'Management' },
-        { id: 'wallets', icon: Wallet, label: 'Wallets', group: 'Management' },
-        ...(isRestaurant ? [{ id: 'leaderboard', icon: Trophy, label: 'Leaderboard', group: 'Management' }] : []),
-        { id: 'reports', icon: BarChart3, label: 'Analytics', group: 'Management' },
-        { id: 'settings', icon: Settings, label: 'Settings', group: 'Management' },
-      ] : []),
-    ];
-
-    return { primaryNav: primary, secondaryNav: secondary };
-  }, [config.business?.isRestaurantMode, currentUserRole]);
+  const { primaryNav, secondaryNav, navItems } = useMemo(() => {
+    const built = buildNavigation(roleForPermissions, permissionOptions);
+    return {
+      ...built,
+      navItems: [
+        ...built.navItems,
+        ...(isDev ? [{ id: 'dev' as const, icon: Code2, label: 'Dev' }] : []),
+      ],
+    };
+  }, [roleForPermissions, permissionOptions, isDev]);
 
   // All nav items combined (for redirect logic and mobile nav)
-  const navItems = useMemo(() => {
-    const all = [
-      ...primaryNav,
-      ...secondaryNav,
-      ...(isDev ? [{ id: 'dev', icon: Code2, label: '🛠 Dev' }] : []),
-    ];
-    return all;
-  }, [primaryNav, secondaryNav, isDev]);
+  
   // Redirect if current view is not allowed — but never redirect a dev user away from /dev or anyone from /profile
   useEffect(() => {
-    if (view === 'dev' && isDev) return;
-    if (view === 'profile') return; // always accessible via avatar menu
-    if (!navItems.find(i => i.id === view)) {
-      navigate('/');
+    if (!currentUserRole) return;
+    if (!canAccessView(roleForPermissions, view, permissionOptions)) {
+      navigate(`/${getDefaultView(roleForPermissions, permissionOptions)}`);
     }
-  }, [currentUserRole, view, isDev]);
+  }, [currentUserRole, roleForPermissions, view, permissionOptions, navigate]);
 
   // CRUD handlers
   const saveProduct = async (e: React.FormEvent) => {
@@ -619,7 +601,7 @@ export default function App() {
           return;
         }
         const created = await apiPost(`/api/mariadb/tenants/${tenantId}/staff`, { ...data, status: 'active', createdAt: new Date().toISOString() });
-        targetId = created.id;
+        targetId = (created as any).id;
       }
 
       if (newPassword && newPassword.length >= 6) {
@@ -721,7 +703,7 @@ export default function App() {
   }
 
   if (!config?.setupCompleted) {
-    if (currentUserRole === 'admin' || currentUserRole === 'dev') {
+    if (currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'dev') {
       return <SetupWizard user={user} config={config} />;
     } else {
       return (

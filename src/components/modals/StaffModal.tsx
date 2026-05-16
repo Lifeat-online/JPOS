@@ -70,6 +70,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
               onChange={e => onChange({ ...staff, role: e.target.value as Staff['role'] })}
             >
               <option value="cashier">Cashier</option>
+              <option value="chef">Chef / Kitchen</option>
               <option value="manager">Manager</option>
               <option value="admin">Administrator</option>
             </select>

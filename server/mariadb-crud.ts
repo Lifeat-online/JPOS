@@ -1,5 +1,5 @@
 import { getConnection, isPostgres, query } from "./db.js";
-import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem } from "./types.js";
+import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem, BulkItem, RecipeItem, ModifierGroup, ModifierOption } from "./types.js";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
 const PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY;
@@ -658,7 +658,7 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
     if (sale.items && Array.isArray(sale.items)) {
       for (const item of sale.items) {
         const itemId = generateSaleItemId();
-        const productId = item.productId || item.id || null;
+        const productId = (item as any).productId || item.id || null;
         
         await conn.query(
           `INSERT INTO sale_items (
@@ -683,7 +683,7 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
             `SELECT bulk_item_id, quantity FROM product_recipes WHERE product_id = ?`,
             [productId]
           );
-          for (const r of recipe) {
+          for (const r of recipe as unknown as any[]) {
             await conn.query(
               `UPDATE bulk_items SET stock = stock - ? WHERE id = ?`,
               [r.quantity * item.quantity, r.bulk_item_id]
@@ -697,7 +697,7 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
             const opt = await conn.query(
               `SELECT bulk_item_id, bulk_quantity FROM modifier_options WHERE id = ?`,
               [mod.optionId]
-            );
+            ) as unknown as any[];
             if (opt.length > 0 && opt[0].bulk_item_id) {
               await conn.query(
                 `UPDATE bulk_items SET stock = stock - ? WHERE id = ?`,
@@ -847,7 +847,8 @@ export async function updateSale(
       // Get existing items to preserve their status and timestamps
       let existingItems: any[] = [];
       try {
-        existingItems = await conn.query(`SELECT * FROM sale_items WHERE sale_id = ?`, [saleId]);
+        const result = await conn.query(`SELECT * FROM sale_items WHERE sale_id = ?`, [saleId]);
+        existingItems = Array.isArray(result) ? result : [];
       } catch (error) {
         console.warn('Failed to fetch existing items:', error);
       }

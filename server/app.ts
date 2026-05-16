@@ -12,9 +12,9 @@ import { getConnection, isPostgres, query } from "./db.js";
 import { initDb } from "./init-db.js";
 import rateLimit from "express-rate-limit";
 import http from "http";
-import { Server as SocketIOServer } from "socket.io";
+import { setupSocketIO, broadcastToMessages, broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "./socket.js";
 import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, StaffSchema, SaleSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
-import { Request, Response, NextFunction } from "express";
+import { NextFunction, Request, Response } from "express";
 import {
   getProductsByTenant,
   getTenantIdBySlug,
@@ -77,6 +77,7 @@ import {
   getProductModifiers,
   deleteModifierGroup,
 } from "./mariadb-crud.js";
+import { broadcastSalesUpdate } from "./socket.js";
 import {
   handleLogin,
   handleLogout,
@@ -232,7 +233,7 @@ function generatePayFastSignature(data: any, passphrase?: string) {
   return crypto.createHash("md5").update(queryString).digest("hex");
 }
 
-export async function createApp() {
+export async function createApp(io: any = null) {
   const app = express();
   
   // Force production mode if running on Railway
@@ -739,6 +740,15 @@ export async function createApp() {
   app.post("/api/mariadb/tenants/:tenantId/sales", requireAuth, validateSchema(SaleSchema), async (req, res) => {
     try {
       const sale = await createSale(req.params.tenantId, req.body);
+      
+      // Broadcast to workstations if order has workstation items
+      if (io && sale.items && Array.isArray(sale.items)) {
+        const hasWorkstationItems = sale.items.some((item: any) => item.workstationId);
+        if (hasWorkstationItems) {
+          broadcastSalesUpdate(io, req.params.tenantId, sale.id);
+        }
+      }
+      
       res.json(sale);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1674,17 +1684,33 @@ export async function createApp() {
       ...(isTest ? { stack: err.stack } : {})
     });
   });
-
-  return app;
 }
 
-  export async function startServer() {
-    const app = await createApp();
-    const PORT = Number(process.env.PORT || 8080);
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://0.0.0.0:${PORT}`);
-      console.log(`${isPostgres() ? "Postgres" : "MariaDB"}-connected POS system ready`);
-      console.log(`__dirname is: ${__dirname}`);
-      console.log(`distDir is: ${path.resolve(__dirname, '..', 'dist')}`);
-    });
-  }
+export async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT || 8080);
+  
+  // Create HTTP server and attach Socket.IO
+  const httpServer = http.createServer(app);
+  const io = setupSocketIO(httpServer);
+  
+  // Set up routes with io instance
+  setupRoutes(app, io);
+  
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`${isPostgres() ? "Postgres" : "MariaDB"}-connected POS system ready`);
+    console.log(`Socket.IO server initialized`);
+    console.log(`__dirname is: ${__dirname}`);
+    console.log(`distDir is: ${path.resolve(__dirname, '..', 'dist')}`);
+  });
+  
+  return { app, io, httpServer };
+}
+
+function setupRoutes(app: any, io: any) {
+  // Routes are defined in createApp for backward compatibility
+  // This function is a placeholder for future refactoring
+}
+
+export { setupRoutes };

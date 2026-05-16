@@ -2,11 +2,12 @@
  * useCheckout — MariaDB REST edition.
  * Replaces all Firestore addDoc/updateDoc calls with REST API calls.
  */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { JwtUser } from './useAuth';
 import { Customer, Staff, AppConfig } from '../types';
 import { usePosStore } from '../store/usePosStore';
 import { apiPost, apiPut, createSale, updateCustomer, updateStaff, getSaleById } from '../api';
+import { useSocket } from './useSocket';
 
 interface CheckoutDeps {
   user: JwtUser | null;
@@ -25,6 +26,26 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     activeTableNumber, setActiveTableNumber,
     activeOrderId, setActiveOrderId,
   } = usePosStore();
+
+  // Connect to WebSocket when active order is open
+  const { connect, disconnect, joinTab, leaveTab } = useSocket({
+    user,
+    tenantId,
+    tabId: activeOrderId,
+  });
+
+  useEffect(() => {
+    if (activeOrderId) {
+      connect();
+      joinTab(activeOrderId);
+    } else {
+      leaveTab(activeOrderId || '');
+    }
+    
+    return () => {
+      leaveTab(activeOrderId || '');
+    };
+  }, [activeOrderId, connect, disconnect, joinTab, leaveTab]);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [tenderedAmount, setTenderedAmount] = useState<number | string>('');
@@ -365,6 +386,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     cartSubtotal, taxAmount,
     cartTotal: cartTotalAfterDiscount,
     cartTotalBeforeDiscount: cartTotal,
+    activeOrderId,
     handleSaveOrder,
     handleOpenTab,
     handleCheckout,

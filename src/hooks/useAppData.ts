@@ -15,6 +15,7 @@ import {
   getTenantTableSections,
   getTenantRestaurantTables,
 } from '../api';
+import { canLoadDataset, type StaffRole } from '../permissions';
 
 export const DEFAULT_CONFIG: AppConfig = {
   payfastMerchantId: '10000100',
@@ -53,10 +54,10 @@ export function useAppData(user: User | null) {
   }
 
   const [currentUserStaff, setCurrentUserStaff] = useState<Staff | null>(null);
-  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'manager' | 'cashier' | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<StaffRole | null>(null);
 
   const loadSales = useCallback(async () => {
-    if (!tenantId) {
+    if (!tenantId || !canLoadDataset(currentUserRole, 'sales')) {
       setSales([]);
       return;
     }
@@ -83,7 +84,7 @@ export function useAppData(user: User | null) {
     } catch (err) {
       console.error('Sales load error:', err);
     }
-  }, [tenantId]);
+  }, [tenantId, currentUserRole]);
 
   useEffect(() => {
     let active = true;
@@ -135,8 +136,7 @@ export function useAppData(user: User | null) {
     if (user && !isStaffLoading) {
       const s = staff.find(s => s.email === user.email) ?? null;
       setCurrentUserStaff(s);
-      const role = s?.role === 'dev' ? 'admin' : (s?.role ?? null);
-      setCurrentUserRole(role);
+      setCurrentUserRole(s?.role ?? null);
     } else if (!user) {
       setCurrentUserStaff(null);
       setCurrentUserRole(null);
@@ -144,7 +144,7 @@ export function useAppData(user: User | null) {
   }, [user, staff, isStaffLoading]);
 
     useEffect(() => {
-    if (!tenantId) {
+    if (!tenantId || !canLoadDataset(currentUserRole, 'products')) {
       setProducts([]);
       return;
     }
@@ -183,10 +183,10 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId]);
+  }, [tenantId, currentUserRole]);
 
     useEffect(() => {
-    if (!tenantId) {
+    if (!tenantId || !canLoadDataset(currentUserRole, 'customers')) {
       setCustomers([]);
       return;
     }
@@ -223,7 +223,7 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId]);
+  }, [tenantId, currentUserRole]);
 
     useEffect(() => {
     if (!tenantId) {
@@ -331,7 +331,7 @@ export function useAppData(user: User | null) {
   }, [loadSales]);
 
     useEffect(() => {
-    if (!tenantId) {
+    if (!tenantId || !canLoadDataset(currentUserRole, 'workstations')) {
       setWorkstations([]);
       return;
     }
@@ -363,10 +363,10 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId]);
+  }, [tenantId, currentUserRole]);
 
   useEffect(() => {
-    if (!currentUserStaff || !tenantId) {
+    if (!currentUserStaff || !tenantId || !canLoadDataset(currentUserRole, 'cash')) {
       setActiveSession(null);
       return;
     }
@@ -383,10 +383,10 @@ export function useAppData(user: User | null) {
     loadActiveSession();
     const interval = setInterval(loadActiveSession, 60000);
     return () => { active = false; clearInterval(interval); };
-  }, [currentUserStaff, tenantId]);
+  }, [currentUserStaff, tenantId, currentUserRole]);
 
   useEffect(() => {
-    if (!tenantId) {
+    if (!tenantId || !canLoadDataset(currentUserRole, 'tables')) {
       setTableSections([]);
       return;
     }
@@ -403,10 +403,10 @@ export function useAppData(user: User | null) {
     loadSections();
     const interval = setInterval(loadSections, 60000);
     return () => { active = false; clearInterval(interval); };
-  }, [tenantId]);
+  }, [tenantId, currentUserRole]);
 
     useEffect(() => {
-    if (!tenantId) {
+    if (!tenantId || !canLoadDataset(currentUserRole, 'tables')) {
       setRestaurantTables([]);
       return;
     }
@@ -438,7 +438,7 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId]);
+  }, [tenantId, currentUserRole]);
 
   return {
     products, customers, staff, sales, config, setConfig,

@@ -2,9 +2,12 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const { ensureSalePaymentsTable } = await import("./server/init-db.js");
+const { ensureSalePaymentsTable, ensureStaffRoleSupportsChef } = await import("./server/init-db.js");
 await ensureSalePaymentsTable().catch((err: unknown) => {
   console.warn("Failed to ensure sale_payments table:", err);
+});
+await ensureStaffRoleSupportsChef().catch((err: unknown) => {
+  console.warn("Failed to ensure staff role schema:", err);
 });
 
 const { startServer } = await import("./server/app.js");
