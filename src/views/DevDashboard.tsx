@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { getAccessToken, JwtUser } from '../hooks/useAuth';
 import {
-  Product, Customer, Staff, Sale, AppConfig, Workstation,
+  Product, Customer, Staff, Sale, AppConfig, Workstation, CashSession,
 } from '../types';
+import { getTenantCashSessions } from '../api';
 import {
   Terminal, Database, Shield, Activity, Zap,
   Copy, CheckCircle2, XCircle, AlertTriangle, ExternalLink,
@@ -115,6 +116,7 @@ interface TestDef {
     sales: Sale[];
     config: AppConfig;
     workstations: Workstation[];
+    cashSessions: CashSession[];
   }) => { status: 'pass' | 'fail' | 'warn'; detail?: string };
 }
 
@@ -148,6 +150,8 @@ export function DevDashboard({
   const [gitKnownHostsInput, setGitKnownHostsInput] = useState('');
   const [gitAuthMessage, setGitAuthMessage] = useState<string | null>(null);
   const [gitAuthBusy, setGitAuthBusy] = useState(false);
+  const [cashSessions, setCashSessions] = useState<CashSession[]>([]);
+  const [cashSessionsLoading, setCashSessionsLoading] = useState(false);
 
   const GITHUB_REPO = 'Lifeat-online/JPOS';
 
@@ -166,6 +170,61 @@ export function DevDashboard({
   useEffect(() => {
     refreshGitAuthStatus().catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'tests' || !tenantId) return;
+
+    let active = true;
+    let interval: number | null = null;
+
+    const loadCashSessions = async () => {
+      setCashSessionsLoading(true);
+      try {
+        const fetched = await getTenantCashSessions(tenantId, 100);
+        if (!active) return;
+        setCashSessions((fetched || []).map((session: any) => ({
+          ...session,
+          openingFloat: Number(session.openingFloat || 0),
+          expectedCash: Number(session.expectedCash || 0),
+          actualCash: Number(session.actualCash || 0),
+          difference: Number(session.difference || 0),
+          accumulatedTips: Number(session.accumulatedTips || 0),
+          netTips: Number(session.netTips || 0),
+          reviewStatus: session.reviewStatus || (session.status === 'open' ? 'in_progress' : 'submitted'),
+        })));
+      } catch (err) {
+        console.error('Dev cash session test data load error:', err);
+      } finally {
+        if (active) setCashSessionsLoading(false);
+      }
+    };
+
+    const start = () => {
+      if (!interval) interval = window.setInterval(loadCashSessions, 60000);
+    };
+    const stop = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else {
+        void loadCashSessions();
+        start();
+      }
+    };
+
+    void loadCashSessions();
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      active = false;
+      stop();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [activeTab, tenantId]);
 
   const saveGitToken = async () => {
     setGitAuthBusy(true);
@@ -610,13 +669,34 @@ export function DevDashboard({
       },
     },
     {
-      id: 'cash_sessions_balanced', name: 'Cash sessions balanced', group: 'business_logic',
-      description: 'Warn if any closed cash session has |difference| > 50',
-      run: ({ sales }) => {
-        // We don't have cashSessions in props, so we approximate from sales data
-        // This test always passes with a note since cashSessions aren't in props
-        void sales;
-        return { status: 'pass', detail: 'Cash session data not available in props (check CashManagementView)' };
+      id: 'cash_sessions_balanced', name: 'Cash ups reconciled', group: 'business_logic',
+      description: 'Closed cash ups should be manager reconciled, with large variances explained',
+      run: ({ cashSessions }) => {
+        const closed = cashSessions.filter(s => s.status === 'closed');
+        if (closed.length === 0) {
+          return { status: 'warn', detail: 'No closed cash ups found yet' };
+        }
+
+        const unexplainedVariance = closed.filter(s => {
+          const diff = Math.abs(Number(s.difference || 0));
+          return diff > 50 && !s.notes && !s.managerNotes && !s.varianceReason;
+        });
+        if (unexplainedVariance.length > 0) {
+          return {
+            status: 'fail',
+            detail: `${unexplainedVariance.length} cash up(s) have variance over R50 without an explanation`,
+          };
+        }
+
+        const unreconciled = closed.filter(s => (s.reviewStatus || 'submitted') !== 'reconciled');
+        if (unreconciled.length > 0) {
+          return {
+            status: 'warn',
+            detail: `${unreconciled.length} closed cash up(s) still need management reconciliation`,
+          };
+        }
+
+        return { status: 'pass', detail: `${closed.length} closed cash up(s) reconciled` };
       },
     },
     // ── Performance ─────────────────────────────────────────────────
@@ -670,7 +750,7 @@ export function DevDashboard({
     if (!def) return;
     setTestResults(prev => ({ ...prev, [testId]: { status: 'running' } }));
     await new Promise(r => setTimeout(r, 10));
-    const result = def.run({ products, customers, staff, sales, config, workstations });
+    const result = def.run({ products, customers, staff, sales, config, workstations, cashSessions });
     setTestResults(prev => ({ ...prev, [testId]: result }));
   };
 
@@ -1433,6 +1513,9 @@ export function DevDashboard({
                   <div>
                     <h3 className="font-black text-lg text-slate-800 dark:text-white">Automated Test Suite</h3>
                     <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Vitest, React Testing Library & Playwright</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
+                      Cash-up test data polls only while this tab is open. {cashSessionsLoading ? 'Refreshing cash-up data...' : `${cashSessions.length} cash session(s) loaded.`}
+                    </p>
                   </div>
                 </div>
                 <span className="px-3 py-1 rounded-full text-xs font-black bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">Active</span>

@@ -2,7 +2,7 @@
  * useCheckout — MariaDB REST edition.
  * Replaces all Firestore addDoc/updateDoc calls with REST API calls.
  */
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { JwtUser } from './useAuth';
 import { Customer, Staff, AppConfig } from '../types';
 import { usePosStore } from '../store/usePosStore';
@@ -27,25 +27,13 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     activeOrderId, setActiveOrderId,
   } = usePosStore();
 
-  // Connect to WebSocket when active order is open
-  const { connect, disconnect, joinTab, leaveTab } = useSocket({
+  // Keep live order sockets off until a register is open.
+  useSocket({
     user,
     tenantId,
+    enabled: Boolean(activeSession?.id && activeOrderId),
     tabId: activeOrderId,
   });
-
-  useEffect(() => {
-    if (activeOrderId) {
-      connect();
-      joinTab(activeOrderId);
-    } else {
-      leaveTab(activeOrderId || '');
-    }
-    
-    return () => {
-      leaveTab(activeOrderId || '');
-    };
-  }, [activeOrderId, connect, disconnect, joinTab, leaveTab]);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [tenderedAmount, setTenderedAmount] = useState<number | string>('');
@@ -299,15 +287,50 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         if (activeSession?.id && saleData.payments) {
           for (const payment of saleData.payments) {
             const sessionUpdates: any = {};
+            const movements: any[] = [];
             if (payment.method === 'cash') {
               sessionUpdates.expectedCashDelta = payment.amount;
+              movements.push({
+                type: 'cash_sale',
+                direction: 'in',
+                amount: payment.amount,
+                saleId,
+                staffId: currentUserStaff?.id || null,
+                staffName: currentUserStaff?.name || null,
+                note: 'Cash sale recorded from checkout',
+              });
             } else if (payment.method === 'card') {
-              if (payment.cashOutAmount > 0) sessionUpdates.expectedCashDelta = -(payment.cashOutAmount);
-              else if (payment.tipAmount > 0) sessionUpdates.tipsDelta = payment.tipAmount;
+              if (payment.cashOutAmount > 0) {
+                sessionUpdates.expectedCashDelta = -(payment.cashOutAmount);
+                movements.push({
+                  type: 'cash_out',
+                  direction: 'out',
+                  amount: payment.cashOutAmount,
+                  saleId,
+                  staffId: currentUserStaff?.id || null,
+                  staffName: currentUserStaff?.name || null,
+                  note: 'Cash paid out against card overage',
+                });
+              } else if (payment.tipAmount > 0) {
+                sessionUpdates.tipsDelta = payment.tipAmount;
+                movements.push({
+                  type: 'tip',
+                  direction: 'neutral',
+                  amount: payment.tipAmount,
+                  saleId,
+                  staffId: currentUserStaff?.id || null,
+                  staffName: currentUserStaff?.name || null,
+                  note: 'Card tip recorded',
+                });
+              }
             }
             if (Object.keys(sessionUpdates).length > 0) {
               await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}`, sessionUpdates)
                 .catch(e => console.warn('Failed to update session:', e));
+            }
+            for (const movement of movements) {
+              await apiPost(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}/movements`, movement)
+                .catch(e => console.warn('Failed to record cash movement:', e));
             }
           }
         }

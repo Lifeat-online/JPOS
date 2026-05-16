@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CashSession, Staff } from '../types';
-import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins } from 'lucide-react';
+import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { apiGet, apiPost, apiPut } from '../api';
 
@@ -70,6 +70,8 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
   const [openingBreakdown, setOpeningBreakdown] = useState<Record<string, number>>({});
   const [closingBreakdown, setClosingBreakdown] = useState<Record<string, number>>({});
   const [closeNotes, setCloseNotes] = useState("");
+  const [managerNotes, setManagerNotes] = useState<Record<string, string>>({});
+  const [varianceReasons, setVarianceReasons] = useState<Record<string, string>>({});
 
   const toNumber = (value: unknown): number => {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -81,6 +83,18 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
   };
 
   const activeSession = sessions.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id);
+  const canManageCash = ['admin', 'manager', 'dev'].includes(currentUserStaff?.role || '');
+  const pendingReview = sessions.filter(s => s.status === 'closed' && (s.reviewStatus || 'submitted') !== 'reconciled');
+  const today = new Date().toDateString();
+  const todaysClosedSessions = sessions.filter(s => s.status === 'closed' && new Date(s.closedAt || s.openedAt).toDateString() === today);
+  const eodTotals = todaysClosedSessions.reduce((acc, s) => {
+    acc.expected += toNumber((s as any).expectedCash);
+    acc.actual += toNumber((s as any).actualCash);
+    acc.variance += toNumber((s as any).difference);
+    acc.tips += toNumber((s as any).netTips);
+    if ((s.reviewStatus || 'submitted') === 'reconciled') acc.reconciled += 1;
+    return acc;
+  }, { expected: 0, actual: 0, variance: 0, tips: 0, reconciled: 0 });
   const newFloat = Object.entries(openingBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
   const closeAmount = Object.entries(closingBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
 
@@ -99,6 +113,7 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
         difference: toNumber((s as any).difference),
         accumulatedTips: toNumber((s as any).accumulatedTips),
         netTips: toNumber((s as any).netTips),
+        reviewStatus: (s as any).reviewStatus || ((s as any).status === 'open' ? 'in_progress' : 'submitted'),
       })) as CashSession[];
       setSessions(normalized);
       usePosStore.getState().setActiveSession(normalized.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id) || null);
@@ -149,7 +164,9 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
       }
       await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}`, {
         status: 'closed',
+        reviewStatus: 'submitted',
         closedAt: new Date().toISOString(),
+        submittedAt: new Date().toISOString(),
         actualCash: closeAmount,
         closingBreakdown,
         difference,
@@ -170,6 +187,31 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
     setIsProcessing(false);
   };
 
+  const reviewSession = async (session: CashSession, reviewStatus: 'reviewed' | 'reconciled' | 'disputed') => {
+    if (!tenantId) return;
+    setIsProcessing(true);
+    try {
+      await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${session.id}/review`, {
+        reviewStatus,
+        managerNotes: managerNotes[session.id] || '',
+        varianceReason: varianceReasons[session.id] || '',
+      });
+      await fetchSessions();
+    } catch (err) {
+      console.error(err);
+    }
+    setIsProcessing(false);
+  };
+
+  const reviewBadge = (session: CashSession) => {
+    const status = session.reviewStatus || (session.status === 'open' ? 'in_progress' : 'submitted');
+    if (status === 'reconciled') return 'bg-emerald-100 text-emerald-700';
+    if (status === 'disputed') return 'bg-red-100 text-red-700';
+    if (status === 'reviewed') return 'bg-blue-100 text-blue-700';
+    if (status === 'submitted') return 'bg-amber-100 text-amber-700';
+    return 'bg-slate-100 text-slate-600';
+  };
+
   if (loading) return <div className="p-8 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
   return (
@@ -178,6 +220,30 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
         <div>
           <h2 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white mb-2">Cash Management</h2>
           <p className="text-slate-500 font-medium">Manage drawer float, record cash ups, and view shift history.</p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-800/60 shadow-sm">
+            <div className="flex items-center gap-3">
+              <Clock className="w-5 h-5 text-amber-500" />
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Pending Review</p>
+                <p className="text-2xl font-black">{pendingReview.length}</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-800/60 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Today Expected</p>
+            <p className="text-2xl font-black">R{eodTotals.expected.toFixed(2)}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-800/60 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Today Counted</p>
+            <p className="text-2xl font-black">R{eodTotals.actual.toFixed(2)}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-800/60 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Today Variance</p>
+            <p className={`text-2xl font-black ${eodTotals.variance === 0 ? 'text-emerald-600' : eodTotals.variance > 0 ? 'text-blue-600' : 'text-orange-600'}`}>R{eodTotals.variance.toFixed(2)}</p>
+          </div>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm flex flex-col md:flex-row gap-8 lg:gap-12">
@@ -232,7 +298,7 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
                 </div>
                 
                 <button type="submit" disabled={isProcessing} className="w-full py-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black uppercase tracking-widest text-sm rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95">
-                  {isProcessing ? <Loader2 className="w-5 h-5 animate-spin"/> : <Lock className="w-5 h-5"/>} Close Register
+                  {isProcessing ? <Loader2 className="w-5 h-5 animate-spin"/> : <Lock className="w-5 h-5"/>} Submit Cash Up
                 </button>
               </form>
             )}
@@ -241,6 +307,45 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
           <div className="hidden md:block w-px bg-slate-100 dark:bg-slate-800"></div>
           
           <div className="flex-1">
+             {canManageCash && (
+               <div className="mb-8">
+                 <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><ShieldCheck className="w-6 h-6 text-primary"/> Management Review</h3>
+                 <div className="space-y-4">
+                   {pendingReview.slice(0, 6).map(s => {
+                     const diff = toNumber((s as any).difference);
+                     return (
+                       <div key={s.id} className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+                         <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-4">
+                           <div>
+                             <div className="flex items-center gap-2 mb-1">
+                               <p className="font-black">{s.staffName}</p>
+                               <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-widest ${reviewBadge(s)}`}>{s.reviewStatus || 'submitted'}</span>
+                             </div>
+                             <p className="text-xs text-slate-500">Expected R{toNumber((s as any).expectedCash).toFixed(2)} - Counted R{toNumber((s as any).actualCash).toFixed(2)} - Variance R{diff.toFixed(2)}</p>
+                             {s.notes && <p className="text-sm mt-2 text-slate-600 dark:text-slate-300">{s.notes}</p>}
+                           </div>
+                           <div className="flex gap-2">
+                             <button type="button" disabled={isProcessing} onClick={() => reviewSession(s, 'reconciled')} className="px-3 py-2 bg-emerald-500 text-white rounded-lg text-xs font-black uppercase tracking-widest flex items-center gap-1 disabled:opacity-50"><CheckCircle2 className="w-4 h-4"/> Reconcile</button>
+                             <button type="button" disabled={isProcessing} onClick={() => reviewSession(s, 'disputed')} className="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-black uppercase tracking-widest flex items-center gap-1 disabled:opacity-50"><XCircle className="w-4 h-4"/> Dispute</button>
+                           </div>
+                         </div>
+                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-4">
+                           <input value={varianceReasons[s.id] || ''} onChange={e => setVarianceReasons({ ...varianceReasons, [s.id]: e.target.value })} placeholder="Variance reason" className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none" />
+                           <input value={managerNotes[s.id] || ''} onChange={e => setManagerNotes({ ...managerNotes, [s.id]: e.target.value })} placeholder="Manager notes" className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none" />
+                         </div>
+                       </div>
+                     );
+                   })}
+                   {pendingReview.length === 0 && (
+                     <div className="p-5 bg-emerald-50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 flex items-center gap-3">
+                       <ClipboardCheck className="w-5 h-5 text-emerald-600" />
+                       <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">No cash ups waiting for review.</p>
+                     </div>
+                   )}
+                 </div>
+               </div>
+             )}
+
              <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Calendar className="w-6 h-6 text-slate-400"/> Recent Sessions</h3>
              <div className="space-y-4 max-h-[800px] overflow-y-auto pr-2 custom-scrollbar">
                 {sessions.filter(s => s.status === 'closed').slice(0, 50).map(s => {
@@ -254,8 +359,11 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
                               <p className="font-bold text-base">{s.staffName}</p>
                               <p className="text-xs text-slate-500">{opened.toLocaleDateString()} {opened.toLocaleTimeString()} - {closed.toLocaleTimeString()}</p>
                            </div>
-                           <div className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-widest ${diff === 0 ? 'bg-emerald-100 text-emerald-700' : diff > 0 ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
-                             {diff === 0 ? 'Balanced' : diff > 0 ? `+ R${diff.toFixed(2)} OVER` : `- R${Math.abs(diff).toFixed(2)} SHORT`}
+                           <div className="flex flex-col items-end gap-2">
+                             <div className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-widest ${diff === 0 ? 'bg-emerald-100 text-emerald-700' : diff > 0 ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+                               {diff === 0 ? 'Balanced' : diff > 0 ? `+ R${diff.toFixed(2)} OVER` : `- R${Math.abs(diff).toFixed(2)} SHORT`}
+                             </div>
+                             <div className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${reviewBadge(s)}`}>{s.reviewStatus || 'submitted'}</div>
                            </div>
                         </div>
                         <div className="flex gap-4 text-sm font-medium border-t border-slate-200 dark:border-slate-700/60 pt-4">

@@ -26,6 +26,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 
 export function useAppData(user: User | null) {
   const { tenantId, setTenantId } = usePosStore();
+  const storeActiveSession = usePosStore(s => s.activeSession);
   const isAuthenticated = Boolean(user && getAccessToken());
   const canLoadTenantData = Boolean(tenantId && isAuthenticated);
 
@@ -57,6 +58,10 @@ export function useAppData(user: User | null) {
 
   const [currentUserStaff, setCurrentUserStaff] = useState<Staff | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<StaffRole | null>(null);
+  const tableAccessOptions = {
+    isRestaurant: Boolean(config.business?.isRestaurantMode),
+    hasOpenTerminal: Boolean(activeSession || storeActiveSession),
+  };
 
   const loadSales = useCallback(async () => {
     if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'sales')) {
@@ -388,7 +393,7 @@ export function useAppData(user: User | null) {
   }, [currentUserStaff, tenantId, canLoadTenantData, currentUserRole]);
 
   useEffect(() => {
-    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'tables')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'tables', tableAccessOptions)) {
       setTableSections([]);
       return;
     }
@@ -405,10 +410,10 @@ export function useAppData(user: User | null) {
     loadSections();
     const interval = setInterval(loadSections, 60000);
     return () => { active = false; clearInterval(interval); };
-  }, [tenantId, canLoadTenantData, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole, config.business?.isRestaurantMode, activeSession, storeActiveSession]);
 
     useEffect(() => {
-    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'tables')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'tables', tableAccessOptions)) {
       setRestaurantTables([]);
       return;
     }
@@ -440,7 +445,7 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, canLoadTenantData, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole, config.business?.isRestaurantMode, activeSession, storeActiveSession]);
 
   return {
     products, customers, staff, sales, config, setConfig,

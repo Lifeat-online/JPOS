@@ -159,16 +159,42 @@ CREATE TABLE IF NOT EXISTS cash_sessions (
   staff_name TEXT,
   opened_at TIMESTAMPTZ DEFAULT NOW(),
   closed_at TIMESTAMPTZ,
+  submitted_at TIMESTAMPTZ,
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by TEXT,
+  reconciled_at TIMESTAMPTZ,
+  reconciled_by TEXT,
   opening_float NUMERIC(12,2) DEFAULT 0,
+  opening_breakdown TEXT DEFAULT '{}'::TEXT,
   expected_cash NUMERIC(12,2) DEFAULT 0,
   actual_cash NUMERIC(12,2) DEFAULT 0,
+  closing_breakdown TEXT DEFAULT '{}'::TEXT,
   difference NUMERIC(12,2) DEFAULT 0,
   accumulated_tips NUMERIC(12,2) DEFAULT 0,
   net_tips NUMERIC(12,2) DEFAULT 0,
   status TEXT DEFAULT 'open' CHECK (status IN ('open','closed')),
+  review_status TEXT DEFAULT 'in_progress' CHECK (review_status IN ('in_progress','submitted','reviewed','reconciled','disputed')),
   notes TEXT,
+  manager_notes TEXT,
+  variance_reason TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS cash_movements (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  cash_session_id TEXT NOT NULL REFERENCES cash_sessions(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment')),
+  direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
+  amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  sale_id TEXT,
+  payment_id TEXT,
+  staff_id TEXT,
+  staff_name TEXT,
+  created_by TEXT,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS customer_payout_requests (
@@ -334,6 +360,83 @@ export async function initDb() {
     console.log("Executing:", statement.split("\n")[0]);
     await query(statement);
   }
+
+  await ensureCashManagementSchema();
+}
+
+export async function ensureCashManagementSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS reviewed_by TEXT`);
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS reconciled_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS reconciled_by TEXT`);
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS opening_breakdown TEXT DEFAULT '{}'::TEXT`);
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS closing_breakdown TEXT DEFAULT '{}'::TEXT`);
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS review_status TEXT DEFAULT 'in_progress'`);
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS manager_notes TEXT`);
+    await query(`ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS variance_reason TEXT`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS cash_movements (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        cash_session_id TEXT NOT NULL REFERENCES cash_sessions(id) ON DELETE CASCADE,
+        type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment')),
+        direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
+        amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        sale_id TEXT,
+        payment_id TEXT,
+        staff_id TEXT,
+        staff_name TEXT,
+        created_by TEXT,
+        note TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`UPDATE cash_sessions SET review_status = CASE WHEN status = 'open' THEN 'in_progress' ELSE COALESCE(review_status, 'submitted') END WHERE review_status IS NULL`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE cash_sessions ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+
+  await addColumn(`submitted_at DATETIME`);
+  await addColumn(`reviewed_at DATETIME`);
+  await addColumn(`reviewed_by VARCHAR(64)`);
+  await addColumn(`reconciled_at DATETIME`);
+  await addColumn(`reconciled_by VARCHAR(64)`);
+  await addColumn(`opening_breakdown JSON DEFAULT JSON_OBJECT()`);
+  await addColumn(`closing_breakdown JSON DEFAULT JSON_OBJECT()`);
+  await addColumn(`review_status ENUM('in_progress','submitted','reviewed','reconciled','disputed') DEFAULT 'in_progress'`);
+  await addColumn(`manager_notes TEXT`);
+  await addColumn(`variance_reason TEXT`);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS cash_movements (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      cash_session_id VARCHAR(64) NOT NULL,
+      type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment') NOT NULL,
+      direction ENUM('in','out','neutral') NOT NULL DEFAULT 'neutral',
+      amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      sale_id VARCHAR(64),
+      payment_id VARCHAR(64),
+      staff_id VARCHAR(64),
+      staff_name VARCHAR(255),
+      created_by VARCHAR(64),
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`UPDATE cash_sessions SET review_status = IF(status = 'open', 'in_progress', COALESCE(review_status, 'submitted')) WHERE review_status IS NULL`);
 }
 
 export async function ensureSalePaymentsTable() {

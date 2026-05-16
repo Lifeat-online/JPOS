@@ -118,6 +118,86 @@ function canManageUpdates(role: unknown) {
   return r === "admin" || r === "dev";
 }
 
+function canManageCash(role: unknown) {
+  const r = normalizeRole(role);
+  return r === "admin" || r === "manager" || r === "dev";
+}
+
+function safeJsonField(value: unknown, fallback: any) {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function cashSessionResponse(r: any) {
+  const toNumber = (value: unknown): number => {
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    if (typeof value === "string") {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+
+  return {
+    id: r.id,
+    tenantId: r.tenant_id,
+    staffId: r.staff_id,
+    staffName: r.staff_name,
+    openedAt: r.opened_at,
+    closedAt: r.closed_at,
+    submittedAt: r.submitted_at,
+    reviewedAt: r.reviewed_at,
+    reviewedBy: r.reviewed_by,
+    reconciledAt: r.reconciled_at,
+    reconciledBy: r.reconciled_by,
+    openingFloat: toNumber(r.opening_float),
+    openingBreakdown: safeJsonField(r.opening_breakdown, {}),
+    expectedCash: toNumber(r.expected_cash),
+    actualCash: toNumber(r.actual_cash),
+    closingBreakdown: safeJsonField(r.closing_breakdown, {}),
+    difference: toNumber(r.difference),
+    accumulatedTips: toNumber(r.accumulated_tips),
+    netTips: toNumber(r.net_tips),
+    status: r.status,
+    reviewStatus: r.review_status || (r.status === "open" ? "in_progress" : "submitted"),
+    notes: r.notes,
+    managerNotes: r.manager_notes,
+    varianceReason: r.variance_reason,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+async function recordCashMovement(tenantId: string, data: any) {
+  const id = data.id || `cm_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  await query(
+    `INSERT INTO cash_movements (
+      id, tenant_id, cash_session_id, type, direction, amount, sale_id, payment_id,
+      staff_id, staff_name, created_by, note, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    [
+      id,
+      tenantId,
+      data.cashSessionId,
+      data.type,
+      data.direction || "neutral",
+      data.amount || 0,
+      data.saleId || null,
+      data.paymentId || null,
+      data.staffId || null,
+      data.staffName || null,
+      data.createdBy || null,
+      data.note || null,
+    ]
+  );
+  return { id, ...data };
+}
+
 function parseVersionSegments(version: string) {
   return version
     .replace(/^[^0-9]*/, "")
@@ -1362,37 +1442,11 @@ export async function createApp(io: any = null) {
 
   app.get("/api/mariadb/tenants/:tenantId/cash-sessions", optionalAuth, async (req, res) => {
     try {
-      const toNumber = (value: unknown): number => {
-        if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-        if (typeof value === "string") {
-          const parsed = parseFloat(value);
-          return Number.isFinite(parsed) ? parsed : 0;
-        }
-        return 0;
-      };
-
       const staffId = req.query.staffId as string;
       if (staffId) {
         const r: any = await getOpenCashSessionByStaff(req.params.tenantId, staffId);
         if (!r) return res.json(null);
-        return res.json({
-          id: r.id,
-          tenantId: r.tenant_id,
-          staffId: r.staff_id,
-          staffName: r.staff_name,
-          openedAt: r.opened_at,
-          closedAt: r.closed_at,
-          openingFloat: toNumber(r.opening_float),
-          expectedCash: toNumber(r.expected_cash),
-          actualCash: toNumber(r.actual_cash),
-          difference: toNumber(r.difference),
-          accumulatedTips: toNumber(r.accumulated_tips),
-          netTips: toNumber(r.net_tips),
-          status: r.status,
-          notes: r.notes,
-          createdAt: r.created_at,
-          updatedAt: r.updated_at,
-        });
+        return res.json(cashSessionResponse(r));
       }
 
       const limit = parseInt(req.query.limit as string) || 50;
@@ -1401,25 +1455,36 @@ export async function createApp(io: any = null) {
         [req.params.tenantId, limit]
       );
 
-      const sessions = rows.map((r: any) => ({
-        id: r.id,
-        tenantId: r.tenant_id,
-        staffId: r.staff_id,
-        staffName: r.staff_name,
-        openedAt: r.opened_at,
-        closedAt: r.closed_at,
-        openingFloat: toNumber(r.opening_float),
-        expectedCash: toNumber(r.expected_cash),
-        actualCash: toNumber(r.actual_cash),
-        difference: toNumber(r.difference),
-        accumulatedTips: toNumber(r.accumulated_tips),
-        netTips: toNumber(r.net_tips),
-        status: r.status,
-        notes: r.notes,
-        createdAt: r.created_at,
-        updatedAt: r.updated_at,
-      }));
+      const sessions = rows.map(cashSessionResponse);
       res.json(sessions);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/cash-sessions/:id/movements", requireAuth, async (req, res) => {
+    try {
+      const rows = await query(
+        `SELECT
+          id,
+          tenant_id AS tenantId,
+          cash_session_id AS sessionId,
+          type,
+          direction,
+          amount,
+          sale_id AS saleId,
+          payment_id AS paymentId,
+          staff_id AS staffId,
+          staff_name AS staffName,
+          created_by AS createdBy,
+          note,
+          created_at AS timestamp
+        FROM cash_movements
+        WHERE tenant_id = ? AND cash_session_id = ?
+        ORDER BY created_at ASC`,
+        [req.params.tenantId, req.params.id]
+      );
+      res.json(rows.map((r: any) => ({ ...r, amount: Number(r.amount || 0) })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1430,19 +1495,55 @@ export async function createApp(io: any = null) {
       const id = `cs_${Date.now()}_${Math.random().toString(36).substring(7)}`;
       await query(
         `INSERT INTO cash_sessions (
-          id, tenant_id, staff_id, staff_name, opening_float, expected_cash, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          id, tenant_id, staff_id, staff_name, opened_at, opening_float, opening_breakdown,
+          expected_cash, status, review_status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
           id,
           req.params.tenantId,
           req.body.staffId,
           req.body.staffName || '',
+          req.body.openedAt ? new Date(req.body.openedAt) : new Date(),
           req.body.openingFloat || 0,
+          JSON.stringify(req.body.openingBreakdown || {}),
           req.body.expectedCash || 0,
           req.body.status || 'open',
+          'in_progress',
         ]
       );
-      res.json({ id, ...req.body });
+      if (Number(req.body.openingFloat || 0) > 0) {
+        await recordCashMovement(req.params.tenantId, {
+          cashSessionId: id,
+          type: "opening_float",
+          direction: "in",
+          amount: Number(req.body.openingFloat || 0),
+          staffId: req.body.staffId,
+          staffName: req.body.staffName || "",
+          createdBy: req.user?.staffId,
+          note: "Opening float counted",
+        });
+      }
+      res.json({ id, ...req.body, reviewStatus: 'in_progress' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/cash-sessions/:id/movements", requireAuth, async (req, res) => {
+    try {
+      const movement = await recordCashMovement(req.params.tenantId, {
+        cashSessionId: req.params.id,
+        type: req.body.type,
+        direction: req.body.direction,
+        amount: req.body.amount,
+        saleId: req.body.saleId,
+        paymentId: req.body.paymentId,
+        staffId: req.body.staffId,
+        staffName: req.body.staffName,
+        createdBy: req.user?.staffId,
+        note: req.body.note,
+      });
+      res.json(movement);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1451,16 +1552,32 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/cash-sessions/:id", requireAuth, async (req, res) => {
     try {
       const updates = req.body;
+      if (
+        ["reviewed", "reconciled", "disputed"].includes(updates.reviewStatus) &&
+        !canManageCash(req.user?.role)
+      ) {
+        return res.status(403).json({ error: "Only managers and admins can finalize cash reviews" });
+      }
       const fields: string[] = [];
       const values: any[] = [];
 
+      if (updates.submittedAt !== undefined) { fields.push("submitted_at = ?"); values.push(updates.submittedAt ? new Date(updates.submittedAt) : null); }
+      if (updates.reviewedAt !== undefined) { fields.push("reviewed_at = ?"); values.push(updates.reviewedAt ? new Date(updates.reviewedAt) : null); }
+      if (updates.reviewedBy !== undefined) { fields.push("reviewed_by = ?"); values.push(updates.reviewedBy || null); }
+      if (updates.reconciledAt !== undefined) { fields.push("reconciled_at = ?"); values.push(updates.reconciledAt ? new Date(updates.reconciledAt) : null); }
+      if (updates.reconciledBy !== undefined) { fields.push("reconciled_by = ?"); values.push(updates.reconciledBy || null); }
       if (updates.closedAt !== undefined) { fields.push("closed_at = ?"); values.push(updates.closedAt ? new Date(updates.closedAt) : null); }
       if (updates.actualCash !== undefined) { fields.push("actual_cash = ?"); values.push(updates.actualCash); }
+      if (updates.openingBreakdown !== undefined) { fields.push("opening_breakdown = ?"); values.push(JSON.stringify(updates.openingBreakdown || {})); }
+      if (updates.closingBreakdown !== undefined) { fields.push("closing_breakdown = ?"); values.push(JSON.stringify(updates.closingBreakdown || {})); }
       if (updates.difference !== undefined) { fields.push("difference = ?"); values.push(updates.difference); }
       if (updates.accumulatedTips !== undefined) { fields.push("accumulated_tips = ?"); values.push(updates.accumulatedTips); }
       if (updates.netTips !== undefined) { fields.push("net_tips = ?"); values.push(updates.netTips); }
       if (updates.status !== undefined) { fields.push("status = ?"); values.push(updates.status); }
+      if (updates.reviewStatus !== undefined) { fields.push("review_status = ?"); values.push(updates.reviewStatus); }
       if (updates.notes !== undefined) { fields.push("notes = ?"); values.push(updates.notes); }
+      if (updates.managerNotes !== undefined) { fields.push("manager_notes = ?"); values.push(updates.managerNotes); }
+      if (updates.varianceReason !== undefined) { fields.push("variance_reason = ?"); values.push(updates.varianceReason); }
       if (updates.expectedCash !== undefined) { fields.push("expected_cash = ?"); values.push(updates.expectedCash); }
       if (updates.expectedCashDelta !== undefined) { fields.push("expected_cash = expected_cash + ?"); values.push(updates.expectedCashDelta); }
       if (updates.tipsDelta !== undefined) { fields.push("accumulated_tips = accumulated_tips + ?"); values.push(updates.tipsDelta); }
@@ -1471,6 +1588,44 @@ export async function createApp(io: any = null) {
         await query(`UPDATE cash_sessions SET ${fields.join(", ")} WHERE id = ? AND tenant_id = ?`, values);
       }
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/cash-sessions/:id/review", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can review cash ups" });
+      }
+      const reviewStatus = req.body.reviewStatus || "reviewed";
+      if (!["reviewed", "reconciled", "disputed"].includes(reviewStatus)) {
+        return res.status(400).json({ error: "Invalid review status" });
+      }
+
+      const fields = [
+        "review_status = ?",
+        "reviewed_at = NOW()",
+        "reviewed_by = ?",
+        "manager_notes = ?",
+        "variance_reason = ?",
+        "updated_at = NOW()",
+      ];
+      const values: any[] = [
+        reviewStatus,
+        req.user?.staffId || null,
+        req.body.managerNotes || null,
+        req.body.varianceReason || null,
+      ];
+
+      if (reviewStatus === "reconciled") {
+        fields.splice(3, 0, "reconciled_at = NOW()", "reconciled_by = ?");
+        values.splice(2, 0, req.user?.staffId || null);
+      }
+
+      values.push(req.params.id, req.params.tenantId);
+      await query(`UPDATE cash_sessions SET ${fields.join(", ")} WHERE id = ? AND tenant_id = ?`, values);
+      res.json({ success: true, reviewStatus });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

@@ -9,6 +9,7 @@ import { JwtUser } from './useAuth';
 interface UseSocketOptions {
   user: JwtUser | null;
   tenantId: string | null;
+  enabled?: boolean;
   workstationId?: string | null;
   tableId?: string | null;
   tabId?: string | null;
@@ -29,7 +30,7 @@ interface UseSocketReturn {
   leaveMessages: (tenantId: string) => void;
 }
 
-export function useSocket({ user, tenantId, workstationId, tableId, tabId }: UseSocketOptions): UseSocketReturn {
+export function useSocket({ user, tenantId, enabled = true, workstationId, tableId, tabId }: UseSocketOptions): UseSocketReturn {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
@@ -41,7 +42,7 @@ export function useSocket({ user, tenantId, workstationId, tableId, tabId }: Use
 
   // Connect to Socket.IO when user is authenticated
   const connect = useCallback(() => {
-    if (!user || !tenantId) return;
+    if (!enabled || !user || !tenantId || socketRef.current) return;
 
     const token = getAccessToken();
     if (!token) return;
@@ -78,7 +79,7 @@ export function useSocket({ user, tenantId, workstationId, tableId, tabId }: Use
 
     socketRef.current = newSocket;
     setSocket(newSocket);
-  }, [user, tenantId, getAccessToken]);
+  }, [enabled, user, tenantId, getAccessToken]);
 
   // Disconnect from Socket.IO
   const disconnect = useCallback(() => {
@@ -148,8 +149,8 @@ export function useSocket({ user, tenantId, workstationId, tableId, tabId }: Use
 
   // Connect/disconnect based on active channels
   useEffect(() => {
-    // Connect when user is authenticated
-    if (user && tenantId) {
+    // Connect only when the caller explicitly enables live socket work.
+    if (enabled && user && tenantId) {
       connect();
     } else {
       disconnect();
@@ -158,7 +159,7 @@ export function useSocket({ user, tenantId, workstationId, tableId, tabId }: Use
     return () => {
       disconnect();
     };
-  }, [user, tenantId, connect, disconnect]);
+  }, [enabled, user, tenantId, connect, disconnect]);
 
   // Join/leave channels based on active state
   useEffect(() => {

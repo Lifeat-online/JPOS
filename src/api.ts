@@ -168,6 +168,10 @@ export function getOpenCashSession(tenantId: string, staffId: string) {
   return apiGet<any>(`/api/mariadb/tenants/${tenantId}/cash-sessions?staffId=${encodeURIComponent(staffId)}`);
 }
 
+export function getTenantCashSessions(tenantId: string, limit = 100) {
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/cash-sessions?limit=${encodeURIComponent(String(limit))}`);
+}
+
 export function getTenantIdBySlug(slug: string) {
   return apiGet<{ tenantId: string }>(`/api/mariadb/slugs/${encodeURIComponent(slug)}/tenant`);
 }

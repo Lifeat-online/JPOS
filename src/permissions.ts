@@ -45,6 +45,12 @@ export interface NavItem {
   group?: string;
 }
 
+type AccessOptions = {
+  isDev?: boolean;
+  isRestaurant?: boolean;
+  hasOpenTerminal?: boolean;
+};
+
 const ROLE_VIEWS: Record<StaffRole, AppView[]> = {
   admin: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
@@ -84,11 +90,16 @@ const VIEW_META: Record<AppView, NavItem> = {
 
 const PRIMARY_VIEWS: AppView[] = ['pos', 'tables', 'tabs', 'workstation', 'history', 'messages'];
 
-export function getAllowedViews(role: StaffRole | null, options: { isDev?: boolean; isRestaurant?: boolean } = {}) {
+export function getAllowedViews(role: StaffRole | null, options: AccessOptions = {}) {
   if (!role) return new Set<AppView>();
 
   const allowed = new Set<AppView>(ROLE_VIEWS[role] || []);
   if (options.isDev) allowed.add('dev');
+
+  if (role === 'cashier' && options.isRestaurant && options.hasOpenTerminal) {
+    allowed.add('tables');
+    allowed.add('tabs');
+  }
 
   if (!options.isRestaurant) {
     allowed.delete('tables');
@@ -103,18 +114,18 @@ export function getAllowedViews(role: StaffRole | null, options: { isDev?: boole
 export function canAccessView(
   role: StaffRole | null,
   view: string,
-  options: { isDev?: boolean; isRestaurant?: boolean } = {}
+  options: AccessOptions = {}
 ) {
   if (view === 'profile') return Boolean(role);
   return getAllowedViews(role, options).has(view as AppView);
 }
 
-export function getDefaultView(role: StaffRole | null, options: { isDev?: boolean; isRestaurant?: boolean } = {}) {
+export function getDefaultView(role: StaffRole | null, options: AccessOptions = {}) {
   const allowed = getAllowedViews(role, options);
   return (PRIMARY_VIEWS.find(view => allowed.has(view)) || 'profile') as AppView;
 }
 
-export function buildNavigation(role: StaffRole | null, options: { isDev?: boolean; isRestaurant?: boolean } = {}) {
+export function buildNavigation(role: StaffRole | null, options: AccessOptions = {}) {
   const allowed = getAllowedViews(role, options);
   const visible = [...PRIMARY_VIEWS, 'cash', 'live', 'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'settings']
     .filter(view => allowed.has(view as AppView)) as AppView[];
@@ -126,9 +137,16 @@ export function buildNavigation(role: StaffRole | null, options: { isDev?: boole
   };
 }
 
-export function canLoadDataset(role: StaffRole | null, dataset: 'products' | 'customers' | 'staff' | 'sales' | 'config' | 'workstations' | 'cash' | 'tables') {
+export function canLoadDataset(
+  role: StaffRole | null,
+  dataset: 'products' | 'customers' | 'staff' | 'sales' | 'config' | 'workstations' | 'cash' | 'tables',
+  options: AccessOptions = {}
+) {
   if (!role) return false;
   if (role === 'chef') return dataset === 'staff' || dataset === 'sales' || dataset === 'workstations';
-  if (role === 'cashier') return ['products', 'customers', 'staff', 'sales', 'config', 'cash'].includes(dataset);
+  if (role === 'cashier') {
+    if (dataset === 'tables') return Boolean(options.isRestaurant && options.hasOpenTerminal);
+    return ['products', 'customers', 'staff', 'sales', 'config', 'cash'].includes(dataset);
+  }
   return true;
 }

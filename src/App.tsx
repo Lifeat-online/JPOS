@@ -56,7 +56,6 @@ import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage, INITIAL_PRODUC
 
 import { MessagingView } from './views/MessagingView';
 import { useMessaging } from './hooks/useMessaging';
-import { useSocket } from './hooks/useSocket';
 import { usePWA } from './hooks/usePWA';
 import { buildNavigation, canAccessView, getDefaultView, type StaffRole } from './permissions';
 
@@ -412,8 +411,10 @@ export default function App() {
   } = useAppData(user);
 
   const { cart, setCart, setActiveCategory, setSelectedCustomerId, setActiveTableNumber, setActiveOrderId } = usePosStore();
+  const storeActiveSession = usePosStore(s => s.activeSession);
   const addToCart = usePosStore(s => s.addToCart);
   const tenantId = usePosStore(s => s.tenantId);
+  const effectiveActiveSession = storeActiveSession || activeSession;
 
   // Sync server-side data into the Zustand store so components can read it without prop drilling
   useEffect(() => {
@@ -432,17 +433,10 @@ export default function App() {
     usePosStore.getState().setWorkstations(workstations);
   }, [workstations]);
 
-  const checkout = useCheckout({ user, tenantId, currentUserStaff, customers, activeSession, config, refreshSales });
+  const checkout = useCheckout({ user, tenantId, currentUserStaff, customers, activeSession: effectiveActiveSession, config, refreshSales });
 
   // Messaging
   const messaging = useMessaging({ user, tenantId, currentUserStaff, staff });
-
-  // WebSocket connection - only active when needed
-  const { socket, isConnected } = useSocket({
-    user,
-    tenantId,
-    tabId: checkout.activeOrderId,
-  });
 
   // PWA + Kiosk
   const { isKioskMode, enterKioskMode, exitKioskMode, isFullscreen, toggleFullscreen, canInstall, isInstalled, installApp } = usePWA();
@@ -514,8 +508,12 @@ export default function App() {
   // Nav items based on role — split into primary (always visible) and secondary (dropdown)
   const roleForPermissions = currentUserRole as StaffRole | null;
   const permissionOptions = useMemo(
-    () => ({ isDev, isRestaurant: Boolean(config.business?.isRestaurantMode) }),
-    [isDev, config.business?.isRestaurantMode]
+    () => ({
+      isDev,
+      isRestaurant: Boolean(config.business?.isRestaurantMode),
+      hasOpenTerminal: Boolean(effectiveActiveSession),
+    }),
+    [isDev, config.business?.isRestaurantMode, effectiveActiveSession]
   );
 
   const { primaryNav, secondaryNav, navItems } = useMemo(() => {

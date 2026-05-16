@@ -212,6 +212,11 @@ export interface CashSession {
   staffName: string;
   openedAt: any;
   closedAt?: any;
+  submittedAt?: any;
+  reviewedAt?: any;
+  reviewedBy?: string;
+  reconciledAt?: any;
+  reconciledBy?: string;
   openingFloat: number;
   openingBreakdown?: Record<string, number>;
   expectedCash: number;
@@ -221,15 +226,24 @@ export interface CashSession {
   accumulatedTips?: number;
   netTips?: number;
   status: 'open' | 'closed';
+  reviewStatus?: 'in_progress' | 'submitted' | 'reviewed' | 'reconciled' | 'disputed';
   notes?: string;
+  managerNotes?: string;
+  varianceReason?: string;
 }
 
 export interface CashTransaction {
   id: string;
   sessionId: string;
-  type: 'add_float' | 'remove_cash' | 'cash_sale' | 'refund';
+  type: 'opening_float' | 'cash_sale' | 'refund' | 'cash_drop' | 'cash_added' | 'cash_removed' | 'cash_out' | 'tip' | 'manager_adjustment';
+  direction: 'in' | 'out' | 'neutral';
   amount: number;
   timestamp: any;
+  saleId?: string;
+  paymentId?: string;
+  staffId?: string;
+  staffName?: string;
+  createdBy?: string;
   note?: string;
 }
 

@@ -177,17 +177,45 @@ CREATE TABLE IF NOT EXISTS cash_sessions (
   staff_name VARCHAR(255),
   opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   closed_at DATETIME,
+  submitted_at DATETIME,
+  reviewed_at DATETIME,
+  reviewed_by VARCHAR(64),
+  reconciled_at DATETIME,
+  reconciled_by VARCHAR(64),
   opening_float DECIMAL(12,2) DEFAULT 0,
+  opening_breakdown JSON DEFAULT JSON_OBJECT(),
   expected_cash DECIMAL(12,2) DEFAULT 0,
   actual_cash DECIMAL(12,2) DEFAULT 0,
+  closing_breakdown JSON DEFAULT JSON_OBJECT(),
   difference DECIMAL(12,2) DEFAULT 0,
   accumulated_tips DECIMAL(12,2) DEFAULT 0,
   net_tips DECIMAL(12,2) DEFAULT 0,
   status ENUM('open','closed') DEFAULT 'open',
+  review_status ENUM('in_progress','submitted','reviewed','reconciled','disputed') DEFAULT 'in_progress',
   notes TEXT,
+  manager_notes TEXT,
+  variance_reason TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS cash_movements (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  cash_session_id VARCHAR(64) NOT NULL,
+  type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment') NOT NULL,
+  direction ENUM('in','out','neutral') NOT NULL DEFAULT 'neutral',
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  sale_id VARCHAR(64),
+  payment_id VARCHAR(64),
+  staff_id VARCHAR(64),
+  staff_name VARCHAR(255),
+  created_by VARCHAR(64),
+  note TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS customer_payout_requests (
