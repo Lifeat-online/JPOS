@@ -1,17 +1,20 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
   ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Maximize, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Settings
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Customer, AppConfig, Staff } from '../types';
+import { Product, Customer, Sale, Workstation } from '../types';
 import { CustomerSelector } from '../components/CustomerSelector';
 import { usePosStore } from '../store/usePosStore';
+import { WorkstationQueuePanel } from '../components/WorkstationQueuePanel';
 
 interface PointOfSaleViewProps {
   products: Product[];
   customers: Customer[];
+  sales: Sale[];
+  workstations: Workstation[];
   isProcessing: boolean;
   setIsProcessing: (val: boolean) => void;
   handleSaveOrder: (sendToKitchen: boolean) => Promise<void>;
@@ -29,13 +32,14 @@ interface PointOfSaleViewProps {
   pointsDiscount: number;
   onRedeemPoints: (customerId: string, points: number) => void;
   onClearPointsDiscount: () => void;
+  onSalesUpdated?: () => Promise<void>;
 }
 
 export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
-  products, customers, isProcessing, setIsProcessing, handleSaveOrder, 
+  products, customers, sales, workstations, isProcessing, setIsProcessing, handleSaveOrder,
   handleCheckout, handleWalletCheckout, handleOpenTab, setTenderModal, setTenderedAmount, setSplitPaymentModal,
   categoryTree, CATEGORIES, getCategoryIcon, getProductImage, openCashDrawer,
-  pointsDiscount, onRedeemPoints, onClearPointsDiscount,
+  pointsDiscount, onRedeemPoints, onClearPointsDiscount, onSalesUpdated,
 }) => {
   const { 
     cart, addToCart, updateQuantity, clearCart, 
@@ -44,10 +48,14 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     activeTableNumber, setActiveTableNumber, activeOrderId, setActiveOrderId,
     currentUserStaff, config,
     isCartOpen, setIsCartOpen,
+    tenantId,
   } = usePosStore();
 
   const [isScanning, setIsScanning] = useState(false);
   const [modifyingProduct, setModifyingProduct] = useState<Product | null>(null);
+  const [attachedWorkstationId, setAttachedWorkstationId] = useState('');
+  const [hasWorkstationPreference, setHasWorkstationPreference] = useState(false);
+  const [sidePanelMode, setSidePanelMode] = useState<'cart' | 'queue'>('cart');
 
   const handleAddToCart = (product: Product) => {
     if (product.modifiers && product.modifiers.length > 0) {
@@ -58,6 +66,56 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   };
 
   const cartTotal = useMemo(() => cart.reduce((total, item) => total + (item.price * item.quantity), 0), [cart]);
+  const activeWorkstations = useMemo(() => workstations.filter(w => w.status === 'active'), [workstations]);
+  const attachedWorkstation = activeWorkstations.find(w => w.id === attachedWorkstationId);
+  const workstationPreferenceKey = `pos-attached-workstation:${tenantId || 'local'}`;
+  const isWideRegister = typeof window !== 'undefined' && window.innerWidth >= 1536;
+
+  const attachedQueueCount = useMemo(() => {
+    if (!attachedWorkstationId) return 0;
+    return sales.reduce((count, sale) => {
+      if (sale.status !== 'kitchen' && sale.status !== 'open') return count;
+      return count + sale.items.filter(item => {
+        const orderItem = item as any;
+        return orderItem.workstationId === attachedWorkstationId &&
+          (orderItem.status === 'pending' || orderItem.status === 'accepted');
+      }).length;
+    }, 0);
+  }, [attachedWorkstationId, sales]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(workstationPreferenceKey);
+      setHasWorkstationPreference(saved !== null);
+      setAttachedWorkstationId(saved && saved !== 'none' ? saved : '');
+    } catch {
+      setHasWorkstationPreference(false);
+      setAttachedWorkstationId('');
+    }
+  }, [workstationPreferenceKey]);
+
+  useEffect(() => {
+    if (attachedWorkstationId && !activeWorkstations.some(w => w.id === attachedWorkstationId)) {
+      setAttachedWorkstationId('');
+      setSidePanelMode('cart');
+      try {
+        window.localStorage.setItem(workstationPreferenceKey, 'none');
+      } catch {
+        // Ignore storage failures; the selector still works for this session.
+      }
+    }
+  }, [activeWorkstations, attachedWorkstationId, workstationPreferenceKey]);
+
+  const updateAttachedWorkstation = (workstationId: string) => {
+    setAttachedWorkstationId(workstationId);
+    setHasWorkstationPreference(true);
+    if (!workstationId) setSidePanelMode('cart');
+    try {
+      window.localStorage.setItem(workstationPreferenceKey, workstationId || 'none');
+    } catch {
+      // Ignore storage failures; the selector still works for this session.
+    }
+  };
 
   const allowedCategories = useMemo(() => {
     if (!currentUserStaff || currentUserStaff.role !== 'cashier') return CATEGORIES;
@@ -164,7 +222,65 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
               onAddNew={() => {}}
             />
           </div>
+          {config?.business?.isRestaurantMode && activeWorkstations.length > 0 && (
+            <div className="sm:w-64 flex gap-2">
+              <div className="relative flex-1">
+                <ChefHat className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 w-4 h-4" />
+                <select
+                  value={attachedWorkstationId}
+                  onChange={e => updateAttachedWorkstation(e.target.value)}
+                  className="w-full pl-10 pr-8 py-3 lg:py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-xs font-black text-slate-700 dark:text-slate-200 transition-all shadow-sm appearance-none"
+                  title="Register workstation"
+                >
+                  <option value="">No Station</option>
+                  {activeWorkstations.map(w => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+              </div>
+              {attachedWorkstation && (
+                <button
+                  onClick={() => { setSidePanelMode('queue'); setIsCartOpen(true); }}
+                  className="lg:hidden relative w-12 rounded-xl bg-orange-500 text-white flex items-center justify-center shadow-sm active:scale-95 transition-all"
+                  title="Open workstation queue"
+                >
+                  <ChefHat className="w-5 h-5" />
+                  {attachedQueueCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-black min-w-4 h-4 px-1 rounded-full flex items-center justify-center ring-2 ring-white">
+                      {attachedQueueCount > 99 ? '99+' : attachedQueueCount}
+                    </span>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
         </div>
+
+        {config?.business?.isRestaurantMode && activeWorkstations.length > 0 && !hasWorkstationPreference && (
+          <div className="mx-4 lg:mx-6 mb-2 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-900/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-widest text-orange-600 dark:text-orange-400">Use this register as a workstation?</p>
+              <p className="text-xs text-orange-700/70 dark:text-orange-300/70 mt-0.5">Choose a station to see and manage incoming tickets beside the register.</p>
+            </div>
+            <div className="flex gap-2 overflow-x-auto no-scrollbar">
+              <button
+                onClick={() => updateAttachedWorkstation('')}
+                className="px-3 py-2 rounded-lg bg-white dark:bg-slate-900 text-xs font-black text-slate-500 dark:text-slate-300 border border-orange-100 dark:border-orange-900/40 whitespace-nowrap"
+              >
+                Not now
+              </button>
+              {activeWorkstations.map(w => (
+                <button
+                  key={w.id}
+                  onClick={() => updateAttachedWorkstation(w.id)}
+                  className="px-3 py-2 rounded-lg bg-orange-500 text-white text-xs font-black whitespace-nowrap shadow-sm"
+                >
+                  {w.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-4 lg:p-6 pt-2 grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 lg:gap-4 auto-rows-max lg:auto-rows-[160px] pb-24 lg:pb-6">
           <AnimatePresence>
@@ -213,6 +329,19 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
         </div>
       </section>
 
+      {attachedWorkstation && (
+        <aside className="hidden 2xl:flex w-[340px] border-l border-slate-200 dark:border-slate-700/60 bg-slate-50 dark:bg-[#0B1120] shrink-0 min-h-0">
+          <WorkstationQueuePanel
+            sales={sales}
+            workstations={workstations}
+            activeWorkstationId={attachedWorkstationId}
+            currentUserStaff={currentUserStaff}
+            onSalesUpdated={onSalesUpdated}
+            compact
+          />
+        </aside>
+      )}
+
       <AnimatePresence>
         {(isCartOpen || window.innerWidth >= 1024) && (
           <>
@@ -228,6 +357,32 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className={`fixed bottom-0 left-0 right-0 lg:relative lg:inset-auto z-50 lg:z-10 w-full lg:w-[360px] max-h-[90vh] lg:max-h-none bg-white dark:bg-slate-900 lg:border-l border-slate-200 dark:border-slate-700/60 flex flex-col flex-shrink-0 shadow-2xl rounded-t-3xl lg:rounded-none overflow-hidden`}
             >
+              {attachedWorkstation && !isWideRegister && (
+                <div className="grid grid-cols-2 gap-1 p-2 bg-slate-100 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 shrink-0">
+                  <button
+                    onClick={() => setSidePanelMode('cart')}
+                    className={`h-10 rounded-lg text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${sidePanelMode === 'cart' ? 'bg-white dark:bg-slate-900 text-primary shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    Cart
+                  </button>
+                  <button
+                    onClick={() => setSidePanelMode('queue')}
+                    className={`relative h-10 rounded-lg text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${sidePanelMode === 'queue' ? 'bg-white dark:bg-slate-900 text-orange-500 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}
+                  >
+                    <ChefHat className="w-4 h-4" />
+                    Queue
+                    {attachedQueueCount > 0 && (
+                      <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
+                        {attachedQueueCount > 99 ? '99+' : attachedQueueCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {(!attachedWorkstation || sidePanelMode === 'cart' || isWideRegister) ? (
+                <>
               <div className="p-5 border-b border-slate-200 dark:border-slate-700/60 flex justify-between items-center bg-white dark:bg-slate-900 sticky top-0 z-10">
                 <div>
                   <h2 className="font-extrabold text-lg flex items-center gap-2 text-slate-900 dark:text-white">
@@ -449,6 +604,17 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   </button>
                 </div>
               </div>
+                </>
+              ) : (
+                <WorkstationQueuePanel
+                  sales={sales}
+                  workstations={workstations}
+                  activeWorkstationId={attachedWorkstationId}
+                  currentUserStaff={currentUserStaff}
+                  onSalesUpdated={onSalesUpdated}
+                  compact
+                />
+              )}
             </motion.aside>
           </>
         )}

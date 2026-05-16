@@ -830,6 +830,8 @@ export default function App() {
           <PointOfSaleView
             products={products}
             customers={customers}
+            sales={sales}
+            workstations={workstations}
             isProcessing={checkout.isProcessing}
             setIsProcessing={checkout.setIsProcessing}
             handleSaveOrder={(sendToKitchen) => checkout.handleSaveOrder(sendToKitchen, navigate)}
@@ -847,6 +849,7 @@ export default function App() {
             pointsDiscount={checkout.pointsDiscount}
             onRedeemPoints={checkout.redeemPoints}
             onClearPointsDiscount={checkout.clearPointsDiscount}
+            onSalesUpdated={refreshSales}
           />
         )}
         {view === 'history' && (
