@@ -983,7 +983,10 @@ export async function createApp(io: any = null) {
                 WHERE w.tenant_id = ?
                   AND w.status = 'active'
                 GROUP BY w.id
-                ORDER BY (pendingCount + acceptedCount) DESC, w.name ASC
+                ORDER BY (
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END)
+                  + SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END)
+                ) DESC, w.name ASC
               `
             : `
                 SELECT
@@ -1012,7 +1015,10 @@ export async function createApp(io: any = null) {
                 WHERE w.tenant_id = ?
                   AND w.status = 'active'
                 GROUP BY w.id
-                ORDER BY (pendingCount + acceptedCount) DESC, w.name ASC
+                ORDER BY (
+                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END)
+                  + SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END)
+                ) DESC, w.name ASC
               `,
           [tenantId]
         );
