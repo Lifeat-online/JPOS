@@ -45,6 +45,8 @@ const KEYS = {
   USER:    'jpos_user',
 } as const;
 
+let refreshPromise: Promise<boolean> | null = null;
+
 function getStoredUser(): JwtUser | null {
   try {
     const raw = localStorage.getItem(KEYS.USER);
@@ -73,28 +75,37 @@ export function getAccessToken(): string | null {
 // ── Token refresh ──────────────────────────────────────────────────────────
 
 async function refreshAccessToken(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise;
+
   const refreshToken = localStorage.getItem(KEYS.REFRESH);
   if (!refreshToken) return false;
 
-  try {
-    const res = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
-    });
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
 
-    if (!res.ok) {
-      clearSession();
+      if (!res.ok) {
+        clearSession();
+        window.dispatchEvent(new Event('jpos:auth-cleared'));
+        return false;
+      }
+
+      const data = await res.json();
+      localStorage.setItem(KEYS.ACCESS,  data.accessToken);
+      localStorage.setItem(KEYS.REFRESH, data.refreshToken);
+      return true;
+    } catch {
       return false;
+    } finally {
+      refreshPromise = null;
     }
+  })();
 
-    const data = await res.json();
-    localStorage.setItem(KEYS.ACCESS,  data.accessToken);
-    localStorage.setItem(KEYS.REFRESH, data.refreshToken);
-    return true;
-  } catch {
-    return false;
-  }
+  return refreshPromise;
 }
 
 // ── Decode JWT (no library needed for reading claims) ──────────────────────
@@ -126,6 +137,12 @@ export function useAuth() {
 
   // On mount: verify stored token is still valid, refresh if needed
   useEffect(() => {
+    const onAuthCleared = () => {
+      setState({ user: null, authLoading: false, error: null });
+    };
+
+    window.addEventListener('jpos:auth-cleared', onAuthCleared);
+
     const init = async () => {
       const accessToken = localStorage.getItem(KEYS.ACCESS);
       const storedUser  = getStoredUser();
@@ -152,6 +169,7 @@ export function useAuth() {
     };
 
     init();
+    return () => window.removeEventListener('jpos:auth-cleared', onAuthCleared);
   }, []);
 
   // ── Login ────────────────────────────────────────────────────────────────

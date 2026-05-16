@@ -5,25 +5,46 @@
  */
 import { getAccessToken } from './hooks/useAuth';
 
+let refreshPromise: Promise<boolean> | null = null;
+
+function clearStoredSession() {
+  localStorage.removeItem('jpos_access_token');
+  localStorage.removeItem('jpos_refresh_token');
+  localStorage.removeItem('jpos_user');
+  window.dispatchEvent(new Event('jpos:auth-cleared'));
+}
+
 // ── Token refresh (client-side) ──────────────────────────────────────────────
 
 async function tryRefresh(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise;
+
   const refreshToken = localStorage.getItem('jpos_refresh_token');
   if (!refreshToken) return false;
-  try {
-    const res = await fetch('/api/auth/refresh', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ refreshToken }),
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    localStorage.setItem('jpos_access_token',  data.accessToken);
-    localStorage.setItem('jpos_refresh_token', data.refreshToken);
-    return true;
-  } catch {
-    return false;
-  }
+
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch('/api/auth/refresh', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) {
+        clearStoredSession();
+        return false;
+      }
+      const data = await res.json();
+      localStorage.setItem('jpos_access_token',  data.accessToken);
+      localStorage.setItem('jpos_refresh_token', data.refreshToken);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }
 
 // ── Auth header helper ────────────────────────────────────────────────────────
