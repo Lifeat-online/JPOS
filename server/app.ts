@@ -1684,18 +1684,17 @@ export async function createApp(io: any = null) {
       ...(isTest ? { stack: err.stack } : {})
     });
   });
+
+  return app;
 }
 
 export async function startServer() {
-  const app = express();
+  const app = await createApp();
   const PORT = Number(process.env.PORT || 8080);
   
   // Create HTTP server and attach Socket.IO
   const httpServer = http.createServer(app);
-  const io = setupSocketIO(httpServer);
-  
-  // Set up routes with io instance
-  setupRoutes(app, io);
+  setupSocketIO(httpServer);
   
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
@@ -1705,7 +1704,7 @@ export async function startServer() {
     console.log(`distDir is: ${path.resolve(__dirname, '..', 'dist')}`);
   });
   
-  return { app, io, httpServer };
+  return { app, httpServer };
 }
 
 function setupRoutes(app: any, io: any) {
