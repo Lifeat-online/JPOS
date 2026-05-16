@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { apiPost, apiPut, apiDelete, seedProducts, clearAllSales } from './api';
+import { apiPost, apiPut, apiDelete, seedDemoData, clearSeededDemoData, clearAllSales } from './api';
 
 import { useAuth } from './hooks/useAuth';
 import { useAppData } from './hooks/useAppData';
@@ -52,7 +52,7 @@ import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
 import { SplitPaymentModal } from './components/modals/SplitPaymentModal';
 
 import { Product, Customer, Staff } from './types';
-import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage, INITIAL_PRODUCTS } from './constants';
+import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage } from './constants';
 
 import { MessagingView } from './views/MessagingView';
 import { useMessaging } from './hooks/useMessaging';
@@ -464,18 +464,6 @@ export default function App() {
   const [staffModal, setStaffModal] = useState<{ isOpen: boolean; staff: Partial<Staff> | null }>({ isOpen: false, staff: null });
   const [staffToDelete, setStaffToDelete] = useState<string | null>(null);
   const [isProcessingCrud, setIsProcessingCrud] = useState(false);
-
-  // Seed initial products once — only when user is confirmed staff (has a role)
-  useEffect(() => {
-    if (user && tenantId && ['admin', 'manager', 'dev'].includes(currentUserRole || '') && products.length === 0) {
-      const seed = async () => {
-        for (const p of INITIAL_PRODUCTS) {
-          await apiPost(`/api/mariadb/tenants/${tenantId}/products`, { ...p, createdAt: new Date().toISOString() });
-        }
-      };
-      seed().catch(console.error);
-    }
-  }, [user, tenantId, currentUserRole, products.length]);
 
   // Category tree helpers
   const categoryTree = config?.categories || DEFAULT_CATEGORY_TREE;
@@ -972,9 +960,13 @@ export default function App() {
             sales={sales}
             config={config}
             workstations={workstations}
-            onSeedProducts={async () => {
+            onSeedDemo={async (mode) => {
               if (!tenantId) return;
-              await seedProducts(tenantId, INITIAL_PRODUCTS);
+              await seedDemoData(tenantId, mode);
+            }}
+            onClearSeeded={async () => {
+              if (!tenantId) return;
+              await clearSeededDemoData(tenantId);
             }}
             onClearSales={async () => {
               if (!tenantId) return;

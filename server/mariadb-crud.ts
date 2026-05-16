@@ -1395,6 +1395,27 @@ export async function seedProducts(tenantId: string, products: any[]): Promise<v
   try {
     await conn.beginTransaction();
     for (const p of products) {
+      const [existing] = await conn.query<{ id: string }>(
+        `SELECT id FROM products
+         WHERE tenant_id = ?
+           AND (
+             (barcode IS NOT NULL AND barcode <> '' AND barcode = ?)
+             OR (name = ? AND category = ? AND COALESCE(section, '') = COALESCE(?, ''))
+           )
+         ORDER BY created_at ASC, id ASC`,
+        [tenantId, p.barcode || null, p.name, p.category, p.section || null]
+      );
+      if (existing.length > 0) {
+        const duplicateIds = existing.slice(1).map(row => row.id);
+        if (duplicateIds.length > 0) {
+          await conn.query(
+            `DELETE FROM products WHERE tenant_id = ? AND id IN (${duplicateIds.map(() => "?").join(", ")})`,
+            [tenantId, ...duplicateIds]
+          );
+        }
+        continue;
+      }
+
       const id = `prod_${Date.now()}_${Math.random().toString(36).substring(7)}`;
       await conn.query(
         `INSERT INTO products (

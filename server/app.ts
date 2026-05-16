@@ -83,6 +83,7 @@ import {
   handleSetupPassword,
 } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
+import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
 
 dotenv.config();
 
@@ -923,6 +924,25 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/seed-products", requireAuth, async (req, res) => {
     try {
       await seedProducts(req.params.tenantId, req.body.products);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/demo-seed/:mode", requireAuth, async (req, res) => {
+    try {
+      const mode = req.params.mode === "restaurant" ? "restaurant" : "retail";
+      await seedDemoData(req.params.tenantId, mode);
+      res.json({ success: true, mode });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/demo-seed", requireAuth, async (req, res) => {
+    try {
+      await clearSeededDemoData(req.params.tenantId);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -31,7 +31,8 @@ interface DevDashboardProps {
   sales: Sale[];
   config: AppConfig;
   workstations: Workstation[];
-  onSeedProducts?: () => void;
+  onSeedDemo?: (mode: 'retail' | 'restaurant') => void;
+  onClearSeeded?: () => void;
   onClearSales?: () => void;
 }
 
@@ -108,14 +109,15 @@ export function DevDashboard({
   sales,
   config,
   workstations,
-  onSeedProducts,
+  onSeedDemo,
+  onClearSeeded,
   onClearSales,
 }: DevDashboardProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'health' | 'console' | 'actions' | 'tests'>('overview');
   const [dataSubTab, setDataSubTab] = useState<'products' | 'customers' | 'staff' | 'sales' | 'workstations'>('products');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logCounter, setLogCounter] = useState(0);
-  const [seedConfirm, setSeedConfirm] = useState(false);
+  const [seedConfirm, setSeedConfirm] = useState<'retail' | 'restaurant' | 'clearSeeded' | null>(null);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [cashSessions, setCashSessions] = useState<CashSession[]>([]);
   const [cashSessionsLoading, setCashSessionsLoading] = useState(false);
@@ -1237,31 +1239,50 @@ export function DevDashboard({
         ═══════════════════════════════════════════════════════════════ */}
         {activeTab === 'actions' && (
           <div className="space-y-5 max-w-2xl mx-auto">
-            {/* Seed products */}
+            {/* Demo data */}
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-1">
                 <RefreshCw className="w-4 h-4 text-blue-500" />
-                <h4 className="font-black text-slate-800 dark:text-white">Seed Sample Products</h4>
+                <h4 className="font-black text-slate-800 dark:text-white">Seed Demo Data</h4>
               </div>
-              <p className="text-sm text-slate-500 mb-4">Populate the database with sample product data for testing.</p>
-              {!seedConfirm ? (
+              <p className="text-sm text-slate-500 mb-4">Populate demo products, sections, categories, and restaurant recipe stock. Seeding first removes previous demo rows.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <button
-                  onClick={() => setSeedConfirm(true)}
-                  className="px-4 py-2 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all"
+                  onClick={() => setSeedConfirm('retail')}
+                  className="px-4 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all"
                 >
-                  Seed Sample Products
+                  Seed Retail Demo
                 </button>
-              ) : (
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                  <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Are you sure?</span>
+                <button
+                  onClick={() => setSeedConfirm('restaurant')}
+                  className="px-4 py-3 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 transition-all"
+                >
+                  Seed Restaurant / Bar
+                </button>
+                <button
+                  onClick={() => setSeedConfirm('clearSeeded')}
+                  className="px-4 py-3 rounded-xl text-sm font-bold bg-slate-900 dark:bg-slate-700 text-white hover:bg-slate-800 active:scale-95 transition-all"
+                >
+                  Remove Seeded Demo
+                </button>
+              </div>
+              {seedConfirm && (
+                <div className={`mt-4 flex flex-wrap items-center gap-3 p-3 rounded-xl border ${seedConfirm === 'clearSeeded' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'}`}>
+                  <span className={`text-sm font-semibold ${seedConfirm === 'clearSeeded' ? 'text-amber-700 dark:text-amber-300' : 'text-blue-700 dark:text-blue-300'}`}>
+                    {seedConfirm === 'clearSeeded' ? 'Remove all seeded demo rows?' : `Seed ${seedConfirm === 'retail' ? 'retail' : 'restaurant/bar'} demo data?`}
+                  </span>
                   <button
-                    onClick={() => { onSeedProducts?.(); setSeedConfirm(false); }}
-                    className="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all"
+                    onClick={() => {
+                      if (seedConfirm === 'clearSeeded') onClearSeeded?.();
+                      else onSeedDemo?.(seedConfirm);
+                      setSeedConfirm(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-bold text-white active:scale-95 transition-all ${seedConfirm === 'restaurant' ? 'bg-emerald-600 hover:bg-emerald-700' : seedConfirm === 'clearSeeded' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
                   >
-                    Yes, Seed
+                    Confirm
                   </button>
                   <button
-                    onClick={() => setSeedConfirm(false)}
+                    onClick={() => setSeedConfirm(null)}
                     className="px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 active:scale-95 transition-all"
                   >
                     Cancel

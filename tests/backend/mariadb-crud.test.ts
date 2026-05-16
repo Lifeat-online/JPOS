@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { createProduct, createSale, updateProduct, deleteProduct, updateSale } from '../../server/mariadb-crud.js';
+import { createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale } from '../../server/mariadb-crud.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
@@ -34,6 +34,49 @@ describe('mariadb-crud', () => {
     const result = await deleteProduct('tenant_1', 'prod_1');
     expect(result).toBeUndefined();
     expect(dbModule.query).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM products'), ['tenant_1', 'prod_1']);
+  });
+
+  it('skips seeded products that already exist', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockResolvedValueOnce([[{ id: 'prod_existing' }]]),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await seedProducts('tenant_1', [
+      { name: 'Bread', price: 16, category: 'Groceries', section: 'Retail', stock: 35, barcode: '778899' },
+    ]);
+
+    expect(conn.query).toHaveBeenCalledTimes(1);
+    expect(conn.query).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO products'), expect.anything());
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('removes duplicate seeded products while keeping the oldest row', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn()
+        .mockResolvedValueOnce([[{ id: 'prod_oldest' }, { id: 'prod_duplicate_1' }, { id: 'prod_duplicate_2' }]])
+        .mockResolvedValueOnce([[]]),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await seedProducts('tenant_1', [
+      { name: 'Bread', price: 16, category: 'Groceries', section: 'Retail', stock: 35, barcode: '778899' },
+    ]);
+
+    expect(conn.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('DELETE FROM products'),
+      ['tenant_1', 'prod_duplicate_1', 'prod_duplicate_2']
+    );
+    expect(conn.commit).toHaveBeenCalled();
   });
 
   it('creates a sale without treating transaction row tuples as recipe rows', async () => {

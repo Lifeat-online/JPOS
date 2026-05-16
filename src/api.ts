@@ -316,6 +316,14 @@ export function seedProducts(tenantId: string, products: any[]) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/seed-products`, { products });
 }
 
+export function seedDemoData(tenantId: string, mode: 'retail' | 'restaurant') {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/demo-seed/${mode}`, {});
+}
+
+export function clearSeededDemoData(tenantId: string) {
+  return apiDelete<any>(`/api/mariadb/tenants/${tenantId}/demo-seed`);
+}
+
 export function clearAllSales(tenantId: string) {
   return apiDelete<any>(`/api/mariadb/tenants/${tenantId}/sales`);
 }
