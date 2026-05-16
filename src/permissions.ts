@@ -16,7 +16,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import type React from 'react';
-import type { Staff } from './types';
+import type { Staff, StaffPermissions } from './types';
 
 export type StaffRole = Staff['role'];
 export type AppView =
@@ -49,6 +49,7 @@ type AccessOptions = {
   isDev?: boolean;
   isRestaurant?: boolean;
   hasOpenTerminal?: boolean;
+  permissions?: StaffPermissions;
 };
 
 const ROLE_VIEWS: Record<StaffRole, AppView[]> = {
@@ -90,6 +91,31 @@ const VIEW_META: Record<AppView, NavItem> = {
 
 const PRIMARY_VIEWS: AppView[] = ['pos', 'tables', 'tabs', 'workstation', 'history', 'messages'];
 
+const PERMISSION_VIEW_MAP: Array<[keyof StaffPermissions, AppView]> = [
+  ['canSell', 'pos'],
+  ['canManageCash', 'cash'],
+  ['canViewHistory', 'history'],
+  ['canMessage', 'messages'],
+  ['canUseKitchen', 'workstation'],
+  ['canManageTables', 'tables'],
+  ['canManageTabs', 'tabs'],
+  ['canViewLive', 'live'],
+  ['canManageInventory', 'inventory'],
+  ['canManageCustomers', 'customers'],
+  ['canManageStaff', 'staff'],
+  ['canManageWallets', 'wallets'],
+  ['canViewLeaderboard', 'leaderboard'],
+  ['canViewReports', 'reports'],
+  ['canManageSettings', 'settings'],
+  ['canAccessDevTools', 'dev'],
+];
+
+const DATASET_PERMISSION_MAP = {
+  workstations: 'canUseKitchen',
+  cash: 'canManageCash',
+  tables: 'canManageTables',
+} as const satisfies Partial<Record<'products' | 'customers' | 'staff' | 'sales' | 'config' | 'workstations' | 'cash' | 'tables', keyof StaffPermissions>>;
+
 export function getAllowedViews(role: StaffRole | null, options: AccessOptions = {}) {
   if (!role) return new Set<AppView>();
 
@@ -101,6 +127,15 @@ export function getAllowedViews(role: StaffRole | null, options: AccessOptions =
   if (role === 'cashier' && hasActiveRestaurantTerminal) {
     allowed.add('tables');
     allowed.add('tabs');
+  }
+
+  for (const [permission, view] of PERMISSION_VIEW_MAP) {
+    if (options.permissions?.[permission] === true) {
+      allowed.add(view);
+    }
+    if (options.permissions?.[permission] === false) {
+      allowed.delete(view);
+    }
   }
 
   if (!hasActiveRestaurantTerminal) {
@@ -153,6 +188,9 @@ export function canLoadDataset(
   if (!role) return false;
   const hasActiveRestaurantTerminal = Boolean(options.isRestaurant && options.hasOpenTerminal);
   if ((dataset === 'tables' || dataset === 'workstations') && !hasActiveRestaurantTerminal) return false;
+  const permission = DATASET_PERMISSION_MAP[dataset as keyof typeof DATASET_PERMISSION_MAP];
+  if (permission && options.permissions?.[permission] === false) return false;
+  if (permission && options.permissions?.[permission] === true) return true;
   if (role === 'chef') return dataset === 'staff' || dataset === 'sales' || dataset === 'workstations';
   if (role === 'cashier') {
     if (dataset === 'tables') return hasActiveRestaurantTerminal;

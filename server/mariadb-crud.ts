@@ -90,9 +90,9 @@ export async function createStaff(
   await query(
     `INSERT INTO staff (
       id, tenant_id, name, role, email, phone, status,
-      assigned_sections, assigned_categories, id_number, pay_rate, pay_type,
+      permissions, assigned_sections, assigned_categories, id_number, pay_rate, pay_type,
       accumulated_leave, wallet_balance, metrics, badges, rank, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
     [
       id,
       tenantId,
@@ -101,6 +101,7 @@ export async function createStaff(
       staff.email,
       staff.phone || null,
       staff.status || "active",
+      staff.permissions ? JSON.stringify(staff.permissions) : "{}",
       staff.assignedSections ? JSON.stringify(staff.assignedSections) : "[]",
       staff.assignedCategories ? JSON.stringify(staff.assignedCategories) : "[]",
       staff.idNumber || null,
@@ -388,6 +389,10 @@ export async function updateStaff(
     fields.push("status = ?");
     values.push(updates.status);
   }
+  if (updates.permissions !== undefined) {
+    fields.push("permissions = ?");
+    values.push(JSON.stringify(updates.permissions));
+  }
   if (updates.assignedSections !== undefined) {
     fields.push("assigned_sections = ?");
     values.push(JSON.stringify(updates.assignedSections));
@@ -445,6 +450,7 @@ export async function updateStaff(
         email,
         phone,
         status,
+        permissions,
         assigned_sections AS assignedSections,
         assigned_categories AS assignedCategories,
         id_number AS idNumber,
@@ -464,6 +470,7 @@ export async function updateStaff(
     const r = rows[0] as any;
     return {
       ...r,
+      permissions: safeParse(r.permissions, {}),
       assignedSections: safeParse(r.assignedSections, []),
       assignedCategories: safeParse(r.assignedCategories, []),
       metrics: safeParse(r.metrics, {}),
@@ -484,6 +491,7 @@ export async function updateStaff(
       email,
       phone,
       status,
+      permissions,
       assigned_sections AS assignedSections,
       assigned_categories AS assignedCategories,
       id_number AS idNumber,
@@ -503,6 +511,7 @@ export async function updateStaff(
   const r = rows[0] as any;
   return {
     ...r,
+    permissions: safeParse(r.permissions, {}),
     assignedSections: safeParse(r.assignedSections, []),
     assignedCategories: safeParse(r.assignedCategories, []),
     metrics: safeParse(r.metrics, {}),

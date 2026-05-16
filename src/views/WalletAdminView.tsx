@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Wallet, CheckCircle2, XCircle, Clock, DollarSign,
-  Loader2, Plus, Minus,
+  Loader2, Plus, Minus, Users,
 } from 'lucide-react';
-import { Staff, PayoutRequest } from '../types';
+import { Staff, Customer, PayoutRequest } from '../types';
 import { usePosStore } from '../store/usePosStore';
 import { 
   getPayoutRequests, 
@@ -11,23 +11,26 @@ import {
   updatePayoutRequest, 
   updateCustomerPayoutRequest, 
   createPayoutRequest,
-  updateStaff 
+  createCustomerPayoutRequest,
+  updateStaff,
+  updateCustomer,
 } from '../api';
 import { getDate } from '../utils/date';
 
 interface WalletAdminViewProps {
   staff: Staff[];
+  customers: Customer[];
   currentUserStaff: Staff | null;
 }
 
-export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProps) {
+export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAdminViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
   const [requests, setRequests] = useState<PayoutRequest[]>([]);
   const [clientRequests, setClientRequests] = useState<PayoutRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'requests' | 'client-requests' | 'balances'>('requests');
-  const [adjustModal, setAdjustModal] = useState<{ staffId: string; name: string; current: number } | null>(null);
+  const [activeTab, setActiveTab] = useState<'requests' | 'client-requests' | 'balances' | 'client-balances'>('requests');
+  const [adjustModal, setAdjustModal] = useState<{ type: 'staff' | 'customer'; id: string; name: string; current: number; email?: string } | null>(null);
   const [adjustAmount, setAdjustAmount] = useState<string>('');
   const [adjustNote, setAdjustNote] = useState('');
   const [adjustType, setAdjustType] = useState<'add' | 'deduct'>('add');
@@ -72,6 +75,10 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
   const totalWalletBalance = useMemo(
     () => staff.reduce((sum, s) => sum + Number(s.walletBalance || 0), 0),
     [staff]
+  );
+  const totalClientWalletBalance = useMemo(
+    () => customers.reduce((sum, c) => sum + Number(c.walletBalance || 0), 0),
+    [customers]
   );
 
   const handleApprove = async (req: PayoutRequest) => {
@@ -133,21 +140,35 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
     try {
       const delta = adjustType === 'add' ? amount : -amount;
       const newBalance = Math.max(0, adjustModal.current + delta);
-      await updateStaff(tenantId, adjustModal.staffId, {
-        walletBalance: newBalance,
-      });
-      
-      // Log the adjustment as a payout request for audit trail
-      await createPayoutRequest(tenantId, {
-        staffId: adjustModal.staffId,
-        staffName: adjustModal.name,
-        amount: Math.abs(delta),
-        status: 'paid',
-        note: `Manual ${adjustType === 'add' ? 'credit' : 'debit'}: ${adjustNote || 'Admin adjustment'}`,
-        createdAt: new Date().toISOString(),
-        processedAt: new Date().toISOString(),
-        processedBy: currentUserStaff?.id || 'admin',
-      });
+      const auditNote = `Manual ${adjustType === 'add' ? 'credit' : 'debit'}: ${adjustNote || 'Admin adjustment'}`;
+      if (adjustModal.type === 'staff') {
+        await updateStaff(tenantId, adjustModal.id, { walletBalance: newBalance });
+
+        await createPayoutRequest(tenantId, {
+          staffId: adjustModal.id,
+          staffName: adjustModal.name,
+          amount: Math.abs(delta),
+          status: 'paid',
+          note: auditNote,
+          createdAt: new Date().toISOString(),
+          processedAt: new Date().toISOString(),
+          processedBy: currentUserStaff?.id || 'admin',
+        });
+      } else {
+        await updateCustomer(tenantId, adjustModal.id, { walletBalance: newBalance });
+
+        await createCustomerPayoutRequest(tenantId, {
+          customerId: adjustModal.id,
+          customerName: adjustModal.name,
+          customerEmail: adjustModal.email || '',
+          amount: Math.abs(delta),
+          status: 'paid',
+          note: auditNote,
+          createdAt: new Date().toISOString(),
+          processedAt: new Date().toISOString(),
+          processedBy: currentUserStaff?.id || 'admin',
+        });
+      }
       
       await fetchData();
       setAdjustModal(null);
@@ -183,7 +204,7 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
               Wallet Administration
             </h2>
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">
-              Manage staff wallets and payout requests
+              Manage staff and client wallets, balances, and payout requests
             </p>
           </div>
           {pendingRequests.length > 0 && (
@@ -197,11 +218,16 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
         </div>
 
         {/* Summary cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
             <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Total Wallet Liability</p>
             <p className="text-2xl font-black text-slate-900 dark:text-white">R{Number(totalWalletBalance).toFixed(2)}</p>
             <p className="text-xs text-slate-400 mt-1">Across {staff.length} staff members</p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+            <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Client Wallet Liability</p>
+            <p className="text-2xl font-black text-slate-900 dark:text-white">R{Number(totalClientWalletBalance).toFixed(2)}</p>
+            <p className="text-xs text-slate-400 mt-1">Across {customers.length} clients</p>
           </div>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
             <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Pending Payouts</p>
@@ -225,6 +251,7 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
             { id: 'requests', label: `Staff Payouts${pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}` },
             { id: 'client-requests', label: `Client Payouts${pendingClientRequests.length > 0 ? ` (${pendingClientRequests.length})` : ''}` },
             { id: 'balances', label: 'Staff Balances' },
+            { id: 'client-balances', label: 'Client Balances' },
           ] as const).map(tab => (
             <button
               key={tab.id}
@@ -386,6 +413,12 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
                               if (!tenantId) return;
                               setProcessing(req.id);
                               try {
+                                const customer = customers.find(c => c.id === req.customerId);
+                                if (customer && req.customerId) {
+                                  await updateCustomer(tenantId, req.customerId, {
+                                    walletBalance: Number(customer.walletBalance || 0) + Number(req.amount || 0),
+                                  });
+                                }
                                 await updateCustomerPayoutRequest(tenantId, req.id, {
                                   status: 'rejected', 
                                   processedAt: new Date().toISOString(), 
@@ -399,7 +432,7 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
                             className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-100 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                           >
                             {processing === req.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
-                            Reject
+                            Reject & Refund
                           </button>
                           <button
                             onClick={async () => {
@@ -476,7 +509,7 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
                   </div>
                   <button
                     onClick={() => {
-                      setAdjustModal({ staffId: s.id, name: s.name, current: s.walletBalance || 0 });
+                      setAdjustModal({ type: 'staff', id: s.id, name: s.name, current: s.walletBalance || 0 });
                       setAdjustAmount('');
                       setAdjustNote('');
                       setAdjustType('add');
@@ -490,6 +523,56 @@ export function WalletAdminView({ staff, currentUserStaff }: WalletAdminViewProp
             ))}
             {staff.length === 0 && (
               <div className="py-12 text-center text-slate-400 text-sm font-black uppercase tracking-widest">No staff found</div>
+            )}
+          </div>
+        )}
+
+        {/* Client Balances Tab */}
+        {activeTab === 'client-balances' && (
+          <div className="space-y-3">
+            {customers.map(customer => (
+              <div key={customer.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-xl flex items-center justify-center font-black text-lg shrink-0">
+                    {customer.name.charAt(0)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-900 dark:text-white truncate">{customer.name}</p>
+                    <p className="text-xs text-slate-400 truncate">{customer.email || customer.phone || 'No contact details'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 shrink-0">
+                  <div className="text-right">
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Balance</p>
+                    <p className={`text-xl font-black ${(customer.walletBalance || 0) > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
+                      R{Number(customer.walletBalance || 0).toFixed(2)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setAdjustModal({
+                        type: 'customer',
+                        id: customer.id,
+                        name: customer.name,
+                        email: customer.email,
+                        current: customer.walletBalance || 0,
+                      });
+                      setAdjustAmount('');
+                      setAdjustNote('');
+                      setAdjustType('add');
+                    }}
+                    className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all"
+                  >
+                    Adjust
+                  </button>
+                </div>
+              </div>
+            ))}
+            {customers.length === 0 && (
+              <div className="py-16 text-center bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                <Users className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+                <p className="text-sm font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">No clients found</p>
+              </div>
             )}
           </div>
         )}

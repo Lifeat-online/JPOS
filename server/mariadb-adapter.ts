@@ -158,6 +158,7 @@ export async function getStaffByTenant(tenantId: string) {
        email,
        phone,
        status,
+       permissions,
        assigned_sections AS assignedSections,
        assigned_categories AS assignedCategories,
        id_number AS idNumber,
@@ -178,6 +179,7 @@ export async function getStaffByTenant(tenantId: string) {
   
   return rows.map((r: any) => ({
     ...r,
+    permissions: safeParse(r.permissions, {}),
     assignedSections: safeParse(r.assignedSections, []),
     assignedCategories: safeParse(r.assignedCategories, []),
     metrics: safeParse(r.metrics, {}),

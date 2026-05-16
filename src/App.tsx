@@ -512,8 +512,9 @@ export default function App() {
       isDev,
       isRestaurant: Boolean(config.business?.isRestaurantMode),
       hasOpenTerminal: Boolean(effectiveActiveSession),
+      permissions: currentUserStaff?.permissions,
     }),
-    [isDev, config.business?.isRestaurantMode, effectiveActiveSession]
+    [isDev, config.business?.isRestaurantMode, effectiveActiveSession, currentUserStaff?.permissions]
   );
 
   const { primaryNav, secondaryNav, navItems } = useMemo(() => {
@@ -898,7 +899,7 @@ export default function App() {
           />
         )}
         {view === 'wallets' && (
-          <WalletAdminView staff={staff} currentUserStaff={currentUserStaff} />
+          <WalletAdminView staff={staff} customers={customers} currentUserStaff={currentUserStaff} />
         )}
         {view === 'profile' && <StaffProfileView currentUserStaff={currentUserStaff} />}
         {view === 'settings' && <SettingsView config={config} setConfig={setConfig} />}

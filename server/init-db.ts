@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS staff (
   password_hash TEXT,
   phone TEXT,
   status TEXT DEFAULT 'active' CHECK (status IN ('active','inactive')),
+  permissions TEXT DEFAULT '{}'::TEXT,
   assigned_sections TEXT DEFAULT '[]'::TEXT,
   assigned_categories TEXT DEFAULT '[]'::TEXT,
   id_number TEXT,
@@ -361,7 +362,22 @@ export async function initDb() {
     await query(statement);
   }
 
+  await ensureStaffPermissionsSchema();
   await ensureCashManagementSchema();
+}
+
+export async function ensureStaffPermissionsSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS permissions TEXT DEFAULT '{}'::TEXT`);
+    return;
+  }
+
+  try {
+    await query(`ALTER TABLE staff ADD COLUMN permissions JSON DEFAULT JSON_OBJECT() AFTER status`);
+  } catch (err: any) {
+    const message = String(err?.message || "");
+    if (!message.includes("Duplicate column")) throw err;
+  }
 }
 
 export async function ensureCashManagementSchema() {

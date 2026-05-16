@@ -28,6 +28,8 @@ export function validateSchema(schema: any) {
 
 import { z } from 'zod';
 
+const StaffPermissionsSchema = z.record(z.string(), z.boolean()).optional();
+
 export const LoginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address' }),
   password: z.string().min(6, { message: 'Password must be at least 6 characters' }),
@@ -74,6 +76,7 @@ export const StaffSchema = z.object({
   email: z.string().email({ message: 'Invalid email address' }),
   phone: z.string().min(10, { message: 'Phone number must be at least 10 digits' }).optional(),
   status: z.enum(['active', 'inactive']).optional(),
+  permissions: StaffPermissionsSchema,
   assignedSections: z.array(z.string()).optional(),
   assignedCategories: z.array(z.string()).optional(),
   idNumber: z.string().optional(),

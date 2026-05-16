@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { getAccessToken, JwtUser as User } from './useAuth';
 import { Product, Customer, Staff, Sale, AppConfig, Workstation, RestaurantTable, TableSection } from '../types';
 import { usePosStore } from '../store/usePosStore';
@@ -58,13 +58,14 @@ export function useAppData(user: User | null) {
 
   const [currentUserStaff, setCurrentUserStaff] = useState<Staff | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<StaffRole | null>(null);
-  const tableAccessOptions = {
+  const tableAccessOptions = useMemo(() => ({
     isRestaurant: Boolean(config.business?.isRestaurantMode),
     hasOpenTerminal: Boolean(activeSession || storeActiveSession),
-  };
+    permissions: currentUserStaff?.permissions,
+  }), [config.business?.isRestaurantMode, activeSession, storeActiveSession, currentUserStaff?.permissions]);
 
   const loadSales = useCallback(async () => {
-    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'sales')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'sales', tableAccessOptions)) {
       setSales([]);
       return;
     }
@@ -91,7 +92,7 @@ export function useAppData(user: User | null) {
     } catch (err) {
       console.error('Sales load error:', err);
     }
-  }, [tenantId, canLoadTenantData, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
 
   useEffect(() => {
     let active = true;
@@ -151,7 +152,7 @@ export function useAppData(user: User | null) {
   }, [user, staff, isStaffLoading]);
 
     useEffect(() => {
-    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'products')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'products', tableAccessOptions)) {
       setProducts([]);
       return;
     }
@@ -190,10 +191,10 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, canLoadTenantData, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
 
     useEffect(() => {
-    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'customers')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'customers', tableAccessOptions)) {
       setCustomers([]);
       return;
     }
@@ -230,7 +231,7 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, canLoadTenantData, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
 
     useEffect(() => {
     if (!canLoadTenantData) {
@@ -250,6 +251,7 @@ export function useAppData(user: User | null) {
           ...s,
           payRate: s.payRate ? Number(s.payRate) : undefined,
           walletBalance: Number(s.walletBalance || 0),
+          permissions: typeof s.permissions === 'string' ? JSON.parse(s.permissions || '{}') : (s.permissions || {}),
           assignedSections: typeof s.assignedSections === 'string' ? JSON.parse(s.assignedSections) : (s.assignedSections || []),
           assignedCategories: typeof s.assignedCategories === 'string' ? JSON.parse(s.assignedCategories) : (s.assignedCategories || []),
           metrics: typeof s.metrics === 'string' ? JSON.parse(s.metrics) : s.metrics,
@@ -338,7 +340,7 @@ export function useAppData(user: User | null) {
   }, [loadSales]);
 
     useEffect(() => {
-    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'workstations')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'workstations', tableAccessOptions)) {
       setWorkstations([]);
       return;
     }
@@ -370,10 +372,10 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, canLoadTenantData, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
 
   useEffect(() => {
-    if (!currentUserStaff || !canLoadTenantData || !canLoadDataset(currentUserRole, 'cash')) {
+    if (!currentUserStaff || !canLoadTenantData || !canLoadDataset(currentUserRole, 'cash', tableAccessOptions)) {
       setActiveSession(null);
       return;
     }
@@ -390,7 +392,7 @@ export function useAppData(user: User | null) {
     loadActiveSession();
     const interval = setInterval(loadActiveSession, 60000);
     return () => { active = false; clearInterval(interval); };
-  }, [currentUserStaff, tenantId, canLoadTenantData, currentUserRole]);
+  }, [currentUserStaff, tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
 
   useEffect(() => {
     if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'tables', tableAccessOptions)) {
@@ -410,7 +412,7 @@ export function useAppData(user: User | null) {
     loadSections();
     const interval = setInterval(loadSections, 60000);
     return () => { active = false; clearInterval(interval); };
-  }, [tenantId, canLoadTenantData, currentUserRole, config.business?.isRestaurantMode, activeSession, storeActiveSession]);
+  }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
 
     useEffect(() => {
     if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'tables', tableAccessOptions)) {
@@ -445,7 +447,7 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, canLoadTenantData, currentUserRole, config.business?.isRestaurantMode, activeSession, storeActiveSession]);
+  }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
 
   return {
     products, customers, staff, sales, config, setConfig,

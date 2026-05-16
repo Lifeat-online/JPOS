@@ -88,6 +88,25 @@ export interface Sale {
   tabName?: string;
 }
 
+export interface StaffPermissions {
+  canSell?: boolean;
+  canManageCash?: boolean;
+  canViewHistory?: boolean;
+  canMessage?: boolean;
+  canUseKitchen?: boolean;
+  canManageTables?: boolean;
+  canManageTabs?: boolean;
+  canViewLive?: boolean;
+  canManageInventory?: boolean;
+  canManageCustomers?: boolean;
+  canManageStaff?: boolean;
+  canManageWallets?: boolean;
+  canViewLeaderboard?: boolean;
+  canViewReports?: boolean;
+  canManageSettings?: boolean;
+  canAccessDevTools?: boolean;
+}
+
 export interface Staff {
   id: string;
   name: string;
@@ -95,6 +114,7 @@ export interface Staff {
   email: string;
   phone?: string;
   status: 'active' | 'inactive';
+  permissions?: StaffPermissions;
   assignedSections?: string[];
   assignedCategories?: string[];
   idNumber?: string;

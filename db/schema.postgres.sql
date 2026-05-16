@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS staff (
   password_hash TEXT,
   phone TEXT,
   status TEXT DEFAULT 'active' CHECK (status IN ('active','inactive')),
+  permissions TEXT DEFAULT '{}'::TEXT,
   assigned_sections TEXT DEFAULT '[]'::TEXT,
   assigned_categories TEXT DEFAULT '[]'::TEXT,
   id_number TEXT,

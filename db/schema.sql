@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS staff (
   password_hash VARCHAR(255),
   phone VARCHAR(64),
   status ENUM('active','inactive') DEFAULT 'active',
+  permissions JSON DEFAULT JSON_OBJECT(),
   assigned_sections JSON DEFAULT JSON_ARRAY(),
   assigned_categories JSON DEFAULT JSON_ARRAY(),
   id_number VARCHAR(128),

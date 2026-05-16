@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { X, Save, Loader2 } from 'lucide-react';
-import { Staff, AppConfig } from '../../types';
+import { X, Save, Loader2, ShieldCheck, RotateCcw } from 'lucide-react';
+import { Staff, AppConfig, StaffPermissions } from '../../types';
 import { DEFAULT_CATEGORY_TREE } from '../../constants';
 
 interface StaffModalProps {
@@ -11,6 +11,106 @@ interface StaffModalProps {
   onSave: (e: React.FormEvent) => void;
   onClose: () => void;
   onChange: (staff: Partial<Staff>) => void;
+}
+
+type PermissionKey = keyof StaffPermissions;
+
+const ROLE_DEFAULTS: Record<Staff['role'], StaffPermissions> = {
+  cashier: {
+    canSell: true,
+    canManageCash: true,
+    canViewHistory: true,
+    canMessage: true,
+  },
+  chef: {
+    canUseKitchen: true,
+  },
+  manager: {
+    canSell: true,
+    canManageCash: true,
+    canViewHistory: true,
+    canMessage: true,
+    canUseKitchen: true,
+    canManageTables: true,
+    canManageTabs: true,
+    canViewLive: true,
+    canManageInventory: true,
+    canManageCustomers: true,
+    canViewLeaderboard: true,
+  },
+  admin: {
+    canSell: true,
+    canManageCash: true,
+    canViewHistory: true,
+    canMessage: true,
+    canUseKitchen: true,
+    canManageTables: true,
+    canManageTabs: true,
+    canViewLive: true,
+    canManageInventory: true,
+    canManageCustomers: true,
+    canManageStaff: true,
+    canManageWallets: true,
+    canViewLeaderboard: true,
+    canViewReports: true,
+    canManageSettings: true,
+  },
+  dev: {
+    canSell: true,
+    canManageCash: true,
+    canViewHistory: true,
+    canMessage: true,
+    canUseKitchen: true,
+    canManageTables: true,
+    canManageTabs: true,
+    canViewLive: true,
+    canManageInventory: true,
+    canManageCustomers: true,
+    canManageStaff: true,
+    canManageWallets: true,
+    canViewLeaderboard: true,
+    canViewReports: true,
+    canManageSettings: true,
+    canAccessDevTools: true,
+  },
+};
+
+const PERMISSION_GROUPS: Array<{ title: string; items: Array<{ key: PermissionKey; label: string; description: string }> }> = [
+  {
+    title: 'Daily Operations',
+    items: [
+      { key: 'canSell', label: 'Terminal', description: 'Process sales and open the register.' },
+      { key: 'canManageCash', label: 'Cash management', description: 'Open, close, and cash up registers.' },
+      { key: 'canViewHistory', label: 'History', description: 'View sales history.' },
+      { key: 'canMessage', label: 'Messages', description: 'Use staff messaging.' },
+    ],
+  },
+  {
+    title: 'Restaurant',
+    items: [
+      { key: 'canManageTables', label: 'Tables', description: 'Work with restaurant tables.' },
+      { key: 'canManageTabs', label: 'Tabs', description: 'Open and manage customer tabs.' },
+      { key: 'canUseKitchen', label: 'Kitchen', description: 'Use the kitchen workstation.' },
+      { key: 'canViewLeaderboard', label: 'Leaderboard', description: 'View staff performance leaderboard.' },
+    ],
+  },
+  {
+    title: 'Administration',
+    items: [
+      { key: 'canViewLive', label: 'Live dashboard', description: 'View live operational reporting.' },
+      { key: 'canManageInventory', label: 'Inventory', description: 'Manage products and stock.' },
+      { key: 'canManageCustomers', label: 'Customers', description: 'Manage client records.' },
+      { key: 'canManageStaff', label: 'Personnel', description: 'Add and edit staff.' },
+      { key: 'canManageWallets', label: 'Wallets', description: 'Approve payouts and adjust balances.' },
+      { key: 'canViewReports', label: 'Reports', description: 'View analytics and reports.' },
+      { key: 'canManageSettings', label: 'Settings', description: 'Manage business configuration.' },
+      { key: 'canAccessDevTools', label: 'Dev tools', description: 'Access developer diagnostics.' },
+    ],
+  },
+];
+
+function getRoleDefaults(role: Staff['role'] | undefined): StaffPermissions {
+  return { ...(ROLE_DEFAULTS[role || 'cashier'] || ROLE_DEFAULTS.cashier) };
 }
 
 export const StaffModal: React.FC<StaffModalProps> = ({
@@ -27,6 +127,13 @@ export const StaffModal: React.FC<StaffModalProps> = ({
 
   const inputClass = 'w-full px-4 py-3 bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-semibold text-slate-900 dark:text-white';
   const labelClass = 'text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest px-1';
+  const activePermissions = { ...getRoleDefaults(staff.role), ...(staff.permissions || {}) };
+  const setPermission = (key: PermissionKey, value: boolean) => {
+    onChange({ ...staff, permissions: { ...activePermissions, [key]: value } });
+  };
+  const applyRoleDefaults = () => {
+    onChange({ ...staff, permissions: getRoleDefaults(staff.role) });
+  };
 
   return (
     <motion.div
@@ -35,7 +142,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
     >
       <motion.div
         initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-        className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-md w-full shadow-2xl max-h-[90vh] flex flex-col"
+        className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-3xl w-full shadow-2xl max-h-[90vh] flex flex-col"
       >
         <div className="flex justify-between items-center mb-6 shrink-0">
           <h3 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
@@ -67,13 +174,65 @@ export const StaffModal: React.FC<StaffModalProps> = ({
             <label className={labelClass}>Role Designation</label>
             <select className={`${inputClass} appearance-none`}
               value={staff.role || 'cashier'}
-              onChange={e => onChange({ ...staff, role: e.target.value as Staff['role'] })}
+              onChange={e => {
+                const role = e.target.value as Staff['role'];
+                onChange({ ...staff, role, permissions: getRoleDefaults(role) });
+              }}
             >
               <option value="cashier">Cashier</option>
               <option value="chef">Chef / Kitchen</option>
               <option value="manager">Manager</option>
               <option value="admin">Administrator</option>
+              <option value="dev">Developer</option>
             </select>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <label className={labelClass}>Permissions & Admin Capabilities</label>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium px-1 mt-1">
+                  Role defaults are applied automatically, then you can tune exactly what this person can access.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={applyRoleDefaults}
+                className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-2"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Role Defaults
+              </button>
+            </div>
+            <div className="bg-slate-50 dark:bg-[#0B1120] p-4 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-5">
+              {PERMISSION_GROUPS.map(group => (
+                <div key={group.title} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-primary" />
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{group.title}</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {group.items.map(item => (
+                      <label
+                        key={item.key}
+                        className="flex items-start gap-3 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 cursor-pointer hover:border-primary/30 transition-all"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(activePermissions[item.key])}
+                          onChange={e => setPermission(item.key, e.target.checked)}
+                          className="mt-1 rounded border-slate-300 text-primary focus:ring-primary"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-black text-slate-800 dark:text-white">{item.label}</span>
+                          <span className="block text-[11px] leading-4 text-slate-500 dark:text-slate-400">{item.description}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

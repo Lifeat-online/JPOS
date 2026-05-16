@@ -46,4 +46,21 @@ describe('role permissions', () => {
     expect(canLoadDataset('cashier', 'tables', retailOptions)).toBe(false);
     expect(canLoadDataset('chef', 'workstations', retailOptions)).toBe(false);
   });
+
+  it('applies explicit personnel permission overrides on top of role defaults', () => {
+    const options = {
+      isRestaurant: true,
+      hasOpenTerminal: true,
+      permissions: {
+        canManageWallets: true,
+        canManageInventory: false,
+        canManageTables: false,
+      },
+    };
+
+    expect(canAccessView('cashier', 'wallets', options)).toBe(true);
+    expect(canAccessView('manager', 'inventory', options)).toBe(false);
+    expect(canAccessView('admin', 'tables', options)).toBe(false);
+    expect(buildNavigation('cashier', options).secondaryNav.map(item => item.id)).toContain('wallets');
+  });
 });
