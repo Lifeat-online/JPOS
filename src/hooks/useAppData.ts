@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { JwtUser as User } from './useAuth';
+import { getAccessToken, JwtUser as User } from './useAuth';
 import { Product, Customer, Staff, Sale, AppConfig, Workstation, RestaurantTable, TableSection } from '../types';
 import { usePosStore } from '../store/usePosStore';
 import {
@@ -26,6 +26,8 @@ export const DEFAULT_CONFIG: AppConfig = {
 
 export function useAppData(user: User | null) {
   const { tenantId, setTenantId } = usePosStore();
+  const isAuthenticated = Boolean(user && getAccessToken());
+  const canLoadTenantData = Boolean(tenantId && isAuthenticated);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -57,7 +59,7 @@ export function useAppData(user: User | null) {
   const [currentUserRole, setCurrentUserRole] = useState<StaffRole | null>(null);
 
   const loadSales = useCallback(async () => {
-    if (!tenantId || !canLoadDataset(currentUserRole, 'sales')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'sales')) {
       setSales([]);
       return;
     }
@@ -84,7 +86,7 @@ export function useAppData(user: User | null) {
     } catch (err) {
       console.error('Sales load error:', err);
     }
-  }, [tenantId, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole]);
 
   useEffect(() => {
     let active = true;
@@ -144,7 +146,7 @@ export function useAppData(user: User | null) {
   }, [user, staff, isStaffLoading]);
 
     useEffect(() => {
-    if (!tenantId || !canLoadDataset(currentUserRole, 'products')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'products')) {
       setProducts([]);
       return;
     }
@@ -183,10 +185,10 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole]);
 
     useEffect(() => {
-    if (!tenantId || !canLoadDataset(currentUserRole, 'customers')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'customers')) {
       setCustomers([]);
       return;
     }
@@ -223,10 +225,10 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole]);
 
     useEffect(() => {
-    if (!tenantId) {
+    if (!canLoadTenantData) {
       setStaff([]);
       setIsStaffLoading(false);
       return;
@@ -271,10 +273,10 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId]);
+  }, [tenantId, canLoadTenantData]);
 
   useEffect(() => {
-    if (!tenantId) {
+    if (!canLoadTenantData) {
       setConfigLoading(false);
       return;
     }
@@ -294,7 +296,7 @@ export function useAppData(user: User | null) {
     loadConfig();
     const interval = setInterval(loadConfig, 120000); // Config changes very rarely
     return () => { active = false; clearInterval(interval); };
-  }, [tenantId]);
+  }, [tenantId, canLoadTenantData]);
 
   useEffect(() => {
     let interval: number | null = null;
@@ -331,7 +333,7 @@ export function useAppData(user: User | null) {
   }, [loadSales]);
 
     useEffect(() => {
-    if (!tenantId || !canLoadDataset(currentUserRole, 'workstations')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'workstations')) {
       setWorkstations([]);
       return;
     }
@@ -363,10 +365,10 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole]);
 
   useEffect(() => {
-    if (!currentUserStaff || !tenantId || !canLoadDataset(currentUserRole, 'cash')) {
+    if (!currentUserStaff || !canLoadTenantData || !canLoadDataset(currentUserRole, 'cash')) {
       setActiveSession(null);
       return;
     }
@@ -383,10 +385,10 @@ export function useAppData(user: User | null) {
     loadActiveSession();
     const interval = setInterval(loadActiveSession, 60000);
     return () => { active = false; clearInterval(interval); };
-  }, [currentUserStaff, tenantId, currentUserRole]);
+  }, [currentUserStaff, tenantId, canLoadTenantData, currentUserRole]);
 
   useEffect(() => {
-    if (!tenantId || !canLoadDataset(currentUserRole, 'tables')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'tables')) {
       setTableSections([]);
       return;
     }
@@ -403,10 +405,10 @@ export function useAppData(user: User | null) {
     loadSections();
     const interval = setInterval(loadSections, 60000);
     return () => { active = false; clearInterval(interval); };
-  }, [tenantId, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole]);
 
     useEffect(() => {
-    if (!tenantId || !canLoadDataset(currentUserRole, 'tables')) {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'tables')) {
       setRestaurantTables([]);
       return;
     }
@@ -438,7 +440,7 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, currentUserRole]);
+  }, [tenantId, canLoadTenantData, currentUserRole]);
 
   return {
     products, customers, staff, sales, config, setConfig,
