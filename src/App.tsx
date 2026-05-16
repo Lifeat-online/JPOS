@@ -837,6 +837,7 @@ export default function App() {
             handleCheckout={checkout.handleCheckout}
             handleWalletCheckout={checkout.handleWalletCheckout}
             handleOpenTab={checkout.handleOpenTab}
+            handleOpenTable={checkout.handleOpenTable}
             setTenderModal={checkout.setTenderModal}
             setTenderedAmount={(v) => checkout.setTenderedAmount(v)}
             setSplitPaymentModal={checkout.setSplitPaymentModal}
@@ -848,6 +849,7 @@ export default function App() {
             pointsDiscount={checkout.pointsDiscount}
             onRedeemPoints={checkout.redeemPoints}
             onClearPointsDiscount={checkout.clearPointsDiscount}
+            restaurantTables={restaurantTables}
             onSalesUpdated={refreshSales}
           />
         )}
@@ -955,6 +957,7 @@ export default function App() {
           <WorkstationView
             sales={sales}
             workstations={workstations}
+            customers={customers}
             currentUserStaff={currentUserStaff}
             onSalesUpdated={refreshSales}
           />

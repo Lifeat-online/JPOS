@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { CheckCircle2, ChefHat, Clock, Play } from 'lucide-react';
-import { Sale, OrderItem, Workstation, Staff } from '../types';
+import { Sale, OrderItem, Workstation, Staff, Customer } from '../types';
 import { apiPost, apiPut } from '../api';
 import { usePosStore } from '../store/usePosStore';
 import { getDate } from '../utils/date';
@@ -8,15 +8,29 @@ import { getDate } from '../utils/date';
 interface WorkstationQueuePanelProps {
   sales: Sale[];
   workstations: Workstation[];
+  customers?: Customer[];
   activeWorkstationId: string;
   currentUserStaff: Staff | null;
   onSalesUpdated?: () => Promise<void>;
   compact?: boolean;
 }
 
+export function getWorkstationOrderLabel(order: Pick<Sale, 'tableNumber' | 'isTab' | 'tabName' | 'customerId'>, customers: Customer[] = []) {
+  if (order.isTab) {
+    const customer = order.customerId ? customers.find(c => c.id === order.customerId) : null;
+    const tabOwner = customer?.name || order.tabName || 'Client';
+    return `Tab ${tabOwner}`;
+  }
+
+  if (order.tableNumber) return `Table ${order.tableNumber}`;
+
+  return 'Takeaway';
+}
+
 export function WorkstationQueuePanel({
   sales,
   workstations,
+  customers = [],
   activeWorkstationId,
   currentUserStaff,
   onSalesUpdated,
@@ -64,9 +78,9 @@ export function WorkstationQueuePanel({
       });
 
       if (newStatus === 'ready') {
-        const tableLabel = order.tableNumber ? `Table ${order.tableNumber}` : 'Takeaway';
+        const orderLabel = getWorkstationOrderLabel(order, customers);
         const wsLabel = activeWorkstation?.name || 'Workstation';
-        const text = `${tableLabel} - ${item.quantity}x ${item.name} is READY (${wsLabel})`;
+        const text = `${orderLabel} - ${item.quantity}x ${item.name} is READY (${wsLabel})`;
 
         await apiPost(`/api/mariadb/tenants/${tenantId}/messages`, {
           channel: 'general',
@@ -137,7 +151,7 @@ export function WorkstationQueuePanel({
                   <div className={`${compact ? 'px-4 py-3' : 'px-6 py-4'} flex justify-between items-center text-white ${wsItems.some(x => x.item.status === 'pending') ? 'bg-orange-500' : 'bg-blue-600'}`}>
                     <div className="min-w-0">
                       <h3 className={`${compact ? 'text-base' : 'text-xl'} font-black leading-none mb-1 truncate`}>
-                        {order.tableNumber ? `Table ${order.tableNumber}` : 'Takeaway'}
+                        {getWorkstationOrderLabel(order, customers)}
                       </h3>
                       <div className="text-[10px] uppercase font-bold tracking-widest text-white/80 flex items-center gap-1.5">
                         <Clock className="w-3 h-3 shrink-0" />

@@ -1,16 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Sale, Workstation, Staff } from '../types';
+import { Sale, Workstation, Staff, Customer } from '../types';
 import { ChefHat } from 'lucide-react';
 import { WorkstationQueuePanel } from './WorkstationQueuePanel';
 
 interface WorkstationViewProps {
   sales: Sale[];
   workstations: Workstation[];
+  customers: Customer[];
   currentUserStaff: Staff | null;
   onSalesUpdated?: () => Promise<void>;
 }
 
-export function WorkstationView({ sales, workstations, currentUserStaff, onSalesUpdated }: WorkstationViewProps) {
+export function WorkstationView({ sales, workstations, customers, currentUserStaff, onSalesUpdated }: WorkstationViewProps) {
   const visibleWorkstations = useMemo(
     () => currentUserStaff?.role === 'chef'
       ? workstations.filter(w => w.type === 'kitchen')
@@ -69,6 +70,7 @@ export function WorkstationView({ sales, workstations, currentUserStaff, onSales
       <WorkstationQueuePanel
         sales={sales}
         workstations={workstations}
+        customers={customers}
         activeWorkstationId={activeWorkstationId}
         currentUserStaff={currentUserStaff}
         onSalesUpdated={onSalesUpdated}

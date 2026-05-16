@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Customer, Sale, Workstation } from '../types';
+import { Product, Customer, Sale, Workstation, RestaurantTable } from '../types';
 import { CustomerSelector } from '../components/CustomerSelector';
 import { usePosStore } from '../store/usePosStore';
 import { WorkstationQueuePanel } from '../components/WorkstationQueuePanel';
@@ -21,6 +21,7 @@ interface PointOfSaleViewProps {
   handleCheckout: (method: 'cash' | 'payfast' | 'card') => Promise<void>;
   handleWalletCheckout: () => Promise<void>;
   handleOpenTab: (tabName?: string) => Promise<void>;
+  handleOpenTable: (tableNumber: string) => Promise<void>;
   setTenderModal: (modal: { isOpen: boolean, method: 'cash' | 'card' | null }) => void;
   setTenderedAmount: (amount: string) => void;
   setSplitPaymentModal: (val: boolean) => void;
@@ -32,14 +33,15 @@ interface PointOfSaleViewProps {
   pointsDiscount: number;
   onRedeemPoints: (customerId: string, points: number) => void;
   onClearPointsDiscount: () => void;
+  restaurantTables: RestaurantTable[];
   onSalesUpdated?: () => Promise<void>;
 }
 
 export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   products, customers, sales, workstations, isProcessing, setIsProcessing, handleSaveOrder,
-  handleCheckout, handleWalletCheckout, handleOpenTab, setTenderModal, setTenderedAmount, setSplitPaymentModal,
+  handleCheckout, handleWalletCheckout, handleOpenTab, handleOpenTable, setTenderModal, setTenderedAmount, setSplitPaymentModal,
   categoryTree, CATEGORIES, getCategoryIcon, getProductImage, openCashDrawer,
-  pointsDiscount, onRedeemPoints, onClearPointsDiscount, onSalesUpdated,
+  pointsDiscount, onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated,
 }) => {
   const { 
     cart, addToCart, updateQuantity, clearCart, 
@@ -56,6 +58,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [attachedWorkstationId, setAttachedWorkstationId] = useState('');
   const [hasWorkstationPreference, setHasWorkstationPreference] = useState(false);
   const [sidePanelMode, setSidePanelMode] = useState<'cart' | 'queue'>('cart');
+  const [tablePickerOpen, setTablePickerOpen] = useState(false);
+  const [selectedTableForOrder, setSelectedTableForOrder] = useState('');
 
   const handleAddToCart = (product: Product) => {
     if (product.modifiers && product.modifiers.length > 0) {
@@ -70,6 +74,23 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const attachedWorkstation = activeWorkstations.find(w => w.id === attachedWorkstationId);
   const workstationPreferenceKey = `pos-attached-workstation:${tenantId || 'local'}`;
   const isWideRegister = typeof window !== 'undefined' && window.innerWidth >= 1536;
+  const activeRestaurantTables = useMemo(() => {
+    if (restaurantTables.length > 0) return restaurantTables.filter(t => t.status === 'active');
+    return Array.from({ length: 20 }, (_, i) => ({
+      id: `T${i + 1}`,
+      label: `T${i + 1}`,
+      sectionId: 'default',
+      status: 'active' as const,
+    }));
+  }, [restaurantTables]);
+  const selectedTableLabel = activeRestaurantTables.find(t => t.id === (activeTableNumber || selectedTableForOrder))?.label || activeTableNumber || selectedTableForOrder;
+
+  const saveToTable = async (tableNumber: string) => {
+    if (!tableNumber) return;
+    await handleOpenTable(tableNumber);
+    setSelectedTableForOrder(tableNumber);
+    setTablePickerOpen(false);
+  };
 
   const attachedQueueCount = useMemo(() => {
     if (!attachedWorkstationId) return 0;
@@ -334,6 +355,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
           <WorkstationQueuePanel
             sales={sales}
             workstations={workstations}
+            customers={customers}
             activeWorkstationId={attachedWorkstationId}
             currentUserStaff={currentUserStaff}
             onSalesUpdated={onSalesUpdated}
@@ -415,9 +437,10 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 bg-slate-50/50 dark:bg-slate-950/50 min-h-[200px]">
+              <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50/50 dark:bg-slate-950/50">
+              <div className="px-5 py-4 space-y-4 min-h-[160px]">
                 {cart.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-300 dark:text-slate-600 opacity-50 space-y-2 text-center p-8 grayscale">
+                  <div className="min-h-[160px] flex flex-col items-center justify-center text-slate-300 dark:text-slate-600 opacity-50 space-y-2 text-center p-8 grayscale">
                     <ShoppingBag className="w-12 h-12" />
                     <p className="text-xs font-black uppercase tracking-widest">Cart is empty</p>
                   </div>
@@ -451,7 +474,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 )}
               </div>
 
-              <div className="p-5 lg:p-6 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800/60 shadow-[0_-10px_40px_rgba(0,0,0,0.03)] sticky bottom-0">
+              <div className="p-5 lg:p-6 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800/60 shadow-[0_-10px_40px_rgba(0,0,0,0.03)]">
                 {config?.business?.isRestaurantMode && activeTableNumber && (
                   <div className="flex justify-between items-center mb-4 p-3 bg-primary/10 rounded-xl border border-primary/20">
                     <span className="font-bold text-primary flex items-center gap-2"><Utensils className="w-4 h-4"/> Table {activeTableNumber}</span>
@@ -589,6 +612,26 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     </span>
                   </button>
                 )}
+
+                {config?.business?.isRestaurantMode && (
+                  <button
+                    disabled={isProcessing || cart.length === 0}
+                    onClick={() => {
+                      const defaultTable = activeTableNumber || selectedTableForOrder || activeRestaurantTables[0]?.id || '';
+                      setSelectedTableForOrder(defaultTable);
+                      setTablePickerOpen(true);
+                    }}
+                    className="w-full mb-4 h-14 rounded-2xl bg-primary text-white font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 shadow-lg shadow-primary/30 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
+                  >
+                    <Utensils className="w-4 h-4" />
+                    {activeTableNumber ? 'Update Table' : 'Open Table'}
+                    {selectedTableLabel && (
+                      <span className="ml-auto bg-white/20 px-2 py-0.5 rounded-lg text-[10px] truncate max-w-28">
+                        {selectedTableLabel}
+                      </span>
+                    )}
+                  </button>
+                )}
                 
                 <div className="flex gap-2">
                   <button onClick={() => clearCart()} title="Clear Cart" className="h-14 w-14 bg-slate-50 dark:bg-[#0B1120] text-red-500 rounded-2xl flex items-center justify-center hover:bg-red-50 transition-all border border-slate-100 dark:border-slate-800/60 active:scale-95 shrink-0">
@@ -604,11 +647,13 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   </button>
                 </div>
               </div>
+              </div>
                 </>
               ) : (
                 <WorkstationQueuePanel
                   sales={sales}
                   workstations={workstations}
+                  customers={customers}
                   activeWorkstationId={attachedWorkstationId}
                   currentUserStaff={currentUserStaff}
                   onSalesUpdated={onSalesUpdated}
@@ -617,6 +662,79 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
               )}
             </motion.aside>
           </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {tablePickerOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            onClick={() => setTablePickerOpen(false)}
+          >
+            <motion.div
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 24, opacity: 0 }}
+              className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="font-black text-lg text-slate-900 dark:text-white">Choose Table</h3>
+                  <p className="text-xs font-medium text-slate-500 mt-0.5">Save this sale to a table order.</p>
+                </div>
+                <button
+                  onClick={() => setTablePickerOpen(false)}
+                  className="w-9 h-9 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-500 flex items-center justify-center"
+                  aria-label="Close table picker"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Table</label>
+                  <select
+                    value={selectedTableForOrder}
+                    onChange={(e) => setSelectedTableForOrder(e.target.value)}
+                    className="w-full h-12 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-primary/40"
+                  >
+                    {activeRestaurantTables.map(table => {
+                      const activeSale = sales.find(s =>
+                        s.tableNumber === table.id &&
+                        (s.status === 'open' || s.status === 'kitchen') &&
+                        s.id !== activeOrderId
+                      );
+                      return (
+                        <option key={table.id} value={table.id}>
+                          {table.label}{activeSale ? ' - occupied' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {activeRestaurantTables.length === 0 && (
+                  <div className="rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 text-xs font-bold text-amber-700 dark:text-amber-300">
+                    No active tables are configured.
+                  </div>
+                )}
+
+                <button
+                  disabled={isProcessing || cart.length === 0 || !selectedTableForOrder}
+                  onClick={() => saveToTable(selectedTableForOrder)}
+                  className="w-full h-14 rounded-2xl bg-primary text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-40 active:scale-95 transition-all"
+                >
+                  {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Utensils className="w-4 h-4" />}
+                  {activeOrderId ? 'Transfer / Update Table' : 'Open Table'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 

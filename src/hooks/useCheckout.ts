@@ -225,6 +225,59 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     }
   };
 
+  // ── Open / update a table order ──────────────────────────────────────────────
+  const handleOpenTable = async (tableNumber: string) => {
+    if (cart.length === 0 || !tableNumber || !tenantId) return;
+    setIsProcessing(true);
+    try {
+      const saleData: any = {
+        items: stampOrderItems(cart),
+        total: Number(cartTotalAfterDiscount) || 0,
+        subtotal: Number(cartSubtotal) || 0,
+        taxAmount: Number(taxAmount) || 0,
+        taxRate: taxRate || null,
+        taxInclusive,
+        paymentMethod: 'pending',
+        status: 'open',
+        tableNumber,
+        isTab: false,
+        tabName: null,
+        customerId: selectedCustomerId || null,
+        staffId: currentUserStaff?.id || null,
+        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
+      };
+
+      let saleId = activeOrderId;
+      if (activeOrderId) {
+        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
+      } else {
+        const created = await createSale(tenantId, saleData);
+        saleId = created.id;
+        setActiveOrderId(saleId);
+      }
+
+      setActiveTableNumber(tableNumber);
+      await refreshSales();
+
+      if (saleId) {
+        const freshSale = await getSaleById(tenantId, saleId).catch(() => null);
+        if (freshSale && freshSale.items) {
+          const sanitizedItems = freshSale.items.map((item: any) => ({
+            ...item,
+            price: Number(item.price || 0),
+            quantity: Number(item.quantity || 0),
+          }));
+          usePosStore.getState().setCart(sanitizedItems);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to open table:', err);
+      alert('Error saving table');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleCheckout = async (method: 'cash' | 'payfast' | 'card' | 'wallet' | 'split', splitPayments?: any[]) => {
     if (cart.length === 0 || !tenantId) return;
     setIsProcessing(true);
@@ -412,6 +465,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     activeOrderId,
     handleSaveOrder,
     handleOpenTab,
+    handleOpenTable,
     handleCheckout,
     handleWalletCheckout,
   };
