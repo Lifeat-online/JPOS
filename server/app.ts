@@ -10,7 +10,7 @@ import { initDb } from "./init-db.js";
 import rateLimit from "express-rate-limit";
 import http from "http";
 import { setupSocketIO, broadcastToMessages, broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "./socket.js";
-import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, StaffSchema, SaleSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
+import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
 import { NextFunction, Request, Response } from "express";
 import {
   getProductsByTenant,
@@ -1016,7 +1016,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, validateSchema(CustomerSchema), async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, validateSchema(CustomerUpdateSchema), async (req, res) => {
     try {
       const data = await updateCustomer(req.params.tenantId, req.params.id, req.body);
       res.json(data);
@@ -1043,7 +1043,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, validateSchema(StaffSchema), async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, validateSchema(StaffUpdateSchema), async (req, res) => {
     try {
       const data = await updateStaff(req.params.tenantId, req.params.id, req.body);
       res.json(data);

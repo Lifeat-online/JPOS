@@ -70,6 +70,8 @@ export const CustomerSchema = z.object({
   uid: z.string().optional()
 });
 
+export const CustomerUpdateSchema = CustomerSchema.partial();
+
 export const StaffSchema = z.object({
   name: z.string().min(1, { message: 'Staff name is required' }),
   role: z.enum(['admin', 'cashier', 'manager', 'chef', 'dev'], { message: 'Invalid role' }),
@@ -85,6 +87,8 @@ export const StaffSchema = z.object({
   accumulatedLeave: z.number().min(0).optional(),
   walletBalance: z.number().min(0).optional()
 });
+
+export const StaffUpdateSchema = StaffSchema.partial();
 
 export const SaleSchema = z.object({
   items: z.array(z.object({

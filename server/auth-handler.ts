@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { Request, Response } from 'express';
 import { query, getConnection } from './db.js';
 import { seedDemoData } from './demo-seed.js';
+import { ensureBulkInventorySchema } from './init-db.js';
 import { 
   generateAccessToken, 
   generateRefreshToken, 
@@ -138,6 +139,7 @@ async function ensureDemoTenant() {
     conn.release();
   }
 
+  await ensureBulkInventorySchema();
   await seedDemoData(tenantId, 'restaurant');
 
   return {

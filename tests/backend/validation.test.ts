@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SaleSchema, validateSchema } from '../../server/validation.js';
+import { CustomerSchema, CustomerUpdateSchema, SaleSchema, StaffSchema, StaffUpdateSchema, validateSchema } from '../../server/validation.js';
 
 describe('validation middleware', () => {
   it('accepts pending tab sales with null optional fields', () => {
@@ -35,5 +35,17 @@ describe('validation middleware', () => {
       details: expect.any(Array),
     }));
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it('allows wallet-only customer updates while keeping customer creation strict', () => {
+    expect(CustomerSchema.safeParse({ walletBalance: 10 }).success).toBe(false);
+    expect(CustomerUpdateSchema.safeParse({ walletBalance: 10 }).success).toBe(true);
+    expect(CustomerUpdateSchema.safeParse({ walletBalance: -1 }).success).toBe(false);
+  });
+
+  it('allows wallet-only staff updates while keeping staff creation strict', () => {
+    expect(StaffSchema.safeParse({ walletBalance: 10 }).success).toBe(false);
+    expect(StaffUpdateSchema.safeParse({ walletBalance: 10 }).success).toBe(true);
+    expect(StaffUpdateSchema.safeParse({ walletBalance: -1 }).success).toBe(false);
   });
 });

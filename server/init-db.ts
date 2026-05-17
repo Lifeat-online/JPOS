@@ -457,6 +457,8 @@ export async function ensureCashManagementSchema() {
 }
 
 export async function ensureBulkInventorySchema() {
+  await ensureRestaurantInventoryTables();
+
   if (isPostgres()) {
     await query(`ALTER TABLE bulk_items ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'single'`);
     await query(`ALTER TABLE bulk_items ADD COLUMN IF NOT EXISTS pack_name TEXT`);
@@ -480,6 +482,121 @@ export async function ensureBulkInventorySchema() {
   await addColumn(`pack_quantity DECIMAL(12,3) DEFAULT 1 AFTER pack_name`);
   await addColumn(`single_unit_name VARCHAR(64) DEFAULT 'item' AFTER pack_quantity`);
   await query(`UPDATE bulk_items SET item_type = COALESCE(item_type, 'single'), pack_quantity = COALESCE(pack_quantity, 1), single_unit_name = COALESCE(single_unit_name, 'item')`);
+}
+
+export async function ensureRestaurantInventoryTables() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS bulk_items (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        item_type TEXT DEFAULT 'single',
+        unit TEXT NOT NULL DEFAULT 'items',
+        stock NUMERIC(12,3) DEFAULT 0,
+        min_stock NUMERIC(12,3) DEFAULT 0,
+        cost_per_unit NUMERIC(12,2) DEFAULT 0,
+        barcode TEXT,
+        pack_name TEXT,
+        pack_quantity NUMERIC(12,3) DEFAULT 1,
+        single_unit_name TEXT DEFAULT 'item',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS product_recipes (
+        product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        bulk_item_id TEXT NOT NULL REFERENCES bulk_items(id) ON DELETE CASCADE,
+        quantity NUMERIC(12,3) NOT NULL,
+        PRIMARY KEY (product_id, bulk_item_id)
+      )
+    `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS product_modifiers (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        type TEXT DEFAULT 'single',
+        required SMALLINT DEFAULT 0,
+        min_selection INTEGER DEFAULT 0,
+        max_selection INTEGER DEFAULT 1,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS modifier_options (
+        id TEXT PRIMARY KEY,
+        modifier_id TEXT NOT NULL REFERENCES product_modifiers(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        price_extra NUMERIC(12,2) DEFAULT 0,
+        bulk_item_id TEXT REFERENCES bulk_items(id) ON DELETE SET NULL,
+        bulk_quantity NUMERIC(12,3) DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS bulk_items (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      item_type ENUM('single','bulk') DEFAULT 'single',
+      unit VARCHAR(32) NOT NULL DEFAULT 'items',
+      stock DECIMAL(12,3) DEFAULT 0,
+      min_stock DECIMAL(12,3) DEFAULT 0,
+      cost_per_unit DECIMAL(12,2) DEFAULT 0,
+      barcode VARCHAR(255),
+      pack_name VARCHAR(64),
+      pack_quantity DECIMAL(12,3) DEFAULT 1,
+      single_unit_name VARCHAR(64) DEFAULT 'item',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS product_recipes (
+      product_id VARCHAR(64) NOT NULL,
+      bulk_item_id VARCHAR(64) NOT NULL,
+      quantity DECIMAL(12,3) NOT NULL,
+      PRIMARY KEY (product_id, bulk_item_id),
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+      FOREIGN KEY (bulk_item_id) REFERENCES bulk_items(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS product_modifiers (
+      id VARCHAR(64) PRIMARY KEY,
+      product_id VARCHAR(64) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      type ENUM('single', 'multiple') DEFAULT 'single',
+      required BOOLEAN DEFAULT FALSE,
+      min_selection INT DEFAULT 0,
+      max_selection INT DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS modifier_options (
+      id VARCHAR(64) PRIMARY KEY,
+      modifier_id VARCHAR(64) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      price_extra DECIMAL(12,2) DEFAULT 0,
+      bulk_item_id VARCHAR(64),
+      bulk_quantity DECIMAL(12,3) DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (modifier_id) REFERENCES product_modifiers(id) ON DELETE CASCADE,
+      FOREIGN KEY (bulk_item_id) REFERENCES bulk_items(id) ON DELETE SET NULL
+    )
+  `);
 }
 
 export async function ensureSalePaymentsTable() {
