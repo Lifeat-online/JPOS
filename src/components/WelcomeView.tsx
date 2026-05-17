@@ -27,6 +27,8 @@ import {
 
 interface WelcomeViewProps {
   onLogin: () => void;
+  onTryNow: () => void;
+  onStartSetup: () => void;
   onClientLogin: () => void;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
@@ -41,6 +43,7 @@ const fadeUp = (delay = 0) => ({
 const navLinks = [
   { label: 'Features', href: '#features' },
   { label: 'Industries', href: '#industries' },
+  { label: 'Client Login', href: '#client-login' },
   { label: 'Setup', href: '#setup' },
   { label: 'FAQ', href: '#faq' },
 ];
@@ -202,7 +205,7 @@ const faqItems = [
 const centeredCard =
   'group relative overflow-hidden rounded-[32px] border border-white/60 dark:border-white/10 bg-white/80 dark:bg-slate-900/70 backdrop-blur-xl shadow-[0_30px_120px_-40px_rgba(15,23,42,0.35)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_40px_140px_-40px_rgba(37,99,235,0.35)]';
 
-export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode }: WelcomeViewProps) {
+export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, isDarkMode, toggleDarkMode }: WelcomeViewProps) {
   const [openFaq, setOpenFaq] = useState(0);
 
   return (
@@ -257,10 +260,10 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
               className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white lg:flex"
             >
               <UserCircle className="h-4 w-4" />
-              Staff Login
+              Admin Login
             </button>
             <button
-              onClick={onLogin}
+              onClick={onTryNow}
               className="flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-950/20 transition hover:scale-[1.01] hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
             >
               <Sparkles className="h-4 w-4" />
@@ -299,14 +302,14 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
 
               <motion.div {...fadeUp(0.24)} className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:flex-wrap sm:justify-center lg:justify-start">
                 <button
-                  onClick={onLogin}
+                  onClick={onTryNow}
                   className="inline-flex items-center justify-center gap-3 rounded-2xl bg-blue-600 px-8 py-4 text-base font-bold text-white shadow-[0_24px_80px_-24px_rgba(37,99,235,0.75)] transition hover:scale-[1.02] hover:bg-blue-500"
                 >
                   Try Now
                   <ArrowRight className="h-5 w-5" />
                 </button>
                 <button
-                  onClick={onLogin}
+                  onClick={onStartSetup}
                   className="inline-flex items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-8 py-4 text-base font-bold text-slate-900 transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:hover:border-slate-700 dark:hover:bg-slate-800"
                 >
                   Start Setup
@@ -419,6 +422,30 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                 <p className="mt-3 text-sm font-semibold leading-6 text-slate-600 dark:text-slate-300">{stat.label}</p>
               </motion.div>
             ))}
+          </div>
+        </section>
+
+        <section id="client-login" className="px-4 py-20 sm:px-6 lg:px-10">
+          <div className="mx-auto grid max-w-7xl items-center gap-8 rounded-[36px] border border-slate-200/80 bg-white/85 px-6 py-10 shadow-[0_30px_90px_-30px_rgba(15,23,42,0.2)] backdrop-blur dark:border-slate-800 dark:bg-slate-900/75 md:grid-cols-[1fr_auto] md:px-10">
+            <div className="text-center md:text-left">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+                <ShoppingBag className="h-3.5 w-3.5" />
+                Client Login
+              </div>
+              <h2 className="mt-6 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
+                Give customers a clear place to check their account.
+              </h2>
+              <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600 dark:text-slate-300">
+                Clients can open their portal from the home screen to review account activity, wallet balances, and payout requests connected to their customer profile.
+              </p>
+            </div>
+            <button
+              onClick={onClientLogin}
+              className="inline-flex items-center justify-center gap-3 rounded-2xl bg-emerald-600 px-8 py-4 text-base font-black text-white shadow-[0_24px_80px_-24px_rgba(5,150,105,0.65)] transition hover:scale-[1.02] hover:bg-emerald-500"
+            >
+              <ShoppingBag className="h-5 w-5" />
+              Client Login
+            </button>
           </div>
         </section>
 
@@ -601,11 +628,11 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
                 onClick={onLogin}
                 className="inline-flex items-center justify-center gap-3 rounded-2xl bg-white px-8 py-4 text-base font-black text-slate-950 transition hover:scale-[1.02] hover:bg-slate-100"
               >
-                Sign Up
+                Admin Login
                 <ArrowRight className="h-5 w-5" />
               </button>
               <button
-                onClick={onLogin}
+                onClick={onStartSetup}
                 className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/20 bg-blue-600/30 px-8 py-4 text-base font-black text-white transition hover:scale-[1.02] hover:bg-blue-500/40"
               >
                 Start Setup
@@ -670,14 +697,14 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
 
               <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
                 <button
-                  onClick={onLogin}
+                  onClick={onTryNow}
                   className="inline-flex items-center justify-center gap-3 rounded-2xl bg-white px-8 py-4 text-base font-black text-blue-700 transition hover:scale-[1.02] hover:bg-blue-50"
                 >
                   Try Now
                   <ArrowRight className="h-5 w-5" />
                 </button>
                 <button
-                  onClick={onLogin}
+                  onClick={onStartSetup}
                   className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/25 bg-white/10 px-8 py-4 text-base font-black text-white transition hover:scale-[1.02] hover:bg-white/20"
                 >
                   Start Setup
@@ -710,7 +737,7 @@ export function WelcomeView({ onLogin, onClientLogin, isDarkMode, toggleDarkMode
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
             >
               <UserCircle className="h-4 w-4" />
-              Staff Login
+              Admin Login
             </button>
           </div>
         </footer>

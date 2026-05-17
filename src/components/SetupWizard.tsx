@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Building2, Save } from 'lucide-react';
-import { setupTenant } from '../api';
+import { setupTenant, updateTenantConfig } from '../api';
 import { AppConfig } from '../types';
 
 interface SetupWizardProps {
-  user: { uid: string; email: string; displayName: string | null };
+  user: { uid: string; email: string; displayName: string | null; tenantId?: string };
   config: AppConfig;
 }
 
@@ -40,15 +40,19 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
         }
       };
 
-      await setupTenant({
-        businessName,
-        user: {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName || user.email.split('@')[0] || 'User'
-        },
-        config: setupConfig
-      });
+      if (user.tenantId) {
+        await updateTenantConfig(user.tenantId, setupConfig);
+      } else {
+        await setupTenant({
+          businessName,
+          user: {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName || user.email.split('@')[0] || 'User'
+          },
+          config: setupConfig
+        });
+      }
 
       window.location.reload();
     } catch (error: any) {

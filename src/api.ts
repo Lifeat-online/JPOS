@@ -312,6 +312,10 @@ export function setupTenant(data: any) {
   return apiPost<{ tenantId: string }>(`/api/mariadb/setup`, data);
 }
 
+export function updateTenantConfig(tenantId: string, config: any) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/settings/app`, config);
+}
+
 export function seedProducts(tenantId: string, products: any[]) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/seed-products`, { products });
 }

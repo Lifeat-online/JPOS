@@ -31,6 +31,13 @@ interface LoginCredentials {
   tenantId?: string;
 }
 
+interface EnrollmentDetails {
+  businessName: string;
+  ownerName: string;
+  email: string;
+  password: string;
+}
+
 interface AuthState {
   user: JwtUser | null;
   authLoading: boolean;
@@ -179,10 +186,23 @@ export function useAuth() {
    *  1. login()                   — triggers the LoginView modal (no-op here; App handles UI)
    *  2. login(email, password)    — performs the actual API call
    */
-  const login = useCallback(async (credentials?: LoginCredentials): Promise<void> => {
+  const persistAuthResponse = useCallback((data: any) => {
+    const user: JwtUser = {
+      ...data.user,
+      // Firebase-compat shims so App.tsx doesn't need changes
+      uid:         data.user.id,
+      displayName: data.user.name,
+      photoURL:    null,
+    };
+
+    persistSession(data.accessToken, data.refreshToken, user);
+    setState({ user, authLoading: false, error: null });
+  }, []);
+
+  const login = useCallback(async (credentials?: LoginCredentials): Promise<boolean> => {
     // If called without credentials, App.tsx sets loginMode which shows the LoginView.
     // The actual auth is performed by loginWithCredentials below.
-    if (!credentials) return;
+    if (!credentials) return false;
 
     setState(s => ({ ...s, authLoading: true, error: null }));
 
@@ -197,24 +217,55 @@ export function useAuth() {
 
       if (!res.ok) {
         setState(s => ({ ...s, authLoading: false, error: data.error || 'Login failed' }));
-        return;
+        return false;
       }
 
-      const user: JwtUser = {
-        ...data.user,
-        // Firebase-compat shims so App.tsx doesn't need changes
-        uid:         data.user.id,
-        displayName: data.user.name,
-        photoURL:    null,
-      };
-
-      persistSession(data.accessToken, data.refreshToken, user);
-      setState({ user, authLoading: false, error: null });
+      persistAuthResponse(data);
+      return true;
 
     } catch {
       setState(s => ({ ...s, authLoading: false, error: 'Network error. Check server.' }));
+      return false;
     }
-  }, []);
+  }, [persistAuthResponse]);
+
+  const startDemo = useCallback(async (): Promise<boolean> => {
+    setState(s => ({ ...s, authLoading: true, error: null }));
+    try {
+      const res = await fetch('/api/demo/start', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setState(s => ({ ...s, authLoading: false, error: data.error || 'Unable to start demo' }));
+        return false;
+      }
+      persistAuthResponse(data);
+      return true;
+    } catch {
+      setState(s => ({ ...s, authLoading: false, error: 'Network error. Check server.' }));
+      return false;
+    }
+  }, [persistAuthResponse]);
+
+  const enroll = useCallback(async (details: EnrollmentDetails): Promise<boolean> => {
+    setState(s => ({ ...s, authLoading: true, error: null }));
+    try {
+      const res = await fetch('/api/enroll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(details),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setState(s => ({ ...s, authLoading: false, error: data.error || 'Unable to start enrollment' }));
+        return false;
+      }
+      persistAuthResponse(data);
+      return true;
+    } catch {
+      setState(s => ({ ...s, authLoading: false, error: 'Network error. Check server.' }));
+      return false;
+    }
+  }, [persistAuthResponse]);
 
   // ── Logout ───────────────────────────────────────────────────────────────
 
@@ -242,6 +293,8 @@ export function useAuth() {
     authLoading: state.authLoading,
     error:       state.error,
     login,
+    startDemo,
+    enroll,
     logout,
     clearError,
   };

@@ -76,11 +76,13 @@ import {
 } from "./mariadb-crud.js";
 import { broadcastSalesUpdate } from "./socket.js";
 import {
+  handleEnrollment,
   handleLogin,
   handleLogout,
   handleRefreshToken,
   handleGetMe,
   handleSetupPassword,
+  handleStartDemo,
 } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
 import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
@@ -335,6 +337,9 @@ export async function createApp(io: any = null) {
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
+
+  app.post("/api/demo/start", handleStartDemo);
+  app.post("/api/enroll", handleEnrollment);
 
   app.get("/api/dev/db-test", async (req, res) => {
     try {

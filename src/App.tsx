@@ -21,6 +21,7 @@ import { usePosStore } from './store/usePosStore';
 
 import { WelcomeView } from './components/WelcomeView';
 import { LoginModal } from './components/LoginModal';
+import { EnrollmentModal } from './components/EnrollmentModal';
 import { SetupWizard } from './components/SetupWizard';
 import { PointOfSaleView } from './views/PointOfSaleView';
 import { HistoryView } from './views/HistoryView';
@@ -382,25 +383,35 @@ export default function App() {
   const location = useLocation();
   const view = location.pathname.substring(1) || 'pos';
 
-  const { user, authLoading, login, logout, error: authError, clearError } = useAuth();
+  const { user, authLoading, login, startDemo, enroll, logout, error: authError, clearError } = useAuth();
   const clientPortal = useClientPortal(user);
 
   // Track which login mode was chosen so we can route correctly
   const [loginMode, setLoginMode] = useState<'staff' | 'client' | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [enrollmentModalOpen, setEnrollmentModalOpen] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
+  const [enrollmentLoading, setEnrollmentLoading] = useState(false);
 
-  const handleStaffLogin = () => { setLoginMode('staff'); clearError(); setLoginModalOpen(true); };
+  const handleAdminLogin = () => { setLoginMode('staff'); clearError(); setLoginModalOpen(true); };
+  const handleTryNow = async () => { setLoginMode('staff'); clearError(); await startDemo(); };
+  const handleStartSetup = () => { setLoginMode('staff'); clearError(); setEnrollmentModalOpen(true); };
   const handleClientLogin = async () => { setLoginMode('client'); await login(); };
   const handleLogout = async () => { setLoginMode(null); await logout(); navigate('/'); };
   // Called by LoginModal on form submit
   const handleLoginSubmit = async (email: string, password: string) => {
     setLoginLoading(true);
-    await login({ email, password });
+    const ok = await login({ email, password });
     setLoginLoading(false);
     // Modal stays open on error; useAuth sets authError.
     // On success user becomes non-null, App re-renders past the WelcomeView.
-    if (!authError) setLoginModalOpen(false);
+    if (ok) setLoginModalOpen(false);
+  };
+  const handleEnrollmentSubmit = async (details: { businessName: string; ownerName: string; email: string; password: string }) => {
+    setEnrollmentLoading(true);
+    const ok = await enroll(details);
+    setEnrollmentLoading(false);
+    if (ok) setEnrollmentModalOpen(false);
   };
   const {
     products, customers, staff, sales, config, setConfig,
@@ -632,7 +643,9 @@ export default function App() {
     return (
       <>
         <WelcomeView
-          onLogin={handleStaffLogin}
+          onLogin={handleAdminLogin}
+          onTryNow={handleTryNow}
+          onStartSetup={handleStartSetup}
           onClientLogin={handleClientLogin}
           isDarkMode={isDarkMode}
           toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
@@ -643,6 +656,13 @@ export default function App() {
           onSubmit={handleLoginSubmit}
           error={authError}
           isLoading={loginLoading}
+        />
+        <EnrollmentModal
+          isOpen={enrollmentModalOpen}
+          onClose={() => { setEnrollmentModalOpen(false); clearError(); }}
+          onSubmit={handleEnrollmentSubmit}
+          error={authError}
+          isLoading={enrollmentLoading}
         />
       </>
     );
@@ -690,7 +710,7 @@ export default function App() {
   }
 
   if (!config?.setupCompleted) {
-    if (currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'dev') {
+    if (currentUserRole === 'admin') {
       return <SetupWizard user={user} config={config} />;
     } else {
       return (

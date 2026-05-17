@@ -1,6 +1,6 @@
 /**
- * LoginModal — Email + Password login for Staff.
- * Shown by App.tsx / WelcomeView when the user clicks "Staff Login".
+ * LoginModal — Email + Password login for admins and staff.
+ * Shown by App.tsx / WelcomeView when the user clicks "Admin Login".
  * Submits credentials to POST /api/auth/login via the useAuth hook.
  */
 import React, { useState, useEffect, useRef } from 'react';
@@ -82,7 +82,7 @@ export function LoginModal({ isOpen, onClose, onSubmit, error, isLoading }: Logi
                 <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center mb-4">
                   <Store className="w-6 h-6 text-white" />
                 </div>
-                <h2 className="text-2xl font-black tracking-tight">Staff Login</h2>
+                <h2 className="text-2xl font-black tracking-tight">Admin Login</h2>
                 <p className="text-blue-100 text-sm mt-1">Sign in to your Jimmy's POS account</p>
               </div>
 
