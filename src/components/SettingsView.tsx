@@ -1,9 +1,10 @@
 import { usePosStore } from '../store/usePosStore';
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
-import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2 } from 'lucide-react';
+import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
-import { apiGet, apiPut, apiPost, apiDelete } from '../api';
+import { apiGet, apiPut, apiPost, apiDelete, getTenantPackageLimits, type TenantPackageLimitsResponse } from '../api';
+import { JPOS_PACKAGES } from '../../shared/packageCatalog';
 
 export function SettingsView({ config, setConfig }: { config: AppConfig, setConfig: (c: AppConfig) => void }) {
   const tenantId = usePosStore(state => state.tenantId);
@@ -12,7 +13,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     categories: config.categories || DEFAULT_CATEGORY_TREE
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'business' | 'payment' | 'categories' | 'features' | 'printing' | 'tax' | 'loyalty' | 'workstations' | 'tables'>('business');
+  const [activeTab, setActiveTab] = useState<'business' | 'package' | 'payment' | 'categories' | 'features' | 'printing' | 'tax' | 'loyalty' | 'workstations' | 'tables'>('business');
+  const [packageLimits, setPackageLimits] = useState<TenantPackageLimitsResponse | null>(null);
 
   // Workstations state
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
@@ -29,14 +31,16 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const fetchData = useCallback(async () => {
     if (!tenantId) return;
     try {
-      const [ws, sects, tabs] = await Promise.all([
+      const [ws, sects, tabs, limits] = await Promise.all([
         apiGet<Workstation[]>(`/api/mariadb/tenants/${tenantId}/workstations`),
         apiGet<TableSection[]>(`/api/mariadb/tenants/${tenantId}/table-sections`),
         apiGet<RestaurantTable[]>(`/api/mariadb/tenants/${tenantId}/restaurant-tables`),
+        getTenantPackageLimits(tenantId),
       ]);
       setWorkstations(ws || []);
       setSections(sects || []);
       setTables(tabs || []);
+      setPackageLimits(limits);
     } catch (err) {
       console.error('Settings data fetch error:', err);
     }
@@ -134,6 +138,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     try {
       await apiPut(`/api/mariadb/tenants/${tenantId}/settings/app`, formData);
       setConfig(formData);
+      setPackageLimits(await getTenantPackageLimits(tenantId));
       alert("Settings saved successfully!");
     } catch (e) {
       console.error(e);
@@ -219,6 +224,11 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     }
   };
 
+  const formatLimit = (value?: number) => value === -1 ? 'Unlimited' : Number(value || 0).toLocaleString();
+  const packageTier = formData.business?.packageTier || packageLimits?.package.id || 'free';
+  const selectedPackage = JPOS_PACKAGES.find(pkg => pkg.id === packageTier) || JPOS_PACKAGES[0];
+  const canEditPackage = packageLimits?.source !== 'licence';
+
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50 dark:bg-slate-950">
       <div className="max-w-4xl mx-auto space-y-8">
@@ -241,6 +251,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           >
             <Settings2 className="w-4 h-4" />
             Features
+          </button>
+          <button
+            onClick={() => setActiveTab('package')}
+            className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'package' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
+          >
+            <PackageCheck className="w-4 h-4" />
+            Package
           </button>
           <button 
             onClick={() => setActiveTab('payment')}
@@ -381,6 +398,70 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'package' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-500">Current package</p>
+                    <h3 className="mt-1 text-2xl font-black text-slate-900 dark:text-white">{selectedPackage.name}</h3>
+                    <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">{selectedPackage.limitsLabel}</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-500">Billing</p>
+                    <p className="mt-1 text-lg font-black text-primary">{selectedPackage.priceLabel}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-400">{packageLimits?.source === 'licence' ? 'Signed licence' : 'Hosted workspace'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {canEditPackage ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {JPOS_PACKAGES.filter(pkg => pkg.delivery === 'hosted_saas').map(pkg => (
+                    <button
+                      key={pkg.id}
+                      type="button"
+                      onClick={() => setFormData({
+                        ...formData,
+                        business: { ...formData.business, packageTier: pkg.id }
+                      } as AppConfig)}
+                      className={`text-left rounded-2xl border p-4 transition-all ${packageTier === pkg.id ? 'border-primary bg-primary/5 shadow-sm' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-primary/40'}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-black text-slate-900 dark:text-white">{pkg.name}</p>
+                          <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{pkg.description}</p>
+                        </div>
+                        <span className="text-sm font-black text-primary whitespace-nowrap">{pkg.priceLabel}</span>
+                      </div>
+                      <p className="mt-3 text-xs font-bold text-slate-500 dark:text-slate-400">{pkg.limitsLabel}</p>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
+                  This install is controlled by its signed licence key. Package changes must be issued from the licence console.
+                </div>
+              )}
+
+              {packageLimits && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Products', used: packageLimits.usage.products, limit: packageLimits.package.maxProducts },
+                    { label: 'Staff', used: packageLimits.usage.staff, limit: packageLimits.package.maxStaff },
+                    { label: 'Customers', used: packageLimits.usage.customers, limit: packageLimits.package.maxCustomers },
+                    { label: 'Open registers', used: packageLimits.usage.activeRegisters, limit: packageLimits.package.maxRegisters },
+                  ].map(item => (
+                    <div key={item.label} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                      <p className="text-xs font-black uppercase tracking-widest text-slate-400">{item.label}</p>
+                      <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">{formatLimit(item.used)} / {formatLimit(item.limit)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

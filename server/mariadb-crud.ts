@@ -1289,6 +1289,7 @@ export async function setupTenant(data: {
   const businessConfig = {
     ...config.business,
     name: data.businessName,
+    packageTier: config.business?.packageTier || process.env.JPOS_HOSTED_PACKAGE_TIER || "free",
   };
   
   const conn = await getConnection();

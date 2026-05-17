@@ -18,6 +18,9 @@ export interface JposPackage {
   billing: 'free' | 'monthly' | 'once_off';
   delivery: DeliveryModel;
   maxRegisters: number;
+  maxProducts: number;
+  maxStaff: number;
+  maxCustomers: number;
   features: PackageFeature[];
   limitsLabel: string;
   description: string;
@@ -45,8 +48,11 @@ export const JPOS_PACKAGES: JposPackage[] = [
     billing: 'free',
     delivery: 'hosted_saas',
     maxRegisters: 2,
+    maxProducts: 100,
+    maxStaff: 3,
+    maxCustomers: 100,
     features: ['jpos_branding'],
-    limitsLabel: '2 registers, JPOS branding',
+    limitsLabel: '2 registers, 100 products, 3 staff, JPOS branding',
     description: 'Hosted starter workspace for testing, small counters, and proof-of-fit.',
     ctaLabel: 'Start Free',
   },
@@ -58,8 +64,11 @@ export const JPOS_PACKAGES: JposPackage[] = [
     billing: 'monthly',
     delivery: 'hosted_saas',
     maxRegisters: 5,
+    maxProducts: 1000,
+    maxStaff: 15,
+    maxCustomers: 2000,
     features: ['own_logo', 'images'],
-    limitsLabel: '5 registers, own logo, images',
+    limitsLabel: '5 registers, 1,000 products, 15 staff, own logo, images',
     description: 'Hosted POS for small operators who need branded selling and product images.',
     ctaLabel: 'Choose Starter',
   },
@@ -71,8 +80,11 @@ export const JPOS_PACKAGES: JposPackage[] = [
     billing: 'monthly',
     delivery: 'hosted_saas',
     maxRegisters: 15,
+    maxProducts: -1,
+    maxStaff: 50,
+    maxCustomers: -1,
     features: ['own_logo', 'images', 'ai', 'analytics'],
-    limitsLabel: '15 registers, AI features, reports',
+    limitsLabel: '15 registers, unlimited products, 50 staff, AI features, reports',
     description: 'Hosted growth tier with reporting and AI assistance for larger teams.',
     ctaLabel: 'Choose Business',
     highlighted: true,
@@ -85,8 +97,11 @@ export const JPOS_PACKAGES: JposPackage[] = [
     billing: 'once_off',
     delivery: 'docker_licence',
     maxRegisters: -1,
+    maxProducts: -1,
+    maxStaff: -1,
+    maxCustomers: -1,
     features: ['full_branding', 'own_logo', 'images', 'ai', 'analytics'],
-    limitsLabel: 'Unlimited registers, full branding, source not included',
+    limitsLabel: 'Unlimited registers, products, staff, and customers; full branding, source not included',
     description: 'A Docker image with a signed licence key for self-hosted branded deployments.',
     ctaLabel: 'Request Licence',
   },
@@ -123,4 +138,8 @@ export function featureSetForPackage(tier: PackageTier, includeSupport = false):
     for (const feature of JPOS_PACKAGE_ADDONS[0].features) features.add(feature);
   }
   return [...features];
+}
+
+export function hasPackageFeature(features: readonly string[], feature: PackageFeature): boolean {
+  return features.includes(feature) || features.includes('full_branding');
 }

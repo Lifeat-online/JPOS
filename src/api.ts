@@ -339,6 +339,33 @@ export function createCustomerPayoutRequest(tenantId: string, data: any) {
 export type LicenceFeature = 'jpos_branding' | 'own_logo' | 'images' | 'ai' | 'analytics' | 'api_access' | 'multi_location' | 'full_branding' | 'priority_support' | 'updates';
 export type LicenceTier = 'free' | 'starter' | 'business' | 'whitelabel';
 
+export interface TenantPackageLimitsResponse {
+  source: 'hosted' | 'licence';
+  package: {
+    id: LicenceTier;
+    name: string;
+    priceLabel: string;
+    maxRegisters: number;
+    maxProducts: number;
+    maxStaff: number;
+    maxCustomers: number;
+    features: LicenceFeature[];
+    limitsLabel: string;
+  };
+  usage: {
+    products: number;
+    staff: number;
+    customers: number;
+    activeRegisters: number;
+  };
+  remaining: {
+    products: number;
+    staff: number;
+    customers: number;
+    activeRegisters: number;
+  };
+}
+
 export interface LicenceInfoResponse {
   enabled: boolean;
   valid: boolean;
@@ -376,6 +403,10 @@ export interface GenerateLicenceResponse {
 
 export function getLicenceInfo() {
   return apiGet<LicenceInfoResponse>('/api/licence/info');
+}
+
+export function getTenantPackageLimits(tenantId: string) {
+  return apiGet<TenantPackageLimitsResponse>(`/api/mariadb/tenants/${tenantId}/package-limits`);
 }
 
 export async function generateLicence(adminKey: string, data: GenerateLicenceRequest) {

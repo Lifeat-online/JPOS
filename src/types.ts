@@ -157,6 +157,7 @@ export interface Customer {
 
 export interface BusinessSettings {
   name: string;
+  packageTier?: 'free' | 'starter' | 'business' | 'whitelabel';
   logoUrl?: string;
   address?: string;
   phone?: string;

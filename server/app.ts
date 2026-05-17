@@ -86,7 +86,7 @@ import {
 } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
 import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
-import { getHostedPackage, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES } from "../shared/packageCatalog.js";
+import { featureSetForPackage, getHostedPackage, hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, type PackageFeature } from "../shared/packageCatalog.js";
 
 dotenv.config();
 
@@ -301,6 +301,112 @@ export async function createApp(io: any = null) {
   const licence = await import("./licenceMiddleware.js");
   await licence.initialiseLicence();
 
+  async function getTenantPackageContext(tenantId: string) {
+    const info = licence.getLicenceInfo();
+    if (licence.shouldEnforceLicence() && info.payload) {
+      const tier = info.payload.tier;
+      const pkg = getHostedPackage(tier);
+      const catalogPackage = JPOS_PACKAGES.find((p) => p.id === tier) || pkg;
+      return {
+        source: "licence",
+        package: {
+          ...catalogPackage,
+          id: tier,
+          maxRegisters: info.payload.maxRegisters,
+          features: info.payload.features,
+        },
+      };
+    }
+
+    const cfg = await getAppConfigByTenant(tenantId);
+    const tier = cfg?.business?.packageTier || process.env.JPOS_HOSTED_PACKAGE_TIER || "free";
+    const pkg = getHostedPackage(tier);
+    return {
+      source: "hosted",
+      package: {
+        ...pkg,
+        features: featureSetForPackage(pkg.id),
+      },
+    };
+  }
+
+  async function getTenantPackageUsage(tenantId: string) {
+    const [productRows, staffRows, customerRows, registerRows] = await Promise.all([
+      query<any>("SELECT COUNT(*) AS count FROM products WHERE tenant_id = ?", [tenantId]),
+      query<any>("SELECT COUNT(*) AS count FROM staff WHERE tenant_id = ?", [tenantId]),
+      query<any>("SELECT COUNT(*) AS count FROM customers WHERE tenant_id = ?", [tenantId]),
+      query<any>("SELECT COUNT(*) AS count FROM cash_sessions WHERE tenant_id = ? AND status = 'open'", [tenantId]),
+    ]);
+
+    return {
+      products: Number(productRows[0]?.count || 0),
+      staff: Number(staffRows[0]?.count || 0),
+      customers: Number(customerRows[0]?.count || 0),
+      activeRegisters: Number(registerRows[0]?.count || 0),
+    };
+  }
+
+  function limitReached(current: number, limit: number) {
+    return limit !== -1 && current >= limit;
+  }
+
+  function packageLimitResponse(res: Response, details: { packageId: string; limitName: string; limit: number; current?: number }) {
+    return res.status(403).json({
+      error: "Package limit reached",
+      package: details.packageId,
+      limitName: details.limitName,
+      limit: details.limit,
+      current: details.current,
+      upgrade: "Upgrade your JPOS package to unlock more capacity",
+    });
+  }
+
+  async function requirePackageCapacity(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    usageKey: "products" | "staff" | "customers" | "activeRegisters",
+    limitKey: "maxProducts" | "maxStaff" | "maxCustomers" | "maxRegisters",
+    limitName: string
+  ) {
+    try {
+      const context = await getTenantPackageContext(req.params.tenantId);
+      const usage = await getTenantPackageUsage(req.params.tenantId);
+      const limit = Number((context.package as any)[limitKey]);
+      if (limitReached(Number((usage as any)[usageKey]), limit)) {
+        packageLimitResponse(res, {
+          packageId: context.package.id,
+          limitName,
+          limit,
+          current: Number((usage as any)[usageKey]),
+        });
+        return;
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  function requirePackageFeature(feature: PackageFeature) {
+    return async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const context = await getTenantPackageContext(req.params.tenantId);
+        if (!hasPackageFeature(context.package.features, feature)) {
+          return res.status(403).json({
+            error: "Feature not available on your package",
+            package: context.package.id,
+            feature,
+            upgrade: "Upgrade your JPOS package to unlock this feature",
+          });
+        }
+        next();
+      } catch (err) {
+        next(err);
+      }
+    };
+  }
+
   // Security Headers
   app.use((req, res, next) => {
     res.setHeader("X-Frame-Options", "DENY");
@@ -445,8 +551,42 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/package-limits", requireAuth, async (req, res) => {
+    try {
+      const [context, usage] = await Promise.all([
+        getTenantPackageContext(req.params.tenantId),
+        getTenantPackageUsage(req.params.tenantId),
+      ]);
+      const pkg = context.package;
+      res.json({
+        source: context.source,
+        package: pkg,
+        usage,
+        remaining: {
+          products: pkg.maxProducts === -1 ? -1 : Math.max(0, pkg.maxProducts - usage.products),
+          staff: pkg.maxStaff === -1 ? -1 : Math.max(0, pkg.maxStaff - usage.staff),
+          customers: pkg.maxCustomers === -1 ? -1 : Math.max(0, pkg.maxCustomers - usage.customers),
+          activeRegisters: pkg.maxRegisters === -1 ? -1 : Math.max(0, pkg.maxRegisters - usage.activeRegisters),
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.put("/api/mariadb/tenants/:tenantId/settings/app", requireAuth, async (req, res) => {
     try {
+      if (req.body?.business?.logoUrl) {
+        const context = await getTenantPackageContext(req.params.tenantId);
+        if (!hasPackageFeature(context.package.features, "own_logo")) {
+          return res.status(403).json({
+            error: "Feature not available on your package",
+            package: context.package.id,
+            feature: "own_logo",
+            upgrade: "Upgrade your JPOS package to use your own logo",
+          });
+        }
+      }
       await updateAppConfig(req.params.tenantId, req.body);
       res.json({ success: true });
     } catch (err: any) {
@@ -1015,7 +1155,16 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/products", requireAuth, validateSchema(ProductSchema), async (req, res) => {
+  app.post(
+    "/api/mariadb/tenants/:tenantId/products",
+    requireAuth,
+    validateSchema(ProductSchema),
+    (req, res, next) => requirePackageCapacity(req, res, next, "products", "maxProducts", "products"),
+    async (req, res, next) => {
+      if (!req.body.imageUrl) return next();
+      return requirePackageFeature("images")(req, res, next);
+    },
+    async (req, res) => {
     try {
       const data = await createProduct(req.params.tenantId, req.body);
       res.json(data);
@@ -1024,7 +1173,15 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/products/:id", requireAuth, validateSchema(ProductSchema), async (req, res) => {
+  app.put(
+    "/api/mariadb/tenants/:tenantId/products/:id",
+    requireAuth,
+    validateSchema(ProductSchema),
+    async (req, res, next) => {
+      if (!req.body.imageUrl) return next();
+      return requirePackageFeature("images")(req, res, next);
+    },
+    async (req, res) => {
     try {
       const data = await updateProduct(req.params.tenantId, req.params.id, req.body);
       res.json(data);
@@ -1042,7 +1199,12 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/customers", requireAuth, validateSchema(CustomerSchema), async (req, res) => {
+  app.post(
+    "/api/mariadb/tenants/:tenantId/customers",
+    requireAuth,
+    validateSchema(CustomerSchema),
+    (req, res, next) => requirePackageCapacity(req, res, next, "customers", "maxCustomers", "customers"),
+    async (req, res) => {
     try {
       const data = await createCustomer(req.params.tenantId, req.body);
       res.json(data);
@@ -1069,7 +1231,12 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/staff", requireAuth, validateSchema(StaffSchema), async (req, res) => {
+  app.post(
+    "/api/mariadb/tenants/:tenantId/staff",
+    requireAuth,
+    validateSchema(StaffSchema),
+    (req, res, next) => requirePackageCapacity(req, res, next, "staff", "maxStaff", "staff members"),
+    async (req, res) => {
     try {
       const data = await createStaff(req.params.tenantId, req.body);
       res.json(data);
