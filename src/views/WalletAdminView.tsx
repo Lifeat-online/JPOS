@@ -80,6 +80,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
     () => customers.reduce((sum, c) => sum + Number(c.walletBalance || 0), 0),
     [customers]
   );
+  const totalWalletLiability = totalWalletBalance + totalClientWalletBalance;
 
   const handleApprove = async (req: PayoutRequest) => {
     if (!tenantId) return;
@@ -221,8 +222,8 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
             <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Total Wallet Liability</p>
-            <p className="text-2xl font-black text-slate-900 dark:text-white">R{Number(totalWalletBalance).toFixed(2)}</p>
-            <p className="text-xs text-slate-400 mt-1">Across {staff.length} staff members</p>
+            <p className="text-2xl font-black text-slate-900 dark:text-white">R{Number(totalWalletLiability).toFixed(2)}</p>
+            <p className="text-xs text-slate-400 mt-1">Across {staff.length} staff and {customers.length} clients</p>
           </div>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
             <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Client Wallet Liability</p>
