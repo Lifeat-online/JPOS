@@ -40,6 +40,7 @@ import { DevDashboard } from './views/DevDashboard';
 import { WalletAdminView } from './views/WalletAdminView';
 import { ClientPortalView } from './views/ClientPortalView';
 import { PackagesView } from './views/PackagesView';
+import { PublicPackagesPage } from './views/PublicPackagesPage';
 import { useClientPortal } from './hooks/useClientPortal';
 import { TabsView } from './views/TabsView';
 import { BarcodeScanner } from './components/BarcodeScanner';
@@ -641,6 +642,35 @@ export default function App() {
   }
 
   if (!user) {
+    if (view === 'packages') {
+      return (
+        <>
+          <PublicPackagesPage
+            onLogin={handleAdminLogin}
+            onTryNow={handleTryNow}
+            onStartSetup={handleStartSetup}
+            onClientLogin={handleClientLogin}
+            isDarkMode={isDarkMode}
+            toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+          />
+          <LoginModal
+            isOpen={loginModalOpen}
+            onClose={() => { setLoginModalOpen(false); clearError(); }}
+            onSubmit={handleLoginSubmit}
+            error={authError}
+            isLoading={loginLoading}
+          />
+          <EnrollmentModal
+            isOpen={enrollmentModalOpen}
+            onClose={() => { setEnrollmentModalOpen(false); clearError(); }}
+            onSubmit={handleEnrollmentSubmit}
+            error={authError}
+            isLoading={enrollmentLoading}
+          />
+        </>
+      );
+    }
+
     return (
       <>
         <WelcomeView

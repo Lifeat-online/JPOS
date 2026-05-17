@@ -43,7 +43,7 @@ const fadeUp = (delay = 0) => ({
 
 const navLinks = [
   { label: 'Features', href: '#features' },
-  { label: 'Pricing', href: '#pricing' },
+  { label: 'Packages', href: '/packages' },
   { label: 'Industries', href: '#industries' },
   { label: 'Client Login', href: '#client-login' },
   { label: 'Setup', href: '#setup' },

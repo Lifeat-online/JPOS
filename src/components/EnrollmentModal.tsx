@@ -68,10 +68,10 @@ export function EnrollmentModal({ isOpen, onClose, onSubmit, error, isLoading }:
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 16 }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+            className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pointer-events-none sm:items-center"
           >
-            <div className="pointer-events-auto w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700/60 dark:bg-slate-900">
-              <div className="relative bg-gradient-to-br from-slate-950 to-blue-800 px-8 pb-6 pt-8 text-white">
+            <div className="pointer-events-auto flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700/60 dark:bg-slate-900">
+              <div className="relative shrink-0 bg-gradient-to-br from-slate-950 to-blue-800 px-8 pb-6 pt-8 text-white">
                 <button
                   onClick={onClose}
                   className="absolute right-4 top-4 rounded-xl bg-white/10 p-1.5 text-white transition hover:bg-white/20"
@@ -86,7 +86,7 @@ export function EnrollmentModal({ isOpen, onClose, onSubmit, error, isLoading }:
                 <p className="mt-1 text-sm text-blue-100">Create the owner account, then complete business setup.</p>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-5 p-8">
+              <form onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-8">
                 {error && (
                   <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-800/40 dark:bg-red-900/20">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />

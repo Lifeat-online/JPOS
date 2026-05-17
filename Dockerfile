@@ -40,6 +40,7 @@ COPY --from=builder /app/db ./db
 # Copy server code and src
 COPY --from=builder /app/server ./server
 COPY --from=builder /app/src ./src
+COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/server.ts ./
 
 ARG JPOS_REQUIRE_LICENCE=false

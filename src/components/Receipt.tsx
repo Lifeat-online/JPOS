@@ -86,7 +86,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
           <span>TOTAL DUE</span>
           <span>{currency}{Number(sale.total || 0).toFixed(2)}</span>
         </div>
-        
+
         {sale.payments && sale.payments.length > 0 ? (
           <div className="space-y-0.5 mt-2">
             <p className="text-[10px] font-bold border-b border-black border-dotted pb-0.5 mb-1 uppercase">Payments</p>
@@ -129,7 +129,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
                 <span>{currency}{Number(sale.changeAmount || 0).toFixed(2)}</span>
               </div>
             )}
-            {sale.tipAmount !== undefined && sale.tipAmount > 0 && (
+            {sale.tipAmount != null && Number(sale.tipAmount) > 0 && (
               <div className="flex justify-between">
                 <span>TIP</span>
                 <span>{currency}{Number(sale.tipAmount || 0).toFixed(2)}</span>
