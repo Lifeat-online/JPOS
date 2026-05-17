@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { isPostgres, query } from "./db.js";
+import { ensureLicenceSchema } from "./licenceSchema.js";
 
 dotenv.config();
 
@@ -363,6 +364,7 @@ export async function initDb() {
   }
 
   await ensureStaffPermissionsSchema();
+  await ensureLicenceSchema();
   await ensureCashManagementSchema();
   await ensureBulkInventorySchema();
 }

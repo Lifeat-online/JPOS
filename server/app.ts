@@ -292,6 +292,14 @@ export async function createApp(io: any = null) {
   app.use(bodyParser.json());
   app.use(bodyParser.urlencoded({ extended: true }));
 
+  if (process.env.JPOS_HOSTED === "true") {
+    const { licenceRouter } = await import("./licenceServer.js");
+    app.use("/api", licenceRouter);
+  }
+
+  const licence = await import("./licenceMiddleware.js");
+  await licence.initialiseLicence();
+
   // Security Headers
   app.use((req, res, next) => {
     res.setHeader("X-Frame-Options", "DENY");
@@ -337,6 +345,25 @@ export async function createApp(io: any = null) {
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
+
+  app.get("/api/licence/info", (req, res) => {
+    const info = licence.getLicenceInfo();
+    res.json({
+      enabled: info.enabled,
+      valid: info.valid,
+      lockedOut: info.lockedOut,
+      reason: info.reason,
+      lastOnlineCheck: info.lastOnlineCheck || null,
+      lastOnlineSuccess: info.lastOnlineSuccess || null,
+      tier: info.payload?.tier,
+      tenantName: info.payload?.tenantName,
+      maxRegisters: info.payload?.maxRegisters,
+      features: info.payload?.features || [],
+      expiresAt: info.payload?.expiresAt ? new Date(info.payload.expiresAt * 1000).toISOString() : null,
+    });
+  });
+
+  app.use("/api", licence.requireValidLicence);
 
   app.post("/api/demo/start", handleStartDemo);
   app.post("/api/enroll", handleEnrollment);
@@ -1149,6 +1176,20 @@ export async function createApp(io: any = null) {
 
   app.post("/api/mariadb/tenants/:tenantId/cash-sessions", requireAuth, async (req, res) => {
     try {
+      const activeRegisterRows = await query<any>(
+        "SELECT COUNT(*) AS active_count FROM cash_sessions WHERE tenant_id = ? AND status = 'open'",
+        [req.params.tenantId]
+      );
+      const activeRegisters = Number(activeRegisterRows[0]?.active_count || 0);
+      if (!licence.checkRegisterLimit(activeRegisters)) {
+        const info = licence.getLicenceInfo();
+        return res.status(403).json({
+          error: "Register limit reached",
+          limit: info.payload?.maxRegisters,
+          upgrade: "Contact support to upgrade your licence",
+        });
+      }
+
       const id = `cs_${Date.now()}_${Math.random().toString(36).substring(7)}`;
       await query(
         `INSERT INTO cash_sessions (

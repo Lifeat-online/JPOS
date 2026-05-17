@@ -42,6 +42,17 @@ COPY --from=builder /app/server ./server
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/server.ts ./
 
+ARG JPOS_REQUIRE_LICENCE=false
+ARG JPOS_LICENCE_SERVER=https://jpos-production.up.railway.app
+ARG LICENCE_SECRET=
+ARG JPOS_INCLUDE_LICENCE_SERVER=false
+
+RUN if [ "$JPOS_INCLUDE_LICENCE_SERVER" != "true" ]; then rm -f ./server/licenceServer.ts; fi
+
+ENV JPOS_REQUIRE_LICENCE=$JPOS_REQUIRE_LICENCE
+ENV JPOS_LICENCE_SERVER=$JPOS_LICENCE_SERVER
+ENV LICENCE_SECRET=$LICENCE_SECRET
+
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001

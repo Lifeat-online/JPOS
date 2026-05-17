@@ -40,6 +40,21 @@ CREATE TABLE IF NOT EXISTS app_settings (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS licences (
+  licence_id VARCHAR(64) PRIMARY KEY,
+  tenant_name VARCHAR(255) NOT NULL,
+  key_hash VARCHAR(128) NOT NULL UNIQUE,
+  tier VARCHAR(32) NOT NULL,
+  max_registers INT NOT NULL DEFAULT 2,
+  features TEXT NOT NULL DEFAULT '[]',
+  issued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME,
+  revoked BOOLEAN NOT NULL DEFAULT FALSE,
+  revoked_at DATETIME,
+  revoked_reason TEXT,
+  INDEX idx_licences_key_hash (key_hash)
+);
+
 CREATE TABLE IF NOT EXISTS products (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,

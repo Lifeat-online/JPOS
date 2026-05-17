@@ -18,6 +18,16 @@ describe('api routes', () => {
     expect(response.body).toEqual({ status: 'ok' });
   });
 
+  it('exposes licence info without requiring self-hosted enforcement in tests', async () => {
+    const response = await request(app).get('/api/licence/info');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      enabled: false,
+      valid: false,
+      lockedOut: false,
+    });
+  });
+
   it('returns unauthorized for protected endpoint without token', async () => {
     const response = await request(app).get('/api/mariadb/tenants/tenant_1/products');
     expect(response.status).toBe(401);
