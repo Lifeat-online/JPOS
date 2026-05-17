@@ -39,6 +39,7 @@ import { LeaderboardView } from './views/LeaderboardView';
 import { DevDashboard } from './views/DevDashboard';
 import { WalletAdminView } from './views/WalletAdminView';
 import { ClientPortalView } from './views/ClientPortalView';
+import { PackagesView } from './views/PackagesView';
 import { useClientPortal } from './hooks/useClientPortal';
 import { TabsView } from './views/TabsView';
 import { BarcodeScanner } from './components/BarcodeScanner';
@@ -407,7 +408,7 @@ export default function App() {
     // On success user becomes non-null, App re-renders past the WelcomeView.
     if (ok) setLoginModalOpen(false);
   };
-  const handleEnrollmentSubmit = async (details: { businessName: string; ownerName: string; email: string; password: string }) => {
+  const handleEnrollmentSubmit = async (details: { businessName: string; ownerName: string; email: string; password: string; packageTier: 'free' | 'starter' | 'business' | 'whitelabel' }) => {
     setEnrollmentLoading(true);
     const ok = await enroll(details);
     setEnrollmentLoading(false);
@@ -913,6 +914,7 @@ export default function App() {
         )}
         {view === 'profile' && <StaffProfileView currentUserStaff={currentUserStaff} />}
         {view === 'settings' && <SettingsView config={config} setConfig={setConfig} />}
+        {view === 'packages' && <PackagesView />}
         {view === 'tables' && (
           <TablesView
             sales={sales}

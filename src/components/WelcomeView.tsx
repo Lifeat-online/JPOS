@@ -24,6 +24,7 @@ import {
   Utensils,
   Zap,
 } from 'lucide-react';
+import { PackagesPricing } from './PackagesPricing';
 
 interface WelcomeViewProps {
   onLogin: () => void;
@@ -42,6 +43,7 @@ const fadeUp = (delay = 0) => ({
 
 const navLinks = [
   { label: 'Features', href: '#features' },
+  { label: 'Pricing', href: '#pricing' },
   { label: 'Industries', href: '#industries' },
   { label: 'Client Login', href: '#client-login' },
   { label: 'Setup', href: '#setup' },
@@ -481,6 +483,8 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             </div>
           </div>
         </section>
+
+        <PackagesPricing onStartSetup={onStartSetup} />
 
         <section className="px-4 py-24 sm:px-6 lg:px-10">
           <div className="mx-auto max-w-7xl rounded-[36px] border border-slate-200/80 bg-white/85 px-6 py-12 shadow-[0_30px_90px_-30px_rgba(15,23,42,0.2)] backdrop-blur dark:border-slate-800 dark:bg-slate-900/75 sm:px-10 lg:px-12">

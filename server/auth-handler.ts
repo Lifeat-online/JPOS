@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { query, getConnection } from './db.js';
 import { seedDemoData } from './demo-seed.js';
 import { ensureBulkInventorySchema } from './init-db.js';
+import { getHostedPackage } from '../shared/packageCatalog.js';
 import { 
   generateAccessToken, 
   generateRefreshToken, 
@@ -189,7 +190,15 @@ export async function handleEnrollment(req: Request, res: Response) {
     const tenantId = `tnt_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const staffId = `staff_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const passwordHash = await hashPassword(password);
-    const business = { name: businessName, currency: 'R', taxRate: 15 };
+    const requestedPackage = getHostedPackage(String(req.body?.packageTier || 'free'));
+    const business = {
+      name: businessName,
+      currency: 'R',
+      taxRate: 15,
+      packageTier: requestedPackage.id,
+      packageName: requestedPackage.name,
+      maxRegisters: requestedPackage.maxRegisters,
+    };
 
     const conn = await getConnection();
     try {

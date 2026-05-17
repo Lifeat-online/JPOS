@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Router, Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
+import { JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, featureSetForPackage, getPackageByTier, PackageTier } from "../shared/packageCatalog.js";
 import { query } from "./db.js";
 import { generateLicenceKey, hashLicenceKey, LicenceFeature, LicencePayload, LicenceTier } from "./licenceKey.js";
 export { ensureLicenceSchema } from "./licenceSchema.js";
@@ -38,17 +39,21 @@ licenceRouter.post("/admin/licence/generate", requireAdminKey, async (req, res) 
     const body = req.body as {
       tenantName?: string;
       tier?: LicenceTier;
+      packageId?: PackageTier;
       maxRegisters?: number;
       features?: LicenceFeature[];
       expiresInDays?: number | null;
+      supportPlus?: boolean;
     };
 
-    if (!body.tenantName || !body.tier || body.maxRegisters === undefined || !Array.isArray(body.features)) {
-      res.status(400).json({ error: "tenantName, tier, maxRegisters and features are required" });
+    const packageId = body.packageId || body.tier;
+    const selectedPackage = getPackageByTier(packageId);
+    if (!body.tenantName || !selectedPackage) {
+      res.status(400).json({ error: "tenantName and a valid packageId or tier are required" });
       return;
     }
 
-    if (!["starter", "business", "whitelabel"].includes(body.tier)) {
+    if (!["free", "starter", "business", "whitelabel"].includes(selectedPackage.id)) {
       res.status(400).json({ error: "Invalid tier" });
       return;
     }
@@ -59,11 +64,13 @@ licenceRouter.post("/admin/licence/generate", requireAdminKey, async (req, res) 
     const payload: LicencePayload = {
       licenceId,
       tenantName: body.tenantName.trim(),
-      maxRegisters: Number(body.maxRegisters),
-      features: body.features,
+      maxRegisters: body.maxRegisters === undefined ? selectedPackage.maxRegisters : Number(body.maxRegisters),
+      features: (Array.isArray(body.features)
+        ? body.features
+        : featureSetForPackage(selectedPackage.id, Boolean(body.supportPlus))) as LicenceFeature[],
       issuedAt,
       expiresAt,
-      tier: body.tier,
+      tier: selectedPackage.id,
     };
     const key = generateLicenceKey(payload, LICENCE_SECRET);
 
@@ -76,12 +83,21 @@ licenceRouter.post("/admin/licence/generate", requireAdminKey, async (req, res) 
       tier: payload.tier,
       maxRegisters: payload.maxRegisters,
       features: payload.features,
+      package: selectedPackage,
+      addOns: body.supportPlus && selectedPackage.id === "whitelabel" ? [JPOS_PACKAGE_ADDONS[0]] : [],
       issuedAt: new Date(issuedAt * 1000).toISOString(),
       expiresAt: expiresAt ? new Date(expiresAt * 1000).toISOString() : null,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to generate licence" });
   }
+});
+
+licenceRouter.get("/packages", (_req, res) => {
+  res.json({
+    packages: JPOS_PACKAGES,
+    addOns: JPOS_PACKAGE_ADDONS,
+  });
 });
 
 licenceRouter.post("/admin/licence/revoke", requireAdminKey, async (req, res) => {

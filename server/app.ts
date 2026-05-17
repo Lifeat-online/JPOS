@@ -86,6 +86,7 @@ import {
 } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
 import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
+import { getHostedPackage, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES } from "../shared/packageCatalog.js";
 
 dotenv.config();
 
@@ -360,6 +361,13 @@ export async function createApp(io: any = null) {
       maxRegisters: info.payload?.maxRegisters,
       features: info.payload?.features || [],
       expiresAt: info.payload?.expiresAt ? new Date(info.payload.expiresAt * 1000).toISOString() : null,
+    });
+  });
+
+  app.get("/api/packages", (_req, res) => {
+    res.json({
+      packages: JPOS_PACKAGES,
+      addOns: JPOS_PACKAGE_ADDONS,
     });
   });
 
@@ -1181,11 +1189,15 @@ export async function createApp(io: any = null) {
         [req.params.tenantId]
       );
       const activeRegisters = Number(activeRegisterRows[0]?.active_count || 0);
-      if (!licence.checkRegisterLimit(activeRegisters)) {
+      const cfg = await getAppConfigByTenant(req.params.tenantId);
+      const hostedPackage = getHostedPackage(cfg?.business?.packageTier || process.env.JPOS_HOSTED_PACKAGE_TIER || "free");
+      const hostedLimitReached = !licence.shouldEnforceLicence() && hostedPackage.maxRegisters !== -1 && activeRegisters >= hostedPackage.maxRegisters;
+      if (!licence.checkRegisterLimit(activeRegisters) || hostedLimitReached) {
         const info = licence.getLicenceInfo();
         return res.status(403).json({
           error: "Register limit reached",
-          limit: info.payload?.maxRegisters,
+          package: info.payload?.tier || hostedPackage.id,
+          limit: info.payload?.maxRegisters ?? hostedPackage.maxRegisters,
           upgrade: "Contact support to upgrade your licence",
         });
       }

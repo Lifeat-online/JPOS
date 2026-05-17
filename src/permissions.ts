@@ -8,6 +8,7 @@ import {
   LayoutGrid,
   MessageSquare,
   Package,
+  Tags,
   Settings,
   TabletSmartphone,
   Trophy,
@@ -34,6 +35,7 @@ export type AppView =
   | 'wallets'
   | 'leaderboard'
   | 'reports'
+  | 'packages'
   | 'settings'
   | 'profile'
   | 'dev';
@@ -56,14 +58,17 @@ const ROLE_VIEWS: Record<StaffRole, AppView[]> = {
   admin: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
     'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile',
+    'packages',
   ],
   dev: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
     'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile', 'dev',
+    'packages',
   ],
   manager: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
     'inventory', 'customers', 'leaderboard', 'profile',
+    'packages',
   ],
   cashier: ['pos', 'history', 'messages', 'cash', 'profile'],
   chef: ['workstation', 'profile'],
@@ -84,6 +89,7 @@ const VIEW_META: Record<AppView, NavItem> = {
   wallets: { id: 'wallets', icon: Wallet, label: 'Wallets', group: 'Management' },
   leaderboard: { id: 'leaderboard', icon: Trophy, label: 'Leaderboard', group: 'Management' },
   reports: { id: 'reports', icon: BarChart3, label: 'Analytics', group: 'Management' },
+  packages: { id: 'packages', icon: Tags, label: 'Packages', group: 'Management' },
   settings: { id: 'settings', icon: Settings, label: 'Settings', group: 'Management' },
   profile: { id: 'profile', icon: Users, label: 'Profile' },
   dev: { id: 'dev', icon: Code2, label: 'Dev' },
@@ -170,7 +176,7 @@ export function getDefaultView(role: StaffRole | null, options: AccessOptions = 
 
 export function buildNavigation(role: StaffRole | null, options: AccessOptions = {}) {
   const allowed = getAllowedViews(role, options);
-  const visible = [...PRIMARY_VIEWS, 'cash', 'live', 'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'settings']
+  const visible = [...PRIMARY_VIEWS, 'cash', 'live', 'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'packages', 'settings']
     .filter(view => allowed.has(view as AppView)) as AppView[];
 
   return {

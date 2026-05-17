@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateLicenceKey, hashLicenceKey, LicencePayload, verifyLicenceKey } from "../../server/licenceKey.js";
+import { featureSetForPackage, getPackageByTier } from "../../shared/packageCatalog.js";
 
 const secret = "test-licence-secret";
 
@@ -51,5 +52,15 @@ describe("licence keys", () => {
 
     expect(hashLicenceKey(key)).toMatch(/^[a-f0-9]{64}$/);
     expect(hashLicenceKey(key)).not.toContain(key);
+  });
+
+  it("maps package tiers to licence limits and feature flags", () => {
+    expect(getPackageByTier("free")).toMatchObject({ maxRegisters: 2, priceLabel: "R0" });
+    expect(getPackageByTier("starter")).toMatchObject({ maxRegisters: 5, priceLabel: "R399/mo" });
+    expect(getPackageByTier("business")).toMatchObject({ maxRegisters: 15, priceLabel: "R999/mo" });
+    expect(getPackageByTier("whitelabel")).toMatchObject({ maxRegisters: -1, priceLabel: "R25,000 once-off" });
+    expect(featureSetForPackage("whitelabel", true)).toEqual(
+      expect.arrayContaining(["full_branding", "updates", "priority_support"])
+    );
   });
 });

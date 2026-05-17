@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { AlertCircle, Building2, Loader2, Lock, Mail, Store, User, X } from 'lucide-react';
+import { AlertCircle, Building2, CheckCircle2, Loader2, Lock, Mail, Store, User, X } from 'lucide-react';
+import { JPOS_PACKAGES, type PackageTier } from '../../shared/packageCatalog';
 
 interface EnrollmentModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface EnrollmentModalProps {
     ownerName: string;
     email: string;
     password: string;
+    packageTier: PackageTier;
   }) => Promise<void>;
   error: string | null;
   isLoading: boolean;
@@ -20,6 +22,7 @@ export function EnrollmentModal({ isOpen, onClose, onSubmit, error, isLoading }:
   const [ownerName, setOwnerName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [packageTier, setPackageTier] = useState<PackageTier>('free');
   const businessRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -28,6 +31,7 @@ export function EnrollmentModal({ isOpen, onClose, onSubmit, error, isLoading }:
       setOwnerName('');
       setEmail('');
       setPassword('');
+      setPackageTier('free');
       setTimeout(() => businessRef.current?.focus(), 80);
     }
   }, [isOpen]);
@@ -42,6 +46,7 @@ export function EnrollmentModal({ isOpen, onClose, onSubmit, error, isLoading }:
       ownerName: ownerName.trim(),
       email: email.trim().toLowerCase(),
       password,
+      packageTier,
     });
   };
 
@@ -88,6 +93,34 @@ export function EnrollmentModal({ isOpen, onClose, onSubmit, error, isLoading }:
                     <p className="text-sm font-medium text-red-700 dark:text-red-400">{error}</p>
                   </div>
                 )}
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                    Package
+                  </label>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {JPOS_PACKAGES.filter(pkg => pkg.delivery === 'hosted_saas').map((pkg) => (
+                      <button
+                        key={pkg.id}
+                        type="button"
+                        onClick={() => setPackageTier(pkg.id)}
+                        disabled={isLoading}
+                        className={`rounded-xl border p-3 text-left transition ${
+                          packageTier === pkg.id
+                            ? 'border-primary bg-primary/5 text-primary ring-2 ring-primary/20'
+                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-black uppercase">{pkg.name}</span>
+                          {packageTier === pkg.id && <CheckCircle2 className="h-4 w-4" />}
+                        </div>
+                        <p className="mt-1 text-sm font-black text-slate-950 dark:text-white">{pkg.priceLabel}</p>
+                        <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500 dark:text-slate-400">{pkg.maxRegisters} registers</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="space-y-1.5">
                   <label htmlFor="enroll-business" className="block text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">

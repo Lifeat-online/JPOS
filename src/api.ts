@@ -336,8 +336,8 @@ export function createCustomerPayoutRequest(tenantId: string, data: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests`, data);
 }
 
-export type LicenceFeature = 'images' | 'ai' | 'analytics' | 'api_access' | 'multi_location';
-export type LicenceTier = 'starter' | 'business' | 'whitelabel';
+export type LicenceFeature = 'jpos_branding' | 'own_logo' | 'images' | 'ai' | 'analytics' | 'api_access' | 'multi_location' | 'full_branding' | 'priority_support' | 'updates';
+export type LicenceTier = 'free' | 'starter' | 'business' | 'whitelabel';
 
 export interface LicenceInfoResponse {
   enabled: boolean;
@@ -356,9 +356,11 @@ export interface LicenceInfoResponse {
 export interface GenerateLicenceRequest {
   tenantName: string;
   tier: LicenceTier;
-  maxRegisters: number;
-  features: LicenceFeature[];
+  packageId?: LicenceTier;
+  maxRegisters?: number;
+  features?: LicenceFeature[];
   expiresInDays: number | null;
+  supportPlus?: boolean;
 }
 
 export interface GenerateLicenceResponse {

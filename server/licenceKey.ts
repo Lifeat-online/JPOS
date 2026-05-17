@@ -1,8 +1,18 @@
 import crypto from "crypto";
 
-export type LicenceFeature = "images" | "ai" | "analytics" | "api_access" | "multi_location";
+export type LicenceFeature =
+  | "jpos_branding"
+  | "own_logo"
+  | "images"
+  | "ai"
+  | "analytics"
+  | "api_access"
+  | "multi_location"
+  | "full_branding"
+  | "priority_support"
+  | "updates";
 
-export type LicenceTier = "starter" | "business" | "whitelabel";
+export type LicenceTier = "free" | "starter" | "business" | "whitelabel";
 
 export interface LicencePayload {
   licenceId: string;
@@ -98,7 +108,7 @@ function validatePayloadShape(payload: LicencePayload): string | null {
   if (!payload.tenantName || typeof payload.tenantName !== "string") return "Missing tenant name";
   if (!Number.isInteger(payload.maxRegisters)) return "Invalid register limit";
   if (!Array.isArray(payload.features)) return "Invalid feature list";
-  if (!["starter", "business", "whitelabel"].includes(payload.tier)) return "Invalid tier";
+  if (!["free", "starter", "business", "whitelabel"].includes(payload.tier)) return "Invalid tier";
   if (!Number.isFinite(payload.issuedAt)) return "Invalid issue date";
   if (payload.expiresAt !== null && !Number.isFinite(payload.expiresAt)) return "Invalid expiry date";
   return null;
