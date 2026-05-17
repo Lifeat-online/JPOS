@@ -335,3 +335,75 @@ export function clearAllSales(tenantId: string) {
 export function createCustomerPayoutRequest(tenantId: string, data: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests`, data);
 }
+
+export type LicenceFeature = 'images' | 'ai' | 'analytics' | 'api_access' | 'multi_location';
+export type LicenceTier = 'starter' | 'business' | 'whitelabel';
+
+export interface LicenceInfoResponse {
+  enabled: boolean;
+  valid: boolean;
+  lockedOut: boolean;
+  reason: string;
+  lastOnlineCheck: number | null;
+  lastOnlineSuccess: number | null;
+  tier?: LicenceTier;
+  tenantName?: string;
+  maxRegisters?: number;
+  features: LicenceFeature[];
+  expiresAt: string | null;
+}
+
+export interface GenerateLicenceRequest {
+  tenantName: string;
+  tier: LicenceTier;
+  maxRegisters: number;
+  features: LicenceFeature[];
+  expiresInDays: number | null;
+}
+
+export interface GenerateLicenceResponse {
+  licenceId: string;
+  key: string;
+  tenantName: string;
+  tier: LicenceTier;
+  maxRegisters: number;
+  features: LicenceFeature[];
+  issuedAt: string;
+  expiresAt: string | null;
+}
+
+export function getLicenceInfo() {
+  return apiGet<LicenceInfoResponse>('/api/licence/info');
+}
+
+export async function generateLicence(adminKey: string, data: GenerateLicenceRequest) {
+  const res = await fetch('/api/admin/licence/generate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-key': adminKey,
+    },
+    body: JSON.stringify(data),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body?.error || `Licence generation failed [${res.status}]`);
+  }
+  return body as GenerateLicenceResponse;
+}
+
+export async function revokeLicence(adminKey: string, licenceId: string, reason?: string) {
+  const res = await fetch('/api/admin/licence/revoke', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-key': adminKey,
+    },
+    body: JSON.stringify({ licenceId, reason }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body?.error || `Licence revoke failed [${res.status}]`);
+  }
+  return body as { success: boolean; licenceId: string };
+}

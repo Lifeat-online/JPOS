@@ -3,11 +3,20 @@ import { JwtUser } from '../hooks/useAuth';
 import {
   Product, Customer, Staff, Sale, AppConfig, Workstation, CashSession,
 } from '../types';
-import { getTenantCashSessions } from '../api';
+import {
+  generateLicence,
+  getLicenceInfo,
+  getTenantCashSessions,
+  revokeLicence,
+  type GenerateLicenceResponse,
+  type LicenceFeature,
+  type LicenceInfoResponse,
+  type LicenceTier,
+} from '../api';
 import {
   Terminal, Database, Shield, Activity, Zap,
   Copy, CheckCircle2, XCircle, AlertTriangle, ExternalLink,
-  Download, Trash2, RefreshCw, Code2, Server, Wifi, FlaskConical,
+  Download, Trash2, RefreshCw, Code2, Server, Wifi, FlaskConical, KeyRound,
 } from 'lucide-react';
 import { getDate } from '../utils/date';
 
@@ -113,7 +122,7 @@ export function DevDashboard({
   onClearSeeded,
   onClearSales,
 }: DevDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'health' | 'console' | 'actions' | 'tests'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'health' | 'licences' | 'console' | 'actions' | 'tests'>('overview');
   const [dataSubTab, setDataSubTab] = useState<'products' | 'customers' | 'staff' | 'sales' | 'workstations'>('products');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logCounter, setLogCounter] = useState(0);
@@ -121,6 +130,19 @@ export function DevDashboard({
   const [clearConfirm, setClearConfirm] = useState(false);
   const [cashSessions, setCashSessions] = useState<CashSession[]>([]);
   const [cashSessionsLoading, setCashSessionsLoading] = useState(false);
+  const [licenceInfo, setLicenceInfo] = useState<LicenceInfoResponse | null>(null);
+  const [licenceLoading, setLicenceLoading] = useState(false);
+  const [licenceAdminKey, setLicenceAdminKey] = useState('');
+  const [licenceForm, setLicenceForm] = useState({
+    tenantName: '',
+    tier: 'business' as LicenceTier,
+    maxRegisters: 15,
+    expiresInDays: '',
+    features: ['images', 'ai', 'analytics'] as LicenceFeature[],
+  });
+  const [generatedLicence, setGeneratedLicence] = useState<GenerateLicenceResponse | null>(null);
+  const [licenceActionStatus, setLicenceActionStatus] = useState<{ type: 'ok' | 'error'; message: string } | null>(null);
+  const [revokeForm, setRevokeForm] = useState({ licenceId: '', reason: '' });
 
   useEffect(() => {
     if (activeTab !== 'tests' || !tenantId) return;
@@ -176,6 +198,22 @@ export function DevDashboard({
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [activeTab, tenantId]);
+
+  const loadLicenceInfo = async () => {
+    setLicenceLoading(true);
+    try {
+      setLicenceInfo(await getLicenceInfo());
+    } catch (err: any) {
+      setLicenceActionStatus({ type: 'error', message: err?.message || 'Failed to load licence status' });
+    } finally {
+      setLicenceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'licences') return;
+    void loadLicenceInfo();
+  }, [activeTab]);
 
   // ── Test suite state ─────────────────────────────────────────────────
   const TEST_DEFINITIONS: TestDef[] = [
@@ -553,11 +591,50 @@ export function DevDashboard({
     URL.revokeObjectURL(url);
   };
 
+  const toggleLicenceFeature = (feature: LicenceFeature) => {
+    setLicenceForm(prev => ({
+      ...prev,
+      features: prev.features.includes(feature)
+        ? prev.features.filter(f => f !== feature)
+        : [...prev.features, feature],
+    }));
+  };
+
+  const handleGenerateLicence = async () => {
+    setLicenceActionStatus(null);
+    setGeneratedLicence(null);
+    try {
+      const response = await generateLicence(licenceAdminKey, {
+        tenantName: licenceForm.tenantName.trim(),
+        tier: licenceForm.tier,
+        maxRegisters: Number(licenceForm.maxRegisters),
+        features: licenceForm.features,
+        expiresInDays: licenceForm.expiresInDays.trim() ? Number(licenceForm.expiresInDays) : null,
+      });
+      setGeneratedLicence(response);
+      setLicenceActionStatus({ type: 'ok', message: `Generated licence ${response.licenceId}` });
+    } catch (err: any) {
+      setLicenceActionStatus({ type: 'error', message: err?.message || 'Licence generation failed' });
+    }
+  };
+
+  const handleRevokeLicence = async () => {
+    setLicenceActionStatus(null);
+    try {
+      const response = await revokeLicence(licenceAdminKey, revokeForm.licenceId.trim(), revokeForm.reason.trim() || undefined);
+      setRevokeForm({ licenceId: '', reason: '' });
+      setLicenceActionStatus({ type: 'ok', message: `Revoked licence ${response.licenceId}` });
+    } catch (err: any) {
+      setLicenceActionStatus({ type: 'error', message: err?.message || 'Licence revoke failed' });
+    }
+  };
+
   // ── Tab definitions ──────────────────────────────────────────────────
   const tabs = [
     { id: 'overview', label: 'Overview', icon: Server },
     { id: 'data', label: 'Data Explorer', icon: Database },
     { id: 'health', label: 'App Health', icon: Activity },
+    { id: 'licences', label: 'Licences', icon: KeyRound },
     { id: 'console', label: `Console${logs.length > 0 ? ` (${logs.length})` : ''}`, icon: Terminal },
     { id: 'actions', label: 'Quick Actions', icon: Zap },
     { id: 'tests', label: 'Test Suite', icon: FlaskConical },
@@ -983,6 +1060,209 @@ export function DevDashboard({
                     </span>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════
+            TAB 4 — LICENCES
+        ═══════════════════════════════════════════════════════════════ */}
+        {activeTab === 'licences' && (
+          <div className="space-y-5 max-w-5xl mx-auto">
+            <div className="grid lg:grid-cols-[1fr_1.4fr] gap-5">
+              <div className="space-y-5">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <div className="flex items-center gap-2">
+                      <KeyRound className="w-4 h-4 text-violet-500" />
+                      <h3 className="font-black text-slate-800 dark:text-white">Licence Runtime</h3>
+                    </div>
+                    <button
+                      onClick={loadLicenceInfo}
+                      disabled={licenceLoading}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-60 active:scale-95 transition-all"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${licenceLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </button>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <CheckRow
+                      ok={Boolean(licenceInfo && !licenceInfo.lockedOut)}
+                      warn={Boolean(licenceInfo && !licenceInfo.enabled)}
+                      label={
+                        licenceInfo
+                          ? licenceInfo.enabled
+                            ? licenceInfo.valid
+                              ? 'Self-hosted licence is valid'
+                              : `Licence blocked: ${licenceInfo.reason}`
+                            : 'Hosted/dev mode: self-hosted enforcement is off'
+                          : 'Licence status not loaded'
+                      }
+                    />
+                    <div className="grid grid-cols-2 gap-3 pt-2">
+                      {[
+                        { label: 'Tenant', value: licenceInfo?.tenantName || 'Not licensed' },
+                        { label: 'Tier', value: licenceInfo?.tier || 'Hosted/dev' },
+                        { label: 'Registers', value: licenceInfo?.maxRegisters === -1 ? 'Unlimited' : String(licenceInfo?.maxRegisters ?? '-') },
+                        { label: 'Expires', value: licenceInfo?.expiresAt || 'No expiry' },
+                      ].map(item => (
+                        <div key={item.label} className="rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{item.label}</p>
+                          <p className="text-sm font-bold text-slate-800 dark:text-white break-all">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Shield className="w-4 h-4 text-emerald-500" />
+                    <h3 className="font-black text-slate-800 dark:text-white">Admin Key</h3>
+                  </div>
+                  <input
+                    type="password"
+                    value={licenceAdminKey}
+                    onChange={(e) => setLicenceAdminKey(e.target.value)}
+                    placeholder="x-admin-key"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-violet-500"
+                  />
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-red-200 dark:border-red-900 p-5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                    <h3 className="font-black text-red-700 dark:text-red-400">Revoke Licence</h3>
+                  </div>
+                  <div className="space-y-3">
+                    <input
+                      value={revokeForm.licenceId}
+                      onChange={(e) => setRevokeForm(prev => ({ ...prev, licenceId: e.target.value }))}
+                      placeholder="Licence ID"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                    <input
+                      value={revokeForm.reason}
+                      onChange={(e) => setRevokeForm(prev => ({ ...prev, reason: e.target.value }))}
+                      placeholder="Reason"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                    <button
+                      onClick={handleRevokeLicence}
+                      disabled={!licenceAdminKey || !revokeForm.licenceId.trim()}
+                      className="w-full px-4 py-2 rounded-xl text-sm font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-5">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-4">
+                    <KeyRound className="w-4 h-4 text-violet-500" />
+                    <h3 className="font-black text-slate-800 dark:text-white">Generate Licence</h3>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-bold text-slate-500">Tenant name</span>
+                      <input
+                        value={licenceForm.tenantName}
+                        onChange={(e) => setLicenceForm(prev => ({ ...prev, tenantName: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-violet-500"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold text-slate-500">Tier</span>
+                      <select
+                        value={licenceForm.tier}
+                        onChange={(e) => setLicenceForm(prev => ({ ...prev, tier: e.target.value as LicenceTier }))}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-violet-500"
+                      >
+                        <option value="starter">Starter</option>
+                        <option value="business">Business</option>
+                        <option value="whitelabel">White-label</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold text-slate-500">Max registers</span>
+                      <input
+                        type="number"
+                        value={licenceForm.maxRegisters}
+                        onChange={(e) => setLicenceForm(prev => ({ ...prev, maxRegisters: Number(e.target.value) }))}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-violet-500"
+                      />
+                    </label>
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-bold text-slate-500">Expiry days</span>
+                      <input
+                        type="number"
+                        value={licenceForm.expiresInDays}
+                        onChange={(e) => setLicenceForm(prev => ({ ...prev, expiresInDays: e.target.value }))}
+                        placeholder="Blank for perpetual"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-violet-500"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-4">
+                    <p className="text-xs font-bold text-slate-500 mb-2">Features</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(['images', 'ai', 'analytics', 'api_access', 'multi_location'] as LicenceFeature[]).map(feature => (
+                        <button
+                          key={feature}
+                          type="button"
+                          onClick={() => toggleLicenceFeature(feature)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border active:scale-95 transition-all ${
+                            licenceForm.features.includes(feature)
+                              ? 'bg-violet-600 border-violet-600 text-white'
+                              : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {feature.replace('_', ' ')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleGenerateLicence}
+                    disabled={!licenceAdminKey || !licenceForm.tenantName.trim()}
+                    className="mt-5 w-full px-4 py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+                  >
+                    Generate Key
+                  </button>
+                </div>
+
+                {licenceActionStatus && (
+                  <div className={`rounded-2xl border p-4 text-sm font-semibold ${
+                    licenceActionStatus.type === 'ok'
+                      ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                      : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+                  }`}>
+                    {licenceActionStatus.message}
+                  </div>
+                )}
+
+                {generatedLicence && (
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <h3 className="font-black text-slate-800 dark:text-white">Generated Key</h3>
+                        <p className="text-xs text-slate-500 font-mono">{generatedLicence.licenceId}</p>
+                      </div>
+                      <CopyBtn text={generatedLicence.key} label="Copy Key" />
+                    </div>
+                    <textarea
+                      readOnly
+                      value={generatedLicence.key}
+                      className="w-full min-h-[120px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-mono text-slate-700 dark:text-slate-300 resize-y"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
