@@ -106,7 +106,15 @@ function parseJson<T>(value: unknown, fallback: T): T {
   }
 }
 
-function providerErrorMessage(body: any, fallback: string) {
+function compactProviderBody(body: any) {
+  try {
+    return JSON.stringify(body).slice(0, 800);
+  } catch {
+    return "";
+  }
+}
+
+function providerErrorMessage(body: any, fallback: string, status?: number) {
   const error = body?.error;
   const candidates = [
     error?.message,
@@ -119,7 +127,17 @@ function providerErrorMessage(body: any, fallback: string) {
   ].filter(Boolean).map(String);
   const message = candidates.find((item) => item.trim()) || fallback;
   const code = error?.code || body?.code;
-  return code ? `${message} (${code})` : message;
+  const lowerMessage = message.toLowerCase();
+  const isGeneric = lowerMessage === "provider returned error" || lowerMessage === "provider returned error.";
+  const friendly429 = status === 429 || code === 429
+    ? "The provider is rate limiting or quota/credits are exhausted. Try a cheaper model, wait a minute, or check provider billing/limits."
+    : "";
+  const raw = isGeneric ? compactProviderBody(body) : "";
+  return [
+    friendly429,
+    code ? `${message} (${code})` : message,
+    raw ? `Raw provider response: ${raw}` : "",
+  ].filter(Boolean).join(" ");
 }
 
 function toNumber(value: unknown): number {
@@ -1139,7 +1157,7 @@ async function callOpenAiText(settings: AiSettings, message: string, images: str
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(providerErrorMessage(body, `OpenAI test failed [${response.status}]`));
+  if (!response.ok) throw new Error(providerErrorMessage(body, `OpenAI test failed [${response.status}]`, response.status));
   return body.output_text || body.output?.flatMap((item: any) => item.content || []).map((part: any) => part.text || "").join("") || "";
 }
 
@@ -1187,7 +1205,7 @@ async function callOllamaText(settings: AiSettings, message: string, images: str
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(providerErrorMessage(body, `Ollama test failed [${response.status}]`));
+  if (!response.ok) throw new Error(providerErrorMessage(body, `Ollama test failed [${response.status}]`, response.status));
   return body.message?.content || body.response || "";
 }
 
@@ -1224,7 +1242,7 @@ async function callAnythingLlmText(settings: AiSettings, message: string, images
     body: JSON.stringify({ message: `${message}${mediaNote}`, mode: "chat" }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(providerErrorMessage(body, `AnythingLLM test failed [${response.status}]`));
+  if (!response.ok) throw new Error(providerErrorMessage(body, `AnythingLLM test failed [${response.status}]`, response.status));
   return body.textResponse || body.response || body.message || "";
 }
 
@@ -1265,7 +1283,7 @@ async function callGoogleText(settings: AiSettings, message: string, images: str
     body: JSON.stringify({ contents: [{ role: "user", parts }] }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(providerErrorMessage(body, `Google AI test failed [${response.status}]`));
+  if (!response.ok) throw new Error(providerErrorMessage(body, `Google AI test failed [${response.status}]`, response.status));
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
 
@@ -1315,7 +1333,7 @@ async function callVertexText(settings: AiSettings, message: string, images: str
   );
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = providerErrorMessage(body, `Vertex AI test failed [${response.status}]`);
+    const error = providerErrorMessage(body, `Vertex AI test failed [${response.status}]`, response.status);
     if (/missing authentication header/i.test(error) && key) return callGoogleText({ ...settings, provider: "google", apiKey: key }, message, images, documents);
     throw new Error(error);
   }
@@ -1381,7 +1399,7 @@ async function callOpenRouterText(settings: AiSettings, message: string, images:
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(providerErrorMessage(body, `OpenRouter test failed [${response.status}]`));
+  if (!response.ok) throw new Error(providerErrorMessage(body, `OpenRouter test failed [${response.status}]`, response.status));
   return body.choices?.[0]?.message?.content || "";
 }
 

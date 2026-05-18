@@ -74,3 +74,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - `npm.cmd run lint` passed after provider error visibility fix.
 - `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after provider error visibility fix.
 - `npm.cmd run build` passed after provider error visibility fix with the existing Vite large-chunk warning.
+- Provider test now maps 429 errors to rate limit/quota/credits guidance and includes raw provider response for generic gateway errors.
+- `npm.cmd run lint` passed after 429 guidance update.
+- `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after 429 guidance update.
+- `npm.cmd run build` passed after 429 guidance update with the existing Vite large-chunk warning.
