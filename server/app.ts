@@ -724,7 +724,11 @@ export async function createApp(io: any = null) {
     requireAiRoleAccess,
     async (req, res) => {
       try {
-        res.json(await applyApprovedInventoryAgentSteps(req.params.tenantId, req.body?.steps || []));
+        const fullAutopilot = Boolean(req.body?.fullAutopilot);
+        if (fullAutopilot && normalizeRole(req.user?.role) !== "dev") {
+          return res.status(403).json({ error: "Full autopilot is restricted to Dev users" });
+        }
+        res.json(await applyApprovedInventoryAgentSteps(req.params.tenantId, req.body?.steps || [], { fullAutopilot }));
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }

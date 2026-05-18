@@ -457,8 +457,8 @@ export function generateInventoryAgentProposal(tenantId: string, data: unknown) 
   return apiPost<InventoryAgentProposal>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/proposal`, data);
 }
 
-export function applyInventoryAgentSteps(tenantId: string, steps: InventoryAgentStep[]) {
-  return apiPost<InventoryAgentApplyResult>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/apply`, { steps });
+export function applyInventoryAgentSteps(tenantId: string, steps: InventoryAgentStep[], fullAutopilot = false) {
+  return apiPost<InventoryAgentApplyResult>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/apply`, { steps, fullAutopilot });
 }
 
 export async function generateLicence(adminKey: string, data: GenerateLicenceRequest) {

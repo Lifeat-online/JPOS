@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, Bot, CalendarDays, CheckCircle2, FileImage, Loader2, PackageCheck, ShoppingCart, Sparkles, UploadCloud } from 'lucide-react';
+import { AlertTriangle, Bot, CalendarDays, CheckCircle2, FileText, Loader2, PackageCheck, ShieldAlert, ShoppingCart, Sparkles, ToggleLeft, ToggleRight, UploadCloud } from 'lucide-react';
 import { applyInventoryAgentSteps, generateInventoryAgentProposal } from '../api';
 import type { InventoryAgentApplyResult, InventoryAgentMode, InventoryAgentProposal } from '../types';
 import { usePosStore } from '../store/usePosStore';
+import { useAuth } from '../hooks/useAuth';
 
 type EventDraft = {
   name: string;
@@ -13,7 +14,7 @@ type EventDraft = {
 };
 
 const modes: { id: InventoryAgentMode; label: string; icon: React.ElementType }[] = [
-  { id: 'invoice', label: 'Invoice Images', icon: FileImage },
+  { id: 'invoice', label: 'Invoice Files', icon: FileText },
   { id: 'low_stock', label: 'Low Stock PO', icon: ShoppingCart },
   { id: 'event', label: 'Event Planning', icon: CalendarDays },
 ];
@@ -27,13 +28,25 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function filePayload(file: File, dataUrl: string) {
+  return {
+    name: file.name,
+    type: file.type || 'application/octet-stream',
+    size: file.size,
+    dataUrl,
+  };
+}
+
 export function InventoryAgentView() {
+  const { user } = useAuth();
   const tenantId = usePosStore(s => s.tenantId);
+  const isDev = String(user?.role || '').toLowerCase() === 'dev';
   const [mode, setMode] = useState<InventoryAgentMode>('invoice');
   const [notes, setNotes] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [proposal, setProposal] = useState<InventoryAgentProposal | null>(null);
   const [approved, setApproved] = useState<Record<string, boolean>>({});
+  const [fullAutopilot, setFullAutopilot] = useState(false);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<InventoryAgentApplyResult | null>(null);
@@ -53,11 +66,17 @@ export function InventoryAgentView() {
     setLoading(true);
     setError(null);
     try {
-      const imageDataUrls = mode === 'invoice' ? await Promise.all(files.map(readFileAsDataUrl)) : [];
+      const uploadedFiles = mode === 'invoice'
+        ? await Promise.all(files.map(async file => filePayload(file, await readFileAsDataUrl(file))))
+        : [];
+      const documentDataUrls = mode === 'invoice'
+        ? uploadedFiles.filter(file => !file.type.startsWith('image/'))
+        : [];
       const result = await generateInventoryAgentProposal(tenantId, {
         mode,
         notes,
-        imageDataUrls,
+        imageDataUrls: mode === 'invoice' ? uploadedFiles.filter(file => file.type.startsWith('image/')).map(file => file.dataUrl) : [],
+        documentDataUrls,
         event: mode === 'event' ? {
           ...eventDraft,
           expectedPeople: Number(eventDraft.expectedPeople || 0),
@@ -65,8 +84,17 @@ export function InventoryAgentView() {
         } : undefined,
       });
       setProposal(result);
-      setApproved(Object.fromEntries(result.steps.map(step => [step.id, false])));
+      const nextApproved = Object.fromEntries(result.steps.map(step => [step.id, fullAutopilot && isDev]));
+      setApproved(nextApproved);
       setApplyResult(null);
+      if (fullAutopilot && isDev && result.steps.length > 0) {
+        setApplying(true);
+        try {
+          setApplyResult(await applyInventoryAgentSteps(tenantId, result.steps, true));
+        } finally {
+          setApplying(false);
+        }
+      }
     } catch (err: any) {
       setError(err?.message || 'Copilot could not prepare a proposal.');
     } finally {
@@ -80,7 +108,7 @@ export function InventoryAgentView() {
     setError(null);
     try {
       const steps = proposal.steps.map(step => ({ ...step, approved: Boolean(approved[step.id]) }));
-      setApplyResult(await applyInventoryAgentSteps(tenantId, steps));
+      setApplyResult(await applyInventoryAgentSteps(tenantId, steps, fullAutopilot && isDev));
     } catch (err: any) {
       setError(err?.message || 'Approved steps could not be applied.');
     } finally {
@@ -122,6 +150,31 @@ export function InventoryAgentView() {
             </button>
           ))}
         </div>
+
+        {isDev && (
+          <button
+            type="button"
+            onClick={() => {
+              const next = !fullAutopilot;
+              setFullAutopilot(next);
+              if (proposal) {
+                setApproved(Object.fromEntries(proposal.steps.map(step => [step.id, next])));
+              }
+            }}
+            className={`mt-5 w-full rounded-3xl border p-5 flex items-center justify-between gap-4 text-left transition-all ${fullAutopilot ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800/60' : 'bg-slate-50 dark:bg-[#0B1120] border-slate-200 dark:border-slate-800/60'}`}
+          >
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${fullAutopilot ? 'bg-red-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div>
+                <p className={`text-sm font-black uppercase tracking-widest ${fullAutopilot ? 'text-red-700 dark:text-red-300' : 'text-slate-700 dark:text-slate-300'}`}>Dev full autopilot</p>
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-1">When enabled, Copilot auto-approves and applies draft-safe steps immediately after generating a proposal.</p>
+              </div>
+            </div>
+            {fullAutopilot ? <ToggleRight className="w-9 h-9 text-red-600 shrink-0" /> : <ToggleLeft className="w-9 h-9 text-slate-400 shrink-0" />}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-6">
@@ -129,12 +182,12 @@ export function InventoryAgentView() {
           {mode === 'invoice' && (
             <label className="block border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl p-6 text-center cursor-pointer hover:border-primary/50 transition-all">
               <UploadCloud className="w-9 h-9 mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-              <p className="text-sm font-black text-slate-800 dark:text-white">Upload invoice images</p>
-              <p className="text-xs font-semibold text-slate-400 mt-1">{files.length ? `${files.length} image${files.length === 1 ? '' : 's'} selected` : 'PNG, JPG, or WebP'}</p>
+              <p className="text-sm font-black text-slate-800 dark:text-white">Upload invoice files</p>
+              <p className="text-xs font-semibold text-slate-400 mt-1">{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected` : 'PDF, PNG, JPG, WebP, CSV, or text'}</p>
               <input
                 className="hidden"
                 type="file"
-                accept="image/*"
+                accept="image/*,.pdf,.csv,.txt,.doc,.docx,application/pdf,text/plain,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 multiple
                 onChange={e => setFiles(Array.from(e.target.files || []))}
               />
@@ -187,22 +240,22 @@ export function InventoryAgentView() {
               <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/60 rounded-[24px] p-6 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
                   <h3 className="text-xl font-black text-slate-900 dark:text-white">{proposal.summary}</h3>
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mt-2">{approvedCount} of {proposal.steps.length} steps approved</p>
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mt-2">{fullAutopilot && isDev ? 'Dev full autopilot active' : `${approvedCount} of ${proposal.steps.length} steps approved`}</p>
                 </div>
-                <div className="text-xs font-black text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl px-4 py-3 flex items-center gap-2 uppercase tracking-widest">
+                <div className={`text-xs font-black rounded-2xl px-4 py-3 flex items-center gap-2 uppercase tracking-widest ${fullAutopilot && isDev ? 'text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20' : 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20'}`}>
                   <CheckCircle2 className="w-4 h-4" />
-                  Human approval required
+                  {fullAutopilot && isDev ? 'Autopilot applying' : 'Human approval required'}
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={applyApproved}
-                disabled={applying || approvedCount === 0}
+                disabled={applying || (!fullAutopilot && approvedCount === 0)}
                 className="w-full h-14 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl disabled:opacity-50"
               >
                 {applying ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-                Apply Approved Draft-Safe Steps
+                {fullAutopilot && isDev ? 'Run Full Autopilot Draft-Safe Steps' : 'Apply Approved Draft-Safe Steps'}
               </button>
 
               {applyResult && (

@@ -39,6 +39,13 @@ export interface InventoryAgentApplyResult {
   skipped: { stepId: string; type: StepType; reason: string }[];
 }
 
+type UploadedDocumentEvidence = {
+  name?: string;
+  type?: string;
+  size?: number;
+  dataUrl?: string;
+};
+
 function proposalId(mode: AgentMode) {
   return `agent_${mode}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -209,37 +216,48 @@ export async function generateInventoryAgentProposal(tenantId: string, body: any
   }
 
   const imageCount = Array.isArray(body?.imageDataUrls) ? body.imageDataUrls.length : 0;
+  const documents: UploadedDocumentEvidence[] = Array.isArray(body?.documentDataUrls) ? body.documentDataUrls : [];
+  const documentCount = documents.length;
+  const pdfCount = documents.filter((doc) => String(doc.type || "").includes("pdf") || String(doc.name || "").toLowerCase().endsWith(".pdf")).length;
+  const documentNames = documents.map((doc) => doc.name).filter(Boolean).slice(0, 5);
   const notes = String(body?.notes || "").trim();
+  const uploadEvidence = [
+    `${imageCount} invoice image${imageCount === 1 ? "" : "s"} uploaded`,
+    `${documentCount} invoice document${documentCount === 1 ? "" : "s"} uploaded`,
+    pdfCount ? `${pdfCount} PDF invoice${pdfCount === 1 ? "" : "s"} included` : "No PDF invoice uploaded",
+    documentNames.length ? `Files: ${documentNames.join(", ")}` : "No document filenames supplied",
+    notes ? "Manager notes supplied" : "No invoice notes supplied",
+  ];
   const steps = [
     step(
       "create_vendor",
       "Review invoice supplier and create vendor if missing",
-      { vendorName: body?.vendorName || "", contactPerson: "", email: "", phone: "", address: "", status: "active" },
-      [`${imageCount} invoice image${imageCount === 1 ? "" : "s"} uploaded`, notes ? "Manager notes supplied" : "No invoice notes supplied"],
+      { vendorName: body?.vendorName || "", contactPerson: "", email: "", phone: "", address: "", status: "active", documentNames },
+      uploadEvidence,
       "high",
-      notes || imageCount ? 0.58 : 0.32
+      notes || imageCount || documentCount ? 0.58 : 0.32
     ),
     step(
       "create_bulk_item",
       "Review invoice lines for bulk or single stock items",
       { invoiceLineCandidates: body?.invoiceLines || [], createMissingOnly: true },
-      ["Human must confirm pack size, unit, cost, and barcode before creation"],
+      ["Human must confirm pack size, unit, cost, and barcode before creation", documentCount ? "Invoice documents attached as review evidence" : "No invoice documents attached"],
       "high",
-      0.46
+      documentCount || imageCount ? 0.5 : 0.46
     ),
     step(
       "create_purchase_order",
       "Create draft purchase order from approved invoice lines",
       { vendorId: null, status: "draft", type: "once_off", items: [] },
-      ["Draft PO is created only after vendor and item lines are approved"],
+      ["Draft PO is created only after vendor and item lines are approved", documentCount ? "PDF/document invoice can be used during review" : "No document invoice supplied"],
       "medium",
-      0.44
+      documentCount || imageCount ? 0.48 : 0.44
     ),
     step(
       "receive_invoice",
       "Receive invoice against approved purchase order",
       { invoiceNumber: body?.invoiceNumber || "", invoiceDate: body?.invoiceDate || null },
-      ["Requires invoice number/date confirmation"],
+      ["Requires invoice number/date confirmation", pdfCount ? "PDF invoice attached" : "No PDF invoice attached"],
       "medium",
       0.42
     ),
@@ -260,15 +278,16 @@ export async function generateInventoryAgentProposal(tenantId: string, body: any
     summary: "Prepared an invoice intake workflow with human approval required at every step.",
     requiresHumanApproval: true,
     steps,
-    warnings: ["Invoice image extraction is experimental. Confirm vendor, units, pack sizes, costs, and quantities before applying anything."],
+    warnings: ["Invoice image/PDF extraction is experimental. Confirm vendor, units, pack sizes, costs, and quantities before applying anything."],
     dataAccess,
   };
 }
 
-export async function applyApprovedInventoryAgentSteps(tenantId: string, steps: InventoryAgentStep[]): Promise<InventoryAgentApplyResult> {
+export async function applyApprovedInventoryAgentSteps(tenantId: string, steps: InventoryAgentStep[], options: { fullAutopilot?: boolean } = {}): Promise<InventoryAgentApplyResult> {
   const result: InventoryAgentApplyResult = { applied: [], skipped: [] };
   for (const item of steps || []) {
-    if (!item.approved) {
+    const approved = options.fullAutopilot || item.approved;
+    if (!approved) {
       result.skipped.push({ stepId: item.id, type: item.type, reason: "Step was not approved" });
       continue;
     }
