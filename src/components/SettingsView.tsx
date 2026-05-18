@@ -1,5 +1,5 @@
 import { usePosStore } from '../store/usePosStore';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
 import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
@@ -22,6 +22,16 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
   const [aiModelsLoading, setAiModelsLoading] = useState(false);
   const [aiModelsError, setAiModelsError] = useState<string | null>(null);
+  const activeTabRef = useRef(activeTab);
+  const aiSettingsRef = useRef<AiSettings | null>(aiSettings);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    aiSettingsRef.current = aiSettings;
+  }, [aiSettings]);
 
   // Workstations state
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
@@ -49,9 +59,14 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
       setTables(tabs || []);
       setPackageLimits(limits);
       try {
-        setAiSettings(await getAiSettings(tenantId));
+        const latestAiSettings = await getAiSettings(tenantId);
+        if (activeTabRef.current !== 'ai' || !aiSettingsRef.current) {
+          setAiSettings(latestAiSettings);
+        }
       } catch {
-        setAiSettings(null);
+        if (activeTabRef.current !== 'ai' || !aiSettingsRef.current) {
+          setAiSettings(null);
+        }
       }
     } catch (err) {
       console.error('Settings data fetch error:', err);
