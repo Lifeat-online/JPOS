@@ -325,6 +325,7 @@ CREATE TABLE IF NOT EXISTS ai_settings (
   enabled SMALLINT DEFAULT 1 CHECK (enabled IN (0, 1)),
   provider TEXT DEFAULT 'openai',
   model TEXT DEFAULT 'gpt-5-mini',
+  api_key TEXT,
   base_url TEXT,
   workspace_slug TEXT,
   insights_enabled SMALLINT DEFAULT 1 CHECK (insights_enabled IN (0, 1)),

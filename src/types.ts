@@ -416,6 +416,7 @@ export interface AiSettings {
   enabled: boolean;
   provider: AiProviderName;
   model: string;
+  apiKey?: string | null;
   baseUrl?: string | null;
   workspaceSlug?: string | null;
   insightsEnabled: boolean;
@@ -423,8 +424,16 @@ export interface AiSettings {
   visibleRoles: AiRole[];
   staffScoreVisibleRoles: AiRole[];
   openAiConfigured?: boolean;
+  apiKeyConfigured?: boolean;
   providerStatus?: Record<AiProviderName, boolean>;
   updatedAt?: string;
+}
+
+export interface AiModelOption {
+  id: string;
+  name: string;
+  provider: AiProviderName;
+  ownedBy?: string;
 }
 
 export interface AiInsight {

@@ -495,6 +495,7 @@ export async function ensureAiSchema() {
         enabled SMALLINT DEFAULT 1 CHECK (enabled IN (0, 1)),
         provider TEXT DEFAULT 'openai',
         model TEXT DEFAULT 'gpt-5-mini',
+        api_key TEXT,
         base_url TEXT,
         workspace_slug TEXT,
         insights_enabled SMALLINT DEFAULT 1 CHECK (insights_enabled IN (0, 1)),
@@ -554,6 +555,7 @@ export async function ensureAiSchema() {
       )
     `);
     await query(`ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS base_url TEXT`);
+    await query(`ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS api_key TEXT`);
     await query(`ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS workspace_slug TEXT`);
     return;
   }
@@ -564,6 +566,7 @@ export async function ensureAiSchema() {
         enabled BOOLEAN DEFAULT TRUE,
         provider VARCHAR(32) DEFAULT 'openai',
         model VARCHAR(64) DEFAULT 'gpt-5-mini',
+        api_key TEXT,
         base_url VARCHAR(255),
         workspace_slug VARCHAR(128),
       insights_enabled BOOLEAN DEFAULT TRUE,
@@ -635,6 +638,7 @@ export async function ensureAiSchema() {
       if (!message.includes("Duplicate column")) throw err;
     }
   };
+  await addAiColumn(`api_key TEXT AFTER model`);
   await addAiColumn(`base_url VARCHAR(255) AFTER model`);
   await addAiColumn(`workspace_slug VARCHAR(128) AFTER base_url`);
 }

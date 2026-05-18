@@ -3,9 +3,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
 import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
-import { apiGet, apiPut, apiPost, apiDelete, getTenantPackageLimits, getAiSettings, updateAiSettings, type TenantPackageLimitsResponse } from '../api';
+import { apiGet, apiPut, apiPost, apiDelete, getTenantPackageLimits, getAiSettings, listAiModels, updateAiSettings, type TenantPackageLimitsResponse } from '../api';
 import { JPOS_PACKAGES } from '../../shared/packageCatalog';
-import type { AiProviderName, AiRole, AiSettings } from '../types';
+import type { AiModelOption, AiProviderName, AiRole, AiSettings } from '../types';
 
 export function SettingsView({ config, setConfig }: { config: AppConfig, setConfig: (c: AppConfig) => void }) {
   const tenantId = usePosStore(state => state.tenantId);
@@ -18,6 +18,10 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const [packageLimits, setPackageLimits] = useState<TenantPackageLimitsResponse | null>(null);
   const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
   const [aiSaving, setAiSaving] = useState(false);
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
+  const [aiModelsLoading, setAiModelsLoading] = useState(false);
+  const [aiModelsError, setAiModelsError] = useState<string | null>(null);
 
   // Workstations state
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
@@ -167,7 +171,12 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     if (!tenantId || !aiSettings) return;
     setAiSaving(true);
     try {
-      setAiSettings(await updateAiSettings(tenantId, aiSettings));
+      const saved = await updateAiSettings(tenantId, {
+        ...aiSettings,
+        ...(aiApiKey.trim() ? { apiKey: aiApiKey.trim() } : {}),
+      });
+      setAiSettings(saved);
+      setAiApiKey('');
       alert('AI settings saved successfully!');
     } catch (err) {
       console.error(err);
@@ -176,6 +185,34 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
       setAiSaving(false);
     }
   };
+
+  const refreshAiModels = async (settingsOverride?: Partial<AiSettings>) => {
+    if (!tenantId || !aiSettings) return;
+    const requestSettings = {
+      ...aiSettings,
+      ...settingsOverride,
+      ...(aiApiKey.trim() ? { apiKey: aiApiKey.trim() } : {}),
+    };
+    setAiModelsLoading(true);
+    setAiModelsError(null);
+    try {
+      const response = await listAiModels(tenantId, requestSettings);
+      setAiModels(response.models || []);
+      if (response.models?.length && !response.models.some(model => model.id === requestSettings.model)) {
+        setAiSettings({ ...aiSettings, ...settingsOverride, model: response.models[0].id });
+      }
+    } catch (err: any) {
+      setAiModels([]);
+      setAiModelsError(err?.message || 'Unable to load models');
+    } finally {
+      setAiModelsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setAiModels([]);
+    setAiModelsError(null);
+  }, [aiSettings?.provider, aiSettings?.baseUrl, aiSettings?.workspaceSlug]);
 
   const [categoryInput, setCategoryInput] = useState<{ isOpen: boolean, type: 'section'|'category'|'subcategory', section?: string, category?: string }>({ isOpen: false, type: 'section' });
   const [inputValue, setInputValue] = useState("");
@@ -552,12 +589,15 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                         onChange={e => {
                           const provider = e.target.value as AiProviderName;
                           const meta = aiProviders.find(item => item.id === provider);
-                          setAiSettings({
+                          const nextSettings = {
                             ...aiSettings,
                             provider,
                             model: meta?.defaultModel || aiSettings.model,
                             baseUrl: provider === 'ollama' ? (aiSettings.baseUrl || 'http://localhost:11434') : provider === 'anythingllm' ? (aiSettings.baseUrl || 'http://localhost:3001') : aiSettings.baseUrl,
-                          });
+                          };
+                          setAiSettings(nextSettings);
+                          setAiModels([]);
+                          setAiModelsError(null);
                         }}
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
                       >
@@ -570,17 +610,67 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                       </p>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Model</label>
-                      <input
-                        value={aiSettings.model}
-                        onChange={e => setAiSettings({ ...aiSettings, model: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
-                      />
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-xs font-black uppercase tracking-widest text-slate-500">Model</label>
+                        <button
+                          type="button"
+                          onClick={() => refreshAiModels()}
+                          disabled={aiModelsLoading}
+                          className="text-[10px] font-black uppercase tracking-widest text-primary disabled:text-slate-400"
+                        >
+                          {aiModelsLoading ? 'Loading...' : 'Refresh models'}
+                        </button>
+                      </div>
+                      {aiModels.length > 0 ? (
+                        <select
+                          value={aiSettings.model}
+                          onChange={e => setAiSettings({ ...aiSettings, model: e.target.value })}
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        >
+                          {aiModels.map(model => (
+                            <option key={model.id} value={model.id}>{model.name || model.id}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={aiSettings.model}
+                          onChange={e => setAiSettings({ ...aiSettings, model: e.target.value })}
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                        />
+                      )}
                       <p className="text-xs font-semibold text-slate-400">
-                        {aiSettings.providerStatus?.[aiSettings.provider] ? 'Selected provider is configured' : 'Selected provider is not fully configured; deterministic fallback is active'}
+                        {aiModelsError || (aiSettings.providerStatus?.[aiSettings.provider] ? 'Selected provider is configured' : 'Selected provider is not fully configured; deterministic fallback is active')}
                       </p>
                     </div>
                   </div>
+
+                  {aiSettings.provider !== 'ollama' && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">
+                        API key {aiSettings.apiKeyConfigured ? '(saved)' : ''}
+                      </label>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <input
+                          type="password"
+                          value={aiApiKey}
+                          onChange={e => setAiApiKey(e.target.value)}
+                          className="min-w-0 flex-1 px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                          placeholder={aiSettings.apiKeyConfigured ? 'Leave blank to keep saved key' : 'Paste provider API key'}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => refreshAiModels()}
+                          disabled={aiModelsLoading || (!aiApiKey.trim() && !aiSettings.apiKeyConfigured && !aiSettings.providerStatus?.[aiSettings.provider])}
+                          className="px-4 py-3 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-xs font-black uppercase tracking-widest disabled:opacity-50"
+                        >
+                          Load models
+                        </button>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-400">
+                        Keys are saved server-side for this tenant and are never returned to the browser.
+                      </p>
+                    </div>
+                  )}
 
                   {(aiSettings.provider === 'ollama' || aiSettings.provider === 'anythingllm') && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -91,13 +91,14 @@ import {
   canManageAi,
   generateInsights,
   generateStaffScores,
-  getAiProviderStatus,
   getAiSettings,
+  listAiModels,
   listInsights,
   listStaffScores,
   requireAiRoleAccess,
   requireAiStaffScoreAccess,
   saveAiSettings,
+  serializeAiSettings,
 } from "./ai.js";
 
 dotenv.config();
@@ -599,11 +600,7 @@ export async function createApp(io: any = null) {
     async (req, res) => {
       try {
         const settings = await getAiSettings(req.params.tenantId);
-        res.json({
-          ...settings,
-          openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
-          providerStatus: getAiProviderStatus(settings),
-        });
+        res.json(serializeAiSettings(settings));
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -620,13 +617,25 @@ export async function createApp(io: any = null) {
           return res.status(403).json({ error: "Only managers, admins, and devs can manage AI settings" });
         }
         const settings = await saveAiSettings(req.params.tenantId, req.body || {});
-        res.json({
-          ...settings,
-          openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
-          providerStatus: getAiProviderStatus(settings),
-        });
+        res.json(serializeAiSettings(settings));
       } catch (err: any) {
         res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/mariadb/tenants/:tenantId/ai/models",
+    requireAuth,
+    requireAiPackageAccess,
+    async (req, res) => {
+      try {
+        if (!canManageAi(req.user?.role)) {
+          return res.status(403).json({ error: "Only managers, admins, and devs can manage AI settings" });
+        }
+        res.json({ models: await listAiModels(req.params.tenantId, req.body || {}) });
+      } catch (err: any) {
+        res.status(400).json({ error: err.message });
       }
     }
   );

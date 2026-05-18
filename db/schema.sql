@@ -341,6 +341,7 @@ CREATE TABLE IF NOT EXISTS ai_settings (
   enabled BOOLEAN DEFAULT TRUE,
   provider VARCHAR(32) DEFAULT 'openai',
   model VARCHAR(64) DEFAULT 'gpt-5-mini',
+  api_key TEXT,
   base_url VARCHAR(255),
   workspace_slug VARCHAR(128),
   insights_enabled BOOLEAN DEFAULT TRUE,

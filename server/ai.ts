@@ -11,6 +11,7 @@ export interface AiSettings {
   enabled: boolean;
   provider: AiProviderName;
   model: string;
+  apiKey?: string | null;
   baseUrl?: string | null;
   workspaceSlug?: string | null;
   insightsEnabled: boolean;
@@ -18,6 +19,13 @@ export interface AiSettings {
   visibleRoles: AiRole[];
   staffScoreVisibleRoles: AiRole[];
   updatedAt?: string;
+}
+
+export interface AiModelOption {
+  id: string;
+  name: string;
+  provider: AiProviderName;
+  ownedBy?: string;
 }
 
 export interface AiInsight {
@@ -57,6 +65,7 @@ const DEFAULT_SETTINGS: Omit<AiSettings, "tenantId"> = {
   enabled: true,
   provider: "openai",
   model: process.env.OPENAI_MODEL || "gpt-5-mini",
+  apiKey: null,
   baseUrl: null,
   workspaceSlug: null,
   insightsEnabled: true,
@@ -118,11 +127,21 @@ export function canManageAi(role: unknown) {
 
 export function getAiProviderStatus(settings?: Partial<AiSettings>) {
   return {
-    openai: Boolean(process.env.OPENAI_API_KEY),
+    openai: Boolean(settings?.apiKey || process.env.OPENAI_API_KEY),
     ollama: Boolean((settings?.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").trim()),
-    anythingllm: Boolean(process.env.ANYTHINGLLM_API_KEY && (settings?.workspaceSlug || process.env.ANYTHINGLLM_WORKSPACE_SLUG)),
-    google: Boolean(process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY),
-    openrouter: Boolean(process.env.OPENROUTER_API_KEY),
+    anythingllm: Boolean((settings?.apiKey || process.env.ANYTHINGLLM_API_KEY) && (settings?.workspaceSlug || process.env.ANYTHINGLLM_WORKSPACE_SLUG)),
+    google: Boolean(settings?.apiKey || process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY),
+    openrouter: Boolean(settings?.apiKey || process.env.OPENROUTER_API_KEY),
+  };
+}
+
+export function serializeAiSettings(settings: AiSettings) {
+  return {
+    ...settings,
+    apiKey: undefined,
+    apiKeyConfigured: Boolean(getProviderApiKey(settings)),
+    openAiConfigured: Boolean(settings.provider === "openai" ? getProviderApiKey(settings) : process.env.OPENAI_API_KEY),
+    providerStatus: getAiProviderStatus(settings),
   };
 }
 
@@ -160,6 +179,7 @@ export async function getAiSettings(tenantId: string): Promise<AiSettings> {
     enabled: asBool(row.enabled, DEFAULT_SETTINGS.enabled),
     provider: (row.provider || DEFAULT_SETTINGS.provider) as AiProviderName,
     model: row.model || DEFAULT_SETTINGS.model,
+    apiKey: row.api_key || null,
     baseUrl: row.base_url || null,
     workspaceSlug: row.workspace_slug || null,
     insightsEnabled: asBool(row.insights_enabled, DEFAULT_SETTINGS.insightsEnabled),
@@ -177,6 +197,7 @@ export async function saveAiSettings(tenantId: string, input: Partial<AiSettings
     enabled: input.enabled ?? current.enabled,
     provider: input.provider || current.provider,
     model: input.model || current.model,
+    apiKey: input.apiKey !== undefined ? input.apiKey : current.apiKey,
     baseUrl: input.baseUrl !== undefined ? input.baseUrl : current.baseUrl,
     workspaceSlug: input.workspaceSlug !== undefined ? input.workspaceSlug : current.workspaceSlug,
     insightsEnabled: input.insightsEnabled ?? current.insightsEnabled,
@@ -188,13 +209,14 @@ export async function saveAiSettings(tenantId: string, input: Partial<AiSettings
   await query(
     pg
       ? `INSERT INTO ai_settings (
-          tenant_id, enabled, provider, model, base_url, workspace_slug, insights_enabled, staff_scoring_enabled,
+          tenant_id, enabled, provider, model, api_key, base_url, workspace_slug, insights_enabled, staff_scoring_enabled,
           visible_roles, staff_score_visible_roles, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
         ON CONFLICT (tenant_id) DO UPDATE SET
           enabled = EXCLUDED.enabled,
           provider = EXCLUDED.provider,
           model = EXCLUDED.model,
+          api_key = COALESCE(EXCLUDED.api_key, ai_settings.api_key),
           base_url = EXCLUDED.base_url,
           workspace_slug = EXCLUDED.workspace_slug,
           insights_enabled = EXCLUDED.insights_enabled,
@@ -203,13 +225,14 @@ export async function saveAiSettings(tenantId: string, input: Partial<AiSettings
           staff_score_visible_roles = EXCLUDED.staff_score_visible_roles,
           updated_at = NOW()`
       : `INSERT INTO ai_settings (
-          tenant_id, enabled, provider, model, base_url, workspace_slug, insights_enabled, staff_scoring_enabled,
+          tenant_id, enabled, provider, model, api_key, base_url, workspace_slug, insights_enabled, staff_scoring_enabled,
           visible_roles, staff_score_visible_roles, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
         ON DUPLICATE KEY UPDATE
           enabled = VALUES(enabled),
           provider = VALUES(provider),
           model = VALUES(model),
+          api_key = COALESCE(VALUES(api_key), api_key),
           base_url = VALUES(base_url),
           workspace_slug = VALUES(workspace_slug),
           insights_enabled = VALUES(insights_enabled),
@@ -222,6 +245,7 @@ export async function saveAiSettings(tenantId: string, input: Partial<AiSettings
       next.enabled ? 1 : 0,
       next.provider,
       next.model,
+      next.apiKey?.trim() || null,
       next.baseUrl || null,
       next.workspaceSlug || null,
       next.insightsEnabled ? 1 : 0,
@@ -231,6 +255,37 @@ export async function saveAiSettings(tenantId: string, input: Partial<AiSettings
     ]
   );
   return getAiSettings(tenantId);
+}
+
+function getProviderApiKey(settings: Partial<AiSettings>) {
+  const configured = settings.apiKey?.trim();
+  if (configured) return configured;
+  if (settings.provider === "openai") return process.env.OPENAI_API_KEY || "";
+  if (settings.provider === "anythingllm") return process.env.ANYTHINGLLM_API_KEY || "";
+  if (settings.provider === "google") return process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || "";
+  if (settings.provider === "openrouter") return process.env.OPENROUTER_API_KEY || "";
+  return "";
+}
+
+function uniqueModels(models: AiModelOption[]) {
+  const seen = new Set<string>();
+  return models
+    .filter((model) => {
+      if (!model.id || seen.has(model.id)) return false;
+      seen.add(model.id);
+      return true;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function listAiModels(tenantId: string, input: Partial<AiSettings> = {}): Promise<AiModelOption[]> {
+  const settings = { ...(await getAiSettings(tenantId)), ...input };
+  if (settings.provider === "openai") return listOpenAiModels(settings);
+  if (settings.provider === "ollama") return listOllamaModels(settings);
+  if (settings.provider === "anythingllm") return listAnythingLlmModels(settings);
+  if (settings.provider === "google") return listGoogleModels(settings);
+  if (settings.provider === "openrouter") return listOpenRouterModels(settings);
+  throw new Error(`Unsupported AI provider: ${settings.provider}`);
 }
 
 function sanitizeRoles(roles: string[]) {
@@ -583,7 +638,7 @@ async function callProviderForStaffScores(settings: AiSettings, scores: StaffSco
 }
 
 async function callConfiguredProvider(settings: AiSettings, payload: any): Promise<string> {
-  if (settings.provider === "openai") return callOpenAi(settings.model, payload);
+  if (settings.provider === "openai") return callOpenAi(settings, payload);
   if (settings.provider === "ollama") return callOllama(settings, payload);
   if (settings.provider === "anythingllm") return callAnythingLlm(settings, payload);
   if (settings.provider === "google") return callGoogle(settings, payload);
@@ -595,8 +650,103 @@ function providerPrompt(payload: any) {
   return JSON.stringify(payload);
 }
 
-async function callOpenAi(model: string, payload: any): Promise<string> {
-  const key = process.env.OPENAI_API_KEY;
+async function listOpenAiModels(settings: Partial<AiSettings>) {
+  const key = getProviderApiKey({ ...settings, provider: "openai" });
+  if (!key) throw new Error("OpenAI API key is not configured");
+  const response = await fetch("https://api.openai.com/v1/models", {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `OpenAI model list failed [${response.status}]`);
+  return uniqueModels((body.data || []).map((model: any) => ({
+    id: model.id,
+    name: model.id,
+    provider: "openai" as const,
+    ownedBy: model.owned_by,
+  })));
+}
+
+async function listOllamaModels(settings: Partial<AiSettings>) {
+  const baseUrl = (settings.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/api/tags`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error || `Ollama model list failed [${response.status}]`);
+  return uniqueModels((body.models || []).map((model: any) => ({
+    id: model.name,
+    name: model.name,
+    provider: "ollama" as const,
+    ownedBy: model.details?.family,
+  })));
+}
+
+async function listAnythingLlmModels(settings: Partial<AiSettings>) {
+  const baseUrl = (settings.baseUrl || process.env.ANYTHINGLLM_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
+  const key = getProviderApiKey({ ...settings, provider: "anythingllm" });
+  if (!key) throw new Error("AnythingLLM API key is not configured");
+  const headers = { Authorization: `Bearer ${key}` };
+  const endpoints = [
+    "/api/v1/system/llm",
+    "/api/v1/system/models",
+    "/api/v1/admin/llm",
+  ];
+
+  let lastError = "AnythingLLM model list failed";
+  for (const endpoint of endpoints) {
+    const response = await fetch(`${baseUrl}${endpoint}`, { headers });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      lastError = body?.error || body?.message || `${endpoint} failed [${response.status}]`;
+      continue;
+    }
+    const rawModels =
+      body.models ||
+      body.availableModels ||
+      body.llm?.models ||
+      body.providers?.flatMap((provider: any) => provider.models || []) ||
+      [];
+    const models = Array.isArray(rawModels)
+      ? rawModels.map((model: any) => {
+          const id = typeof model === "string" ? model : model.id || model.name || model.model;
+          return { id, name: id, provider: "anythingllm" as const, ownedBy: model.provider || model.family };
+        })
+      : [];
+    if (models.length) return uniqueModels(models);
+  }
+  throw new Error(lastError);
+}
+
+async function listGoogleModels(settings: Partial<AiSettings>) {
+  const key = getProviderApiKey({ ...settings, provider: "google" });
+  if (!key) throw new Error("Google AI API key is not configured");
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `Google model list failed [${response.status}]`);
+  return uniqueModels((body.models || [])
+    .filter((model: any) => (model.supportedGenerationMethods || []).includes("generateContent"))
+    .map((model: any) => {
+      const id = String(model.name || "").replace(/^models\//, "");
+      return { id, name: model.displayName || id, provider: "google" as const, ownedBy: "google" };
+    }));
+}
+
+async function listOpenRouterModels(settings: Partial<AiSettings>) {
+  const key = getProviderApiKey({ ...settings, provider: "openrouter" });
+  if (!key) throw new Error("OpenRouter API key is not configured");
+  const response = await fetch("https://openrouter.ai/api/v1/models", {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `OpenRouter model list failed [${response.status}]`);
+  return uniqueModels((body.data || []).map((model: any) => ({
+    id: model.id,
+    name: model.name || model.id,
+    provider: "openrouter" as const,
+    ownedBy: model.architecture?.modality,
+  })));
+}
+
+async function callOpenAi(settings: AiSettings, payload: any): Promise<string> {
+  const key = getProviderApiKey(settings);
   if (!key) throw new Error("OPENAI_API_KEY is not configured");
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -605,7 +755,7 @@ async function callOpenAi(model: string, payload: any): Promise<string> {
       Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model,
+      model: settings.model,
       input: [
         {
           role: "system",
@@ -647,7 +797,7 @@ async function callOllama(settings: AiSettings, payload: any): Promise<string> {
 async function callAnythingLlm(settings: AiSettings, payload: any): Promise<string> {
   const baseUrl = (settings.baseUrl || process.env.ANYTHINGLLM_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
   const workspaceSlug = settings.workspaceSlug || process.env.ANYTHINGLLM_WORKSPACE_SLUG;
-  const key = process.env.ANYTHINGLLM_API_KEY;
+  const key = getProviderApiKey(settings);
   if (!key) throw new Error("ANYTHINGLLM_API_KEY is not configured");
   if (!workspaceSlug) throw new Error("AnythingLLM workspace slug is not configured");
   const response = await fetch(`${baseUrl}/api/v1/workspace/${encodeURIComponent(workspaceSlug)}/chat`, {
@@ -667,7 +817,7 @@ async function callAnythingLlm(settings: AiSettings, payload: any): Promise<stri
 }
 
 async function callGoogle(settings: AiSettings, payload: any): Promise<string> {
-  const key = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+  const key = getProviderApiKey(settings);
   if (!key) throw new Error("GOOGLE_AI_API_KEY or GEMINI_API_KEY is not configured");
   const model = settings.model || process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash";
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
@@ -691,7 +841,7 @@ async function callGoogle(settings: AiSettings, payload: any): Promise<string> {
 }
 
 async function callOpenRouter(settings: AiSettings, payload: any): Promise<string> {
-  const key = process.env.OPENROUTER_API_KEY;
+  const key = getProviderApiKey(settings);
   if (!key) throw new Error("OPENROUTER_API_KEY is not configured");
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",

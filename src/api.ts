@@ -4,7 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
-import type { AiInsight, AiSettings, AiStaffScore } from './types';
+import type { AiInsight, AiModelOption, AiSettings, AiStaffScore } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
@@ -431,6 +431,10 @@ export function getAiSettings(tenantId: string) {
 
 export function updateAiSettings(tenantId: string, settings: Partial<AiSettings>) {
   return apiPut<AiSettings>(`/api/mariadb/tenants/${tenantId}/ai/settings`, settings);
+}
+
+export function listAiModels(tenantId: string, settings: Partial<AiSettings>) {
+  return apiPost<{ models: AiModelOption[] }>(`/api/mariadb/tenants/${tenantId}/ai/models`, settings);
 }
 
 export function getAiInsights(tenantId: string) {
