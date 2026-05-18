@@ -78,3 +78,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - `npm.cmd run lint` passed after 429 guidance update.
 - `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after 429 guidance update.
 - `npm.cmd run build` passed after 429 guidance update with the existing Vite large-chunk warning.
+- Vertex AI blocked `aiplatform.googleapis.com GenerateContent` errors now get explicit Google Cloud remediation guidance and Gemini API-key fallback where possible.
+- `npm.cmd run lint` passed after Vertex blocked API guidance update.
+- `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after Vertex blocked API guidance update.
+- `npm.cmd run build` passed after Vertex blocked API guidance update with the existing Vite large-chunk warning.

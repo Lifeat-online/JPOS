@@ -140,6 +140,18 @@ function providerErrorMessage(body: any, fallback: string, status?: number) {
   ].filter(Boolean).join(" ");
 }
 
+function isVertexBlockedError(message: string) {
+  return /aiplatform\.googleapis\.com/i.test(message) && /blocked|permission|denied|forbidden/i.test(message);
+}
+
+function vertexBlockedGuidance(message: string) {
+  return [
+    message,
+    "Vertex AI blocked the GenerateContent request. Enable the Vertex AI API for the Google Cloud project, remove API restrictions that block aiplatform.googleapis.com, and make sure the service account has Vertex AI user/prediction permissions.",
+    "If this is a Gemini API key rather than a Vertex service account or OAuth token, choose the Google Gemini provider instead of Vertex AI.",
+  ].join(" ");
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value === "string") {
@@ -948,10 +960,10 @@ async function callVertexWithFiles(settings: AiSettings, payload: any, images: s
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = body?.error?.message || `Vertex invoice extraction failed [${response.status}]`;
-    if (/missing authentication header/i.test(message) && key) {
+    if ((/missing authentication header/i.test(message) || isVertexBlockedError(message)) && key) {
       return callGeminiApiKeyWithFiles(key, model, payload, images, documents, "Vertex fallback Gemini invoice extraction");
     }
-    throw new Error(message);
+    throw new Error(isVertexBlockedError(message) ? vertexBlockedGuidance(message) : message);
   }
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
@@ -1105,8 +1117,8 @@ async function listVertexModels(settings: Partial<AiSettings>) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = body?.error?.message || `Vertex AI model list failed [${response.status}]`;
-    if (/missing authentication header/i.test(message) && key) return listGoogleModels({ ...settings, provider: "google", apiKey: key });
-    throw new Error(message);
+    if ((/missing authentication header/i.test(message) || isVertexBlockedError(message)) && key) return listGoogleModels({ ...settings, provider: "google", apiKey: key });
+    throw new Error(isVertexBlockedError(message) ? vertexBlockedGuidance(message) : message);
   }
 
   return uniqueModels((body.publisherModels || body.models || []).map((model: any) => {
@@ -1334,8 +1346,8 @@ async function callVertexText(settings: AiSettings, message: string, images: str
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = providerErrorMessage(body, `Vertex AI test failed [${response.status}]`, response.status);
-    if (/missing authentication header/i.test(error) && key) return callGoogleText({ ...settings, provider: "google", apiKey: key }, message, images, documents);
-    throw new Error(error);
+    if ((/missing authentication header/i.test(error) || isVertexBlockedError(error)) && key) return callGoogleText({ ...settings, provider: "google", apiKey: key }, message, images, documents);
+    throw new Error(isVertexBlockedError(error) ? vertexBlockedGuidance(error) : error);
   }
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
@@ -1371,8 +1383,8 @@ async function callVertex(settings: AiSettings, payload: any): Promise<string> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = body?.error?.message || `Vertex AI request failed [${response.status}]`;
-    if (/missing authentication header/i.test(message) && key) return callGoogle({ ...settings, provider: "google", apiKey: key }, payload);
-    throw new Error(message);
+    if ((/missing authentication header/i.test(message) || isVertexBlockedError(message)) && key) return callGoogle({ ...settings, provider: "google", apiKey: key }, payload);
+    throw new Error(isVertexBlockedError(message) ? vertexBlockedGuidance(message) : message);
   }
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
