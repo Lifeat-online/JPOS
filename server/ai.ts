@@ -88,6 +88,8 @@ const DEFAULT_SETTINGS: Omit<AiSettings, "tenantId"> = {
   staffScoreVisibleRoles: ["admin", "manager", "dev"],
 };
 
+const AI_PROVIDERS: AiProviderName[] = ["openai", "ollama", "anythingllm", "google", "vertex", "openrouter"];
+
 function asBool(value: unknown, fallback = false) {
   if (value === null || value === undefined) return fallback;
   if (typeof value === "boolean") return value;
@@ -174,6 +176,40 @@ function normalizeOpenRouterModel(model: string | undefined | null) {
   return aliases[cleaned.toLowerCase()] || cleaned;
 }
 
+function normalizeProviderApiKey(value: string) {
+  const trimmed = String(value || "").trim().replace(/^["']|["']$/g, "");
+  if (/^Bearer\s+/i.test(trimmed)) return trimmed.replace(/^Bearer\s+/i, "").trim();
+  return trimmed;
+}
+
+function parseProviderKeyStore(raw: unknown, legacyProvider?: AiProviderName): Partial<Record<AiProviderName, string>> {
+  const text = String(raw || "").trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return AI_PROVIDERS.reduce<Partial<Record<AiProviderName, string>>>((acc, provider) => {
+        const value = normalizeProviderApiKey(String((parsed as any)[provider] || ""));
+        if (value) acc[provider] = value;
+        return acc;
+      }, {});
+    }
+  } catch {
+    // Legacy single-key storage falls through.
+  }
+  const legacyKey = normalizeProviderApiKey(text);
+  return legacyProvider && legacyKey ? { [legacyProvider]: legacyKey } : {};
+}
+
+function serializeProviderKeyStore(keys: Partial<Record<AiProviderName, string>>) {
+  const cleaned = AI_PROVIDERS.reduce<Partial<Record<AiProviderName, string>>>((acc, provider) => {
+    const value = normalizeProviderApiKey(keys[provider] || "");
+    if (value) acc[provider] = value;
+    return acc;
+  }, {});
+  return Object.keys(cleaned).length ? JSON.stringify(cleaned) : null;
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value === "string") {
@@ -209,16 +245,16 @@ export function canManageAi(role: unknown) {
 
 export function getAiProviderStatus(settings?: Partial<AiSettings>) {
   return {
-    openai: Boolean(settings?.apiKey || process.env.OPENAI_API_KEY),
+    openai: Boolean(getProviderApiKey({ ...settings, provider: "openai" })),
     ollama: Boolean((settings?.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").trim()),
-    anythingllm: Boolean((settings?.apiKey || process.env.ANYTHINGLLM_API_KEY) && (settings?.workspaceSlug || process.env.ANYTHINGLLM_WORKSPACE_SLUG)),
-    google: Boolean(settings?.apiKey || process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY),
+    anythingllm: Boolean(getProviderApiKey({ ...settings, provider: "anythingllm" }) && (settings?.workspaceSlug || process.env.ANYTHINGLLM_WORKSPACE_SLUG)),
+    google: Boolean(getProviderApiKey({ ...settings, provider: "google" })),
     vertex: Boolean(
-      (settings?.apiKey || process.env.GOOGLE_VERTEX_API_KEY) &&
+      getProviderApiKey({ ...settings, provider: "vertex" }) &&
       (settings?.workspaceSlug || process.env.GOOGLE_VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT) &&
       (settings?.baseUrl || process.env.GOOGLE_VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION)
     ),
-    openrouter: Boolean(settings?.apiKey || process.env.OPENROUTER_API_KEY),
+    openrouter: Boolean(getProviderApiKey({ ...settings, provider: "openrouter" })),
   };
 }
 
@@ -279,12 +315,17 @@ export async function getAiSettings(tenantId: string): Promise<AiSettings> {
 
 export async function saveAiSettings(tenantId: string, input: Partial<AiSettings>): Promise<AiSettings> {
   const current = await getAiSettings(tenantId);
+  const provider = input.provider || current.provider;
+  const providerKeys = parseProviderKeyStore(current.apiKey, current.provider);
+  if (input.apiKey !== undefined && input.apiKey.trim()) {
+    providerKeys[provider] = normalizeProviderApiKey(input.apiKey);
+  }
   const next: AiSettings = {
     ...current,
     enabled: input.enabled ?? current.enabled,
-    provider: input.provider || current.provider,
+    provider,
     model: input.model || current.model,
-    apiKey: input.apiKey !== undefined ? input.apiKey : current.apiKey,
+    apiKey: serializeProviderKeyStore(providerKeys),
     baseUrl: input.baseUrl !== undefined ? input.baseUrl : current.baseUrl,
     workspaceSlug: input.workspaceSlug !== undefined ? input.workspaceSlug : current.workspaceSlug,
     insightsEnabled: input.insightsEnabled ?? current.insightsEnabled,
@@ -346,19 +387,18 @@ export async function saveAiSettings(tenantId: string, input: Partial<AiSettings
 
 function getProviderApiKey(settings: Partial<AiSettings>) {
   const configured = settings.apiKey?.trim();
-  if (configured) return normalizeProviderApiKey(configured);
+  if (configured) {
+    const providerKeys = parseProviderKeyStore(configured);
+    const scopedKey = settings.provider ? providerKeys[settings.provider] : "";
+    if (scopedKey) return scopedKey;
+    if (!configured.startsWith("{")) return normalizeProviderApiKey(configured);
+  }
   if (settings.provider === "openai") return process.env.OPENAI_API_KEY || "";
   if (settings.provider === "anythingllm") return process.env.ANYTHINGLLM_API_KEY || "";
   if (settings.provider === "google") return process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || "";
   if (settings.provider === "vertex") return process.env.GOOGLE_VERTEX_API_KEY || "";
   if (settings.provider === "openrouter") return normalizeProviderApiKey(process.env.OPENROUTER_API_KEY || "");
   return "";
-}
-
-function normalizeProviderApiKey(value: string) {
-  const trimmed = String(value || "").trim().replace(/^["']|["']$/g, "");
-  if (/^Bearer\s+/i.test(trimmed)) return trimmed.replace(/^Bearer\s+/i, "").trim();
-  return trimmed;
 }
 
 function getVertexConfig(settings: Partial<AiSettings>) {

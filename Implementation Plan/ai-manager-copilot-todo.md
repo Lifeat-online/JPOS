@@ -86,3 +86,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - `npm.cmd run lint` passed after OpenRouter auth/model normalization.
 - `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after OpenRouter auth/model normalization.
 - `npm.cmd run build` passed after OpenRouter auth/model normalization with the existing Vite large-chunk warning.
+- AI keys are now stored and checked per provider so Google/Vertex/OpenAI keys are not reused for OpenRouter.
+- `npm.cmd run lint` passed after provider-scoped key storage.
+- `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after provider-scoped key storage.
+- `npm.cmd run build` passed after provider-scoped key storage with the existing Vite large-chunk warning.
