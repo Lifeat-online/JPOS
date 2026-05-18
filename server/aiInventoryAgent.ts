@@ -294,6 +294,24 @@ export async function generateInventoryAgentProposal(tenantId: string, body: any
     extractedLines.length ? `${extractedLines.length} invoice line candidate${extractedLines.length === 1 ? "" : "s"} extracted` : "No invoice line candidates extracted",
     notes ? "Manager notes supplied" : "No invoice notes supplied",
   ];
+  if (!aiExtraction || (extractedLines.length === 0 && !extractedVendorName)) {
+    return {
+      id: proposalId(mode),
+      mode,
+      status: "draft",
+      summary: aiError
+        ? "AI could not read the invoice because the provider call failed."
+        : "AI could not extract usable vendor or line items from this invoice.",
+      requiresHumanApproval: true,
+      steps: [],
+      warnings: [
+        aiError ? `AI provider error: ${aiError}` : "No vendor or invoice lines were extracted.",
+        "Full autopilot did not apply anything because extraction did not produce safe payloads.",
+        "Check the configured AI provider/model supports invoice image or PDF input, then retry.",
+      ],
+      dataAccess,
+    };
+  }
   const steps: InventoryAgentStep[] = [
     step(
       "create_vendor",

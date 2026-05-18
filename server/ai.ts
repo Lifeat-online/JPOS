@@ -1,5 +1,6 @@
 import { query, isPostgres } from "./db.js";
 import type { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
 
 export type AiRole = "admin" | "manager" | "dev" | "cashier" | "chef";
 export type AiProviderName = "openai" | "ollama" | "anythingllm" | "google" | "vertex" | "openrouter";
@@ -287,8 +288,12 @@ function getProviderApiKey(settings: Partial<AiSettings>) {
 }
 
 function getVertexConfig(settings: Partial<AiSettings>) {
+  const configured = getProviderApiKey({ ...settings, provider: "vertex" });
+  const bearer = configured.startsWith("Bearer ") ? configured.slice("Bearer ".length).trim() : configured;
   return {
-    key: getProviderApiKey({ ...settings, provider: "vertex" }),
+    key: configured,
+    accessToken: bearer.startsWith("ya29.") || bearer.startsWith("ya29_") ? bearer : (process.env.GOOGLE_VERTEX_ACCESS_TOKEN || ""),
+    serviceAccountJson: configured.trim().startsWith("{") ? configured : (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT_JSON || ""),
     projectId: settings.workspaceSlug || process.env.GOOGLE_VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || "",
     location: settings.baseUrl || process.env.GOOGLE_VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || "us-central1",
   };
@@ -683,6 +688,50 @@ function dataUrlPayload(dataUrl: string) {
   };
 }
 
+function base64Url(input: string | Buffer) {
+  return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function parseServiceAccount(raw: string) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    try {
+      return JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function getVertexBearerToken(settings: Partial<AiSettings>) {
+  const cfg = getVertexConfig(settings);
+  if (cfg.accessToken) return cfg.accessToken;
+  const account = parseServiceAccount(cfg.serviceAccountJson);
+  if (!account?.client_email || !account?.private_key) return "";
+  const now = Math.floor(Date.now() / 1000);
+  const assertion = `${base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }))}.${base64Url(JSON.stringify({
+    iss: account.client_email,
+    scope: "https://www.googleapis.com/auth/cloud-platform",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+  }))}`;
+  const signature = crypto.createSign("RSA-SHA256").update(assertion).sign(account.private_key);
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: `${assertion}.${base64Url(signature)}`,
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error_description || body?.error || `Vertex service account auth failed [${response.status}]`);
+  return body.access_token || "";
+}
+
 function buildInvoiceExtractionPayload(input: AiInvoiceExtractionInput) {
   return {
     task: "Extract supplier invoice data for JPOS inventory automation. Return compact valid JSON only.",
@@ -790,6 +839,10 @@ async function callGoogleWithFiles(settings: AiSettings, payload: any, images: s
   const key = getProviderApiKey(settings);
   if (!key) throw new Error("GOOGLE_AI_API_KEY or GEMINI_API_KEY is not configured");
   const model = settings.model || process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash";
+  return callGeminiApiKeyWithFiles(key, model, payload, images, documents, "Google invoice extraction");
+}
+
+async function callGeminiApiKeyWithFiles(key: string, model: string, payload: any, images: string[], documents: AiFileInput[], label: string): Promise<string> {
   const parts: any[] = [{ text: `Return compact valid JSON only.\n${providerPrompt(payload)}` }];
   for (const dataUrl of [...images, ...documents.map((doc) => doc.dataUrl)]) {
     const parsed = dataUrlPayload(dataUrl);
@@ -804,7 +857,7 @@ async function callGoogleWithFiles(settings: AiSettings, payload: any, images: s
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.message || `Google invoice extraction failed [${response.status}]`);
+  if (!response.ok) throw new Error(body?.error?.message || `${label} failed [${response.status}]`);
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
 
@@ -814,16 +867,21 @@ async function callVertexWithFiles(settings: AiSettings, payload: any, images: s
   if (!projectId) throw new Error("Google Vertex AI project ID is required");
   if (!location) throw new Error("Google Vertex AI location is required");
   const model = settings.model || process.env.GOOGLE_VERTEX_MODEL || "gemini-2.5-flash";
+  const token = await getVertexBearerToken(settings);
   const parts: any[] = [{ text: `Return compact valid JSON only.\n${providerPrompt(payload)}` }];
   for (const dataUrl of [...images, ...documents.map((doc) => doc.dataUrl)]) {
     const parsed = dataUrlPayload(dataUrl);
     if (parsed.base64) parts.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } });
   }
+  const querySuffix = token ? "" : `?key=${encodeURIComponent(key)}`;
   const response = await fetch(
-    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent${querySuffix}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({
         contents: [{ role: "user", parts }],
         generationConfig: { responseMimeType: "application/json" },
@@ -831,7 +889,13 @@ async function callVertexWithFiles(settings: AiSettings, payload: any, images: s
     }
   );
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.message || `Vertex invoice extraction failed [${response.status}]`);
+  if (!response.ok) {
+    const message = body?.error?.message || `Vertex invoice extraction failed [${response.status}]`;
+    if (/missing authentication header/i.test(message) && key) {
+      return callGeminiApiKeyWithFiles(key, model, payload, images, documents, "Vertex fallback Gemini invoice extraction");
+    }
+    throw new Error(message);
+  }
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
 
@@ -970,15 +1034,23 @@ async function listGoogleModels(settings: Partial<AiSettings>) {
 
 async function listVertexModels(settings: Partial<AiSettings>) {
   const { key, projectId, location } = getVertexConfig(settings);
-  if (!key) throw new Error("Google Vertex AI API key is not configured");
   if (!projectId) throw new Error("Google Vertex AI project ID is required");
   if (!location) throw new Error("Google Vertex AI location is required");
+  const token = await getVertexBearerToken(settings);
+  if (!token && !key) throw new Error("Google Vertex AI access token, service account JSON, or API key is not configured");
 
   const response = await fetch(
-    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models?key=${encodeURIComponent(key)}`
+    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models${token ? "" : `?key=${encodeURIComponent(key)}`}`,
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }
   );
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.message || `Vertex AI model list failed [${response.status}]`);
+  if (!response.ok) {
+    const message = body?.error?.message || `Vertex AI model list failed [${response.status}]`;
+    if (/missing authentication header/i.test(message) && key) return listGoogleModels({ ...settings, provider: "google", apiKey: key });
+    throw new Error(message);
+  }
 
   return uniqueModels((body.publisherModels || body.models || []).map((model: any) => {
     const rawName = String(model.name || model.publisherModel || model.id || "");
@@ -1109,11 +1181,15 @@ async function callVertex(settings: AiSettings, payload: any): Promise<string> {
   if (!projectId) throw new Error("Google Vertex AI project ID is required");
   if (!location) throw new Error("Google Vertex AI location is required");
   const model = settings.model || process.env.GOOGLE_VERTEX_MODEL || "gemini-2.5-flash";
+  const token = await getVertexBearerToken(settings);
   const response = await fetch(
-    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent${token ? "" : `?key=${encodeURIComponent(key)}`}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({
         contents: [
           {
@@ -1128,7 +1204,11 @@ async function callVertex(settings: AiSettings, payload: any): Promise<string> {
     }
   );
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.message || `Vertex AI request failed [${response.status}]`);
+  if (!response.ok) {
+    const message = body?.error?.message || `Vertex AI request failed [${response.status}]`;
+    if (/missing authentication header/i.test(message) && key) return callGoogle({ ...settings, provider: "google", apiKey: key }, payload);
+    throw new Error(message);
+  }
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
 

@@ -30,6 +30,8 @@
 - Added server-side Dev role enforcement so non-Dev users cannot spoof full autopilot.
 - Added AI-provider invoice extraction for uploaded PDFs/images/documents through OpenAI, Google Gemini, Vertex AI, OpenRouter image models, and Ollama image models where supported.
 - Added automatic proposal payloads from extracted invoice data: vendor, bulk/single stock items, sales units, and draft purchase order lines.
+- Hardened Vertex AI authentication for bearer tokens and service account JSON, with Gemini API-key fallback when Vertex rejects key-only calls.
+- Stopped full autopilot from applying empty placeholder steps when invoice extraction fails.
 
 ## In Progress
 - [x] Verification pass for lint, focused backend tests, and build.
@@ -47,6 +49,7 @@
 - Receiving invoices and booking stock are intentionally review-only until stock movements are audited.
 - Full autopilot currently runs only draft-safe operations; audited stock receiving still needs the next execution layer.
 - OpenRouter/Ollama support is image-focused; PDF extraction is strongest with OpenAI, Google Gemini, or Vertex AI models that support document input.
+- Vertex AI may require `GOOGLE_VERTEX_ACCESS_TOKEN` or `GOOGLE_VERTEX_SERVICE_ACCOUNT_JSON`; API-key-only Vertex calls can be rejected by Google with a missing authentication header.
 - Event demand planning needs reliable booking details and menu assumptions before it can be trusted.
 
 ## Verification Log
@@ -62,3 +65,6 @@
 - Passed after AI invoice extraction: `npm.cmd run lint`.
 - Passed after AI invoice extraction: `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts`.
 - Passed after AI invoice extraction: `npm.cmd run build`.
+- Passed after Vertex auth hardening: `npm.cmd run lint`.
+- Passed after Vertex auth hardening: `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts`.
+- Passed after Vertex auth hardening: `npm.cmd run build`.
