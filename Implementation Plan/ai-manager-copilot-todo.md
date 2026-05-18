@@ -14,6 +14,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - [x] Phase 6: Verification and cleanup
 - [x] Phase 7: Multi-provider AI expansion
 - [x] Phase 8: Provider model picker stability
+- [x] Phase 9: Provider contact test chat
 
 ## In progress
 
@@ -34,6 +35,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - [x] Add OpenRouter provider.
 - [x] Add provider configuration fields and environment documentation.
 - [x] Prevent background Settings refresh from resetting AI provider/model selection while the AI tab is open.
+- [x] Add AI credentials test chat with optional media attachments.
 
 ## Blockers/risks
 
@@ -41,6 +43,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - AI features obey package and role permissions.
 - V1 recommendations remain suggest-only.
 - Settings background refresh now preserves in-progress AI provider/model browsing while the AI tab is open.
+- Provider test chat sends the selected provider/model/key and optional image/document attachments for contact testing.
 
 ## Verification log
 
@@ -60,3 +63,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - AI settings model picker stability fix added after user-reported reset while browsing models.
 - `npm.cmd run lint` passed after model picker stability fix.
 - `npm.cmd run build` passed after model picker stability fix with the existing Vite large-chunk warning.
+- AI credentials test chat with media attachments added after provider contact failures.
+- `npm.cmd run lint` passed after provider test chat.
+- `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after provider test chat.
+- `npm.cmd run build` passed after provider test chat with the existing Vite large-chunk warning.

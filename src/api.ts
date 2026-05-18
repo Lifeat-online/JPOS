@@ -437,6 +437,10 @@ export function listAiModels(tenantId: string, settings: Partial<AiSettings>) {
   return apiPost<{ models: AiModelOption[] }>(`/api/mariadb/tenants/${tenantId}/ai/models`, settings);
 }
 
+export function testAiProvider(tenantId: string, settings: Partial<AiSettings> & { message?: string; images?: string[]; documents?: Array<{ name?: string; type?: string; dataUrl: string }> }) {
+  return apiPost<{ provider: string; model: string; reply: string; latencyMs: number }>(`/api/mariadb/tenants/${tenantId}/ai/test`, settings);
+}
+
 export function getAiInsights(tenantId: string) {
   return apiGet<AiInsight[]>(`/api/mariadb/tenants/${tenantId}/ai/insights`);
 }

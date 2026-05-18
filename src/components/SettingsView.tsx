@@ -1,11 +1,20 @@
 import { usePosStore } from '../store/usePosStore';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
-import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit } from 'lucide-react';
+import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
-import { apiGet, apiPut, apiPost, apiDelete, getTenantPackageLimits, getAiSettings, listAiModels, updateAiSettings, type TenantPackageLimitsResponse } from '../api';
+import { apiGet, apiPut, apiPost, apiDelete, getTenantPackageLimits, getAiSettings, listAiModels, testAiProvider, updateAiSettings, type TenantPackageLimitsResponse } from '../api';
 import { JPOS_PACKAGES } from '../../shared/packageCatalog';
 import type { AiModelOption, AiProviderName, AiRole, AiSettings } from '../types';
+
+function readSettingsFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export function SettingsView({ config, setConfig }: { config: AppConfig, setConfig: (c: AppConfig) => void }) {
   const tenantId = usePosStore(state => state.tenantId);
@@ -22,6 +31,10 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
   const [aiModelsLoading, setAiModelsLoading] = useState(false);
   const [aiModelsError, setAiModelsError] = useState<string | null>(null);
+  const [aiTestMessage, setAiTestMessage] = useState('Reply with one short sentence confirming this provider and model can answer.');
+  const [aiTestLoading, setAiTestLoading] = useState(false);
+  const [aiTestTranscript, setAiTestTranscript] = useState<Array<{ role: 'user' | 'assistant' | 'system'; text: string }>>([]);
+  const [aiTestMedia, setAiTestMedia] = useState<Array<{ name: string; type: string; dataUrl: string }>>([]);
   const activeTabRef = useRef(activeTab);
   const aiSettingsRef = useRef<AiSettings | null>(aiSettings);
 
@@ -222,6 +235,44 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     } finally {
       setAiModelsLoading(false);
     }
+  };
+
+  const sendAiTestMessage = async () => {
+    if (!tenantId || !aiSettings || !aiTestMessage.trim()) return;
+    const message = aiTestMessage.trim();
+    const images = aiTestMedia.filter(file => file.type.startsWith('image/')).map(file => file.dataUrl);
+    const documents = aiTestMedia.filter(file => !file.type.startsWith('image/'));
+    const requestSettings = {
+      ...aiSettings,
+      ...(aiApiKey.trim() ? { apiKey: aiApiKey.trim() } : {}),
+      message,
+      images,
+      documents,
+    };
+    setAiTestLoading(true);
+    setAiTestTranscript(current => [...current, { role: 'user', text: aiTestMedia.length ? `${message}\nAttached: ${aiTestMedia.map(file => file.name).join(', ')}` : message }]);
+    try {
+      const response = await testAiProvider(tenantId, requestSettings);
+      setAiTestTranscript(current => [
+        ...current,
+        { role: 'assistant', text: response.reply || `Connected to ${response.provider} / ${response.model} in ${response.latencyMs}ms.` },
+        { role: 'system', text: `${response.provider} / ${response.model} responded in ${response.latencyMs}ms.` },
+      ]);
+    } catch (err: any) {
+      setAiTestTranscript(current => [...current, { role: 'system', text: err?.message || 'AI provider test failed.' }]);
+    } finally {
+      setAiTestLoading(false);
+    }
+  };
+
+  const addAiTestMedia = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const next = await Promise.all(Array.from(files).map(async file => ({
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      dataUrl: await readSettingsFileAsDataUrl(file),
+    })));
+    setAiTestMedia(current => [...current, ...next].slice(0, 4));
   };
 
   useEffect(() => {
@@ -694,6 +745,86 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                       </p>
                     </div>
                   )}
+
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-black text-slate-900 dark:text-white">Provider test chat</h3>
+                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                          Uses the selected provider, model, base URL/project, and the pasted key before saving.
+                        </p>
+                      </div>
+                      {aiTestLoading && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+                    </div>
+                    <div className="min-h-[112px] max-h-56 overflow-y-auto rounded-xl bg-slate-50 dark:bg-slate-900/60 p-3 space-y-2">
+                      {aiTestTranscript.length === 0 ? (
+                        <p className="text-xs font-semibold text-slate-400">Send a test message to confirm the provider can respond.</p>
+                      ) : aiTestTranscript.map((entry, index) => (
+                        <div
+                          key={`${entry.role}-${index}`}
+                          className={`rounded-xl px-3 py-2 text-xs font-semibold ${
+                            entry.role === 'user'
+                              ? 'bg-primary/10 text-slate-900 dark:text-white'
+                              : entry.role === 'assistant'
+                                ? 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                                : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-200'
+                          }`}
+                        >
+                          <span className="mb-1 block text-[10px] font-black uppercase tracking-widest opacity-60">
+                            {entry.role === 'user' ? 'You' : entry.role === 'assistant' ? 'Provider' : 'Status'}
+                          </span>
+                          {entry.text}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <textarea
+                        value={aiTestMessage}
+                        onChange={e => setAiTestMessage(e.target.value)}
+                        rows={2}
+                        className="min-w-0 flex-1 resize-none px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                      />
+                      <label className="inline-flex cursor-pointer items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-black uppercase tracking-widest">
+                        <Paperclip className="w-4 h-4" />
+                        Media
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*,.pdf,.csv,.txt,.doc,.docx,application/pdf,text/plain,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          onChange={e => {
+                            void addAiTestMedia(e.target.files);
+                            e.currentTarget.value = '';
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={sendAiTestMessage}
+                        disabled={aiTestLoading || !aiTestMessage.trim() || (!aiApiKey.trim() && !aiSettings.apiKeyConfigured && !aiSettings.providerStatus?.[aiSettings.provider] && aiSettings.provider !== 'ollama')}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary text-white text-xs font-black uppercase tracking-widest disabled:opacity-50"
+                      >
+                        <Send className="w-4 h-4" />
+                        Send test
+                      </button>
+                    </div>
+                    {aiTestMedia.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {aiTestMedia.map(file => (
+                          <span key={`${file.name}-${file.dataUrl.length}`} className="inline-flex max-w-full items-center gap-2 rounded-full bg-slate-100 dark:bg-slate-800 px-3 py-1 text-xs font-bold text-slate-600 dark:text-slate-300">
+                            <span className="truncate">{file.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setAiTestMedia(current => current.filter(item => item !== file))}
+                              className="text-slate-400 hover:text-red-500"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   {(aiSettings.provider === 'ollama' || aiSettings.provider === 'anythingllm' || aiSettings.provider === 'vertex') && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

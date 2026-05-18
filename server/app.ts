@@ -105,6 +105,7 @@ import {
   requireAiStaffScoreAccess,
   saveAiSettings,
   serializeAiSettings,
+  testAiProviderContact,
 } from "./ai.js";
 import { applyApprovedInventoryAgentSteps, generateInventoryAgentProposal } from "./aiInventoryAgent.js";
 
@@ -641,6 +642,22 @@ export async function createApp(io: any = null) {
           return res.status(403).json({ error: "Only managers, admins, and devs can manage AI settings" });
         }
         res.json({ models: await listAiModels(req.params.tenantId, req.body || {}) });
+      } catch (err: any) {
+        res.status(400).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/mariadb/tenants/:tenantId/ai/test",
+    requireAuth,
+    requireAiPackageAccess,
+    async (req, res) => {
+      try {
+        if (!canManageAi(req.user?.role)) {
+          return res.status(403).json({ error: "Only managers, admins, and devs can test AI provider credentials" });
+        }
+        res.json(await testAiProviderContact(req.params.tenantId, req.body || {}));
       } catch (err: any) {
         res.status(400).json({ error: err.message });
       }

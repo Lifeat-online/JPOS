@@ -321,6 +321,19 @@ export async function listAiModels(tenantId: string, input: Partial<AiSettings> 
   throw new Error(`Unsupported AI provider: ${settings.provider}`);
 }
 
+export async function testAiProviderContact(tenantId: string, input: Partial<AiSettings> & { message?: string; images?: string[]; documents?: AiFileInput[] } = {}) {
+  const settings = { ...(await getAiSettings(tenantId)), ...input };
+  const message = String(input.message || "").trim() || "Reply with one short sentence confirming the AI provider connection works.";
+  const startedAt = Date.now();
+  const reply = await callConfiguredProviderText(settings, message, input.images || [], input.documents || []);
+  return {
+    provider: settings.provider,
+    model: settings.model,
+    reply: String(reply || "").trim(),
+    latencyMs: Date.now() - startedAt,
+  };
+}
+
 function sanitizeRoles(roles: string[]) {
   const allowed = new Set(["admin", "manager", "dev", "cashier", "chef"]);
   const cleaned = roles.map(String).filter((role) => allowed.has(role));
@@ -677,6 +690,16 @@ async function callConfiguredProvider(settings: AiSettings, payload: any): Promi
   if (settings.provider === "google") return callGoogle(settings, payload);
   if (settings.provider === "vertex") return callVertex(settings, payload);
   if (settings.provider === "openrouter") return callOpenRouter(settings, payload);
+  throw new Error(`Unsupported AI provider: ${settings.provider}`);
+}
+
+async function callConfiguredProviderText(settings: AiSettings, message: string, images: string[] = [], documents: AiFileInput[] = []): Promise<string> {
+  if (settings.provider === "openai") return callOpenAiText(settings, message, images, documents);
+  if (settings.provider === "ollama") return callOllamaText(settings, message, images);
+  if (settings.provider === "anythingllm") return callAnythingLlmText(settings, message, images, documents);
+  if (settings.provider === "google") return callGoogleText(settings, message, images, documents);
+  if (settings.provider === "vertex") return callVertexText(settings, message, images, documents);
+  if (settings.provider === "openrouter") return callOpenRouterText(settings, message, images);
   throw new Error(`Unsupported AI provider: ${settings.provider}`);
 }
 
@@ -1080,6 +1103,30 @@ async function listOpenRouterModels(settings: Partial<AiSettings>) {
   })));
 }
 
+async function callOpenAiText(settings: AiSettings, message: string, images: string[] = [], documents: AiFileInput[] = []): Promise<string> {
+  const key = getProviderApiKey(settings);
+  if (!key) throw new Error("OPENAI_API_KEY is not configured");
+  const content: any[] = [{ type: "input_text", text: message }];
+  for (const image of images) content.push({ type: "input_image", image_url: image });
+  for (const document of documents) {
+    if (document.dataUrl) content.push({ type: "input_file", filename: document.name || "test-document", file_data: document.dataUrl });
+  }
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model: settings.model,
+      input: [
+        { role: "system", content: "You are a provider connectivity tester for JPOS. Reply briefly in plain text." },
+        { role: "user", content },
+      ],
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `OpenAI test failed [${response.status}]`);
+  return body.output_text || body.output?.flatMap((item: any) => item.content || []).map((part: any) => part.text || "").join("") || "";
+}
+
 async function callOpenAi(settings: AiSettings, payload: any): Promise<string> {
   const key = getProviderApiKey(settings);
   if (!key) throw new Error("OPENAI_API_KEY is not configured");
@@ -1109,6 +1156,25 @@ async function callOpenAi(settings: AiSettings, payload: any): Promise<string> {
   return body.output_text || body.output?.flatMap((item: any) => item.content || []).map((part: any) => part.text || "").join("") || "";
 }
 
+async function callOllamaText(settings: AiSettings, message: string, images: string[] = []): Promise<string> {
+  const baseUrl = (settings.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: settings.model || process.env.OLLAMA_MODEL || "llama3.1",
+      stream: false,
+      messages: [
+        { role: "system", content: "You are a provider connectivity tester for JPOS. Reply briefly in plain text." },
+        { role: "user", content: message, ...(images.length ? { images: images.map((image) => dataUrlPayload(image).base64).filter(Boolean) } : {}) },
+      ],
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error || `Ollama test failed [${response.status}]`);
+  return body.message?.content || body.response || "";
+}
+
 async function callOllama(settings: AiSettings, payload: any): Promise<string> {
   const baseUrl = (settings.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
   const response = await fetch(`${baseUrl}/api/chat`, {
@@ -1127,6 +1193,23 @@ async function callOllama(settings: AiSettings, payload: any): Promise<string> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body?.error || `Ollama request failed [${response.status}]`);
   return body.message?.content || body.response || "";
+}
+
+async function callAnythingLlmText(settings: AiSettings, message: string, images: string[] = [], documents: AiFileInput[] = []): Promise<string> {
+  const baseUrl = (settings.baseUrl || process.env.ANYTHINGLLM_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
+  const workspaceSlug = settings.workspaceSlug || process.env.ANYTHINGLLM_WORKSPACE_SLUG;
+  const key = getProviderApiKey(settings);
+  if (!key) throw new Error("ANYTHINGLLM_API_KEY is not configured");
+  if (!workspaceSlug) throw new Error("AnythingLLM workspace slug is not configured");
+  const mediaNote = images.length || documents.length ? `\n\nAttached media count: ${images.length + documents.length}. This AnythingLLM test endpoint verifies text contact; media support depends on your AnythingLLM workspace connector.` : "";
+  const response = await fetch(`${baseUrl}/api/v1/workspace/${encodeURIComponent(workspaceSlug)}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ message: `${message}${mediaNote}`, mode: "chat" }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error || body?.message || `AnythingLLM test failed [${response.status}]`);
+  return body.textResponse || body.response || body.message || "";
 }
 
 async function callAnythingLlm(settings: AiSettings, payload: any): Promise<string> {
@@ -1151,6 +1234,25 @@ async function callAnythingLlm(settings: AiSettings, payload: any): Promise<stri
   return body.textResponse || body.response || body.message || "";
 }
 
+async function callGoogleText(settings: AiSettings, message: string, images: string[] = [], documents: AiFileInput[] = []): Promise<string> {
+  const key = getProviderApiKey(settings);
+  if (!key) throw new Error("GOOGLE_AI_API_KEY or GEMINI_API_KEY is not configured");
+  const model = settings.model || process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash";
+  const parts: any[] = [{ text: message }];
+  for (const dataUrl of [...images, ...documents.map((doc) => doc.dataUrl)]) {
+    const parsed = dataUrlPayload(dataUrl);
+    if (parsed.base64) parts.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } });
+  }
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ role: "user", parts }] }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `Google AI test failed [${response.status}]`);
+  return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
+}
+
 async function callGoogle(settings: AiSettings, payload: any): Promise<string> {
   const key = getProviderApiKey(settings);
   if (!key) throw new Error("GOOGLE_AI_API_KEY or GEMINI_API_KEY is not configured");
@@ -1172,6 +1274,35 @@ async function callGoogle(settings: AiSettings, payload: any): Promise<string> {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body?.error?.message || `Google AI request failed [${response.status}]`);
+  return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
+}
+
+async function callVertexText(settings: AiSettings, message: string, images: string[] = [], documents: AiFileInput[] = []): Promise<string> {
+  const { key, projectId, location } = getVertexConfig(settings);
+  if (!projectId) throw new Error("Google Vertex AI project ID is required");
+  if (!location) throw new Error("Google Vertex AI location is required");
+  const model = settings.model || process.env.GOOGLE_VERTEX_MODEL || "gemini-2.5-flash";
+  const token = await getVertexBearerToken(settings);
+  if (!token && !key) throw new Error("Google Vertex AI access token, service account JSON, or API key is not configured");
+  const parts: any[] = [{ text: message }];
+  for (const dataUrl of [...images, ...documents.map((doc) => doc.dataUrl)]) {
+    const parsed = dataUrlPayload(dataUrl);
+    if (parsed.base64) parts.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } });
+  }
+  const response = await fetch(
+    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent${token ? "" : `?key=${encodeURIComponent(key)}`}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ contents: [{ role: "user", parts }] }),
+    }
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = body?.error?.message || `Vertex AI test failed [${response.status}]`;
+    if (/missing authentication header/i.test(error) && key) return callGoogleText({ ...settings, provider: "google", apiKey: key }, message, images, documents);
+    throw new Error(error);
+  }
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
 
@@ -1210,6 +1341,32 @@ async function callVertex(settings: AiSettings, payload: any): Promise<string> {
     throw new Error(message);
   }
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
+}
+
+async function callOpenRouterText(settings: AiSettings, message: string, images: string[] = []): Promise<string> {
+  const key = getProviderApiKey(settings);
+  if (!key) throw new Error("OPENROUTER_API_KEY is not configured");
+  const content: any[] = [{ type: "text", text: message }];
+  for (const image of images) content.push({ type: "image_url", image_url: { url: image } });
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+      "HTTP-Referer": process.env.APP_URL || "http://localhost",
+      "X-Title": "JPOS AI Manager Copilot",
+    },
+    body: JSON.stringify({
+      model: settings.model || process.env.OPENROUTER_MODEL || "openai/gpt-5-mini",
+      messages: [
+        { role: "system", content: "You are a provider connectivity tester for JPOS. Reply briefly in plain text." },
+        { role: "user", content },
+      ],
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `OpenRouter test failed [${response.status}]`);
+  return body.choices?.[0]?.message?.content || "";
 }
 
 async function callOpenRouter(settings: AiSettings, payload: any): Promise<string> {
