@@ -28,6 +28,19 @@ export interface AiModelOption {
   ownedBy?: string;
 }
 
+export interface AiFileInput {
+  name?: string;
+  type?: string;
+  dataUrl: string;
+}
+
+export interface AiInvoiceExtractionInput {
+  notes?: string;
+  images?: string[];
+  documents?: AiFileInput[];
+  context?: Record<string, any>;
+}
+
 export interface AiInsight {
   id: string;
   tenantId: string;
@@ -660,6 +673,216 @@ async function callConfiguredProvider(settings: AiSettings, payload: any): Promi
   if (settings.provider === "vertex") return callVertex(settings, payload);
   if (settings.provider === "openrouter") return callOpenRouter(settings, payload);
   throw new Error(`Unsupported AI provider: ${settings.provider}`);
+}
+
+function dataUrlPayload(dataUrl: string) {
+  const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl || "");
+  return {
+    mimeType: match?.[1] || "application/octet-stream",
+    base64: match?.[2] || "",
+  };
+}
+
+function buildInvoiceExtractionPayload(input: AiInvoiceExtractionInput) {
+  return {
+    task: "Extract supplier invoice data for JPOS inventory automation. Return compact valid JSON only.",
+    requiredShape: {
+      vendorName: "string",
+      invoiceNumber: "string",
+      invoiceDate: "YYYY-MM-DD or empty string",
+      currency: "string",
+      lines: [
+        {
+          description: "string",
+          sku: "string",
+          barcode: "string",
+          quantity: "number",
+          unit: "string",
+          unitCost: "number",
+          lineTotal: "number",
+          packSize: "number",
+          itemType: "bulk or single",
+          sellable: "boolean",
+          confidence: "number 0-1"
+        }
+      ],
+      totals: { subtotal: "number", tax: "number", total: "number" },
+      warnings: ["string"]
+    },
+    rules: [
+      "Do not invent missing invoice lines.",
+      "If a value is unclear, use an empty string or 0 and add a warning.",
+      "Prefer supplier/vendor name exactly as printed on the invoice.",
+      "For stock items, use the invoice line description as productName.",
+      "Return JSON with keys: vendorName, invoiceNumber, invoiceDate, currency, lines, totals, warnings.",
+    ],
+    notes: input.notes || "",
+    context: input.context || {},
+  };
+}
+
+export async function extractInvoiceWithAi(tenantId: string, input: AiInvoiceExtractionInput): Promise<any | null> {
+  const settings = await getAiSettings(tenantId);
+  if (!isProviderConfigured(settings)) return null;
+  const promptPayload = buildInvoiceExtractionPayload(input);
+  const documents = input.documents || [];
+  const images = input.images || [];
+
+  let text = "";
+  if (settings.provider === "openai") {
+    text = await callOpenAiWithFiles(settings, promptPayload, images, documents);
+  } else if (settings.provider === "google") {
+    text = await callGoogleWithFiles(settings, promptPayload, images, documents);
+  } else if (settings.provider === "vertex") {
+    text = await callVertexWithFiles(settings, promptPayload, images, documents);
+  } else if (settings.provider === "openrouter") {
+    text = await callOpenRouterWithImages(settings, promptPayload, images);
+  } else if (settings.provider === "ollama") {
+    text = await callOllamaWithImages(settings, promptPayload, images);
+  } else {
+    text = await callConfiguredProvider(settings, {
+      ...promptPayload,
+      warning: "This provider was called without binary document support. Use manager notes if available.",
+    });
+  }
+
+  const parsed = parseJson(text, null);
+  if (!parsed || typeof parsed !== "object") return null;
+  return parsed;
+}
+
+async function callOpenAiWithFiles(settings: AiSettings, payload: any, images: string[], documents: AiFileInput[]): Promise<string> {
+  const key = getProviderApiKey(settings);
+  if (!key) throw new Error("OPENAI_API_KEY is not configured");
+  const content: any[] = [{ type: "input_text", text: providerPrompt(payload) }];
+  for (const image of images) {
+    content.push({ type: "input_image", image_url: image });
+  }
+  for (const document of documents) {
+    if (!document.dataUrl) continue;
+    content.push({
+      type: "input_file",
+      filename: document.name || "invoice.pdf",
+      file_data: document.dataUrl,
+    });
+  }
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model: settings.model,
+      input: [
+        { role: "system", content: "You are an invoice extraction engine for JPOS. Return strict JSON only." },
+        { role: "user", content },
+      ],
+      text: { format: { type: "json_object" } },
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `OpenAI invoice extraction failed [${response.status}]`);
+  return body.output_text || body.output?.flatMap((item: any) => item.content || []).map((part: any) => part.text || "").join("") || "";
+}
+
+async function callGoogleWithFiles(settings: AiSettings, payload: any, images: string[], documents: AiFileInput[]): Promise<string> {
+  const key = getProviderApiKey(settings);
+  if (!key) throw new Error("GOOGLE_AI_API_KEY or GEMINI_API_KEY is not configured");
+  const model = settings.model || process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash";
+  const parts: any[] = [{ text: `Return compact valid JSON only.\n${providerPrompt(payload)}` }];
+  for (const dataUrl of [...images, ...documents.map((doc) => doc.dataUrl)]) {
+    const parsed = dataUrlPayload(dataUrl);
+    if (parsed.base64) parts.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } });
+  }
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts }],
+      generationConfig: { responseMimeType: "application/json" },
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `Google invoice extraction failed [${response.status}]`);
+  return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
+}
+
+async function callVertexWithFiles(settings: AiSettings, payload: any, images: string[], documents: AiFileInput[]): Promise<string> {
+  const { key, projectId, location } = getVertexConfig(settings);
+  if (!key) throw new Error("GOOGLE_VERTEX_API_KEY is not configured");
+  if (!projectId) throw new Error("Google Vertex AI project ID is required");
+  if (!location) throw new Error("Google Vertex AI location is required");
+  const model = settings.model || process.env.GOOGLE_VERTEX_MODEL || "gemini-2.5-flash";
+  const parts: any[] = [{ text: `Return compact valid JSON only.\n${providerPrompt(payload)}` }];
+  for (const dataUrl of [...images, ...documents.map((doc) => doc.dataUrl)]) {
+    const parsed = dataUrlPayload(dataUrl);
+    if (parsed.base64) parts.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } });
+  }
+  const response = await fetch(
+    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: { responseMimeType: "application/json" },
+      }),
+    }
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `Vertex invoice extraction failed [${response.status}]`);
+  return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
+}
+
+async function callOpenRouterWithImages(settings: AiSettings, payload: any, images: string[]): Promise<string> {
+  const key = getProviderApiKey(settings);
+  if (!key) throw new Error("OPENROUTER_API_KEY is not configured");
+  const content: any[] = [{ type: "text", text: providerPrompt(payload) }];
+  for (const image of images) content.push({ type: "image_url", image_url: { url: image } });
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+      "HTTP-Referer": process.env.APP_URL || "http://localhost",
+      "X-Title": "JPOS AI Manager Copilot",
+    },
+    body: JSON.stringify({
+      model: settings.model || process.env.OPENROUTER_MODEL || "openai/gpt-5-mini",
+      messages: [
+        { role: "system", content: "You are an invoice extraction engine for JPOS. Return strict JSON only." },
+        { role: "user", content },
+      ],
+      response_format: { type: "json_object" },
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `OpenRouter invoice extraction failed [${response.status}]`);
+  return body.choices?.[0]?.message?.content || "";
+}
+
+async function callOllamaWithImages(settings: AiSettings, payload: any, images: string[]): Promise<string> {
+  const baseUrl = (settings.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: settings.model || process.env.OLLAMA_MODEL || "llama3.1",
+      stream: false,
+      format: "json",
+      messages: [
+        {
+          role: "user",
+          content: providerPrompt(payload),
+          images: images.map((image) => dataUrlPayload(image).base64).filter(Boolean),
+        },
+      ],
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error || `Ollama invoice extraction failed [${response.status}]`);
+  return body.message?.content || body.response || "";
 }
 
 function providerPrompt(payload: any) {

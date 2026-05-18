@@ -7,7 +7,7 @@
 - [x] Added proposal generation for invoice intake, PDF/document intake, low-stock purchase orders, and event/function planning.
 - [x] Added guarded apply endpoint for approved draft-safe steps.
 - [x] Added Dev-only full autopilot switch for automatic draft-safe apply.
-- [ ] Add provider-specific vision/OCR extraction for invoice images and PDF/text extraction for invoice documents.
+- [x] Add provider-specific AI extraction for invoice images and PDF/document uploads.
 - [ ] Add audited execution records for each approved Copilot step.
 - [ ] Add full bookings/events CRUD and calendar visibility.
 
@@ -28,22 +28,25 @@
 - Added apply handling for approved vendor creation, bulk item creation, sales unit creation, and draft PO creation.
 - Added a Dev-only full autopilot switch that auto-approves and applies draft-safe steps immediately after proposal generation.
 - Added server-side Dev role enforcement so non-Dev users cannot spoof full autopilot.
+- Added AI-provider invoice extraction for uploaded PDFs/images/documents through OpenAI, Google Gemini, Vertex AI, OpenRouter image models, and Ollama image models where supported.
+- Added automatic proposal payloads from extracted invoice data: vendor, bulk/single stock items, sales units, and draft purchase order lines.
 
 ## In Progress
 - [x] Verification pass for lint, focused backend tests, and build.
 
 ## Next Up
-- [ ] Add OCR/vision/PDF extraction so invoice files produce real line candidates automatically.
+- [x] Add OCR/vision/PDF extraction so invoice files produce real line candidates automatically via the configured AI provider.
 - [ ] Add a persisted `ai_agent_runs` table with per-step approval and audit logs.
 - [ ] Add an `event_bookings` table and bookings UI for private/public events.
 - [ ] Persist controlled execution runs with one mutation per explicit approval.
 - [ ] Add min-stock recommendation storage and manager approval.
 
 ## Blockers/Risks
-- Invoice file parsing currently accepts images, PDFs, and documents as evidence but does not yet extract exact item lines.
+- Invoice file parsing now uses the configured AI provider, but extraction quality depends on the selected model's document/image support.
 - Applying stock movements must remain audited because mistakes affect inventory valuation.
 - Receiving invoices and booking stock are intentionally review-only until stock movements are audited.
 - Full autopilot currently runs only draft-safe operations; audited stock receiving still needs the next execution layer.
+- OpenRouter/Ollama support is image-focused; PDF extraction is strongest with OpenAI, Google Gemini, or Vertex AI models that support document input.
 - Event demand planning needs reliable booking details and menu assumptions before it can be trusted.
 
 ## Verification Log
@@ -56,3 +59,6 @@
 - Passed after Dev full autopilot switch: `npm.cmd run lint`.
 - Passed after Dev full autopilot switch: `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts`.
 - Passed after Dev full autopilot switch: `npm.cmd run build`.
+- Passed after AI invoice extraction: `npm.cmd run lint`.
+- Passed after AI invoice extraction: `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts`.
+- Passed after AI invoice extraction: `npm.cmd run build`.

@@ -1,4 +1,5 @@
 import { query } from "./db.js";
+import { extractInvoiceWithAi } from "./ai.js";
 import { getProductsByTenant } from "./mariadb-adapter.js";
 import { createBulkItem, createProduct, createPurchaseOrder, createVendor, getBulkItems, getVendors } from "./mariadb-crud.js";
 
@@ -66,6 +67,35 @@ function step(type: StepType, label: string, payload: Record<string, any>, evide
 function toNumber(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function slug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "invoice_item";
+}
+
+function sameName(a: unknown, b: unknown) {
+  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+}
+
+function normalizeInvoiceLine(line: any, index: number) {
+  const description = String(line?.productName || line?.description || line?.name || `Invoice line ${index + 1}`).trim();
+  const quantity = Math.max(1, toNumber(line?.quantity, 1));
+  const unitCost = toNumber(line?.unitCost ?? line?.expectedPrice ?? line?.price, 0);
+  const packSize = Math.max(1, toNumber(line?.packSize, 1));
+  return {
+    description,
+    productName: description,
+    sku: String(line?.sku || "").trim(),
+    barcode: String(line?.barcode || "").trim(),
+    quantity,
+    unit: String(line?.unit || "items").trim() || "items",
+    unitCost,
+    lineTotal: toNumber(line?.lineTotal, unitCost * quantity),
+    packSize,
+    itemType: line?.itemType === "bulk" || packSize > 1 ? "bulk" : "single",
+    sellable: line?.sellable !== false,
+    confidence: Math.max(0, Math.min(1, toNumber(line?.confidence, 0.65))),
+  };
 }
 
 async function getProductVelocity(tenantId: string) {
@@ -221,70 +251,175 @@ export async function generateInventoryAgentProposal(tenantId: string, body: any
   const pdfCount = documents.filter((doc) => String(doc.type || "").includes("pdf") || String(doc.name || "").toLowerCase().endsWith(".pdf")).length;
   const documentNames = documents.map((doc) => doc.name).filter(Boolean).slice(0, 5);
   const notes = String(body?.notes || "").trim();
+  let aiExtraction: any = null;
+  let aiError = "";
+  try {
+    aiExtraction = await extractInvoiceWithAi(tenantId, {
+      notes,
+      images: Array.isArray(body?.imageDataUrls) ? body.imageDataUrls : [],
+      documents: documents.filter((doc) => doc.dataUrl) as any,
+      context: {
+        existingVendors: vendors.map((vendor) => ({ id: vendor.id, name: vendor.name })),
+        existingProducts: (products as any[]).slice(0, 200).map((product) => ({ id: product.id, name: product.name, barcode: product.barcode })),
+        existingBulkItems: bulkItems.slice(0, 200).map((item) => ({ id: item.id, name: item.name, barcode: item.barcode })),
+      },
+    });
+  } catch (err: any) {
+    aiError = err?.message || "AI invoice extraction failed";
+  }
+  const extractedLines = Array.isArray(aiExtraction?.lines)
+    ? aiExtraction.lines.map(normalizeInvoiceLine).filter((line: any) => line.description && line.description !== "Invoice line")
+    : [];
+  const extractedVendorName = String(aiExtraction?.vendorName || body?.vendorName || "").trim();
+  const existingVendor = vendors.find((vendor) => sameName(vendor.name, extractedVendorName));
+  const purchaseOrderItems = extractedLines.map((line: any, index: number) => {
+    const existingProduct = (products as any[]).find((product) => sameName(product.name, line.productName) || (line.barcode && product.barcode === line.barcode));
+    return {
+      productId: existingProduct?.id || `pending_${slug(line.productName)}_${index + 1}`,
+      productName: line.productName,
+      quantity: line.quantity,
+      expectedPrice: line.unitCost,
+      sku: line.sku,
+      barcode: line.barcode,
+      lineTotal: line.lineTotal,
+      extractedConfidence: line.confidence,
+    };
+  });
   const uploadEvidence = [
     `${imageCount} invoice image${imageCount === 1 ? "" : "s"} uploaded`,
     `${documentCount} invoice document${documentCount === 1 ? "" : "s"} uploaded`,
     pdfCount ? `${pdfCount} PDF invoice${pdfCount === 1 ? "" : "s"} included` : "No PDF invoice uploaded",
     documentNames.length ? `Files: ${documentNames.join(", ")}` : "No document filenames supplied",
+    aiExtraction ? "AI extracted invoice fields from uploaded files" : aiError ? `AI extraction failed: ${aiError}` : "AI extraction did not return invoice fields",
+    extractedLines.length ? `${extractedLines.length} invoice line candidate${extractedLines.length === 1 ? "" : "s"} extracted` : "No invoice line candidates extracted",
     notes ? "Manager notes supplied" : "No invoice notes supplied",
   ];
-  const steps = [
+  const steps: InventoryAgentStep[] = [
     step(
       "create_vendor",
-      "Review invoice supplier and create vendor if missing",
-      { vendorName: body?.vendorName || "", contactPerson: "", email: "", phone: "", address: "", status: "active", documentNames },
+      existingVendor ? `Use existing vendor: ${existingVendor.name}` : "Create invoice supplier as vendor",
+      { vendorId: existingVendor?.id || null, vendorName: extractedVendorName, name: extractedVendorName, contactPerson: "", email: "", phone: "", address: "", status: "active", documentNames },
       uploadEvidence,
-      "high",
-      notes || imageCount || documentCount ? 0.58 : 0.32
-    ),
-    step(
+      existingVendor ? "low" : "medium",
+      extractedVendorName ? 0.78 : (notes || imageCount || documentCount ? 0.48 : 0.32)
+    )
+  ];
+
+  for (const [index, line] of extractedLines.entries()) {
+    const existingBulk = bulkItems.find((item) => sameName(item.name, line.productName) || (line.barcode && item.barcode === line.barcode));
+    if (!existingBulk) {
+      steps.push(step(
+        "create_bulk_item",
+        `Create ${line.itemType} stock item: ${line.productName}`,
+        {
+          name: line.productName,
+          itemType: line.itemType,
+          unit: line.unit,
+          stock: line.quantity * line.packSize,
+          minStock: 0,
+          costPerUnit: line.packSize > 1 ? line.unitCost / line.packSize : line.unitCost,
+          barcode: line.barcode || null,
+          packName: line.packSize > 1 ? "Case" : undefined,
+          packQuantity: line.packSize,
+          singleUnitName: line.unit || "item",
+          invoiceLineIndex: index,
+        },
+        ["AI extracted this line from the uploaded invoice", `Quantity: ${line.quantity}`, `Unit cost: ${line.unitCost}`],
+        line.confidence >= 0.75 ? "medium" : "high",
+        line.confidence
+      ));
+    }
+
+    const existingProduct = (products as any[]).find((product) => sameName(product.name, line.productName) || (line.barcode && product.barcode === line.barcode));
+    if (!existingProduct && line.sellable) {
+      steps.push(step(
+        "create_sales_unit",
+        `Create sales unit item: ${line.productName}`,
+        {
+          name: line.productName,
+          price: Number((line.unitCost * 1.35).toFixed(2)),
+          costPrice: line.unitCost,
+          category: "General",
+          section: "General",
+          stock: line.quantity,
+          minStock: 0,
+          barcode: line.barcode || undefined,
+          invoiceLineIndex: index,
+        },
+        ["AI marked this line as sellable or did not rule it out", "Selling price defaults to cost plus 35% and can be edited"],
+        "high",
+        Math.min(line.confidence, 0.68)
+      ));
+    }
+  }
+
+  if (extractedLines.length === 0) {
+    steps.push(step(
       "create_bulk_item",
       "Review invoice lines for bulk or single stock items",
       { invoiceLineCandidates: body?.invoiceLines || [], createMissingOnly: true },
-      ["Human must confirm pack size, unit, cost, and barcode before creation", documentCount ? "Invoice documents attached as review evidence" : "No invoice documents attached"],
+      ["AI could not extract line items", "Human must confirm pack size, unit, cost, and barcode before creation", documentCount ? "Invoice documents attached as review evidence" : "No invoice documents attached"],
       "high",
-      documentCount || imageCount ? 0.5 : 0.46
-    ),
+      documentCount || imageCount ? 0.35 : 0.25
+    ));
+  }
+
+  steps.push(
     step(
       "create_purchase_order",
-      "Create draft purchase order from approved invoice lines",
-      { vendorId: null, status: "draft", type: "once_off", items: [] },
-      ["Draft PO is created only after vendor and item lines are approved", documentCount ? "PDF/document invoice can be used during review" : "No document invoice supplied"],
-      "medium",
-      documentCount || imageCount ? 0.48 : 0.44
+      extractedLines.length ? `Create draft purchase order from ${extractedLines.length} extracted line${extractedLines.length === 1 ? "" : "s"}` : "Create draft purchase order from approved invoice lines",
+      {
+        vendorId: existingVendor?.id || null,
+        vendorName: extractedVendorName,
+        status: "draft",
+        type: "once_off",
+        items: purchaseOrderItems,
+        invoiceNumber: aiExtraction?.invoiceNumber || body?.invoiceNumber || "",
+        invoiceDate: aiExtraction?.invoiceDate || body?.invoiceDate || null,
+      },
+      ["Draft PO is created from AI-extracted invoice lines", documentCount ? "PDF/document invoice can be used during review" : "No document invoice supplied"],
+      extractedLines.length ? "medium" : "high",
+      extractedLines.length ? 0.72 : 0.34
     ),
     step(
       "receive_invoice",
       "Receive invoice against approved purchase order",
-      { invoiceNumber: body?.invoiceNumber || "", invoiceDate: body?.invoiceDate || null },
-      ["Requires invoice number/date confirmation", pdfCount ? "PDF invoice attached" : "No PDF invoice attached"],
+      { invoiceNumber: aiExtraction?.invoiceNumber || body?.invoiceNumber || "", invoiceDate: aiExtraction?.invoiceDate || body?.invoiceDate || null, totals: aiExtraction?.totals || {} },
+      [aiExtraction?.invoiceNumber ? `Invoice number: ${aiExtraction.invoiceNumber}` : "Requires invoice number confirmation", pdfCount ? "PDF invoice attached" : "No PDF invoice attached"],
       "medium",
-      0.42
+      aiExtraction?.invoiceNumber ? 0.68 : 0.42
     ),
     step(
       "book_stock",
       "Book approved stock quantities into inventory",
-      { adjustments: [], source: "copilot_invoice" },
-      ["Stock movement remains blocked until quantities and units are approved"],
+      { adjustments: extractedLines.map((line: any) => ({ name: line.productName, quantity: line.quantity * line.packSize, unit: line.unit, cost: line.unitCost })), source: "copilot_invoice" },
+      [extractedLines.length ? `${extractedLines.length} stock adjustment candidate${extractedLines.length === 1 ? "" : "s"}` : "Stock movement remains blocked until quantities and units are approved"],
       "high",
-      0.4
-    ),
-  ];
+      extractedLines.length ? 0.62 : 0.4
+    )
+  );
 
   return {
     id: proposalId(mode),
     mode,
     status: "draft",
-    summary: "Prepared an invoice intake workflow with human approval required at every step.",
+    summary: extractedLines.length
+      ? `AI extracted ${extractedLines.length} invoice line${extractedLines.length === 1 ? "" : "s"}${extractedVendorName ? ` from ${extractedVendorName}` : ""}.`
+      : "Prepared an invoice intake workflow, but AI could not extract usable line items.",
     requiresHumanApproval: true,
     steps,
-    warnings: ["Invoice image/PDF extraction is experimental. Confirm vendor, units, pack sizes, costs, and quantities before applying anything."],
+    warnings: [
+      "AI invoice extraction is experimental. Confirm vendor, units, pack sizes, costs, and quantities before applying anything.",
+      ...(aiError ? [`AI provider error: ${aiError}`] : []),
+      ...((Array.isArray(aiExtraction?.warnings) ? aiExtraction.warnings.map(String) : []).slice(0, 4)),
+    ],
     dataAccess,
   };
 }
 
 export async function applyApprovedInventoryAgentSteps(tenantId: string, steps: InventoryAgentStep[], options: { fullAutopilot?: boolean } = {}): Promise<InventoryAgentApplyResult> {
   const result: InventoryAgentApplyResult = { applied: [], skipped: [] };
+  const vendorIdsByName = new Map<string, string>();
   for (const item of steps || []) {
     const approved = options.fullAutopilot || item.approved;
     if (!approved) {
@@ -295,6 +430,11 @@ export async function applyApprovedInventoryAgentSteps(tenantId: string, steps: 
     try {
       if (item.type === "create_vendor") {
         const name = item.payload?.name || item.payload?.vendorName;
+        if (item.payload?.vendorId) {
+          vendorIdsByName.set(String(name || item.payload.vendorId).toLowerCase(), item.payload.vendorId);
+          result.applied.push({ stepId: item.id, type: item.type, result: { id: item.payload.vendorId, existing: true, name } });
+          continue;
+        }
         if (!name) {
           result.skipped.push({ stepId: item.id, type: item.type, reason: "Vendor name is required" });
           continue;
@@ -307,6 +447,7 @@ export async function applyApprovedInventoryAgentSteps(tenantId: string, steps: 
           address: item.payload?.address || "",
           status: "active",
         });
+        vendorIdsByName.set(String(name).toLowerCase(), created.id);
         result.applied.push({ stepId: item.id, type: item.type, result: created });
         continue;
       }
@@ -363,9 +504,11 @@ export async function applyApprovedInventoryAgentSteps(tenantId: string, steps: 
           result.skipped.push({ stepId: item.id, type: item.type, reason: "Purchase order needs at least one approved item" });
           continue;
         }
+        const vendorName = String(item.payload.vendorName || "").toLowerCase();
+        const vendorId = item.payload.vendorId || (vendorName ? vendorIdsByName.get(vendorName) : null) || null;
         const totalAmount = item.payload.items.reduce((sum: number, line: any) => sum + Number(line.quantity || 0) * Number(line.expectedPrice || 0), 0);
         const created = await createPurchaseOrder(tenantId, {
-          vendorId: item.payload.vendorId || null,
+          vendorId,
           status: "draft",
           type: item.payload.type || "once_off",
           items: item.payload.items,
