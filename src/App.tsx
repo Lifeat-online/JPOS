@@ -422,7 +422,7 @@ export default function App() {
     tableSections, restaurantTables,
     refreshSales,
     tenantLoading, configLoading, isStaffLoading,
-  } = useAppData(user);
+  } = useAppData(authLoading ? null : user);
 
   const { cart, setCart, setActiveCategory, setSelectedCustomerId, setActiveTableNumber, setActiveOrderId } = usePosStore();
   const storeActiveSession = usePosStore(s => s.activeSession);

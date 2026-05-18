@@ -24,6 +24,15 @@ export const DEFAULT_CONFIG: AppConfig = {
   payfastSandbox: true,
 };
 
+function isSessionExpiredError(err: unknown) {
+  return err instanceof Error && err.message.includes('Session expired');
+}
+
+function logLoadError(label: string, err: unknown) {
+  if (isSessionExpiredError(err)) return;
+  console.error(`${label} load error:`, err);
+}
+
 export function useAppData(user: User | null) {
   const { tenantId, setTenantId } = usePosStore();
   const storeActiveSession = usePosStore(s => s.activeSession);
@@ -90,7 +99,7 @@ export function useAppData(user: User | null) {
       }));
       setSales(sanitized);
     } catch (err) {
-      console.error('Sales load error:', err);
+      logLoadError('Sales', err);
     }
   }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
 
@@ -172,7 +181,7 @@ export function useAppData(user: User | null) {
         }));
         setProducts(sanitized);
       } catch (err) {
-        console.error('Products load error:', err);
+        logLoadError('Products', err);
       }
     }
 
@@ -212,7 +221,7 @@ export function useAppData(user: User | null) {
         }));
         setCustomers(sanitized);
       } catch (err) {
-        console.error('Customers load error:', err);
+        logLoadError('Customers', err);
       }
     }
 
@@ -259,7 +268,7 @@ export function useAppData(user: User | null) {
         }));
         setStaff(sanitized);
       } catch (err) {
-        console.error('Staff load error:', err);
+        logLoadError('Staff', err);
       } finally {
         if (active) setIsStaffLoading(false);
       }
@@ -295,7 +304,7 @@ export function useAppData(user: User | null) {
         if (!active) return;
         if (fetched) setConfig(fetched);
       } catch (err) {
-        console.error('Config load error:', err);
+        logLoadError('Config', err);
       } finally {
         if (active) setConfigLoading(false);
       }
@@ -353,7 +362,7 @@ export function useAppData(user: User | null) {
         if (!active) return;
         setWorkstations(fetched || []);
       } catch (err) {
-        console.error('Workstations load error:', err);
+        logLoadError('Workstations', err);
       }
     }
 
@@ -386,7 +395,7 @@ export function useAppData(user: User | null) {
         if (!active) return;
         setActiveSession(fetched);
       } catch (err) {
-        console.error('Active session load error:', err);
+        logLoadError('Active session', err);
       }
     }
     loadActiveSession();
@@ -406,7 +415,7 @@ export function useAppData(user: User | null) {
         if (!active) return;
         setTableSections(fetched || []);
       } catch (err) {
-        console.error('Table sections load error:', err);
+        logLoadError('Table sections', err);
       }
     }
     loadSections();
@@ -428,7 +437,7 @@ export function useAppData(user: User | null) {
         if (!active) return;
         setRestaurantTables(fetched || []);
       } catch (err) {
-        console.error('Restaurant tables load error:', err);
+        logLoadError('Restaurant tables', err);
       }
     }
 
