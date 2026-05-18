@@ -152,6 +152,28 @@ function vertexBlockedGuidance(message: string) {
   ].join(" ");
 }
 
+function openRouterAuthGuidance(message: string, hasKey: boolean) {
+  return [
+    message,
+    hasKey
+      ? "JPOS had an OpenRouter key for this request, but OpenRouter still rejected the Authorization header. Re-save the key as the raw sk-or-... token only, without the word Bearer, quotes, or extra spaces."
+      : "JPOS did not have an OpenRouter key for this request. Paste an OpenRouter sk-or-... key in AI Settings, then Save or keep it in the API key box while pressing Send test.",
+    "Also make sure the selected provider is OpenRouter and the model is the full OpenRouter model id, for example openai/gpt-oss-120b rather than a short alias like oss120b.",
+  ].join(" ");
+}
+
+function normalizeOpenRouterModel(model: string | undefined | null) {
+  const raw = String(model || process.env.OPENROUTER_MODEL || "openai/gpt-5-mini").trim();
+  const cleaned = raw.replace(/^openrouter[:\s/]+/i, "").trim();
+  const aliases: Record<string, string> = {
+    oss120b: "openai/gpt-oss-120b",
+    "gpt-oss-120b": "openai/gpt-oss-120b",
+    oss20b: "openai/gpt-oss-20b",
+    "gpt-oss-20b": "openai/gpt-oss-20b",
+  };
+  return aliases[cleaned.toLowerCase()] || cleaned;
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value === "string") {
@@ -324,13 +346,19 @@ export async function saveAiSettings(tenantId: string, input: Partial<AiSettings
 
 function getProviderApiKey(settings: Partial<AiSettings>) {
   const configured = settings.apiKey?.trim();
-  if (configured) return configured;
+  if (configured) return normalizeProviderApiKey(configured);
   if (settings.provider === "openai") return process.env.OPENAI_API_KEY || "";
   if (settings.provider === "anythingllm") return process.env.ANYTHINGLLM_API_KEY || "";
   if (settings.provider === "google") return process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || "";
   if (settings.provider === "vertex") return process.env.GOOGLE_VERTEX_API_KEY || "";
-  if (settings.provider === "openrouter") return process.env.OPENROUTER_API_KEY || "";
+  if (settings.provider === "openrouter") return normalizeProviderApiKey(process.env.OPENROUTER_API_KEY || "");
   return "";
+}
+
+function normalizeProviderApiKey(value: string) {
+  const trimmed = String(value || "").trim().replace(/^["']|["']$/g, "");
+  if (/^Bearer\s+/i.test(trimmed)) return trimmed.replace(/^Bearer\s+/i, "").trim();
+  return trimmed;
 }
 
 function getVertexConfig(settings: Partial<AiSettings>) {
@@ -982,7 +1010,7 @@ async function callOpenRouterWithImages(settings: AiSettings, payload: any, imag
       "X-Title": "JPOS AI Manager Copilot",
     },
     body: JSON.stringify({
-      model: settings.model || process.env.OPENROUTER_MODEL || "openai/gpt-5-mini",
+      model: normalizeOpenRouterModel(settings.model),
       messages: [
         { role: "system", content: "You are an invoice extraction engine for JPOS. Return strict JSON only." },
         { role: "user", content },
@@ -991,7 +1019,10 @@ async function callOpenRouterWithImages(settings: AiSettings, payload: any, imag
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.message || `OpenRouter invoice extraction failed [${response.status}]`);
+  if (!response.ok) {
+    const message = body?.error?.message || `OpenRouter invoice extraction failed [${response.status}]`;
+    throw new Error(/missing authentication header|auth/i.test(message) ? openRouterAuthGuidance(message, Boolean(key)) : message);
+  }
   return body.choices?.[0]?.message?.content || "";
 }
 
@@ -1403,7 +1434,7 @@ async function callOpenRouterText(settings: AiSettings, message: string, images:
       "X-Title": "JPOS AI Manager Copilot",
     },
     body: JSON.stringify({
-      model: settings.model || process.env.OPENROUTER_MODEL || "openai/gpt-5-mini",
+      model: normalizeOpenRouterModel(settings.model),
       messages: [
         { role: "system", content: "You are a provider connectivity tester for JPOS. Reply briefly in plain text." },
         { role: "user", content },
@@ -1411,7 +1442,10 @@ async function callOpenRouterText(settings: AiSettings, message: string, images:
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(providerErrorMessage(body, `OpenRouter test failed [${response.status}]`, response.status));
+  if (!response.ok) {
+    const message = providerErrorMessage(body, `OpenRouter test failed [${response.status}]`, response.status);
+    throw new Error(/missing authentication header|auth/i.test(message) ? openRouterAuthGuidance(message, Boolean(key)) : message);
+  }
   return body.choices?.[0]?.message?.content || "";
 }
 
@@ -1427,7 +1461,7 @@ async function callOpenRouter(settings: AiSettings, payload: any): Promise<strin
       "X-Title": "JPOS AI Manager Copilot",
     },
     body: JSON.stringify({
-      model: settings.model || process.env.OPENROUTER_MODEL || "openai/gpt-5-mini",
+      model: normalizeOpenRouterModel(settings.model),
       messages: [
         { role: "system", content: "You are JPOS Manager Copilot. Return compact valid JSON only. Never invent business metrics." },
         { role: "user", content: providerPrompt(payload) },
@@ -1436,6 +1470,9 @@ async function callOpenRouter(settings: AiSettings, payload: any): Promise<strin
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.message || `OpenRouter request failed [${response.status}]`);
+  if (!response.ok) {
+    const message = body?.error?.message || `OpenRouter request failed [${response.status}]`;
+    throw new Error(/missing authentication header|auth/i.test(message) ? openRouterAuthGuidance(message, Boolean(key)) : message);
+  }
   return body.choices?.[0]?.message?.content || "";
 }

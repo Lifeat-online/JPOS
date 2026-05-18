@@ -82,3 +82,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - `npm.cmd run lint` passed after Vertex blocked API guidance update.
 - `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after Vertex blocked API guidance update.
 - `npm.cmd run build` passed after Vertex blocked API guidance update with the existing Vite large-chunk warning.
+- OpenRouter auth handling now strips pasted `Bearer` prefixes/quotes, explains missing-auth failures, and maps `oss120b` to `openai/gpt-oss-120b`.
+- `npm.cmd run lint` passed after OpenRouter auth/model normalization.
+- `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after OpenRouter auth/model normalization.
+- `npm.cmd run build` passed after OpenRouter auth/model normalization with the existing Vite large-chunk warning.
