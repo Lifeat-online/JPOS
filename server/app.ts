@@ -95,6 +95,7 @@ import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
 import { featureSetForPackage, getHostedPackage, hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, type PackageFeature } from "../shared/packageCatalog.js";
 import {
   canManageAi,
+  deleteInsight,
   generateInsights,
   generateStaffScores,
   getAiSettings,
@@ -672,6 +673,20 @@ export async function createApp(io: any = null) {
     async (req, res) => {
       try {
         res.json(await listInsights(req.params.tenantId));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/mariadb/tenants/:tenantId/ai/insights/:insightId",
+    requireAuth,
+    requireAiPackageAccess,
+    requireAiRoleAccess,
+    async (req, res) => {
+      try {
+        res.json(await deleteInsight(req.params.tenantId, req.params.insightId));
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }

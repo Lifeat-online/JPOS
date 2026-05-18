@@ -607,6 +607,13 @@ export async function listInsights(tenantId: string): Promise<AiInsight[]> {
   }));
 }
 
+export async function deleteInsight(tenantId: string, insightId: string) {
+  const result: any = await query("DELETE FROM ai_insights WHERE tenant_id = ? AND id = ?", [tenantId, insightId]);
+  return {
+    deleted: Number(result?.affectedRows || result?.rowCount || 0),
+  };
+}
+
 export async function generateStaffScores(tenantId: string, requestedBy?: string | null): Promise<StaffScore[]> {
   const settings = await getAiSettings(tenantId);
   const dataset = await getBusinessDataset(tenantId);

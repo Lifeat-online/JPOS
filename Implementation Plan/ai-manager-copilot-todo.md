@@ -90,3 +90,8 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - `npm.cmd run lint` passed after provider-scoped key storage.
 - `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after provider-scoped key storage.
 - `npm.cmd run build` passed after provider-scoped key storage with the existing Vite large-chunk warning.
+- AI Manager Copilot insight cards now have refresh and per-card delete controls.
+- Tenant-scoped AI insight delete API route added.
+- `npm.cmd run lint` passed after insight card refresh/delete controls.
+- `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after insight card refresh/delete controls.
+- `npm.cmd run build` passed after insight card refresh/delete controls with the existing Vite large-chunk warning.

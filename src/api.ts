@@ -456,6 +456,10 @@ export function generateAiInsights(tenantId: string) {
   return apiPost<AiInsight[]>(`/api/mariadb/tenants/${tenantId}/ai/insights/generate`, {});
 }
 
+export function deleteAiInsight(tenantId: string, insightId: string) {
+  return apiDelete<{ deleted: number }>(`/api/mariadb/tenants/${tenantId}/ai/insights/${insightId}`);
+}
+
 export function getAiStaffScores(tenantId: string) {
   return apiGet<AiStaffScore[]>(`/api/mariadb/tenants/${tenantId}/ai/staff-scores`);
 }

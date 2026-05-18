@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BrainCircuit, RefreshCw, ShieldCheck, Sparkles, Trophy } from 'lucide-react';
-import { generateAiInsights, generateAiStaffScores, getAiInsights, getAiStaffScores } from '../api';
+import { BrainCircuit, RefreshCw, ShieldCheck, Sparkles, Trash2, Trophy } from 'lucide-react';
+import { deleteAiInsight, generateAiInsights, generateAiStaffScores, getAiInsights, getAiStaffScores } from '../api';
 import type { AiInsight, AiStaffScore } from '../types';
 
 const severityStyles: Record<string, string> = {
@@ -15,12 +15,18 @@ export function AiCopilotView({ tenantId }: { tenantId: string | null }) {
   const [scores, setScores] = useState<AiStaffScore[]>([]);
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [loadingScores, setLoadingScores] = useState(false);
+  const [refreshingInsights, setRefreshingInsights] = useState(false);
+  const [deletingInsightId, setDeletingInsightId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = async (options?: { insightsOnly?: boolean }) => {
     if (!tenantId) return;
     setError(null);
     try {
+      if (options?.insightsOnly) {
+        setInsights(await getAiInsights(tenantId).catch(() => []));
+        return;
+      }
       const [insightRows, scoreRows] = await Promise.all([
         getAiInsights(tenantId).catch(() => []),
         getAiStaffScores(tenantId).catch(() => []),
@@ -29,6 +35,30 @@ export function AiCopilotView({ tenantId }: { tenantId: string | null }) {
       setScores(scoreRows || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const refreshInsights = async () => {
+    if (!tenantId) return;
+    setRefreshingInsights(true);
+    try {
+      await load({ insightsOnly: true });
+    } finally {
+      setRefreshingInsights(false);
+    }
+  };
+
+  const deleteInsightCard = async (insightId: string) => {
+    if (!tenantId) return;
+    setDeletingInsightId(insightId);
+    setError(null);
+    try {
+      await deleteAiInsight(tenantId, insightId);
+      setInsights(current => current.filter(insight => insight.id !== insightId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingInsightId(null);
     }
   };
 
@@ -125,7 +155,18 @@ export function AiCopilotView({ tenantId }: { tenantId: string | null }) {
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-black text-slate-900 dark:text-white">Insight Cards</h3>
-            <div className="text-xs font-bold text-slate-400">Suggest-only actions</div>
+            <div className="flex items-center gap-2">
+              <div className="hidden sm:block text-xs font-bold text-slate-400">Suggest-only actions</div>
+              <button
+                type="button"
+                onClick={refreshInsights}
+                disabled={refreshingInsights || !tenantId}
+                className="inline-flex items-center gap-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${refreshingInsights ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {insights.length === 0 && (
@@ -140,9 +181,20 @@ export function AiCopilotView({ tenantId }: { tenantId: string | null }) {
                     <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{insight.category}</div>
                     <h4 className="mt-1 text-lg font-black text-slate-900 dark:text-white">{insight.title}</h4>
                   </div>
-                  <span className="rounded-full bg-white/70 dark:bg-slate-950/40 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
-                    {insight.confidence}%
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-white/70 dark:bg-slate-950/40 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
+                      {insight.confidence}%
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => deleteInsightCard(insight.id)}
+                      disabled={deletingInsightId === insight.id}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/80 text-slate-500 hover:text-red-600 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:text-red-300 disabled:opacity-50"
+                      title="Delete insight card"
+                    >
+                      {deletingInsightId === insight.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
                 <p className="mt-3 text-sm font-semibold text-slate-700 dark:text-slate-300 leading-6">{insight.summary}</p>
                 <p className="mt-3 text-sm font-black text-slate-900 dark:text-white leading-6">{insight.recommendation}</p>
