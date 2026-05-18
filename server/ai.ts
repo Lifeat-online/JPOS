@@ -2,7 +2,7 @@ import { query, isPostgres } from "./db.js";
 import type { Request, Response, NextFunction } from "express";
 
 export type AiRole = "admin" | "manager" | "dev" | "cashier" | "chef";
-export type AiProviderName = "openai" | "ollama" | "anythingllm" | "google" | "openrouter";
+export type AiProviderName = "openai" | "ollama" | "anythingllm" | "google" | "vertex" | "openrouter";
 export type AiInsightCategory = "sales" | "stock" | "cash" | "staff" | "restaurant" | "customer" | "package";
 export type AiSeverity = "info" | "success" | "warning" | "critical";
 
@@ -131,6 +131,11 @@ export function getAiProviderStatus(settings?: Partial<AiSettings>) {
     ollama: Boolean((settings?.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").trim()),
     anythingllm: Boolean((settings?.apiKey || process.env.ANYTHINGLLM_API_KEY) && (settings?.workspaceSlug || process.env.ANYTHINGLLM_WORKSPACE_SLUG)),
     google: Boolean(settings?.apiKey || process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY),
+    vertex: Boolean(
+      (settings?.apiKey || process.env.GOOGLE_VERTEX_API_KEY) &&
+      (settings?.workspaceSlug || process.env.GOOGLE_VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT) &&
+      (settings?.baseUrl || process.env.GOOGLE_VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION)
+    ),
     openrouter: Boolean(settings?.apiKey || process.env.OPENROUTER_API_KEY),
   };
 }
@@ -263,8 +268,17 @@ function getProviderApiKey(settings: Partial<AiSettings>) {
   if (settings.provider === "openai") return process.env.OPENAI_API_KEY || "";
   if (settings.provider === "anythingllm") return process.env.ANYTHINGLLM_API_KEY || "";
   if (settings.provider === "google") return process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || "";
+  if (settings.provider === "vertex") return process.env.GOOGLE_VERTEX_API_KEY || "";
   if (settings.provider === "openrouter") return process.env.OPENROUTER_API_KEY || "";
   return "";
+}
+
+function getVertexConfig(settings: Partial<AiSettings>) {
+  return {
+    key: getProviderApiKey({ ...settings, provider: "vertex" }),
+    projectId: settings.workspaceSlug || process.env.GOOGLE_VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || "",
+    location: settings.baseUrl || process.env.GOOGLE_VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || "us-central1",
+  };
 }
 
 function uniqueModels(models: AiModelOption[]) {
@@ -284,6 +298,7 @@ export async function listAiModels(tenantId: string, input: Partial<AiSettings> 
   if (settings.provider === "ollama") return listOllamaModels(settings);
   if (settings.provider === "anythingllm") return listAnythingLlmModels(settings);
   if (settings.provider === "google") return listGoogleModels(settings);
+  if (settings.provider === "vertex") return listVertexModels(settings);
   if (settings.provider === "openrouter") return listOpenRouterModels(settings);
   throw new Error(`Unsupported AI provider: ${settings.provider}`);
 }
@@ -642,6 +657,7 @@ async function callConfiguredProvider(settings: AiSettings, payload: any): Promi
   if (settings.provider === "ollama") return callOllama(settings, payload);
   if (settings.provider === "anythingllm") return callAnythingLlm(settings, payload);
   if (settings.provider === "google") return callGoogle(settings, payload);
+  if (settings.provider === "vertex") return callVertex(settings, payload);
   if (settings.provider === "openrouter") return callOpenRouter(settings, payload);
   throw new Error(`Unsupported AI provider: ${settings.provider}`);
 }
@@ -727,6 +743,30 @@ async function listGoogleModels(settings: Partial<AiSettings>) {
       const id = String(model.name || "").replace(/^models\//, "");
       return { id, name: model.displayName || id, provider: "google" as const, ownedBy: "google" };
     }));
+}
+
+async function listVertexModels(settings: Partial<AiSettings>) {
+  const { key, projectId, location } = getVertexConfig(settings);
+  if (!key) throw new Error("Google Vertex AI API key is not configured");
+  if (!projectId) throw new Error("Google Vertex AI project ID is required");
+  if (!location) throw new Error("Google Vertex AI location is required");
+
+  const response = await fetch(
+    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models?key=${encodeURIComponent(key)}`
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `Vertex AI model list failed [${response.status}]`);
+
+  return uniqueModels((body.publisherModels || body.models || []).map((model: any) => {
+    const rawName = String(model.name || model.publisherModel || model.id || "");
+    const id = rawName.split("/models/").pop() || rawName.split("/").pop() || rawName;
+    return {
+      id,
+      name: model.displayName || id,
+      provider: "vertex" as const,
+      ownedBy: "google",
+    };
+  }));
 }
 
 async function listOpenRouterModels(settings: Partial<AiSettings>) {
@@ -837,6 +877,35 @@ async function callGoogle(settings: AiSettings, payload: any): Promise<string> {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body?.error?.message || `Google AI request failed [${response.status}]`);
+  return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
+}
+
+async function callVertex(settings: AiSettings, payload: any): Promise<string> {
+  const { key, projectId, location } = getVertexConfig(settings);
+  if (!key) throw new Error("GOOGLE_VERTEX_API_KEY is not configured");
+  if (!projectId) throw new Error("Google Vertex AI project ID is required");
+  if (!location) throw new Error("Google Vertex AI location is required");
+  const model = settings.model || process.env.GOOGLE_VERTEX_MODEL || "gemini-2.5-flash";
+  const response = await fetch(
+    `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `Return compact valid JSON only. Never invent business metrics.\n${providerPrompt(payload)}` }],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: "application/json",
+        },
+      }),
+    }
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error?.message || `Vertex AI request failed [${response.status}]`);
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
 

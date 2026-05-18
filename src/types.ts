@@ -409,7 +409,7 @@ export type AiRole = 'admin' | 'manager' | 'dev' | 'cashier' | 'chef';
 export type AiInsightCategory = 'sales' | 'stock' | 'cash' | 'staff' | 'restaurant' | 'customer' | 'package';
 export type AiInsightSeverity = 'info' | 'success' | 'warning' | 'critical';
 
-export type AiProviderName = 'openai' | 'ollama' | 'anythingllm' | 'google' | 'openrouter';
+export type AiProviderName = 'openai' | 'ollama' | 'anythingllm' | 'google' | 'vertex' | 'openrouter';
 
 export interface AiSettings {
   tenantId: string;

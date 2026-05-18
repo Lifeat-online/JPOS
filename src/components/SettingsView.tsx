@@ -299,8 +299,10 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     { id: 'ollama', label: 'Ollama local', defaultModel: 'llama3.1', note: 'Uses local Ollama, default http://localhost:11434.' },
     { id: 'anythingllm', label: 'AnythingLLM', defaultModel: 'workspace-default', note: 'Uses ANYTHINGLLM_API_KEY and a workspace slug.' },
     { id: 'google', label: 'Google Gemini', defaultModel: 'gemini-2.5-flash', note: 'Uses GOOGLE_AI_API_KEY or GEMINI_API_KEY.' },
+    { id: 'vertex', label: 'Google Vertex AI', defaultModel: 'gemini-2.5-flash', note: 'Uses a Vertex API key, project ID, and location.' },
     { id: 'openrouter', label: 'OpenRouter', defaultModel: 'openai/gpt-5-mini', note: 'Uses OPENROUTER_API_KEY on the server.' },
   ];
+  const selectedAiProvider = aiSettings ? aiProviders.find(provider => provider.id === aiSettings.provider) : null;
 
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50 dark:bg-slate-950">
@@ -593,7 +595,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                             ...aiSettings,
                             provider,
                             model: meta?.defaultModel || aiSettings.model,
-                            baseUrl: provider === 'ollama' ? (aiSettings.baseUrl || 'http://localhost:11434') : provider === 'anythingllm' ? (aiSettings.baseUrl || 'http://localhost:3001') : aiSettings.baseUrl,
+                            baseUrl: provider === 'ollama'
+                              ? (aiSettings.baseUrl || 'http://localhost:11434')
+                              : provider === 'anythingllm'
+                                ? (aiSettings.baseUrl || 'http://localhost:3001')
+                                : provider === 'vertex'
+                                  ? (aiSettings.baseUrl || 'us-central1')
+                                  : aiSettings.baseUrl,
                           };
                           setAiSettings(nextSettings);
                           setAiModels([]);
@@ -606,7 +614,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                         ))}
                       </select>
                       <p className="text-xs font-semibold text-slate-400">
-                        {aiProviders.find(provider => provider.id === aiSettings.provider)?.note}
+                        {selectedAiProvider?.note}
                       </p>
                     </div>
                     <div className="space-y-2">
@@ -672,25 +680,29 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                     </div>
                   )}
 
-                  {(aiSettings.provider === 'ollama' || aiSettings.provider === 'anythingllm') && (
+                  {(aiSettings.provider === 'ollama' || aiSettings.provider === 'anythingllm' || aiSettings.provider === 'vertex') && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-xs font-black uppercase tracking-widest text-slate-500">Base URL</label>
+                        <label className="text-xs font-black uppercase tracking-widest text-slate-500">
+                          {aiSettings.provider === 'vertex' ? 'Location' : 'Base URL'}
+                        </label>
                         <input
                           value={aiSettings.baseUrl || ''}
                           onChange={e => setAiSettings({ ...aiSettings, baseUrl: e.target.value })}
                           className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
-                          placeholder={aiSettings.provider === 'ollama' ? 'http://localhost:11434' : 'http://localhost:3001'}
+                          placeholder={aiSettings.provider === 'ollama' ? 'http://localhost:11434' : aiSettings.provider === 'vertex' ? 'us-central1' : 'http://localhost:3001'}
                         />
                       </div>
-                      {aiSettings.provider === 'anythingllm' && (
+                      {(aiSettings.provider === 'anythingllm' || aiSettings.provider === 'vertex') && (
                         <div className="space-y-2">
-                          <label className="text-xs font-black uppercase tracking-widest text-slate-500">Workspace slug</label>
+                          <label className="text-xs font-black uppercase tracking-widest text-slate-500">
+                            {aiSettings.provider === 'vertex' ? 'Project ID' : 'Workspace slug'}
+                          </label>
                           <input
                             value={aiSettings.workspaceSlug || ''}
                             onChange={e => setAiSettings({ ...aiSettings, workspaceSlug: e.target.value })}
                             className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
-                            placeholder="main-workspace"
+                            placeholder={aiSettings.provider === 'vertex' ? 'my-gcp-project' : 'main-workspace'}
                           />
                         </div>
                       )}
@@ -699,7 +711,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
 
                   <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
                     <h3 className="text-sm font-black text-slate-900 dark:text-white">Provider readiness</h3>
-                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2">
                       {aiProviders.map(provider => (
                         <div key={provider.id} className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2">
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{provider.label}</p>
