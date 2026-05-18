@@ -7,11 +7,13 @@ import { getAccessToken } from './hooks/useAuth';
 import type { AiInsight, AiSettings, AiStaffScore } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
+let sessionCleared = false;
 
 function clearStoredSession() {
   localStorage.removeItem('jpos_access_token');
   localStorage.removeItem('jpos_refresh_token');
   localStorage.removeItem('jpos_user');
+  sessionCleared = true;
   window.dispatchEvent(new Event('jpos:auth-cleared'));
 }
 
@@ -37,6 +39,7 @@ async function tryRefresh(): Promise<boolean> {
       const data = await res.json();
       localStorage.setItem('jpos_access_token',  data.accessToken);
       localStorage.setItem('jpos_refresh_token', data.refreshToken);
+      sessionCleared = false;
       return true;
     } catch {
       return false;
@@ -62,6 +65,14 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
 // ── Core fetch with auto-refresh ──────────────────────────────────────────────
 
 async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<T> {
+  if (sessionCleared && getAccessToken()) {
+    sessionCleared = false;
+  }
+  if (sessionCleared || !getAccessToken()) {
+    clearStoredSession();
+    throw new Error('Session expired. Please sign in again.');
+  }
+
   const doRequest = () => fetch(input, {
     ...init,
     headers: {
@@ -75,7 +86,11 @@ async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<
   if (res.status === 401) {
     const refreshed = await tryRefresh();
     if (refreshed) {
+      sessionCleared = false;
       res = await doRequest();
+    } else {
+      clearStoredSession();
+      throw new Error('Session expired. Please sign in again.');
     }
   }
 

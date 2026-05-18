@@ -419,6 +419,11 @@ export async function createApp(io: any = null) {
     };
   }
 
+  function requireAiPackageAccess(req: Request, res: Response, next: NextFunction) {
+    if (normalizeRole(req.user?.role) === "dev") return next();
+    return requirePackageFeature("ai")(req, res, next);
+  }
+
   // Security Headers
   app.use((req, res, next) => {
     res.setHeader("X-Frame-Options", "DENY");
@@ -589,7 +594,7 @@ export async function createApp(io: any = null) {
   app.get(
     "/api/mariadb/tenants/:tenantId/ai/settings",
     requireAuth,
-    requirePackageFeature("ai"),
+    requireAiPackageAccess,
     requireAiRoleAccess,
     async (req, res) => {
       try {
@@ -608,7 +613,7 @@ export async function createApp(io: any = null) {
   app.put(
     "/api/mariadb/tenants/:tenantId/ai/settings",
     requireAuth,
-    requirePackageFeature("ai"),
+    requireAiPackageAccess,
     async (req, res) => {
       try {
         if (!canManageAi(req.user?.role)) {
@@ -629,7 +634,7 @@ export async function createApp(io: any = null) {
   app.get(
     "/api/mariadb/tenants/:tenantId/ai/insights",
     requireAuth,
-    requirePackageFeature("ai"),
+    requireAiPackageAccess,
     requireAiRoleAccess,
     async (req, res) => {
       try {
@@ -643,7 +648,7 @@ export async function createApp(io: any = null) {
   app.post(
     "/api/mariadb/tenants/:tenantId/ai/insights/generate",
     requireAuth,
-    requirePackageFeature("ai"),
+    requireAiPackageAccess,
     requireAiRoleAccess,
     async (req, res) => {
       try {
@@ -657,7 +662,7 @@ export async function createApp(io: any = null) {
   app.get(
     "/api/mariadb/tenants/:tenantId/ai/staff-scores",
     requireAuth,
-    requirePackageFeature("ai"),
+    requireAiPackageAccess,
     requireAiStaffScoreAccess,
     async (req, res) => {
       try {
@@ -671,7 +676,7 @@ export async function createApp(io: any = null) {
   app.post(
     "/api/mariadb/tenants/:tenantId/ai/staff-scores/generate",
     requireAuth,
-    requirePackageFeature("ai"),
+    requireAiPackageAccess,
     requireAiStaffScoreAccess,
     async (req, res) => {
       try {
