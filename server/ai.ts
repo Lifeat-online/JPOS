@@ -106,6 +106,22 @@ function parseJson<T>(value: unknown, fallback: T): T {
   }
 }
 
+function providerErrorMessage(body: any, fallback: string) {
+  const error = body?.error;
+  const candidates = [
+    error?.message,
+    error?.metadata?.raw,
+    error?.metadata?.provider_name ? `${error.metadata.provider_name}: ${error.metadata.raw || error.message || ""}` : "",
+    body?.message,
+    body?.detail,
+    body?.error_description,
+    typeof error === "string" ? error : "",
+  ].filter(Boolean).map(String);
+  const message = candidates.find((item) => item.trim()) || fallback;
+  const code = error?.code || body?.code;
+  return code ? `${message} (${code})` : message;
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value === "string") {
@@ -1123,7 +1139,7 @@ async function callOpenAiText(settings: AiSettings, message: string, images: str
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.message || `OpenAI test failed [${response.status}]`);
+  if (!response.ok) throw new Error(providerErrorMessage(body, `OpenAI test failed [${response.status}]`));
   return body.output_text || body.output?.flatMap((item: any) => item.content || []).map((part: any) => part.text || "").join("") || "";
 }
 
@@ -1171,7 +1187,7 @@ async function callOllamaText(settings: AiSettings, message: string, images: str
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error || `Ollama test failed [${response.status}]`);
+  if (!response.ok) throw new Error(providerErrorMessage(body, `Ollama test failed [${response.status}]`));
   return body.message?.content || body.response || "";
 }
 
@@ -1208,7 +1224,7 @@ async function callAnythingLlmText(settings: AiSettings, message: string, images
     body: JSON.stringify({ message: `${message}${mediaNote}`, mode: "chat" }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error || body?.message || `AnythingLLM test failed [${response.status}]`);
+  if (!response.ok) throw new Error(providerErrorMessage(body, `AnythingLLM test failed [${response.status}]`));
   return body.textResponse || body.response || body.message || "";
 }
 
@@ -1249,7 +1265,7 @@ async function callGoogleText(settings: AiSettings, message: string, images: str
     body: JSON.stringify({ contents: [{ role: "user", parts }] }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.message || `Google AI test failed [${response.status}]`);
+  if (!response.ok) throw new Error(providerErrorMessage(body, `Google AI test failed [${response.status}]`));
   return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
 
@@ -1299,7 +1315,7 @@ async function callVertexText(settings: AiSettings, message: string, images: str
   );
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = body?.error?.message || `Vertex AI test failed [${response.status}]`;
+    const error = providerErrorMessage(body, `Vertex AI test failed [${response.status}]`);
     if (/missing authentication header/i.test(error) && key) return callGoogleText({ ...settings, provider: "google", apiKey: key }, message, images, documents);
     throw new Error(error);
   }
@@ -1365,7 +1381,7 @@ async function callOpenRouterText(settings: AiSettings, message: string, images:
     }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error?.message || `OpenRouter test failed [${response.status}]`);
+  if (!response.ok) throw new Error(providerErrorMessage(body, `OpenRouter test failed [${response.status}]`));
   return body.choices?.[0]?.message?.content || "";
 }
 

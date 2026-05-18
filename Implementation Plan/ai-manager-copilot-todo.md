@@ -15,6 +15,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - [x] Phase 7: Multi-provider AI expansion
 - [x] Phase 8: Provider model picker stability
 - [x] Phase 9: Provider contact test chat
+- [x] Phase 10: Provider test error visibility
 
 ## In progress
 
@@ -36,6 +37,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - [x] Add provider configuration fields and environment documentation.
 - [x] Prevent background Settings refresh from resetting AI provider/model selection while the AI tab is open.
 - [x] Add AI credentials test chat with optional media attachments.
+- [x] Show detailed provider errors in the AI test chat instead of generic API wrapper messages.
 
 ## Blockers/risks
 
@@ -44,6 +46,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - V1 recommendations remain suggest-only.
 - Settings background refresh now preserves in-progress AI provider/model browsing while the AI tab is open.
 - Provider test chat sends the selected provider/model/key and optional image/document attachments for contact testing.
+- Provider test failures now surface nested provider messages and metadata where available.
 
 ## Verification log
 
@@ -67,3 +70,7 @@ Implementation complete. AI Manager Copilot now supports OpenAI, Ollama, Anythin
 - `npm.cmd run lint` passed after provider test chat.
 - `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after provider test chat.
 - `npm.cmd run build` passed after provider test chat with the existing Vite large-chunk warning.
+- Provider test error visibility improved after generic `Provider returned error` report.
+- `npm.cmd run lint` passed after provider error visibility fix.
+- `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/api.test.ts` passed after provider error visibility fix.
+- `npm.cmd run build` passed after provider error visibility fix with the existing Vite large-chunk warning.

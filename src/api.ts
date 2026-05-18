@@ -96,6 +96,13 @@ async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<
 
   if (!res.ok) {
     const body = await res.text();
+    try {
+      const parsed = JSON.parse(body);
+      const message = parsed?.error || parsed?.message || parsed?.detail;
+      if (message) throw new Error(String(message));
+    } catch (err) {
+      if (err instanceof Error && err.message && !err.message.startsWith('Unexpected')) throw err;
+    }
     throw new Error(`API request failed [${res.status}]: ${body}`);
   }
 
