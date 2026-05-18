@@ -336,6 +336,70 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS ai_settings (
+  tenant_id VARCHAR(64) PRIMARY KEY,
+  enabled BOOLEAN DEFAULT TRUE,
+  provider VARCHAR(32) DEFAULT 'openai',
+  model VARCHAR(64) DEFAULT 'gpt-5-mini',
+  base_url VARCHAR(255),
+  workspace_slug VARCHAR(128),
+  insights_enabled BOOLEAN DEFAULT TRUE,
+  staff_scoring_enabled BOOLEAN DEFAULT TRUE,
+  visible_roles JSON DEFAULT JSON_ARRAY('admin', 'manager', 'dev'),
+  staff_score_visible_roles JSON DEFAULT JSON_ARRAY('admin', 'manager', 'dev'),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ai_insights (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  category ENUM('sales','stock','cash','staff','restaurant','customer','package') NOT NULL,
+  severity ENUM('info','success','warning','critical') NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  summary TEXT NOT NULL,
+  recommendation TEXT NOT NULL,
+  evidence JSON DEFAULT JSON_ARRAY(),
+  confidence INT DEFAULT 0,
+  status ENUM('open','dismissed','done') DEFAULT 'open',
+  source ENUM('deterministic','openai') DEFAULT 'deterministic',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ai_staff_scores (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  staff_id VARCHAR(64) NOT NULL,
+  staff_name VARCHAR(255) NOT NULL,
+  period_start DATETIME NOT NULL,
+  period_end DATETIME NOT NULL,
+  score INT NOT NULL DEFAULT 0,
+  grade VARCHAR(32) NOT NULL,
+  component_scores JSON DEFAULT JSON_OBJECT(),
+  strengths JSON DEFAULT JSON_ARRAY(),
+  coaching_notes JSON DEFAULT JSON_ARRAY(),
+  badges JSON DEFAULT JSON_ARRAY(),
+  risk_flags JSON DEFAULT JSON_ARRAY(),
+  source ENUM('deterministic','openai') DEFAULT 'deterministic',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ai_audit_log (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  action VARCHAR(64) NOT NULL,
+  requested_by VARCHAR(64),
+  provider VARCHAR(32),
+  status VARCHAR(32) NOT NULL,
+  details JSON DEFAULT JSON_OBJECT(),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
 INSERT INTO tenants (id, name) VALUES ('default', 'Default Tenant');
 
 INSERT INTO staff (id, tenant_id, name, role, email, password_hash, status)

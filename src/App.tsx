@@ -8,7 +8,7 @@ import {
   LayoutGrid, History as HistoryIcon, Settings, Package, Banknote,
   Users, UserCog, Moon, Sun, ShoppingCart, AlertCircle, ChefHat, Utensils, Trophy,
   ChevronDown, LogOut, Wallet, TabletSmartphone, Maximize2, Minimize2, Monitor, Download,
-  Activity, Building2, BarChart3, Code2, MessageSquare
+  Activity, Building2, BarChart3, Code2, MessageSquare, BrainCircuit
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -41,6 +41,7 @@ import { WalletAdminView } from './views/WalletAdminView';
 import { ClientPortalView } from './views/ClientPortalView';
 import { PackagesView } from './views/PackagesView';
 import { PublicPackagesPage } from './views/PublicPackagesPage';
+import { AiCopilotView } from './views/AiCopilotView';
 import { useClientPortal } from './hooks/useClientPortal';
 import { TabsView } from './views/TabsView';
 import { BarcodeScanner } from './components/BarcodeScanner';
@@ -930,10 +931,12 @@ export default function App() {
           />
         )}
         {view === 'live' && <LiveView tenantId={tenantId} />}
-        {view === 'reports' && <ReportsView sales={sales} />}
+        {view === 'reports' && <ReportsView sales={sales} tenantId={tenantId} />}
+        {view === 'ai' && <AiCopilotView tenantId={tenantId} />}
         {view === 'staff' && (
           <StaffView
             staff={staff}
+            tenantId={tenantId}
             onEdit={(s) => setStaffModal({ isOpen: true, staff: s })}
             onAdd={() => setStaffModal({ isOpen: true, staff: { role: 'cashier' } })}
             onDelete={(id) => setStaffToDelete(id)}

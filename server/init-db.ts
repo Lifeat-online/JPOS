@@ -367,6 +367,7 @@ export async function initDb() {
   await ensureLicenceSchema();
   await ensureCashManagementSchema();
   await ensureBulkInventorySchema();
+  await ensureAiSchema();
 }
 
 export async function ensureStaffPermissionsSchema() {
@@ -484,6 +485,158 @@ export async function ensureBulkInventorySchema() {
   await addColumn(`pack_quantity DECIMAL(12,3) DEFAULT 1 AFTER pack_name`);
   await addColumn(`single_unit_name VARCHAR(64) DEFAULT 'item' AFTER pack_quantity`);
   await query(`UPDATE bulk_items SET item_type = COALESCE(item_type, 'single'), pack_quantity = COALESCE(pack_quantity, 1), single_unit_name = COALESCE(single_unit_name, 'item')`);
+}
+
+export async function ensureAiSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS ai_settings (
+        tenant_id TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+        enabled SMALLINT DEFAULT 1 CHECK (enabled IN (0, 1)),
+        provider TEXT DEFAULT 'openai',
+        model TEXT DEFAULT 'gpt-5-mini',
+        base_url TEXT,
+        workspace_slug TEXT,
+        insights_enabled SMALLINT DEFAULT 1 CHECK (insights_enabled IN (0, 1)),
+        staff_scoring_enabled SMALLINT DEFAULT 1 CHECK (staff_scoring_enabled IN (0, 1)),
+        visible_roles TEXT DEFAULT '["admin","manager","dev"]'::TEXT,
+        staff_score_visible_roles TEXT DEFAULT '["admin","manager","dev"]'::TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS ai_insights (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        category TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        recommendation TEXT NOT NULL,
+        evidence TEXT DEFAULT '[]'::TEXT,
+        confidence INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'open',
+        source TEXT DEFAULT 'deterministic',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS ai_staff_scores (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        staff_id TEXT NOT NULL,
+        staff_name TEXT NOT NULL,
+        period_start TIMESTAMPTZ NOT NULL,
+        period_end TIMESTAMPTZ NOT NULL,
+        score INTEGER NOT NULL DEFAULT 0,
+        grade TEXT NOT NULL,
+        component_scores TEXT DEFAULT '{}'::TEXT,
+        strengths TEXT DEFAULT '[]'::TEXT,
+        coaching_notes TEXT DEFAULT '[]'::TEXT,
+        badges TEXT DEFAULT '[]'::TEXT,
+        risk_flags TEXT DEFAULT '[]'::TEXT,
+        source TEXT DEFAULT 'deterministic',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS ai_audit_log (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        action TEXT NOT NULL,
+        requested_by TEXT,
+        provider TEXT,
+        status TEXT NOT NULL,
+        details TEXT DEFAULT '{}'::TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS base_url TEXT`);
+    await query(`ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS workspace_slug TEXT`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS ai_settings (
+      tenant_id VARCHAR(64) PRIMARY KEY,
+        enabled BOOLEAN DEFAULT TRUE,
+        provider VARCHAR(32) DEFAULT 'openai',
+        model VARCHAR(64) DEFAULT 'gpt-5-mini',
+        base_url VARCHAR(255),
+        workspace_slug VARCHAR(128),
+      insights_enabled BOOLEAN DEFAULT TRUE,
+      staff_scoring_enabled BOOLEAN DEFAULT TRUE,
+      visible_roles JSON DEFAULT JSON_ARRAY('admin', 'manager', 'dev'),
+      staff_score_visible_roles JSON DEFAULT JSON_ARRAY('admin', 'manager', 'dev'),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS ai_insights (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      category ENUM('sales','stock','cash','staff','restaurant','customer','package') NOT NULL,
+      severity ENUM('info','success','warning','critical') NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      summary TEXT NOT NULL,
+      recommendation TEXT NOT NULL,
+      evidence JSON DEFAULT JSON_ARRAY(),
+      confidence INT DEFAULT 0,
+      status ENUM('open','dismissed','done') DEFAULT 'open',
+      source ENUM('deterministic','openai') DEFAULT 'deterministic',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS ai_staff_scores (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      staff_id VARCHAR(64) NOT NULL,
+      staff_name VARCHAR(255) NOT NULL,
+      period_start DATETIME NOT NULL,
+      period_end DATETIME NOT NULL,
+      score INT NOT NULL DEFAULT 0,
+      grade VARCHAR(32) NOT NULL,
+      component_scores JSON DEFAULT JSON_OBJECT(),
+      strengths JSON DEFAULT JSON_ARRAY(),
+      coaching_notes JSON DEFAULT JSON_ARRAY(),
+      badges JSON DEFAULT JSON_ARRAY(),
+      risk_flags JSON DEFAULT JSON_ARRAY(),
+      source ENUM('deterministic','openai') DEFAULT 'deterministic',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS ai_audit_log (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      action VARCHAR(64) NOT NULL,
+      requested_by VARCHAR(64),
+      provider VARCHAR(32),
+      status VARCHAR(32) NOT NULL,
+      details JSON DEFAULT JSON_OBJECT(),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+
+  const addAiColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE ai_settings ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  await addAiColumn(`base_url VARCHAR(255) AFTER model`);
+  await addAiColumn(`workspace_slug VARCHAR(128) AFTER base_url`);
 }
 
 export async function ensureRestaurantInventoryTables() {

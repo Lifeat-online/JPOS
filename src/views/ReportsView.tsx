@@ -4,14 +4,16 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, L
 import { TrendingUp, Users, Presentation, DollarSign } from 'lucide-react';
 import { format, subDays, isSameDay } from 'date-fns';
 import { getDate } from '../utils/date';
+import { AiInsightStrip } from '../components/AiInsightStrip';
 
 interface ReportsViewProps {
   sales: Sale[];
+  tenantId?: string | null;
 }
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-export const ReportsView: React.FC<ReportsViewProps> = ({ sales }) => {
+export const ReportsView: React.FC<ReportsViewProps> = ({ sales, tenantId }) => {
   // Aggregate data
   const completedSales = sales.filter(s => s.status === 'completed');
   
@@ -51,6 +53,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ sales }) => {
           <h2 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white mb-2">Analytics Dashboard</h2>
           <p className="text-slate-500 font-medium">Revenue tracking, average order value, and top products.</p>
         </div>
+
+        <AiInsightStrip tenantId={tenantId || null} compact />
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <div className="bg-white dark:bg-slate-900 p-6 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">

@@ -1,10 +1,11 @@
 import { usePosStore } from '../store/usePosStore';
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
-import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck } from 'lucide-react';
+import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
-import { apiGet, apiPut, apiPost, apiDelete, getTenantPackageLimits, type TenantPackageLimitsResponse } from '../api';
+import { apiGet, apiPut, apiPost, apiDelete, getTenantPackageLimits, getAiSettings, updateAiSettings, type TenantPackageLimitsResponse } from '../api';
 import { JPOS_PACKAGES } from '../../shared/packageCatalog';
+import type { AiProviderName, AiRole, AiSettings } from '../types';
 
 export function SettingsView({ config, setConfig }: { config: AppConfig, setConfig: (c: AppConfig) => void }) {
   const tenantId = usePosStore(state => state.tenantId);
@@ -13,8 +14,10 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     categories: config.categories || DEFAULT_CATEGORY_TREE
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'business' | 'package' | 'payment' | 'categories' | 'features' | 'printing' | 'tax' | 'loyalty' | 'workstations' | 'tables'>('business');
+  const [activeTab, setActiveTab] = useState<'business' | 'package' | 'ai' | 'payment' | 'categories' | 'features' | 'printing' | 'tax' | 'loyalty' | 'workstations' | 'tables'>('business');
   const [packageLimits, setPackageLimits] = useState<TenantPackageLimitsResponse | null>(null);
+  const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
+  const [aiSaving, setAiSaving] = useState(false);
 
   // Workstations state
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
@@ -41,6 +44,11 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
       setSections(sects || []);
       setTables(tabs || []);
       setPackageLimits(limits);
+      try {
+        setAiSettings(await getAiSettings(tenantId));
+      } catch {
+        setAiSettings(null);
+      }
     } catch (err) {
       console.error('Settings data fetch error:', err);
     }
@@ -148,6 +156,27 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     }
   };
 
+  const toggleAiRole = (field: 'visibleRoles' | 'staffScoreVisibleRoles', role: AiRole) => {
+    if (!aiSettings) return;
+    const current = aiSettings[field] || [];
+    const next = current.includes(role) ? current.filter(r => r !== role) : [...current, role];
+    setAiSettings({ ...aiSettings, [field]: next.length ? next : ['admin', 'manager', 'dev'] });
+  };
+
+  const saveAiSettings = async () => {
+    if (!tenantId || !aiSettings) return;
+    setAiSaving(true);
+    try {
+      setAiSettings(await updateAiSettings(tenantId, aiSettings));
+      alert('AI settings saved successfully!');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to save AI settings');
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
   const [categoryInput, setCategoryInput] = useState<{ isOpen: boolean, type: 'section'|'category'|'subcategory', section?: string, category?: string }>({ isOpen: false, type: 'section' });
   const [inputValue, setInputValue] = useState("");
 
@@ -228,6 +257,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const packageTier = formData.business?.packageTier || packageLimits?.package.id || 'free';
   const selectedPackage = JPOS_PACKAGES.find(pkg => pkg.id === packageTier) || JPOS_PACKAGES[0];
   const canEditPackage = packageLimits?.source !== 'licence';
+  const aiProviders: Array<{ id: AiProviderName; label: string; defaultModel: string; note: string }> = [
+    { id: 'openai', label: 'OpenAI', defaultModel: 'gpt-5-mini', note: 'Uses OPENAI_API_KEY on the server.' },
+    { id: 'ollama', label: 'Ollama local', defaultModel: 'llama3.1', note: 'Uses local Ollama, default http://localhost:11434.' },
+    { id: 'anythingllm', label: 'AnythingLLM', defaultModel: 'workspace-default', note: 'Uses ANYTHINGLLM_API_KEY and a workspace slug.' },
+    { id: 'google', label: 'Google Gemini', defaultModel: 'gemini-2.5-flash', note: 'Uses GOOGLE_AI_API_KEY or GEMINI_API_KEY.' },
+    { id: 'openrouter', label: 'OpenRouter', defaultModel: 'openai/gpt-5-mini', note: 'Uses OPENROUTER_API_KEY on the server.' },
+  ];
 
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50 dark:bg-slate-950">
@@ -258,6 +294,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           >
             <PackageCheck className="w-4 h-4" />
             Package
+          </button>
+          <button
+            onClick={() => setActiveTab('ai')}
+            className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'ai' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
+          >
+            <BrainCircuit className="w-4 h-4" />
+            AI
           </button>
           <button 
             onClick={() => setActiveTab('payment')}
@@ -461,6 +504,159 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'ai' && (
+            <div className="space-y-6">
+              {!aiSettings && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
+                  AI is available on Business and White-label packages. Upgrade or enable AI to manage these controls.
+                </div>
+              )}
+              {aiSettings && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-4">
+                      <input
+                        type="checkbox"
+                        checked={aiSettings.enabled}
+                        onChange={e => setAiSettings({ ...aiSettings, enabled: e.target.checked })}
+                        className="w-5 h-5 rounded text-primary accent-primary"
+                      />
+                      <span>
+                        <span className="block text-sm font-black text-slate-900 dark:text-white">Enable AI Copilot</span>
+                        <span className="block text-xs font-semibold text-slate-500 dark:text-slate-400">Master switch for tenant AI features.</span>
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-4">
+                      <input
+                        type="checkbox"
+                        checked={aiSettings.staffScoringEnabled}
+                        onChange={e => setAiSettings({ ...aiSettings, staffScoringEnabled: e.target.checked })}
+                        className="w-5 h-5 rounded text-primary accent-primary"
+                      />
+                      <span>
+                        <span className="block text-sm font-black text-slate-900 dark:text-white">Staff scoring</span>
+                        <span className="block text-xs font-semibold text-slate-500 dark:text-slate-400">Balanced coaching grades and motivation badges.</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Provider</label>
+                      <select
+                        value={aiSettings.provider}
+                        onChange={e => {
+                          const provider = e.target.value as AiProviderName;
+                          const meta = aiProviders.find(item => item.id === provider);
+                          setAiSettings({
+                            ...aiSettings,
+                            provider,
+                            model: meta?.defaultModel || aiSettings.model,
+                            baseUrl: provider === 'ollama' ? (aiSettings.baseUrl || 'http://localhost:11434') : provider === 'anythingllm' ? (aiSettings.baseUrl || 'http://localhost:3001') : aiSettings.baseUrl,
+                          });
+                        }}
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      >
+                        {aiProviders.map(provider => (
+                          <option key={provider.id} value={provider.id}>{provider.label}</option>
+                        ))}
+                      </select>
+                      <p className="text-xs font-semibold text-slate-400">
+                        {aiProviders.find(provider => provider.id === aiSettings.provider)?.note}
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Model</label>
+                      <input
+                        value={aiSettings.model}
+                        onChange={e => setAiSettings({ ...aiSettings, model: e.target.value })}
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                      />
+                      <p className="text-xs font-semibold text-slate-400">
+                        {aiSettings.providerStatus?.[aiSettings.provider] ? 'Selected provider is configured' : 'Selected provider is not fully configured; deterministic fallback is active'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {(aiSettings.provider === 'ollama' || aiSettings.provider === 'anythingllm') && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-black uppercase tracking-widest text-slate-500">Base URL</label>
+                        <input
+                          value={aiSettings.baseUrl || ''}
+                          onChange={e => setAiSettings({ ...aiSettings, baseUrl: e.target.value })}
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                          placeholder={aiSettings.provider === 'ollama' ? 'http://localhost:11434' : 'http://localhost:3001'}
+                        />
+                      </div>
+                      {aiSettings.provider === 'anythingllm' && (
+                        <div className="space-y-2">
+                          <label className="text-xs font-black uppercase tracking-widest text-slate-500">Workspace slug</label>
+                          <input
+                            value={aiSettings.workspaceSlug || ''}
+                            onChange={e => setAiSettings({ ...aiSettings, workspaceSlug: e.target.value })}
+                            className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                            placeholder="main-workspace"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+                    <h3 className="text-sm font-black text-slate-900 dark:text-white">Provider readiness</h3>
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                      {aiProviders.map(provider => (
+                        <div key={provider.id} className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{provider.label}</p>
+                          <p className={`mt-1 text-xs font-black ${aiSettings.providerStatus?.[provider.id] ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
+                            {aiSettings.providerStatus?.[provider.id] ? 'Ready' : 'Fallback'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {([
+                    { key: 'visibleRoles', title: 'Roles that can use AI Copilot' },
+                    { key: 'staffScoreVisibleRoles', title: 'Roles that can see staff grades' },
+                  ] as const).map(group => (
+                    <div key={group.key} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white">{group.title}</h3>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {(['admin', 'manager', 'dev', 'cashier', 'chef'] as AiRole[]).map(role => (
+                          <button
+                            key={role}
+                            type="button"
+                            onClick={() => toggleAiRole(group.key, role)}
+                            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
+                              aiSettings[group.key].includes(role)
+                                ? 'bg-primary text-white border-primary'
+                                : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-800'
+                            }`}
+                          >
+                            {role}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      onClick={saveAiSettings}
+                      disabled={aiSaving}
+                      className="px-8 py-4 bg-primary text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center gap-3 hover:bg-primary/90 transition-all shadow-xl shadow-primary/20"
+                    >
+                      {aiSaving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-5 h-5" />}
+                      Save AI Settings
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -884,7 +1080,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           )}
 
           {/* Save button — hidden on workstations tab (it has its own save) */}
-          {activeTab !== 'workstations' && activeTab !== 'tables' && (
+          {activeTab !== 'workstations' && activeTab !== 'tables' && activeTab !== 'ai' && (
           <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
             <button 
               onClick={handleSave}

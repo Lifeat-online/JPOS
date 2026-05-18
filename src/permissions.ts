@@ -2,6 +2,7 @@ import {
   Activity,
   Banknote,
   BarChart3,
+  BrainCircuit,
   ChefHat,
   Code2,
   History as HistoryIcon,
@@ -35,6 +36,7 @@ export type AppView =
   | 'wallets'
   | 'leaderboard'
   | 'reports'
+  | 'ai'
   | 'packages'
   | 'settings'
   | 'profile'
@@ -58,16 +60,16 @@ const ROLE_VIEWS: Record<StaffRole, AppView[]> = {
   admin: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
     'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile',
-    'packages',
+    'ai', 'packages',
   ],
   dev: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
     'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile', 'dev',
-    'packages',
+    'ai', 'packages',
   ],
   manager: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
-    'inventory', 'customers', 'leaderboard', 'profile',
+    'inventory', 'customers', 'leaderboard', 'reports', 'ai', 'profile',
     'packages',
   ],
   cashier: ['pos', 'history', 'messages', 'cash', 'profile'],
@@ -89,6 +91,7 @@ const VIEW_META: Record<AppView, NavItem> = {
   wallets: { id: 'wallets', icon: Wallet, label: 'Wallets', group: 'Management' },
   leaderboard: { id: 'leaderboard', icon: Trophy, label: 'Leaderboard', group: 'Management' },
   reports: { id: 'reports', icon: BarChart3, label: 'Analytics', group: 'Management' },
+  ai: { id: 'ai', icon: BrainCircuit, label: 'AI Copilot', group: 'Management' },
   packages: { id: 'packages', icon: Tags, label: 'Packages', group: 'Management' },
   settings: { id: 'settings', icon: Settings, label: 'Settings', group: 'Management' },
   profile: { id: 'profile', icon: Users, label: 'Profile' },
@@ -112,6 +115,7 @@ const PERMISSION_VIEW_MAP: Array<[keyof StaffPermissions, AppView]> = [
   ['canManageWallets', 'wallets'],
   ['canViewLeaderboard', 'leaderboard'],
   ['canViewReports', 'reports'],
+  ['canAccessAi', 'ai'],
   ['canManageSettings', 'settings'],
   ['canAccessDevTools', 'dev'],
 ];
@@ -176,7 +180,7 @@ export function getDefaultView(role: StaffRole | null, options: AccessOptions = 
 
 export function buildNavigation(role: StaffRole | null, options: AccessOptions = {}) {
   const allowed = getAllowedViews(role, options);
-  const visible = [...PRIMARY_VIEWS, 'cash', 'live', 'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'packages', 'settings']
+  const visible = [...PRIMARY_VIEWS, 'cash', 'live', 'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'ai', 'packages', 'settings']
     .filter(view => allowed.has(view as AppView)) as AppView[];
 
   return {

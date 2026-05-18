@@ -320,6 +320,66 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS ai_settings (
+  tenant_id TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  enabled SMALLINT DEFAULT 1 CHECK (enabled IN (0, 1)),
+  provider TEXT DEFAULT 'openai',
+  model TEXT DEFAULT 'gpt-5-mini',
+  base_url TEXT,
+  workspace_slug TEXT,
+  insights_enabled SMALLINT DEFAULT 1 CHECK (insights_enabled IN (0, 1)),
+  staff_scoring_enabled SMALLINT DEFAULT 1 CHECK (staff_scoring_enabled IN (0, 1)),
+  visible_roles TEXT DEFAULT '["admin","manager","dev"]'::TEXT,
+  staff_score_visible_roles TEXT DEFAULT '["admin","manager","dev"]'::TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ai_insights (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  category TEXT NOT NULL CHECK (category IN ('sales','stock','cash','staff','restaurant','customer','package')),
+  severity TEXT NOT NULL CHECK (severity IN ('info','success','warning','critical')),
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  recommendation TEXT NOT NULL,
+  evidence TEXT DEFAULT '[]'::TEXT,
+  confidence INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'open' CHECK (status IN ('open','dismissed','done')),
+  source TEXT DEFAULT 'deterministic' CHECK (source IN ('deterministic','openai')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ai_staff_scores (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  staff_id TEXT NOT NULL,
+  staff_name TEXT NOT NULL,
+  period_start TIMESTAMPTZ NOT NULL,
+  period_end TIMESTAMPTZ NOT NULL,
+  score INTEGER NOT NULL DEFAULT 0,
+  grade TEXT NOT NULL,
+  component_scores TEXT DEFAULT '{}'::TEXT,
+  strengths TEXT DEFAULT '[]'::TEXT,
+  coaching_notes TEXT DEFAULT '[]'::TEXT,
+  badges TEXT DEFAULT '[]'::TEXT,
+  risk_flags TEXT DEFAULT '[]'::TEXT,
+  source TEXT DEFAULT 'deterministic' CHECK (source IN ('deterministic','openai')),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ai_audit_log (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  requested_by TEXT,
+  provider TEXT,
+  status TEXT NOT NULL,
+  details TEXT DEFAULT '{}'::TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 INSERT INTO tenants (id, name) VALUES ('default', 'Default Tenant')
 ON CONFLICT (id) DO NOTHING;
 

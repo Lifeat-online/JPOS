@@ -87,6 +87,18 @@ import {
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
 import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
 import { featureSetForPackage, getHostedPackage, hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, type PackageFeature } from "../shared/packageCatalog.js";
+import {
+  canManageAi,
+  generateInsights,
+  generateStaffScores,
+  getAiProviderStatus,
+  getAiSettings,
+  listInsights,
+  listStaffScores,
+  requireAiRoleAccess,
+  requireAiStaffScoreAccess,
+  saveAiSettings,
+} from "./ai.js";
 
 dotenv.config();
 
@@ -573,6 +585,102 @@ export async function createApp(io: any = null) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  app.get(
+    "/api/mariadb/tenants/:tenantId/ai/settings",
+    requireAuth,
+    requirePackageFeature("ai"),
+    requireAiRoleAccess,
+    async (req, res) => {
+      try {
+        const settings = await getAiSettings(req.params.tenantId);
+        res.json({
+          ...settings,
+          openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
+          providerStatus: getAiProviderStatus(settings),
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.put(
+    "/api/mariadb/tenants/:tenantId/ai/settings",
+    requireAuth,
+    requirePackageFeature("ai"),
+    async (req, res) => {
+      try {
+        if (!canManageAi(req.user?.role)) {
+          return res.status(403).json({ error: "Only managers, admins, and devs can manage AI settings" });
+        }
+        const settings = await saveAiSettings(req.params.tenantId, req.body || {});
+        res.json({
+          ...settings,
+          openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
+          providerStatus: getAiProviderStatus(settings),
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.get(
+    "/api/mariadb/tenants/:tenantId/ai/insights",
+    requireAuth,
+    requirePackageFeature("ai"),
+    requireAiRoleAccess,
+    async (req, res) => {
+      try {
+        res.json(await listInsights(req.params.tenantId));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/mariadb/tenants/:tenantId/ai/insights/generate",
+    requireAuth,
+    requirePackageFeature("ai"),
+    requireAiRoleAccess,
+    async (req, res) => {
+      try {
+        res.json(await generateInsights(req.params.tenantId, req.user?.staffId || null));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.get(
+    "/api/mariadb/tenants/:tenantId/ai/staff-scores",
+    requireAuth,
+    requirePackageFeature("ai"),
+    requireAiStaffScoreAccess,
+    async (req, res) => {
+      try {
+        res.json(await listStaffScores(req.params.tenantId));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/mariadb/tenants/:tenantId/ai/staff-scores/generate",
+    requireAuth,
+    requirePackageFeature("ai"),
+    requireAiStaffScoreAccess,
+    async (req, res) => {
+      try {
+        res.json(await generateStaffScores(req.params.tenantId, req.user?.staffId || null));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
 
   app.put("/api/mariadb/tenants/:tenantId/settings/app", requireAuth, async (req, res) => {
     try {

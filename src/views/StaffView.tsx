@@ -1,15 +1,36 @@
-import React from 'react';
-import { UserPlus, UserCog, Edit, Trash2 } from 'lucide-react';
-import { Staff } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { BrainCircuit, UserPlus, UserCog, Edit, Trash2 } from 'lucide-react';
+import { AiStaffScore, Staff } from '../types';
+import { getAiStaffScores } from '../api';
 
 interface StaffViewProps {
   staff: Staff[];
   onEdit: (staff: Staff) => void;
   onAdd: () => void;
   onDelete: (id: string) => void;
+  tenantId?: string | null;
 }
 
-export const StaffView: React.FC<StaffViewProps> = ({ staff, onEdit, onAdd, onDelete }) => {
+export const StaffView: React.FC<StaffViewProps> = ({ staff, onEdit, onAdd, onDelete, tenantId }) => {
+  const [scores, setScores] = useState<AiStaffScore[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadScores() {
+      if (!tenantId) return;
+      try {
+        const rows = await getAiStaffScores(tenantId);
+        if (active) setScores(rows || []);
+      } catch {
+        if (active) setScores([]);
+      }
+    }
+    void loadScores();
+    return () => { active = false; };
+  }, [tenantId]);
+
+  const scoreByStaffId = useMemo(() => new Map(scores.map(score => [score.staffId, score])), [scores]);
+
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50/50 dark:bg-slate-950/50">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -52,6 +73,23 @@ export const StaffView: React.FC<StaffViewProps> = ({ staff, onEdit, onAdd, onDe
                 <h3 className="font-black text-lg text-slate-900 dark:text-white leading-tight">{s.name}</h3>
                 <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{s.email}</p>
               </div>
+
+              {scoreByStaffId.has(s.id) && (
+                <div className="mb-5 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50 dark:bg-indigo-950/20 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300">
+                      <BrainCircuit className="w-4 h-4" />
+                      <span className="text-[10px] font-black uppercase tracking-widest">AI Grade</span>
+                    </div>
+                    <span className="text-lg font-black text-indigo-700 dark:text-indigo-300">
+                      {scoreByStaffId.get(s.id)?.grade} / {scoreByStaffId.get(s.id)?.score}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    {scoreByStaffId.get(s.id)?.coachingNotes?.[0] || 'Coaching score generated.'}
+                  </p>
+                </div>
+              )}
 
               <div className="pt-4 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
                 <div className="flex items-center gap-2">

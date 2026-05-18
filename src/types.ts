@@ -103,6 +103,7 @@ export interface StaffPermissions {
   canManageWallets?: boolean;
   canViewLeaderboard?: boolean;
   canViewReports?: boolean;
+  canAccessAi?: boolean;
   canManageSettings?: boolean;
   canAccessDevTools?: boolean;
 }
@@ -403,6 +404,61 @@ export interface LiveTenantStats {
 }
 
 // ── Inventory Expansion ────────────────────────────────────────────────────────
+
+export type AiRole = 'admin' | 'manager' | 'dev' | 'cashier' | 'chef';
+export type AiInsightCategory = 'sales' | 'stock' | 'cash' | 'staff' | 'restaurant' | 'customer' | 'package';
+export type AiInsightSeverity = 'info' | 'success' | 'warning' | 'critical';
+
+export type AiProviderName = 'openai' | 'ollama' | 'anythingllm' | 'google' | 'openrouter';
+
+export interface AiSettings {
+  tenantId: string;
+  enabled: boolean;
+  provider: AiProviderName;
+  model: string;
+  baseUrl?: string | null;
+  workspaceSlug?: string | null;
+  insightsEnabled: boolean;
+  staffScoringEnabled: boolean;
+  visibleRoles: AiRole[];
+  staffScoreVisibleRoles: AiRole[];
+  openAiConfigured?: boolean;
+  providerStatus?: Record<AiProviderName, boolean>;
+  updatedAt?: string;
+}
+
+export interface AiInsight {
+  id: string;
+  tenantId: string;
+  category: AiInsightCategory;
+  severity: AiInsightSeverity;
+  title: string;
+  summary: string;
+  recommendation: string;
+  evidence: string[];
+  confidence: number;
+  status: 'open' | 'dismissed' | 'done';
+  source: 'deterministic' | 'openai';
+  createdAt?: string;
+}
+
+export interface AiStaffScore {
+  id: string;
+  tenantId: string;
+  staffId: string;
+  staffName: string;
+  periodStart: string;
+  periodEnd: string;
+  score: number;
+  grade: string;
+  componentScores: Record<string, number>;
+  strengths: string[];
+  coachingNotes: string[];
+  badges: string[];
+  riskFlags: string[];
+  source: 'deterministic' | 'openai';
+  createdAt?: string;
+}
 
 export interface BulkItem {
   id: string;

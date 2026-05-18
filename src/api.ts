@@ -4,6 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
+import type { AiInsight, AiSettings, AiStaffScore } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 
@@ -407,6 +408,30 @@ export function getLicenceInfo() {
 
 export function getTenantPackageLimits(tenantId: string) {
   return apiGet<TenantPackageLimitsResponse>(`/api/mariadb/tenants/${tenantId}/package-limits`);
+}
+
+export function getAiSettings(tenantId: string) {
+  return apiGet<AiSettings>(`/api/mariadb/tenants/${tenantId}/ai/settings`);
+}
+
+export function updateAiSettings(tenantId: string, settings: Partial<AiSettings>) {
+  return apiPut<AiSettings>(`/api/mariadb/tenants/${tenantId}/ai/settings`, settings);
+}
+
+export function getAiInsights(tenantId: string) {
+  return apiGet<AiInsight[]>(`/api/mariadb/tenants/${tenantId}/ai/insights`);
+}
+
+export function generateAiInsights(tenantId: string) {
+  return apiPost<AiInsight[]>(`/api/mariadb/tenants/${tenantId}/ai/insights/generate`, {});
+}
+
+export function getAiStaffScores(tenantId: string) {
+  return apiGet<AiStaffScore[]>(`/api/mariadb/tenants/${tenantId}/ai/staff-scores`);
+}
+
+export function generateAiStaffScores(tenantId: string) {
+  return apiPost<AiStaffScore[]>(`/api/mariadb/tenants/${tenantId}/ai/staff-scores/generate`, {});
 }
 
 export async function generateLicence(adminKey: string, data: GenerateLicenceRequest) {
