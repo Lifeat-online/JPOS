@@ -1,5 +1,5 @@
 import { getConnection, isPostgres, query } from "./db.js";
-import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem, BulkItem, RecipeItem, ModifierGroup, ModifierOption } from "./types.js";
+import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem, BulkItem, RecipeItem, ModifierGroup, ModifierOption, Vendor, PurchaseOrder } from "./types.js";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
 const PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY;
@@ -21,6 +21,11 @@ function safeParse(str: any, fallback: any) {
     console.error('Failed to parse JSON field:', str, e);
     return fallback;
   }
+}
+
+function normalizeJsonField(value: any, fallback: any) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -593,6 +598,129 @@ export async function updateRestaurantTable(
 // ─────────────────────────────────────────────────────────────────────────
 // DELETE Operations
 // ─────────────────────────────────────────────────────────────────────────
+
+export async function getVendors(tenantId: string): Promise<Vendor[]> {
+  const rows = await query(
+    `SELECT
+       id,
+       name,
+       contact_person AS contactPerson,
+       email,
+       phone,
+       address,
+       status,
+       created_at AS createdAt,
+       updated_at AS updatedAt
+     FROM vendors
+     WHERE tenant_id = ?
+     ORDER BY name ASC`,
+    [tenantId]
+  );
+  return rows as Vendor[];
+}
+
+export async function createVendor(tenantId: string, vendor: Partial<Vendor>): Promise<Vendor> {
+  const id = `vendor_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  await query(
+    `INSERT INTO vendors (
+       id, tenant_id, name, contact_person, email, phone, address, status, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [
+      id,
+      tenantId,
+      vendor.name,
+      vendor.contactPerson || null,
+      vendor.email || null,
+      vendor.phone || null,
+      vendor.address || null,
+      vendor.status || "active",
+    ]
+  );
+  return { id, status: "active", ...vendor } as Vendor;
+}
+
+export async function updateVendor(tenantId: string, id: string, updates: Partial<Vendor>): Promise<void> {
+  const fields: string[] = [];
+  const values: any[] = [];
+  if (updates.name !== undefined) { fields.push("name = ?"); values.push(updates.name); }
+  if (updates.contactPerson !== undefined) { fields.push("contact_person = ?"); values.push(updates.contactPerson || null); }
+  if (updates.email !== undefined) { fields.push("email = ?"); values.push(updates.email || null); }
+  if (updates.phone !== undefined) { fields.push("phone = ?"); values.push(updates.phone || null); }
+  if (updates.address !== undefined) { fields.push("address = ?"); values.push(updates.address || null); }
+  if (updates.status !== undefined) { fields.push("status = ?"); values.push(updates.status === "inactive" ? "inactive" : "active"); }
+  if (fields.length === 0) return;
+  fields.push("updated_at = NOW()");
+  values.push(tenantId, id);
+  await query(`UPDATE vendors SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`, values);
+}
+
+export async function getPurchaseOrders(tenantId: string): Promise<PurchaseOrder[]> {
+  const rows = await query(
+    `SELECT
+       id,
+       vendor_id AS vendorId,
+       status,
+       type,
+       recurring_frequency AS recurringFrequency,
+       items,
+       total_amount AS totalAmount,
+       expected_delivery_date AS expectedDeliveryDate,
+       invoice_status AS invoiceStatus,
+       created_at AS createdAt,
+       updated_at AS updatedAt
+     FROM purchase_orders
+     WHERE tenant_id = ?
+     ORDER BY created_at DESC`,
+    [tenantId]
+  );
+  return (rows as any[]).map((row) => ({
+    ...row,
+    items: safeParse(row.items, []),
+    totalAmount: Number(row.totalAmount || 0),
+  })) as PurchaseOrder[];
+}
+
+export async function createPurchaseOrder(tenantId: string, order: Partial<PurchaseOrder>): Promise<PurchaseOrder> {
+  const id = `po_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const items = Array.isArray(order.items) ? order.items : [];
+  const totalAmount = Number(order.totalAmount ?? items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0) * Number(item.expectedPrice || 0), 0));
+  await query(
+    `INSERT INTO purchase_orders (
+       id, tenant_id, vendor_id, status, type, recurring_frequency, items,
+       total_amount, expected_delivery_date, invoice_status, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [
+      id,
+      tenantId,
+      order.vendorId || null,
+      order.status || "draft",
+      order.type || "once_off",
+      order.recurringFrequency || null,
+      normalizeJsonField(items, []),
+      totalAmount,
+      order.expectedDeliveryDate || null,
+      order.invoiceStatus || "unpaid",
+    ]
+  );
+  return { id, status: "draft", type: "once_off", items, totalAmount, ...order } as PurchaseOrder;
+}
+
+export async function updatePurchaseOrder(tenantId: string, id: string, updates: Partial<PurchaseOrder>): Promise<void> {
+  const fields: string[] = [];
+  const values: any[] = [];
+  if (updates.vendorId !== undefined) { fields.push("vendor_id = ?"); values.push(updates.vendorId || null); }
+  if (updates.status !== undefined) { fields.push("status = ?"); values.push(updates.status); }
+  if (updates.type !== undefined) { fields.push("type = ?"); values.push(updates.type); }
+  if (updates.recurringFrequency !== undefined) { fields.push("recurring_frequency = ?"); values.push(updates.recurringFrequency || null); }
+  if (updates.items !== undefined) { fields.push("items = ?"); values.push(normalizeJsonField(updates.items, [])); }
+  if (updates.totalAmount !== undefined) { fields.push("total_amount = ?"); values.push(updates.totalAmount || 0); }
+  if (updates.expectedDeliveryDate !== undefined) { fields.push("expected_delivery_date = ?"); values.push(updates.expectedDeliveryDate || null); }
+  if (updates.invoiceStatus !== undefined) { fields.push("invoice_status = ?"); values.push(updates.invoiceStatus); }
+  if (fields.length === 0) return;
+  fields.push("updated_at = NOW()");
+  values.push(tenantId, id);
+  await query(`UPDATE purchase_orders SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`, values);
+}
 
 export async function deleteProduct(tenantId: string, productId: string): Promise<void> {
   await query(`DELETE FROM products WHERE tenant_id = ? AND id = ?`, [tenantId, productId]);

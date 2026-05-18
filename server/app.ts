@@ -67,6 +67,12 @@ import {
   createBulkItem,
   updateBulkItem,
   deleteBulkItem,
+  getVendors,
+  createVendor,
+  updateVendor,
+  getPurchaseOrders,
+  createPurchaseOrder,
+  updatePurchaseOrder,
   updateProductRecipe,
   getProductRecipe,
   createModifierGroup,
@@ -100,6 +106,7 @@ import {
   saveAiSettings,
   serializeAiSettings,
 } from "./ai.js";
+import { applyApprovedInventoryAgentSteps, generateInventoryAgentProposal } from "./aiInventoryAgent.js";
 
 dotenv.config();
 
@@ -303,8 +310,8 @@ export async function createApp(io: any = null) {
   const isTest = process.env.VITEST === "1" || process.env.NODE_ENV === "test";
 
   app.use(cors());
-  app.use(bodyParser.json());
-  app.use(bodyParser.urlencoded({ extended: true }));
+  app.use(bodyParser.json({ limit: "25mb" }));
+  app.use(bodyParser.urlencoded({ extended: true, limit: "25mb" }));
 
   if (process.env.JPOS_HOSTED === "true") {
     const { licenceRouter } = await import("./licenceServer.js");
@@ -690,6 +697,34 @@ export async function createApp(io: any = null) {
     async (req, res) => {
       try {
         res.json(await generateStaffScores(req.params.tenantId, req.user?.staffId || null));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/mariadb/tenants/:tenantId/ai/agent/inventory/proposal",
+    requireAuth,
+    requireAiPackageAccess,
+    requireAiRoleAccess,
+    async (req, res) => {
+      try {
+        res.json(await generateInventoryAgentProposal(req.params.tenantId, req.body || {}));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/mariadb/tenants/:tenantId/ai/agent/inventory/apply",
+    requireAuth,
+    requireAiPackageAccess,
+    requireAiRoleAccess,
+    async (req, res) => {
+      try {
+        res.json(await applyApprovedInventoryAgentSteps(req.params.tenantId, req.body?.steps || []));
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -1718,6 +1753,56 @@ export async function createApp(io: any = null) {
   // ─────────────────────────────────────────────────────────────────────────
   // Bulk Items & Inventory Expansion
   // ─────────────────────────────────────────────────────────────────────────
+
+  app.get("/api/mariadb/tenants/:tenantId/vendors", requireAuth, async (req, res) => {
+    try {
+      res.json(await getVendors(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/vendors", requireAuth, async (req, res) => {
+    try {
+      res.json(await createVendor(req.params.tenantId, req.body || {}));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/vendors/:id", requireAuth, async (req, res) => {
+    try {
+      await updateVendor(req.params.tenantId, req.params.id, req.body || {});
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/purchase-orders", requireAuth, async (req, res) => {
+    try {
+      res.json(await getPurchaseOrders(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/purchase-orders", requireAuth, async (req, res) => {
+    try {
+      res.json(await createPurchaseOrder(req.params.tenantId, req.body || {}));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/purchase-orders/:id", requireAuth, async (req, res) => {
+    try {
+      await updatePurchaseOrder(req.params.tenantId, req.params.id, req.body || {});
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.get("/api/mariadb/tenants/:tenantId/bulk-items", requireAuth, async (req, res) => {
     try {

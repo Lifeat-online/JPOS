@@ -6,6 +6,7 @@ import { PurchaseOrdersView } from '../components/PurchaseOrdersView';
 import { apiPut } from '../api';
 import { usePosStore } from '../store/usePosStore';
 import { BulkInventoryView } from '../components/BulkInventoryView';
+import { InventoryAgentView } from '../components/InventoryAgentView';
 
 interface InventoryViewProps {
   products: Product[];
@@ -18,7 +19,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   products, config, onEditProduct, onAddProduct,
 }) => {
   const tenantId = usePosStore(state => state.tenantId);
-  const [tab, setTab] = useState<'products' | 'vendors' | 'purchaseOrders' | 'bulk'>('products');
+  const [tab, setTab] = useState<'products' | 'vendors' | 'purchaseOrders' | 'bulk' | 'copilot'>('products');
   const [search, setSearch] = useState('');
   const [section, setSection] = useState('All');
   const [category, setCategory] = useState('All');
@@ -76,13 +77,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       <div className="max-w-[1600px] mx-auto flex flex-col gap-8">
         {/* Sub-Tabs */}
         <div className="flex border-b border-slate-200 dark:border-slate-800 gap-6">
-          {(['products', 'bulk', 'vendors', 'purchaseOrders'] as const).map(t => (
+          {(['products', 'bulk', 'vendors', 'purchaseOrders', 'copilot'] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`pb-4 px-2 text-sm font-bold transition-all capitalize ${tab === t ? 'border-b-2 border-primary text-primary' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
-              {t === 'purchaseOrders' ? 'Purchase Orders' : t === 'bulk' ? 'Bulk Inventory' : t.charAt(0).toUpperCase() + t.slice(1)}
+              {t === 'purchaseOrders' ? 'Purchase Orders' : t === 'bulk' ? 'Bulk Inventory' : t === 'copilot' ? 'Copilot Agent' : t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
         </div>
@@ -93,6 +94,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           <PurchaseOrdersView />
         ) : tab === 'bulk' ? (
           <BulkInventoryView />
+        ) : tab === 'copilot' ? (
+          <InventoryAgentView />
         ) : (
           <div className="flex flex-col lg:flex-row gap-10">
             {/* Filter Sidebar */}

@@ -469,6 +469,35 @@ export interface AiStaffScore {
   createdAt?: string;
 }
 
+export type InventoryAgentMode = 'invoice' | 'low_stock' | 'event';
+
+export interface InventoryAgentStep {
+  id: string;
+  type: 'create_vendor' | 'create_bulk_item' | 'create_sales_unit' | 'create_purchase_order' | 'receive_invoice' | 'book_stock' | 'review_event_demand';
+  label: string;
+  confidence: number;
+  risk: 'low' | 'medium' | 'high';
+  approved: boolean;
+  payload: Record<string, any>;
+  evidence: string[];
+}
+
+export interface InventoryAgentProposal {
+  id: string;
+  mode: InventoryAgentMode;
+  status: 'draft';
+  summary: string;
+  requiresHumanApproval: true;
+  steps: InventoryAgentStep[];
+  warnings: string[];
+  dataAccess: string[];
+}
+
+export interface InventoryAgentApplyResult {
+  applied: { stepId: string; type: InventoryAgentStep['type']; result: any }[];
+  skipped: { stepId: string; type: InventoryAgentStep['type']; reason: string }[];
+}
+
 export interface BulkItem {
   id: string;
   name: string;

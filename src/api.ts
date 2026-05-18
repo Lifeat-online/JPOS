@@ -4,7 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
-import type { AiInsight, AiModelOption, AiSettings, AiStaffScore } from './types';
+import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
@@ -451,6 +451,14 @@ export function getAiStaffScores(tenantId: string) {
 
 export function generateAiStaffScores(tenantId: string) {
   return apiPost<AiStaffScore[]>(`/api/mariadb/tenants/${tenantId}/ai/staff-scores/generate`, {});
+}
+
+export function generateInventoryAgentProposal(tenantId: string, data: unknown) {
+  return apiPost<InventoryAgentProposal>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/proposal`, data);
+}
+
+export function applyInventoryAgentSteps(tenantId: string, steps: InventoryAgentStep[]) {
+  return apiPost<InventoryAgentApplyResult>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/apply`, { steps });
 }
 
 export async function generateLicence(adminKey: string, data: GenerateLicenceRequest) {
