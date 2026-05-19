@@ -126,6 +126,21 @@ CREATE TABLE IF NOT EXISTS workstations (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS companion_device_assignments (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  device_id VARCHAR(128) NOT NULL,
+  device_name VARCHAR(255) NOT NULL,
+  workstation_id VARCHAR(64) NOT NULL,
+  default_mode ENUM('remote_control','wireless_scanner','pole_display') DEFAULT 'remote_control',
+  assigned_by VARCHAR(64),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_companion_device (tenant_id, device_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (workstation_id) REFERENCES workstations(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS sales (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
@@ -144,6 +159,14 @@ CREATE TABLE IF NOT EXISTS sales (
   cash_out_amount DECIMAL(12,2) DEFAULT 0,
   points_discount DECIMAL(12,2) DEFAULT 0,
   status ENUM('pending','completed','failed','open','kitchen') DEFAULT 'pending',
+  transaction_type VARCHAR(24) DEFAULT 'sale',
+  parent_sale_id VARCHAR(64),
+  refund_status VARCHAR(24) DEFAULT 'none',
+  refunded_amount DECIMAL(12,2) DEFAULT 0,
+  refund_reason TEXT,
+  refunded_by VARCHAR(64),
+  void_reason TEXT,
+  voided_by VARCHAR(64),
   payfast_payment_id VARCHAR(128),
   table_number VARCHAR(64),
   is_tab BOOLEAN DEFAULT FALSE,
@@ -220,7 +243,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   cash_session_id VARCHAR(64) NOT NULL,
-  type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment') NOT NULL,
+  type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale') NOT NULL,
   direction ENUM('in','out','neutral') NOT NULL DEFAULT 'neutral',
   amount DECIMAL(12,2) NOT NULL DEFAULT 0,
   sale_id VARCHAR(64),

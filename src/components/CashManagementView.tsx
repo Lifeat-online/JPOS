@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { CashSession, Staff } from '../types';
-import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { CashSession, CashTransaction, Sale, Staff } from '../types';
+import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
-import { apiGet, apiPost, apiPut } from '../api';
+import { apiGet, apiPost, apiPut, recordCashMovement } from '../api';
+import { PrinterReadinessPanel } from './PrinterReadinessPanel';
+import { usePrinterReadiness } from '../hooks/usePrinterReadiness';
 
 interface CashManagementViewProps {
   currentUserStaff: Staff | null;
+  sales: Sale[];
 }
 
 const DENOMINATIONS = [
@@ -20,6 +23,27 @@ const DENOMINATIONS = [
   { value: 0.5, label: '50c Coins' },
   { value: 0.2, label: '20c Coins' },
   { value: 0.1, label: '10c Coins' },
+];
+
+const MOVEMENT_TYPES = [
+  {
+    id: 'cash_drop',
+    label: 'Safe drop',
+    helper: 'Cash removed from the drawer and placed in the safe.',
+    direction: 'out' as const,
+  },
+  {
+    id: 'cash_added',
+    label: 'Cash added',
+    helper: 'Extra cash put into the drawer.',
+    direction: 'in' as const,
+  },
+  {
+    id: 'cash_removed',
+    label: 'Petty cash / payout',
+    helper: 'Cash paid out for a small expense or supplier.',
+    direction: 'out' as const,
+  },
 ];
 
 function DenominationCounter({ breakdown, setBreakdown, total }: { breakdown: Record<string, number>, setBreakdown: (b: Record<string, number>) => void, total: number }) {
@@ -62,9 +86,11 @@ function DenominationCounter({ breakdown, setBreakdown, total }: { breakdown: Re
   );
 }
 
-export function CashManagementView({ currentUserStaff }: CashManagementViewProps) {
+export function CashManagementView({ currentUserStaff, sales }: CashManagementViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
+  const printerReadiness = usePrinterReadiness(tenantId);
   const [sessions, setSessions] = useState<CashSession[]>([]);
+  const [cashMovements, setCashMovements] = useState<Record<string, CashTransaction[]>>({});
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [openingBreakdown, setOpeningBreakdown] = useState<Record<string, number>>({});
@@ -72,6 +98,10 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
   const [closeNotes, setCloseNotes] = useState("");
   const [managerNotes, setManagerNotes] = useState<Record<string, string>>({});
   const [varianceReasons, setVarianceReasons] = useState<Record<string, string>>({});
+  const [movementType, setMovementType] = useState<'cash_drop' | 'cash_added' | 'cash_removed'>('cash_drop');
+  const [movementAmount, setMovementAmount] = useState('');
+  const [movementNote, setMovementNote] = useState('');
+  const [movementError, setMovementError] = useState('');
 
   const toNumber = (value: unknown): number => {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -86,6 +116,12 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
   const canManageCash = ['admin', 'manager', 'dev'].includes(currentUserStaff?.role || '');
   const pendingReview = sessions.filter(s => s.status === 'closed' && (s.reviewStatus || 'submitted') !== 'reconciled');
   const today = new Date().toDateString();
+  const isToday = (date: any) => {
+    if (!date) return false;
+    const parsed = new Date(date);
+    return !isNaN(parsed.getTime()) && parsed.toDateString() === today;
+  };
+  const todaysSessions = sessions.filter(s => isToday(s.openedAt) || isToday(s.closedAt));
   const todaysClosedSessions = sessions.filter(s => s.status === 'closed' && new Date(s.closedAt || s.openedAt).toDateString() === today);
   const eodTotals = todaysClosedSessions.reduce((acc, s) => {
     acc.expected += toNumber((s as any).expectedCash);
@@ -97,6 +133,67 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
   }, { expected: 0, actual: 0, variance: 0, tips: 0, reconciled: 0 });
   const newFloat = Object.entries(openingBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
   const closeAmount = Object.entries(closingBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
+  const todaysMovements = todaysSessions.flatMap(session => cashMovements[session.id] || []);
+  const zReport = useMemo(() => {
+    const todaySales = sales.filter(s => isToday(s.createdAt));
+    const completedSales = todaySales.filter(s => s.status === 'completed' && s.transactionType !== 'refund' && s.transactionType !== 'void');
+    const refundSales = todaySales.filter(s => s.transactionType === 'refund');
+    const voidSales = todaySales.filter(s => s.transactionType === 'void');
+    const openOrders = sales.filter(s => (s.status === 'open' || s.status === 'kitchen' || s.status === 'pending') && s.transactionType !== 'refund' && s.transactionType !== 'void');
+    const paymentTotals = completedSales.reduce((acc, sale) => {
+      const payments = sale.payments && sale.payments.length > 0
+        ? sale.payments
+        : [{ method: sale.paymentMethod, amount: Number(sale.total || 0) }];
+      payments.forEach(payment => {
+        const method = String(payment.method || 'pending') as keyof typeof acc;
+        if (method in acc) acc[method] += Math.max(0, Number(payment.amount || 0));
+      });
+      return acc;
+    }, { cash: 0, card: 0, wallet: 0, payfast: 0, pending: 0 });
+    const movementTotal = (type: CashTransaction['type']) => todaysMovements
+      .filter(movement => movement.type === type)
+      .reduce((sum, movement) => sum + toNumber(movement.amount), 0);
+    const grossSales = completedSales.reduce((sum, sale) => sum + Math.max(0, Number(sale.total || 0)), 0);
+    const refunds = refundSales.reduce((sum, sale) => sum + Math.abs(Number(sale.total || 0)), 0);
+    return {
+      completedSales,
+      refundSales,
+      voidSales,
+      openOrders,
+      paymentTotals,
+      grossSales,
+      refunds,
+      netSales: grossSales - refunds,
+      safeDrops: movementTotal('cash_drop'),
+      cashAdded: movementTotal('cash_added'),
+      pettyCash: movementTotal('cash_removed'),
+      noSaleOpens: todaysMovements.filter(movement => movement.type === 'no_sale').length,
+      openSessions: sessions.filter(session => session.status === 'open'),
+      unreconciledSessions: pendingReview,
+    };
+  }, [sales, todaysMovements, sessions, pendingReview, today]);
+  const zChecklist = [
+    {
+      label: 'Close all registers',
+      ok: zReport.openSessions.length === 0,
+      detail: zReport.openSessions.length === 0 ? 'No open registers' : `${zReport.openSessions.length} register${zReport.openSessions.length === 1 ? '' : 's'} still open`,
+    },
+    {
+      label: 'Clear open orders and tabs',
+      ok: zReport.openOrders.length === 0,
+      detail: zReport.openOrders.length === 0 ? 'No open orders or tabs' : `${zReport.openOrders.length} order${zReport.openOrders.length === 1 ? '' : 's'} still active`,
+    },
+    {
+      label: 'Review submitted cash-ups',
+      ok: zReport.unreconciledSessions.length === 0,
+      detail: zReport.unreconciledSessions.length === 0 ? 'All cash-ups reconciled' : `${zReport.unreconciledSessions.length} cash-up${zReport.unreconciledSessions.length === 1 ? '' : 's'} need review`,
+    },
+    {
+      label: 'Receipt printer checked',
+      ok: printerReadiness.isReadyToday,
+      detail: printerReadiness.isReadyToday ? 'Printer test passed today' : printerReadiness.needsAttention ? 'Printer needs attention before final reports' : 'Run a test print before closing',
+    },
+  ];
 
   const fetchSessions = async () => {
     if (!tenantId) return;
@@ -116,6 +213,12 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
         reviewStatus: (s as any).reviewStatus || ((s as any).status === 'open' ? 'in_progress' : 'submitted'),
       })) as CashSession[];
       setSessions(normalized);
+      const visibleTodaySessions = normalized.filter(s => isToday(s.openedAt) || isToday(s.closedAt));
+      const movementPairs = await Promise.all(visibleTodaySessions.map(async session => {
+        const movements = await apiGet<CashTransaction[]>(`/api/mariadb/tenants/${tenantId}/cash-sessions/${session.id}/movements`).catch(() => []);
+        return [session.id, movements] as const;
+      }));
+      setCashMovements(Object.fromEntries(movementPairs));
       usePosStore.getState().setActiveSession(normalized.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id) || null);
     } catch (err) {
       console.error('CashSessions fetch error:', err);
@@ -198,6 +301,46 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
     setIsProcessing(false);
   };
 
+  const recordDrawerMovement = async () => {
+    if (!tenantId || !activeSession || !currentUserStaff) return;
+    const selectedMovement = MOVEMENT_TYPES.find(type => type.id === movementType) || MOVEMENT_TYPES[0];
+    const amount = toNumber(movementAmount);
+    setMovementError('');
+
+    if (amount <= 0) {
+      setMovementError('Enter the cash amount first.');
+      return;
+    }
+    if (!canManageCash) {
+      setMovementError('Manager approval is required for safe drops, cash added, and petty cash payouts.');
+      return;
+    }
+    if (movementNote.trim().length < 3) {
+      setMovementError('Add a short reason so cash-up review is clear.');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      await recordCashMovement(tenantId, activeSession.id, {
+        type: selectedMovement.id,
+        direction: selectedMovement.direction,
+        amount,
+        staffId: currentUserStaff.id,
+        staffName: currentUserStaff.name,
+        note: movementNote.trim(),
+      });
+      await fetchSessions();
+      setMovementAmount('');
+      setMovementNote('');
+      setMovementType('cash_drop');
+    } catch (err: any) {
+      setMovementError(err?.message || 'Could not record this drawer movement.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const reviewBadge = (session: CashSession) => {
     const status = session.reviewStatus || (session.status === 'open' ? 'in_progress' : 'submitted');
     if (status === 'reconciled') return 'bg-emerald-100 text-emerald-700';
@@ -241,6 +384,122 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
           </div>
         </div>
 
+        <div className="z-report-screen bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm space-y-6">
+          <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+            <div>
+              <h3 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">End-of-day close</h3>
+              <p className="mt-1 text-sm font-semibold text-slate-500">Use this checklist before printing the Z report.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="h-12 px-5 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all"
+            >
+              <Printer className="w-4 h-4" />
+              Print Z Report
+            </button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {zChecklist.map(item => (
+              <div key={item.label} className={`rounded-2xl border p-4 ${item.ok ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-900/10' : 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10'}`}>
+                <div className="flex items-start gap-3">
+                  {item.ok ? <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" /> : <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />}
+                  <div>
+                    <p className={`text-sm font-black ${item.ok ? 'text-emerald-800 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300'}`}>{item.label}</p>
+                    <p className={`mt-1 text-xs font-semibold ${item.ok ? 'text-emerald-700/80 dark:text-emerald-300/70' : 'text-amber-700/80 dark:text-amber-300/70'}`}>{item.detail}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <PrinterReadinessPanel tenantId={tenantId} readiness={printerReadiness} />
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gross sales</p>
+              <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white">R{zReport.grossSales.toFixed(2)}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">{zReport.completedSales.length} completed sale{zReport.completedSales.length === 1 ? '' : 's'}</p>
+            </div>
+            <div className="rounded-2xl bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/30 p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-rose-500">Refunds</p>
+              <p className="mt-2 text-2xl font-black text-rose-700 dark:text-rose-300">R{zReport.refunds.toFixed(2)}</p>
+              <p className="mt-1 text-xs font-semibold text-rose-600/80">{zReport.refundSales.length} refund transaction{zReport.refundSales.length === 1 ? '' : 's'}</p>
+            </div>
+            <div className="rounded-2xl bg-primary/10 border border-primary/20 p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-primary">Net sales</p>
+              <p className="mt-2 text-2xl font-black text-primary">R{zReport.netSales.toFixed(2)}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Gross less refunds</p>
+            </div>
+            <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Voids</p>
+              <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{zReport.voidSales.length}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Cancelled before payment</p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 dark:bg-slate-950/50 text-[10px] font-black uppercase tracking-widest text-slate-500">Payment totals</div>
+              <div className="grid grid-cols-2 gap-px bg-slate-100 dark:bg-slate-800">
+                {[
+                  ['Cash', zReport.paymentTotals.cash],
+                  ['Card', zReport.paymentTotals.card],
+                  ['Wallet', zReport.paymentTotals.wallet],
+                  ['PayFast', zReport.paymentTotals.payfast],
+                ].map(([label, value]) => (
+                  <div key={label as string} className="bg-white dark:bg-slate-900 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                    <p className="mt-1 text-lg font-black">R{Number(value).toFixed(2)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 dark:bg-slate-950/50 text-[10px] font-black uppercase tracking-widest text-slate-500">Drawer activity</div>
+              <div className="grid grid-cols-2 gap-px bg-slate-100 dark:bg-slate-800">
+                {[
+                  ['Safe drops', zReport.safeDrops],
+                  ['Cash added', zReport.cashAdded],
+                  ['Petty cash', zReport.pettyCash],
+                  ['No-sale opens', zReport.noSaleOpens],
+                ].map(([label, value]) => (
+                  <div key={label as string} className="bg-white dark:bg-slate-900 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                    <p className="mt-1 text-lg font-black">{typeof value === 'number' && label !== 'No-sale opens' ? `R${Number(value).toFixed(2)}` : value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="z-report-print-only hidden text-black bg-white p-8 font-sans">
+          <h1 className="text-2xl font-black">Z Report</h1>
+          <p className="mt-1 text-sm">Printed {new Date().toLocaleString()}</p>
+          <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
+            <div>Gross sales: R{zReport.grossSales.toFixed(2)}</div>
+            <div>Refunds: R{zReport.refunds.toFixed(2)}</div>
+            <div>Net sales: R{zReport.netSales.toFixed(2)}</div>
+            <div>Voids: {zReport.voidSales.length}</div>
+            <div>Cash: R{zReport.paymentTotals.cash.toFixed(2)}</div>
+            <div>Card: R{zReport.paymentTotals.card.toFixed(2)}</div>
+            <div>Wallet: R{zReport.paymentTotals.wallet.toFixed(2)}</div>
+            <div>PayFast: R{zReport.paymentTotals.payfast.toFixed(2)}</div>
+            <div>Safe drops: R{zReport.safeDrops.toFixed(2)}</div>
+            <div>Cash added: R{zReport.cashAdded.toFixed(2)}</div>
+            <div>Petty cash: R{zReport.pettyCash.toFixed(2)}</div>
+            <div>No-sale opens: {zReport.noSaleOpens}</div>
+          </div>
+          <div className="mt-6 border-t border-black pt-4 text-sm">
+            {zChecklist.map(item => (
+              <div key={item.label}>{item.ok ? 'OK' : 'ACTION'} - {item.label}: {item.detail}</div>
+            ))}
+          </div>
+        </div>
+
         <div className="bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm flex flex-col md:flex-row gap-8 lg:gap-12">
           <div className="flex-1 max-w-sm shrink-0">
             <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><DollarSign className="w-6 h-6 text-emerald-500"/> Current shift</h3>
@@ -277,6 +536,74 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
                       <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">R{toNumber((activeSession as any).accumulatedTips).toFixed(2)}</p>
                     </div>
                   )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 p-4 space-y-4">
+                  <div>
+                    <h4 className="font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <HandCoins className="w-5 h-5 text-primary" />
+                      Drawer movements
+                    </h4>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">Record safe drops, cash added, or petty cash before cash-up. Manager approval is required.</p>
+                  </div>
+
+                  {movementError && (
+                    <div className="rounded-xl bg-rose-50 border border-rose-200 p-3 text-sm font-bold text-rose-700">
+                      {movementError}
+                    </div>
+                  )}
+
+                  <div className="grid gap-2">
+                    {MOVEMENT_TYPES.map(type => (
+                      <button
+                        key={type.id}
+                        type="button"
+                        onClick={() => setMovementType(type.id as typeof movementType)}
+                        className={`rounded-xl border p-3 text-left transition-all ${
+                          movementType === type.id
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'
+                        }`}
+                      >
+                        <span className="block text-xs font-black uppercase tracking-widest">{type.label}</span>
+                        <span className="mt-1 block text-xs font-semibold text-slate-500">{type.helper}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[120px_1fr]">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Amount</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={movementAmount}
+                        onChange={e => setMovementAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full h-12 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Reason</label>
+                      <input
+                        value={movementNote}
+                        onChange={e => setMovementNote(e.target.value)}
+                        placeholder="e.g. Safe drop bag #12, bought milk"
+                        className="w-full h-12 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isProcessing || !canManageCash}
+                    onClick={recordDrawerMovement}
+                    className="w-full h-12 rounded-xl bg-primary text-white font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-all"
+                  >
+                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <HandCoins className="w-4 h-4" />}
+                    {canManageCash ? 'Record movement' : 'Manager approval required'}
+                  </button>
                 </div>
 
                 <div className="pt-2">
@@ -392,6 +719,19 @@ export function CashManagementView({ currentUserStaff }: CashManagementViewProps
           </div>
         </div>
       </div>
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          body * { visibility: hidden; }
+          .z-report-print-only, .z-report-print-only * { visibility: visible; }
+          .z-report-print-only {
+            display: block !important;
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+        }
+      ` }} />
     </div>
   );
 }

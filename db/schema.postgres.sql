@@ -123,6 +123,19 @@ CREATE TABLE IF NOT EXISTS workstations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS companion_device_assignments (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  device_name TEXT NOT NULL,
+  workstation_id TEXT NOT NULL REFERENCES workstations(id) ON DELETE CASCADE,
+  default_mode TEXT DEFAULT 'remote_control' CHECK (default_mode IN ('remote_control','wireless_scanner','pole_display')),
+  assigned_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (tenant_id, device_id)
+);
+
 CREATE TABLE IF NOT EXISTS sales (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -141,6 +154,14 @@ CREATE TABLE IF NOT EXISTS sales (
   cash_out_amount NUMERIC(12,2) DEFAULT 0,
   points_discount NUMERIC(12,2) DEFAULT 0,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending','completed','failed','open','kitchen')),
+  transaction_type TEXT DEFAULT 'sale',
+  parent_sale_id TEXT,
+  refund_status TEXT DEFAULT 'none',
+  refunded_amount NUMERIC(12,2) DEFAULT 0,
+  refund_reason TEXT,
+  refunded_by TEXT,
+  void_reason TEXT,
+  voided_by TEXT,
   payfast_payment_id TEXT,
   table_number TEXT,
   is_tab SMALLINT DEFAULT 0 CHECK (is_tab IN (0, 1)),
@@ -213,7 +234,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   cash_session_id TEXT NOT NULL REFERENCES cash_sessions(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment')),
+  type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale')),
   direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
   amount NUMERIC(12,2) NOT NULL DEFAULT 0,
   sale_id TEXT,

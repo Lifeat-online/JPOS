@@ -10,7 +10,7 @@ import { initDb } from "./init-db.js";
 import rateLimit from "express-rate-limit";
 import http from "http";
 import { setupSocketIO, broadcastToMessages, broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "./socket.js";
-import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
+import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
 import { NextFunction, Request, Response } from "express";
 import {
   getProductsByTenant,
@@ -52,6 +52,8 @@ import {
   updateSale,
   updateSaleStatus,
   updateSaleItem,
+  processSaleRefund,
+  processSaleVoid,
   getSaleById,
   createPayoutRequest,
   updatePayoutRequest,
@@ -122,6 +124,11 @@ function normalizeRole(role: unknown) {
 function canManageCash(role: unknown) {
   const r = normalizeRole(role);
   return r === "admin" || r === "manager" || r === "dev";
+}
+
+function canManageCompanionDevices(role: unknown) {
+  const r = normalizeRole(role);
+  return r === "admin" || r === "dev";
 }
 
 function safeJsonField(value: unknown, fallback: any) {
@@ -197,6 +204,15 @@ async function recordCashMovement(tenantId: string, data: any) {
     ]
   );
   return { id, ...data };
+}
+
+function expectedCashDeltaForMovement(type: string, direction: string, amount: number) {
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  if (type === "cash_added") return amount;
+  if (type === "cash_drop" || type === "cash_removed") return -amount;
+  if (direction === "in") return amount;
+  if (direction === "out") return -amount;
+  return 0;
 }
 
 function toMoneyNumber(value: unknown): number {
@@ -449,11 +465,16 @@ export async function createApp(io: any = null) {
     next();
   });
 
-  // Rate Limiting for auth endpoints
-  const rateLimit = (windowMs: number, max: number) => {
+  // Rate limiting for auth endpoints. Production stays strict, while local
+  // development gets enough headroom that repeated UI testing does not lock you out.
+  const createAuthRateLimit = (windowMs: number, max: number) => {
     const attempts = new Map<string, { count: number; resetTime: number }>();
     
     return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (process.env.AUTH_RATE_LIMIT_DISABLED === "true") {
+        return next();
+      }
+
       const ip = req.ip || req.socket.remoteAddress || 'unknown';
       const now = Date.now();
       
@@ -465,6 +486,7 @@ export async function createApp(io: any = null) {
       
       record.count++;
       if (record.count > max) {
+        res.setHeader("Retry-After", Math.ceil((record.resetTime - now) / 1000));
         res.status(429).json({ error: "Too many requests. Please try again later." });
         return;
       }
@@ -474,7 +496,13 @@ export async function createApp(io: any = null) {
   };
 
   // Apply rate limiting to auth endpoints
-  const authRateLimit = rateLimit(15 * 60 * 1000, 5); // 5 attempts per 15 minutes
+  const parsePositiveEnvNumber = (value: string | undefined, fallback: number) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  const authRateLimitWindowMs = parsePositiveEnvNumber(process.env.AUTH_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000);
+  const authRateLimitMax = parsePositiveEnvNumber(process.env.AUTH_RATE_LIMIT_MAX, isProduction ? 5 : 200);
+  const authRateLimit = createAuthRateLimit(authRateLimitWindowMs, authRateLimitMax);
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -865,6 +893,46 @@ export async function createApp(io: any = null) {
       res.json(sale);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/sales/:saleId/refund", requireAuth, validateSchema(SaleRefundSchema), async (req, res) => {
+    try {
+      const role = String(req.user?.role || "").toLowerCase();
+      if (!["admin", "manager", "dev"].includes(role)) {
+        res.status(403).json({ error: "Ask a manager to approve this refund before continuing." });
+        return;
+      }
+
+      const refund = await processSaleRefund(req.params.tenantId, req.params.saleId, {
+        ...req.body,
+        staffId: req.body.staffId || req.user?.staffId || null,
+        staffName: req.body.staffName || req.user?.name || null,
+      });
+      broadcastSalesUpdate(io, req.params.tenantId, refund.id);
+      res.json(refund);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/sales/:saleId/void", requireAuth, validateSchema(SaleVoidSchema), async (req, res) => {
+    try {
+      const role = String(req.user?.role || "").toLowerCase();
+      if (!["admin", "manager", "dev"].includes(role)) {
+        res.status(403).json({ error: "Ask a manager to approve this void before continuing." });
+        return;
+      }
+
+      const voided = await processSaleVoid(req.params.tenantId, req.params.saleId, {
+        ...req.body,
+        staffId: req.body.staffId || req.user?.staffId || null,
+        staffName: req.body.staffName || req.user?.name || null,
+      });
+      broadcastSalesUpdate(io, req.params.tenantId, voided.id);
+      res.json(voided);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -1474,6 +1542,150 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/companion-device-assignments", requireAuth, async (req, res) => {
+    try {
+      const rows = await query(
+        `SELECT cda.id,
+                cda.tenant_id AS tenantId,
+                cda.device_id AS deviceId,
+                cda.device_name AS deviceName,
+                cda.workstation_id AS workstationId,
+                w.name AS workstationName,
+                w.type AS workstationType,
+                cda.default_mode AS defaultMode,
+                cda.assigned_by AS assignedBy,
+                cda.created_at AS createdAt,
+                cda.updated_at AS updatedAt
+           FROM companion_device_assignments cda
+           LEFT JOIN workstations w ON w.id = cda.workstation_id AND w.tenant_id = cda.tenant_id
+          WHERE cda.tenant_id = ?
+          ORDER BY cda.updated_at DESC`,
+        [req.params.tenantId]
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/companion-device-assignments/:deviceId", requireAuth, async (req, res) => {
+    try {
+      const rows = await query(
+        `SELECT cda.id,
+                cda.tenant_id AS tenantId,
+                cda.device_id AS deviceId,
+                cda.device_name AS deviceName,
+                cda.workstation_id AS workstationId,
+                w.name AS workstationName,
+                w.type AS workstationType,
+                cda.default_mode AS defaultMode,
+                cda.assigned_by AS assignedBy,
+                cda.created_at AS createdAt,
+                cda.updated_at AS updatedAt
+           FROM companion_device_assignments cda
+           LEFT JOIN workstations w ON w.id = cda.workstation_id AND w.tenant_id = cda.tenant_id
+          WHERE cda.tenant_id = ? AND cda.device_id = ?
+          LIMIT 1`,
+        [req.params.tenantId, req.params.deviceId]
+      );
+      res.json(rows[0] || null);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/companion-device-assignments/:deviceId", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCompanionDevices(req.user?.role)) {
+        return res.status(403).json({ error: "Only admins and devs can assign companion devices" });
+      }
+
+      const deviceId = String(req.params.deviceId || "").trim();
+      const workstationId = String(req.body?.workstationId || "").trim();
+      const deviceName = String(req.body?.deviceName || "Mobile device").trim().slice(0, 120);
+      const defaultMode = ["remote_control", "wireless_scanner", "pole_display"].includes(req.body?.defaultMode)
+        ? req.body.defaultMode
+        : "remote_control";
+      if (!deviceId || !workstationId) {
+        return res.status(400).json({ error: "Device and workstation are required" });
+      }
+
+      const workstationRows = await query(
+        `SELECT id FROM workstations WHERE tenant_id = ? AND id = ? LIMIT 1`,
+        [req.params.tenantId, workstationId]
+      );
+      if (!workstationRows[0]) {
+        return res.status(404).json({ error: "Workstation not found" });
+      }
+
+      const id = `cda_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      if (isPostgres()) {
+        await query(
+          `INSERT INTO companion_device_assignments
+             (id, tenant_id, device_id, device_name, workstation_id, default_mode, assigned_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+           ON CONFLICT (tenant_id, device_id)
+           DO UPDATE SET device_name = EXCLUDED.device_name,
+                         workstation_id = EXCLUDED.workstation_id,
+                         default_mode = EXCLUDED.default_mode,
+                         assigned_by = EXCLUDED.assigned_by,
+                         updated_at = NOW()`,
+          [id, req.params.tenantId, deviceId, deviceName || "Mobile device", workstationId, defaultMode, req.user?.staffId || null]
+        );
+      } else {
+        await query(
+          `INSERT INTO companion_device_assignments
+             (id, tenant_id, device_id, device_name, workstation_id, default_mode, assigned_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             device_name = VALUES(device_name),
+             workstation_id = VALUES(workstation_id),
+             default_mode = VALUES(default_mode),
+             assigned_by = VALUES(assigned_by),
+             updated_at = CURRENT_TIMESTAMP`,
+          [id, req.params.tenantId, deviceId, deviceName || "Mobile device", workstationId, defaultMode, req.user?.staffId || null]
+        );
+      }
+
+      const rows = await query(
+        `SELECT cda.id,
+                cda.tenant_id AS tenantId,
+                cda.device_id AS deviceId,
+                cda.device_name AS deviceName,
+                cda.workstation_id AS workstationId,
+                w.name AS workstationName,
+                w.type AS workstationType,
+                cda.default_mode AS defaultMode,
+                cda.assigned_by AS assignedBy,
+                cda.created_at AS createdAt,
+                cda.updated_at AS updatedAt
+           FROM companion_device_assignments cda
+           LEFT JOIN workstations w ON w.id = cda.workstation_id AND w.tenant_id = cda.tenant_id
+          WHERE cda.tenant_id = ? AND cda.device_id = ?
+          LIMIT 1`,
+        [req.params.tenantId, deviceId]
+      );
+      res.json(rows[0]);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/companion-device-assignments/:deviceId", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCompanionDevices(req.user?.role)) {
+        return res.status(403).json({ error: "Only admins and devs can revoke companion device assignments" });
+      }
+      await query(
+        `DELETE FROM companion_device_assignments WHERE tenant_id = ? AND device_id = ?`,
+        [req.params.tenantId, req.params.deviceId]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.delete("/api/mariadb/tenants/:tenantId/sales", requireAuth, async (req, res) => {
     try {
       await clearAllSales(req.params.tenantId);
@@ -1601,11 +1813,17 @@ export async function createApp(io: any = null) {
 
   app.post("/api/mariadb/tenants/:tenantId/cash-sessions/:id/movements", requireAuth, async (req, res) => {
     try {
+      const movementType = String(req.body.type || "");
+      if (["cash_drop", "cash_added", "cash_removed"].includes(movementType) && !canManageCash(req.user?.role)) {
+        res.status(403).json({ error: "Manager approval is required for cash movements." });
+        return;
+      }
+      const amount = toMoneyNumber(req.body.amount);
       const movement = await recordCashMovement(req.params.tenantId, {
         cashSessionId: req.params.id,
-        type: req.body.type,
+        type: movementType,
         direction: req.body.direction,
-        amount: req.body.amount,
+        amount,
         saleId: req.body.saleId,
         paymentId: req.body.paymentId,
         staffId: req.body.staffId,
@@ -1613,6 +1831,13 @@ export async function createApp(io: any = null) {
         createdBy: req.user?.staffId,
         note: req.body.note,
       });
+      const delta = expectedCashDeltaForMovement(movementType, req.body.direction, amount);
+      if (delta !== 0) {
+        await query(
+          `UPDATE cash_sessions SET expected_cash = COALESCE(expected_cash, 0) + ?, updated_at = NOW() WHERE tenant_id = ? AND id = ? AND status = 'open'`,
+          [delta, req.params.tenantId, req.params.id]
+        );
+      }
       res.json(movement);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

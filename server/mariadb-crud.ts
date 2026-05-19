@@ -28,6 +28,25 @@ function normalizeJsonField(value: any, fallback: any) {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+async function deductCompletedSaleProductStock(conn: any, tenantId: string, items: any[] = []) {
+  const totals = new Map<string, number>();
+  for (const item of items) {
+    const productId = item.productId || item.product_id || item.id || null;
+    const quantity = Number(item.quantity || 0);
+    if (!productId || quantity <= 0) continue;
+    totals.set(productId, (totals.get(productId) || 0) + quantity);
+  }
+
+  for (const [productId, quantity] of totals.entries()) {
+    await conn.query(
+      `UPDATE products
+          SET stock = GREATEST(0, COALESCE(stock, 0) - ?), updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [quantity, tenantId, productId]
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // CREATE Operations
 // ─────────────────────────────────────────────────────────────────────────
@@ -764,8 +783,10 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         id, tenant_id, customer_id, user_id, staff_id, total, subtotal, tax_amount,
         tax_rate, tax_inclusive, payment_method, tendered_amount, change_amount,
         tip_amount, cash_out_amount, points_discount, status, payfast_payment_id,
+        transaction_type, parent_sale_id, refund_status, refunded_amount, refund_reason, refunded_by,
+        void_reason, voided_by,
         table_number, is_tab, tab_name, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         id,
         tenantId,
@@ -785,6 +806,14 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         sale.pointsDiscount || 0,
         sale.status || "pending",
         sale.payfast_payment_id || null,
+        (sale as any).transactionType || "sale",
+        (sale as any).parentSaleId || null,
+        (sale as any).refundStatus || "none",
+        (sale as any).refundedAmount || 0,
+        (sale as any).refundReason || null,
+        (sale as any).refundedBy || null,
+        (sale as any).voidReason || null,
+        (sale as any).voidedBy || null,
         sale.tableNumber || null,
         sale.isTab ? 1 : 0,
         sale.tabName || null,
@@ -846,6 +875,10 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
       }
     }
 
+    if ((sale.status || "pending") === "completed" && ((sale as any).transactionType || "sale") === "sale") {
+      await deductCompletedSaleProductStock(conn, tenantId, sale.items || []);
+    }
+
     // Insert payments
     if (sale.payments && Array.isArray(sale.payments)) {
       for (const p of sale.payments) {
@@ -890,6 +923,12 @@ export async function updateSale(
   const conn = await getConnection();
   try {
     await conn.beginTransaction();
+
+    const [existingSaleResult] = await conn.query<any>(
+      `SELECT status, transaction_type FROM sales WHERE tenant_id = ? AND id = ? LIMIT 1`,
+      [tenantId, saleId]
+    );
+    const existingSale = (existingSaleResult as any[])[0] || null;
 
     const fields: string[] = [];
     const values: any[] = [];
@@ -953,6 +992,38 @@ export async function updateSale(
     if (updates.status !== undefined) {
       fields.push("status = ?");
       values.push(updates.status);
+    }
+    if ((updates as any).transactionType !== undefined) {
+      fields.push("transaction_type = ?");
+      values.push((updates as any).transactionType || "sale");
+    }
+    if ((updates as any).parentSaleId !== undefined) {
+      fields.push("parent_sale_id = ?");
+      values.push((updates as any).parentSaleId || null);
+    }
+    if ((updates as any).refundStatus !== undefined) {
+      fields.push("refund_status = ?");
+      values.push((updates as any).refundStatus || "none");
+    }
+    if ((updates as any).refundedAmount !== undefined) {
+      fields.push("refunded_amount = ?");
+      values.push((updates as any).refundedAmount || 0);
+    }
+    if ((updates as any).refundReason !== undefined) {
+      fields.push("refund_reason = ?");
+      values.push((updates as any).refundReason || null);
+    }
+    if ((updates as any).refundedBy !== undefined) {
+      fields.push("refunded_by = ?");
+      values.push((updates as any).refundedBy || null);
+    }
+    if ((updates as any).voidReason !== undefined) {
+      fields.push("void_reason = ?");
+      values.push((updates as any).voidReason || null);
+    }
+    if ((updates as any).voidedBy !== undefined) {
+      fields.push("voided_by = ?");
+      values.push((updates as any).voidedBy || null);
     }
     if (updates.payfast_payment_id !== undefined) {
       fields.push("payfast_payment_id = ?");
@@ -1057,6 +1128,21 @@ export async function updateSale(
       }
     }
 
+    const nextStatus = updates.status !== undefined ? updates.status : existingSale?.status;
+    const nextTransactionType = (updates as any).transactionType !== undefined ? ((updates as any).transactionType || "sale") : (existingSale?.transaction_type || "sale");
+    const shouldDeductStock = existingSale?.status !== "completed" && nextStatus === "completed" && nextTransactionType === "sale";
+    if (shouldDeductStock) {
+      let itemsForStock = updates.items as any[] | undefined;
+      if (!itemsForStock) {
+        const [saleItemsResult] = await conn.query<any>(
+          `SELECT product_id, quantity FROM sale_items WHERE sale_id = ?`,
+          [saleId]
+        );
+        itemsForStock = saleItemsResult as any[];
+      }
+      await deductCompletedSaleProductStock(conn, tenantId, itemsForStock || []);
+    }
+
     await conn.commit();
     const sale = await getSaleById(tenantId, saleId);
     if (!sale) {
@@ -1117,6 +1203,291 @@ export async function updateSaleStatus(
   return updateSale(tenantId, saleId, { status });
 }
 
+export type SaleRefundInput = {
+  items: { saleItemId: string; quantity: number }[];
+  reason: string;
+  method: "cash" | "card" | "wallet";
+  restock?: boolean;
+  staffId?: string | null;
+  staffName?: string | null;
+  cashSessionId?: string | null;
+};
+
+export async function processSaleRefund(tenantId: string, saleId: string, input: SaleRefundInput): Promise<Sale> {
+  const reason = String(input.reason || "").trim();
+  if (!reason) throw new Error("Please add a refund reason before continuing.");
+  if (!Array.isArray(input.items) || input.items.length === 0) {
+    throw new Error("Choose at least one item to refund.");
+  }
+
+  const conn = await getConnection();
+  const refundId = `refund_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+  try {
+    await conn.beginTransaction();
+
+    const [saleResult] = await conn.query<any>(
+      `SELECT id, tenant_id, customer_id, user_id, staff_id, total, subtotal, tax_amount,
+              tax_rate, tax_inclusive, payment_method, status, transaction_type,
+              refund_status, refunded_amount
+         FROM sales
+        WHERE tenant_id = ? AND id = ?
+        LIMIT 1`,
+      [tenantId, saleId]
+    );
+    const saleRows = saleResult as any[];
+    const original = saleRows[0];
+    if (!original) throw new Error("Sale not found.");
+    if (original.status !== "completed" || original.transaction_type === "refund") {
+      throw new Error("Only completed sales can be refunded.");
+    }
+
+    const [itemResult] = await conn.query<any>(
+      `SELECT id, product_id AS productId, product_name AS name, price, quantity
+         FROM sale_items
+        WHERE sale_id = ?`,
+      [saleId]
+    );
+    const itemRows = itemResult as any[];
+    const originalItems = new Map(itemRows.map(item => [String(item.id), item]));
+
+    const [priorResult] = await conn.query<any>(
+      `SELECT ABS(si.quantity) AS quantity, si.product_id AS productId
+         FROM sales s
+         INNER JOIN sale_items si ON si.sale_id = s.id
+        WHERE s.tenant_id = ?
+          AND s.parent_sale_id = ?
+          AND s.transaction_type = 'refund'`,
+      [tenantId, saleId]
+    );
+    const priorRows = priorResult as any[];
+    const refundedByProduct = new Map<string, number>();
+    for (const row of priorRows) {
+      const key = String(row.productId || "");
+      refundedByProduct.set(key, (refundedByProduct.get(key) || 0) + Number(row.quantity || 0));
+    }
+
+    const refundItems: any[] = [];
+    let refundSubtotal = 0;
+
+    for (const requested of input.items) {
+      const originalItem = originalItems.get(String(requested.saleItemId));
+      if (!originalItem) throw new Error("One of the selected items no longer exists on this sale.");
+      const productId = String(originalItem.productId || "");
+      const quantity = Math.max(0, Math.floor(Number(requested.quantity || 0)));
+      const alreadyRefunded = refundedByProduct.get(productId) || 0;
+      const remaining = Math.max(0, Number(originalItem.quantity || 0) - alreadyRefunded);
+      if (quantity <= 0 || quantity > remaining) {
+        throw new Error(`${originalItem.name} can only refund ${remaining} more.`);
+      }
+
+      refundedByProduct.set(productId, alreadyRefunded + quantity);
+      const price = Number(originalItem.price || 0);
+      refundSubtotal += price * quantity;
+      refundItems.push({
+        id: `item_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        productId: originalItem.productId || null,
+        name: originalItem.name,
+        price,
+        quantity: -quantity,
+      });
+    }
+
+    const originalTotal = Math.max(0, Number(original.total || 0));
+    const originalTaxAmount = Math.max(0, Number(original.tax_amount || 0));
+    const ratio = originalTotal > 0 ? Math.min(1, refundSubtotal / originalTotal) : 0;
+    const refundTax = Number((originalTaxAmount * ratio).toFixed(2));
+    const refundTotal = Number(refundSubtotal.toFixed(2));
+    const signedTotal = -refundTotal;
+    const signedTax = -refundTax;
+    const signedSubtotal = Number((signedTotal - signedTax).toFixed(2));
+
+    await conn.query(
+      `INSERT INTO sales (
+        id, tenant_id, customer_id, user_id, staff_id, total, subtotal, tax_amount,
+        tax_rate, tax_inclusive, payment_method, tendered_amount, change_amount,
+        tip_amount, cash_out_amount, points_discount, status, transaction_type,
+        parent_sale_id, refund_status, refunded_amount, refund_reason, refunded_by,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 'completed', 'refund', ?, 'none', ?, ?, ?, NOW(), NOW())`,
+      [
+        refundId,
+        tenantId,
+        original.customer_id || null,
+        original.user_id || null,
+        input.staffId || original.staff_id || null,
+        signedTotal,
+        signedSubtotal,
+        signedTax,
+        original.tax_rate || 0,
+        original.tax_inclusive ? 1 : 0,
+        input.method,
+        signedTotal,
+        saleId,
+        refundTotal,
+        reason,
+        input.staffId || null,
+      ]
+    );
+
+    for (const item of refundItems) {
+      await conn.query(
+        `INSERT INTO sale_items (
+          id, sale_id, product_id, product_name, price, quantity, status,
+          ordered_at, delivered_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'delivered', NOW(), NOW(), NOW(), NOW())`,
+        [item.id, refundId, item.productId, item.name, item.price, item.quantity]
+      );
+
+      if (input.restock && item.productId) {
+        await conn.query(
+          `UPDATE products SET stock = COALESCE(stock, 0) + ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
+          [Math.abs(Number(item.quantity || 0)), tenantId, item.productId]
+        );
+      }
+    }
+
+    const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    await conn.query(
+      `INSERT INTO sale_payments (
+        id, sale_id, method, amount, tendered_amount, change_amount, tip_amount, cash_out_amount, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, NOW(), NOW())`,
+      [paymentId, refundId, input.method, signedTotal, signedTotal]
+    );
+
+    const newRefundedAmount = Number((Number(original.refunded_amount || 0) + refundTotal).toFixed(2));
+    const refundStatus = newRefundedAmount >= originalTotal - 0.01 ? "full" : "partial";
+    await conn.query(
+      `UPDATE sales
+          SET refunded_amount = ?,
+              refund_status = ?,
+              refund_reason = ?,
+              refunded_by = ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [newRefundedAmount, refundStatus, reason, input.staffId || null, tenantId, saleId]
+    );
+
+    if (input.method === "wallet" && original.customer_id) {
+      await conn.query(
+        `UPDATE customers SET wallet_balance = COALESCE(wallet_balance, 0) + ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
+        [refundTotal, tenantId, original.customer_id]
+      );
+    }
+
+    if (input.method === "cash" && input.cashSessionId) {
+      await conn.query(
+        `UPDATE cash_sessions
+            SET expected_cash = COALESCE(expected_cash, 0) - ?,
+                updated_at = NOW()
+          WHERE tenant_id = ? AND id = ?`,
+        [refundTotal, tenantId, input.cashSessionId]
+      );
+      await conn.query(
+        `INSERT INTO cash_movements (
+          id, tenant_id, cash_session_id, type, direction, amount, sale_id, payment_id,
+          staff_id, staff_name, created_by, note, created_at
+        ) VALUES (?, ?, ?, 'refund', 'out', ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          `cash_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+          tenantId,
+          input.cashSessionId,
+          refundTotal,
+          refundId,
+          paymentId,
+          input.staffId || null,
+          input.staffName || null,
+          input.staffId || null,
+          reason,
+        ]
+      );
+    }
+
+    await conn.commit();
+    const refundSale = await getSaleById(tenantId, refundId);
+    if (!refundSale) throw new Error("Refund was recorded but could not be loaded.");
+    return refundSale;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export type SaleVoidInput = {
+  reason: string;
+  restock?: boolean;
+  staffId?: string | null;
+  staffName?: string | null;
+};
+
+export async function processSaleVoid(tenantId: string, saleId: string, input: SaleVoidInput): Promise<Sale> {
+  const reason = String(input.reason || "").trim();
+  if (!reason) throw new Error("Please add a void reason before continuing.");
+
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [saleResult] = await conn.query<any>(
+      `SELECT id, status, transaction_type
+         FROM sales
+        WHERE tenant_id = ? AND id = ?
+        LIMIT 1`,
+      [tenantId, saleId]
+    );
+    const saleRows = saleResult as any[];
+    const sale = saleRows[0];
+    if (!sale) throw new Error("Sale not found.");
+    if (sale.transaction_type === "refund" || sale.transaction_type === "void") {
+      throw new Error("This transaction cannot be voided.");
+    }
+    if (sale.status === "completed") {
+      throw new Error("Completed sales must be handled through the refund flow.");
+    }
+
+    const [itemResult] = await conn.query<any>(
+      `SELECT product_id AS productId, quantity
+         FROM sale_items
+        WHERE sale_id = ?`,
+      [saleId]
+    );
+    const items = itemResult as any[];
+
+    if (input.restock) {
+      for (const item of items) {
+        if (!item.productId) continue;
+        await conn.query(
+          `UPDATE products SET stock = COALESCE(stock, 0) + ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
+          [Math.max(0, Number(item.quantity || 0)), tenantId, item.productId]
+        );
+      }
+    }
+
+    await conn.query(
+      `UPDATE sales
+          SET status = 'failed',
+              transaction_type = 'void',
+              void_reason = ?,
+              voided_by = ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [reason, input.staffId || null, tenantId, saleId]
+    );
+
+    await conn.commit();
+    const voidedSale = await getSaleById(tenantId, saleId);
+    if (!voidedSale) throw new Error("Void was recorded but could not be loaded.");
+    return voidedSale;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 export async function getSaleById(tenantId: string, saleId: string): Promise<Sale | null> {
   const rows = await query(
     `SELECT
@@ -1137,6 +1508,14 @@ export async function getSaleById(tenantId: string, saleId: string): Promise<Sal
       cash_out_amount AS cashOutAmount,
       points_discount AS pointsDiscount,
       status,
+      transaction_type AS transactionType,
+      parent_sale_id AS parentSaleId,
+      refund_status AS refundStatus,
+      refunded_amount AS refundedAmount,
+      refund_reason AS refundReason,
+      refunded_by AS refundedBy,
+      void_reason AS voidReason,
+      voided_by AS voidedBy,
       payfast_payment_id,
       table_number AS tableNumber,
       is_tab AS isTab,

@@ -224,6 +224,14 @@ export async function getActiveSalesByTenant(tenantId: string) {
         cash_out_amount AS cashOutAmount,
         points_discount AS pointsDiscount,
         status,
+        transaction_type AS transactionType,
+        parent_sale_id AS parentSaleId,
+        refund_status AS refundStatus,
+        refunded_amount AS refundedAmount,
+        refund_reason AS refundReason,
+        refunded_by AS refundedBy,
+        void_reason AS voidReason,
+        voided_by AS voidedBy,
         payfast_payment_id,
         table_number AS tableNumber,
         is_tab AS isTab,
@@ -232,7 +240,7 @@ export async function getActiveSalesByTenant(tenantId: string) {
         updated_at AS updatedAt
       FROM sales
       WHERE tenant_id = ?
-        AND status IN ('completed','pending','open','kitchen')
+        AND (status IN ('completed','pending','open','kitchen') OR transaction_type = 'void')
       ORDER BY created_at DESC
       LIMIT 100
     `,

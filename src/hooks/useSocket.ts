@@ -28,6 +28,7 @@ interface UseSocketReturn {
   leaveTab: (id: string) => void;
   joinMessages: (tenantId: string) => void;
   leaveMessages: (tenantId: string) => void;
+  emit: (event: string, payload?: any) => void;
 }
 
 export function useSocket({ user, tenantId, enabled = true, workstationId, tableId, tabId }: UseSocketOptions): UseSocketReturn {
@@ -147,6 +148,12 @@ export function useSocket({ user, tenantId, enabled = true, workstationId, table
     }
   }, []);
 
+  const emit = useCallback((event: string, payload?: any) => {
+    if (socketRef.current && event) {
+      socketRef.current.emit(event, payload);
+    }
+  }, []);
+
   // Connect/disconnect based on active channels
   useEffect(() => {
     // Connect only when the caller explicitly enables live socket work.
@@ -203,5 +210,6 @@ export function useSocket({ user, tenantId, enabled = true, workstationId, table
     leaveTab,
     joinMessages,
     leaveMessages,
+    emit,
   };
 }

@@ -118,6 +118,26 @@ export const SaleSchema = z.object({
   tabName: z.string().nullish()
 });
 
+export const SaleRefundSchema = z.object({
+  items: z.array(z.object({
+    saleItemId: z.string().min(1),
+    quantity: z.number().int().min(1)
+  })).min(1, { message: 'Choose at least one item to refund' }),
+  reason: z.string().min(3, { message: 'Please add a short refund reason' }),
+  method: z.enum(['cash', 'card', 'wallet']),
+  restock: z.boolean().optional(),
+  staffId: z.string().nullish(),
+  staffName: z.string().nullish(),
+  cashSessionId: z.string().nullish()
+});
+
+export const SaleVoidSchema = z.object({
+  reason: z.string().min(3, { message: 'Please add a short void reason' }),
+  restock: z.boolean().optional(),
+  staffId: z.string().nullish(),
+  staffName: z.string().nullish()
+});
+
 export const WorkstationSchema = z.object({
   name: z.string().min(1, { message: 'Workstation name is required' }),
   type: z.enum(['kitchen', 'bar', 'other']).optional(),
@@ -145,6 +165,8 @@ export type ProductInput = z.infer<typeof ProductSchema>;
 export type CustomerInput = z.infer<typeof CustomerSchema>;
 export type StaffInput = z.infer<typeof StaffSchema>;
 export type SaleInput = z.infer<typeof SaleSchema>;
+export type SaleRefundInput = z.infer<typeof SaleRefundSchema>;
+export type SaleVoidInput = z.infer<typeof SaleVoidSchema>;
 export type WorkstationInput = z.infer<typeof WorkstationSchema>;
 export type TableSectionInput = z.infer<typeof TableSectionSchema>;
 export type RestaurantTableInput = z.infer<typeof RestaurantTableSchema>;

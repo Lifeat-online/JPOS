@@ -1,9 +1,9 @@
 import { usePosStore } from '../store/usePosStore';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
-import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send } from 'lucide-react';
+import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send, Smartphone } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
-import { apiGet, apiPut, apiPost, apiDelete, getTenantPackageLimits, getAiSettings, listAiModels, testAiProvider, updateAiSettings, type TenantPackageLimitsResponse } from '../api';
+import { apiGet, apiPut, apiPost, apiDelete, assignCompanionDevice, getCompanionDeviceAssignments, getTenantPackageLimits, getAiSettings, listAiModels, revokeCompanionDeviceAssignment, testAiProvider, updateAiSettings, type TenantPackageLimitsResponse } from '../api';
 import { JPOS_PACKAGES } from '../../shared/packageCatalog';
 import type { AiModelOption, AiProviderName, AiRole, AiSettings } from '../types';
 
@@ -18,6 +18,7 @@ function readSettingsFileAsDataUrl(file: File) {
 
 export function SettingsView({ config, setConfig }: { config: AppConfig, setConfig: (c: AppConfig) => void }) {
   const tenantId = usePosStore(state => state.tenantId);
+  const currentUserStaff = usePosStore(state => state.currentUserStaff);
   const [formData, setFormData] = useState<AppConfig>({
     ...config,
     categories: config.categories || DEFAULT_CATEGORY_TREE
@@ -48,6 +49,17 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
 
   // Workstations state
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
+  const [companionAssignments, setCompanionAssignments] = useState<any[]>([]);
+  const [companionDeviceName, setCompanionDeviceName] = useState(() => {
+    try {
+      return window.localStorage.getItem('companion-device-name') || 'Mobile device';
+    } catch {
+      return 'Mobile device';
+    }
+  });
+  const [companionWorkstationId, setCompanionWorkstationId] = useState('');
+  const [companionDefaultMode, setCompanionDefaultMode] = useState<'remote_control' | 'wireless_scanner' | 'pole_display'>('remote_control');
+  const [companionSaving, setCompanionSaving] = useState(false);
   const [wsModal, setWsModal] = useState<{ isOpen: boolean; ws: Partial<Workstation> | null }>({ isOpen: false, ws: null });
   const [wsSaving, setWsSaving] = useState(false);
 
@@ -61,13 +73,16 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const fetchData = useCallback(async () => {
     if (!tenantId) return;
     try {
-      const [ws, sects, tabs, limits] = await Promise.all([
+      const [ws, assignments, sects, tabs, limits] = await Promise.all([
         apiGet<Workstation[]>(`/api/mariadb/tenants/${tenantId}/workstations`),
+        getCompanionDeviceAssignments(tenantId).catch(() => []),
         apiGet<TableSection[]>(`/api/mariadb/tenants/${tenantId}/table-sections`),
         apiGet<RestaurantTable[]>(`/api/mariadb/tenants/${tenantId}/restaurant-tables`),
         getTenantPackageLimits(tenantId),
       ]);
       setWorkstations(ws || []);
+      setCompanionAssignments(assignments || []);
+      if (!companionWorkstationId && ws?.[0]?.id) setCompanionWorkstationId(ws[0].id);
       setSections(sects || []);
       setTables(tabs || []);
       setPackageLimits(limits);
@@ -84,7 +99,57 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     } catch (err) {
       console.error('Settings data fetch error:', err);
     }
-  }, [tenantId]);
+  }, [tenantId, companionWorkstationId]);
+
+  const companionDeviceId = React.useMemo(() => {
+    const key = `companion-device-id:${tenantId || 'local'}:${currentUserStaff?.id || 'staff'}`;
+    try {
+      const existing = window.localStorage.getItem(key);
+      if (existing) return existing;
+      const created = `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      window.localStorage.setItem(key, created);
+      return created;
+    } catch {
+      return `device_${Date.now()}`;
+    }
+  }, [tenantId, currentUserStaff?.id]);
+  const canAssignCompanionDevices = currentUserStaff?.role === 'admin' || currentUserStaff?.role === 'dev';
+  const currentDeviceAssignment = companionAssignments.find(assignment => assignment.deviceId === companionDeviceId);
+
+  const saveCompanionAssignment = async () => {
+    if (!tenantId || !companionWorkstationId || !canAssignCompanionDevices) return;
+    setCompanionSaving(true);
+    try {
+      await assignCompanionDevice(tenantId, companionDeviceId, {
+        deviceName: companionDeviceName.trim() || 'Mobile device',
+        workstationId: companionWorkstationId,
+        defaultMode: companionDefaultMode,
+      });
+      try {
+        window.localStorage.setItem('companion-device-name', companionDeviceName.trim() || 'Mobile device');
+      } catch {
+        // Non-critical; the server assignment is authoritative.
+      }
+      await fetchData();
+    } catch (err) {
+      console.error('Failed to assign companion device:', err);
+    } finally {
+      setCompanionSaving(false);
+    }
+  };
+
+  const revokeCompanionAssignment = async (deviceId: string) => {
+    if (!tenantId || !canAssignCompanionDevices) return;
+    setCompanionSaving(true);
+    try {
+      await revokeCompanionDeviceAssignment(tenantId, deviceId);
+      await fetchData();
+    } catch (err) {
+      console.error('Failed to revoke companion device:', err);
+    } finally {
+      setCompanionSaving(false);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -1225,6 +1290,113 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   ))}
                 </div>
               )}
+
+              <div className="mt-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-5 space-y-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      <Smartphone className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-slate-900 dark:text-white">Long-term mobile pairing</h4>
+                      <p className="mt-1 text-xs font-semibold text-slate-500 max-w-2xl">
+                        Admins and devs can bind this physical mobile/browser device to a workstation. It will prefer that workstation every time it signs in.
+                      </p>
+                    </div>
+                  </div>
+                  {currentDeviceAssignment && (
+                    <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-widest">
+                      This device assigned
+                    </span>
+                  )}
+                </div>
+
+                {!canAssignCompanionDevices ? (
+                  <div className="rounded-2xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/40 p-4 text-sm font-bold text-amber-700 dark:text-amber-300">
+                    Only admin and dev users can assign long-term companion devices.
+                  </div>
+                ) : workstations.length === 0 ? (
+                  <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 text-sm font-bold text-slate-500">
+                    Add a workstation first, then assign this device to it.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 lg:grid-cols-[1fr_220px_190px_auto]">
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Device name</label>
+                      <input
+                        value={companionDeviceName}
+                        onChange={event => setCompanionDeviceName(event.target.value)}
+                        placeholder="e.g. Bar phone"
+                        className="w-full h-12 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                      <p className="mt-1 text-[10px] font-semibold text-slate-400">Device ID: {companionDeviceId}</p>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Workstation</label>
+                      <select
+                        value={companionWorkstationId}
+                        onChange={event => setCompanionWorkstationId(event.target.value)}
+                        className="w-full h-12 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none"
+                      >
+                        {workstations.map(ws => (
+                          <option key={ws.id} value={ws.id}>{ws.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Default mode</label>
+                      <select
+                        value={companionDefaultMode}
+                        onChange={event => setCompanionDefaultMode(event.target.value as typeof companionDefaultMode)}
+                        className="w-full h-12 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none"
+                      >
+                        <option value="remote_control">Remote</option>
+                        <option value="wireless_scanner">Scanner</option>
+                        <option value="pole_display">Pole display</option>
+                      </select>
+                    </div>
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        disabled={companionSaving}
+                        onClick={saveCompanionAssignment}
+                        className="w-full h-12 px-5 rounded-2xl bg-primary text-white text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {companionSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Smartphone className="w-4 h-4" />}
+                        Assign
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Assigned devices</p>
+                  {companionAssignments.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-4 text-sm font-bold text-slate-400 text-center">
+                      No long-term devices assigned yet.
+                    </div>
+                  ) : companionAssignments.map(assignment => (
+                    <div key={assignment.deviceId} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+                      <div>
+                        <p className="text-sm font-black text-slate-900 dark:text-white">{assignment.deviceName}</p>
+                        <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          {assignment.workstationName || 'Unknown workstation'} · {String(assignment.defaultMode || '').replace('_', ' ')}
+                        </p>
+                      </div>
+                      {canAssignCompanionDevices && (
+                        <button
+                          type="button"
+                          disabled={companionSaving}
+                          onClick={() => revokeCompanionAssignment(assignment.deviceId)}
+                          className="h-10 px-4 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-300 text-xs font-black uppercase tracking-widest"
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 

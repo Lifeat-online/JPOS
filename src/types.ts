@@ -76,6 +76,14 @@ export interface Sale {
   payments?: SalePayment[];
   pointsDiscount?: number;
   status: 'pending' | 'completed' | 'failed' | 'open' | 'kitchen';
+  transactionType?: 'sale' | 'refund' | 'void';
+  parentSaleId?: string | null;
+  refundStatus?: 'none' | 'partial' | 'full';
+  refundedAmount?: number;
+  refundReason?: string | null;
+  refundedBy?: string | null;
+  voidReason?: string | null;
+  voidedBy?: string | null;
   createdAt: any;
   updatedAt?: any;
   userId?: string;
@@ -257,7 +265,7 @@ export interface CashSession {
 export interface CashTransaction {
   id: string;
   sessionId: string;
-  type: 'opening_float' | 'cash_sale' | 'refund' | 'cash_drop' | 'cash_added' | 'cash_removed' | 'cash_out' | 'tip' | 'manager_adjustment';
+  type: 'opening_float' | 'cash_sale' | 'refund' | 'cash_drop' | 'cash_added' | 'cash_removed' | 'cash_out' | 'tip' | 'manager_adjustment' | 'no_sale';
   direction: 'in' | 'out' | 'neutral';
   amount: number;
   timestamp: any;

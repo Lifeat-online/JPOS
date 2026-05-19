@@ -55,7 +55,7 @@ import { CheckoutSuccessModal } from './components/modals/CheckoutSuccessModal';
 import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
 import { SplitPaymentModal } from './components/modals/SplitPaymentModal';
 
-import { Product, Customer, Staff } from './types';
+import { Product, Customer, Staff, Sale } from './types';
 import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage } from './constants';
 
 import { MessagingView } from './views/MessagingView';
@@ -467,6 +467,8 @@ export default function App() {
   // Barcode scanner
   const [isScanning, setIsScanning] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const [receiptToPrint, setReceiptToPrint] = useState<Sale | null>(null);
+  const [receiptPrintPending, setReceiptPrintPending] = useState(false);
 
   // History filter
   const [filterCustomerId, setFilterCustomerId] = useState<string | null>(null);
@@ -503,6 +505,47 @@ export default function App() {
     () => sales.filter(s => s.isTab && s.status === 'open').length,
     [sales]
   );
+
+  const receiptEligibleSales = useMemo(() => {
+    return sales.filter(sale => {
+      if (sale.status !== 'completed') return false;
+      if (currentUserRole === 'cashier' && (sale as any).staffId !== currentUserStaff?.id) return false;
+      return true;
+    });
+  }, [sales, currentUserRole, currentUserStaff?.id]);
+
+  const lastReceiptSale = useMemo(() => {
+    return [...receiptEligibleSales].sort((a, b) => {
+      const bTime = new Date(b.createdAt || 0).getTime();
+      const aTime = new Date(a.createdAt || 0).getTime();
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    })[0] || null;
+  }, [receiptEligibleSales]);
+
+  const printReceipt = (sale: Sale | null) => {
+    if (!sale) return;
+    setReceiptToPrint(sale);
+    setReceiptPrintPending(true);
+  };
+
+  useEffect(() => {
+    if (!receiptPrintPending || !receiptToPrint) return;
+
+    const cleanup = () => {
+      setReceiptPrintPending(false);
+      setReceiptToPrint(null);
+    };
+    const printTimer = window.setTimeout(() => window.print(), 75);
+    const fallbackTimer = window.setTimeout(cleanup, 5000);
+
+    window.addEventListener('afterprint', cleanup, { once: true });
+
+    return () => {
+      window.clearTimeout(printTimer);
+      window.clearTimeout(fallbackTimer);
+      window.removeEventListener('afterprint', cleanup);
+    };
+  }, [receiptPrintPending, receiptToPrint]);
 
   // Dev role — hardcoded to the dev email, bypasses tenant role system
   const isDev = user?.email === DEV_EMAIL;
@@ -868,12 +911,14 @@ export default function App() {
         {view === 'pos' && (
           <PointOfSaleView
             products={products}
+            user={user}
             customers={customers}
             sales={sales}
             workstations={workstations}
             isProcessing={checkout.isProcessing}
             setIsProcessing={checkout.setIsProcessing}
             handleSaveOrder={(sendToKitchen) => checkout.handleSaveOrder(sendToKitchen, navigate)}
+            handleParkSale={checkout.handleParkSale}
             handleCheckout={checkout.handleCheckout}
             handleWalletCheckout={checkout.handleWalletCheckout}
             handleOpenTab={checkout.handleOpenTab}
@@ -891,6 +936,9 @@ export default function App() {
             onClearPointsDiscount={checkout.clearPointsDiscount}
             restaurantTables={restaurantTables}
             onSalesUpdated={refreshSales}
+            lastReceiptSale={lastReceiptSale}
+            onPrintLastReceipt={() => printReceipt(lastReceiptSale)}
+            suppressBillPrint={Boolean(receiptToPrint)}
           />
         )}
         {view === 'history' && (
@@ -905,9 +953,10 @@ export default function App() {
             setSearchQuery={setSearchQuery}
             filterCustomerId={filterCustomerId}
             setFilterCustomerId={setFilterCustomerId}
+            onSalesUpdated={refreshSales}
           />
         )}
-        {view === 'cash' && <CashManagementView currentUserStaff={currentUserStaff} />}
+        {view === 'cash' && <CashManagementView currentUserStaff={currentUserStaff} sales={sales} />}
         {view === 'inventory' && (
           <InventoryView
             products={products}
@@ -1118,6 +1167,10 @@ export default function App() {
 
         {checkout.checkoutModal.isOpen && checkout.checkoutModal.saleData && (
           <Receipt sale={checkout.checkoutModal.saleData} config={config} />
+        )}
+
+        {receiptToPrint && !checkout.checkoutModal.isOpen && (
+          <Receipt sale={receiptToPrint} config={config} />
         )}
 
         {checkout.checkoutModal.isOpen && (

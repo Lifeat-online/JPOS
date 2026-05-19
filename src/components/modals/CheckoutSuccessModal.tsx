@@ -65,7 +65,7 @@ export const CheckoutSuccessModal: React.FC<CheckoutSuccessModalProps> = ({ sale
             className="w-full py-4 bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 rounded-2xl font-black shadow-lg hover:scale-105 transition-all flex items-center justify-center gap-2"
           >
             <Printer className="w-5 h-5" />
-            PRINT RECEIPT
+            PRINT / REPRINT RECEIPT
           </button>
           <button
             onClick={onNewSale}

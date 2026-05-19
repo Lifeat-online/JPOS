@@ -138,11 +138,12 @@ describe('mariadb-crud', () => {
 
     expect(conn.beginTransaction).toHaveBeenCalled();
     expect(conn.commit).toHaveBeenCalled();
-    expect(conn.query).toHaveBeenNthCalledWith(1, expect.stringContaining('UPDATE sales SET'), [25, 'kitchen', 'tenant_1', 'sale_1']);
-    expect(conn.query).toHaveBeenNthCalledWith(2, expect.stringContaining('SELECT * FROM sale_items WHERE sale_id = ?'), ['sale_1']);
-    expect(conn.query).toHaveBeenNthCalledWith(3, expect.stringContaining('DELETE FROM sale_items WHERE sale_id = ?'), ['sale_1']);
+    expect(conn.query).toHaveBeenNthCalledWith(1, expect.stringContaining('SELECT status, transaction_type FROM sales'), ['tenant_1', 'sale_1']);
+    expect(conn.query).toHaveBeenNthCalledWith(2, expect.stringContaining('UPDATE sales SET'), [25, 'kitchen', 'tenant_1', 'sale_1']);
+    expect(conn.query).toHaveBeenNthCalledWith(3, expect.stringContaining('SELECT * FROM sale_items WHERE sale_id = ?'), ['sale_1']);
+    expect(conn.query).toHaveBeenNthCalledWith(4, expect.stringContaining('DELETE FROM sale_items WHERE sale_id = ?'), ['sale_1']);
     expect(conn.query).toHaveBeenNthCalledWith(
-      4,
+      5,
       expect.stringContaining('INSERT INTO sale_items'),
       expect.arrayContaining(['sale_1', 'prod_1', 'Burger', 25, 1, 'pending'])
     );

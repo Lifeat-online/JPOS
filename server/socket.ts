@@ -16,6 +16,8 @@ export type SocketUser = {
 // ── Socket.IO Setup ───────────────────────────────────────────────────────────
 
 export function setupSocketIO(httpServer: any) {
+  const poleDisplaysByTerminal = new Map<string, string>();
+
   const io = new SocketIOServer(httpServer, {
     cors: {
       origin: "*",
@@ -86,6 +88,71 @@ export function setupSocketIO(httpServer: any) {
       socket.join(`tenant:${tenantId}:messages`);
     });
 
+    socket.on("terminal_register", (payload: { tenantId?: string; staffId?: string; terminalId?: string }) => {
+      const terminalId = String(payload?.terminalId || "");
+      if (!terminalId) return;
+      socket.join(`terminal:${terminalId}`);
+      socket.data.terminalId = terminalId;
+      socket.data.deviceRole = "terminal";
+      io.to(`terminal:${terminalId}`).emit("companion_state", {
+        terminalId,
+        poleDisplayDeviceId: poleDisplaysByTerminal.get(terminalId) || null,
+      });
+    });
+
+    socket.on("companion_join", (payload: { terminalId?: string; deviceId?: string; mode?: string }) => {
+      const terminalId = String(payload?.terminalId || "");
+      const deviceId = String(payload?.deviceId || socket.id);
+      const requestedMode = payload?.mode === "pole_display" ? "pole_display" : payload?.mode === "wireless_scanner" ? "wireless_scanner" : "remote_control";
+      if (!terminalId) return;
+
+      let assignedMode = requestedMode;
+      const currentPoleDisplay = poleDisplaysByTerminal.get(terminalId);
+      if (requestedMode === "pole_display") {
+        if (currentPoleDisplay && currentPoleDisplay !== deviceId) {
+          assignedMode = "remote_control";
+        } else {
+          poleDisplaysByTerminal.set(terminalId, deviceId);
+        }
+      }
+
+      socket.join(`terminal:${terminalId}`);
+      socket.data.terminalId = terminalId;
+      socket.data.companionDeviceId = deviceId;
+      socket.data.companionMode = assignedMode;
+      socket.data.deviceRole = "companion";
+
+      socket.emit("companion_mode_assigned", {
+        terminalId,
+        requestedMode,
+        assignedMode,
+        poleDisplayDeviceId: poleDisplaysByTerminal.get(terminalId) || null,
+      });
+      io.to(`terminal:${terminalId}`).emit("companion_state", {
+        terminalId,
+        poleDisplayDeviceId: poleDisplaysByTerminal.get(terminalId) || null,
+      });
+    });
+
+    socket.on("companion_command", (payload: { terminalId?: string; command?: string; data?: any }) => {
+      const terminalId = String(payload?.terminalId || socket.data.terminalId || "");
+      if (!terminalId || !payload?.command) return;
+      socket.to(`terminal:${terminalId}`).emit("companion_command", {
+        command: payload.command,
+        data: payload.data || {},
+        fromDeviceId: socket.data.companionDeviceId || socket.id,
+      });
+    });
+
+    socket.on("terminal_display_update", (payload: { terminalId?: string; data?: any }) => {
+      const terminalId = String(payload?.terminalId || socket.data.terminalId || "");
+      if (!terminalId) return;
+      socket.to(`terminal:${terminalId}`).emit("terminal_display_update", {
+        terminalId,
+        data: payload.data || {},
+      });
+    });
+
     // ── Leave channels ────────────────────────────────────────────────────────
 
     socket.on("leave_workstation", (workstationId: string) => {
@@ -111,6 +178,17 @@ export function setupSocketIO(httpServer: any) {
     // ── Disconnect Handler ────────────────────────────────────────────────────
 
     socket.on("disconnect", () => {
+      if (socket.data?.companionMode === "pole_display" && socket.data?.terminalId) {
+        const terminalId = String(socket.data.terminalId);
+        const deviceId = String(socket.data.companionDeviceId || socket.id);
+        if (poleDisplaysByTerminal.get(terminalId) === deviceId) {
+          poleDisplaysByTerminal.delete(terminalId);
+          io.to(`terminal:${terminalId}`).emit("companion_state", {
+            terminalId,
+            poleDisplayDeviceId: null,
+          });
+        }
+      }
       console.log(`Client disconnected: ${socket.id}`);
     });
   });

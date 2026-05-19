@@ -6,9 +6,18 @@ import { motion } from 'motion/react';
 interface BarcodeScannerProps {
   onScan: (decodedText: string) => void;
   onClose: () => void;
+  title?: string;
+  subtitle?: string;
+  instructions?: string;
 }
 
-export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScan, onClose }) => {
+export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
+  onScan,
+  onClose,
+  title = 'Barcode Scanner',
+  subtitle = 'Ready to scan',
+  instructions = 'Position the barcode within the scanning area.',
+}) => {
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
   useEffect(() => {
@@ -64,8 +73,8 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScan, onClose 
               <Camera className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <h3 className="font-black text-xl tracking-tight text-slate-900 dark:text-white">Barcode Scanner</h3>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">Ready to scan</p>
+              <h3 className="font-black text-xl tracking-tight text-slate-900 dark:text-white">{title}</h3>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">{subtitle}</p>
             </div>
           </div>
           <button 
@@ -82,7 +91,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScan, onClose 
 
         <div className="p-6 text-center">
           <p className="text-sm font-medium text-slate-500 dark:text-slate-400 max-w-[280px] mx-auto leading-relaxed">
-            Position the barcode within the scanning area to automatically add it to your cart.
+            {instructions}
           </p>
         </div>
 

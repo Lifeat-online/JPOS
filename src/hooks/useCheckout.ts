@@ -173,6 +173,46 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     }
   };
 
+  const handleParkSale = async (label?: string) => {
+    if (cart.length === 0 || !tenantId) return null;
+    setIsProcessing(true);
+    try {
+      const saleData: any = {
+        items: stampOrderItems(cart),
+        total: Number(cartTotalAfterDiscount) || 0,
+        subtotal: Number(cartSubtotal) || 0,
+        taxAmount: Number(taxAmount) || 0,
+        taxRate: taxRate || null,
+        taxInclusive,
+        paymentMethod: 'pending',
+        status: 'open',
+        isTab: false,
+        tabName: label?.trim() || null,
+        customerId: selectedCustomerId || null,
+        staffId: currentUserStaff?.id || null,
+        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
+      };
+
+      let saleId = activeOrderId;
+      if (activeOrderId) {
+        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
+      } else {
+        const created = await createSale(tenantId, saleData);
+        saleId = created.id;
+      }
+
+      await refreshSales();
+      resetAfterCheckout();
+      return saleId;
+    } catch (error) {
+      console.error('Failed to park sale:', error);
+      alert('Could not park this sale. Please try again.');
+      return null;
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // ── Open / update a bar tab ──────────────────────────────────────────────────
   const handleOpenTab = async (tabName?: string) => {
     if (cart.length === 0 || !selectedCustomerId || !tenantId) return;
@@ -482,6 +522,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     cartTotal: cartTotalAfterDiscount,
     cartTotalBeforeDiscount: cartTotal,
     activeOrderId,
+    handleParkSale,
     handleSaveOrder,
     handleOpenTab,
     handleOpenTable,

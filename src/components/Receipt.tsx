@@ -14,6 +14,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
   const taxInclusive = sale.taxInclusive !== undefined ? sale.taxInclusive : config?.business?.taxInclusive !== false;
   const subtotal = sale.subtotal ?? sale.total;
   const taxAmount = sale.taxAmount ?? (taxRate ? (taxInclusive ? subtotal - subtotal / (1 + taxRate / 100) : subtotal * (taxRate / 100)) : 0);
+  const isRefund = sale.transactionType === 'refund' || Number(sale.total || 0) < 0;
 
   const createdAt = getDate(sale.createdAt);
   const isValidDate = !isNaN(createdAt.getTime());
@@ -30,8 +31,9 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
         {config?.business?.address && <p>{config.business.address}</p>}
         {config?.business?.phone && <p>{config.business.phone}</p>}
         <div className="border-b border-black border-dashed my-2" />
-        <p className="font-bold">TAX INVOICE</p>
+        <p className="font-bold">{isRefund ? 'REFUND RECEIPT' : 'TAX INVOICE'}</p>
         <p>Order #{sale.id.slice(-8).toUpperCase()}</p>
+        {sale.parentSaleId && <p>Original #{sale.parentSaleId.slice(-8).toUpperCase()}</p>}
         {dateDisplay && <p>{dateDisplay}</p>}
         {sale.tableNumber && <p className="font-bold mt-1">Table {sale.tableNumber}</p>}
       </div>
@@ -83,7 +85,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
           </div>
         )}
         <div className="flex justify-between font-bold text-sm border-t border-black pt-1 mt-1">
-          <span>TOTAL DUE</span>
+          <span>{isRefund ? 'REFUND TOTAL' : 'TOTAL DUE'}</span>
           <span>{currency}{Number(sale.total || 0).toFixed(2)}</span>
         </div>
 

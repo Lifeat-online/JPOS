@@ -110,6 +110,19 @@ CREATE TABLE IF NOT EXISTS workstations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS companion_device_assignments (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  device_name TEXT NOT NULL,
+  workstation_id TEXT NOT NULL REFERENCES workstations(id) ON DELETE CASCADE,
+  default_mode TEXT DEFAULT 'remote_control' CHECK (default_mode IN ('remote_control','wireless_scanner','pole_display')),
+  assigned_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (tenant_id, device_id)
+);
+
 CREATE TABLE IF NOT EXISTS sales (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -187,7 +200,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   cash_session_id TEXT NOT NULL REFERENCES cash_sessions(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment')),
+  type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale')),
   direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
   amount NUMERIC(12,2) NOT NULL DEFAULT 0,
   sale_id TEXT,
@@ -366,6 +379,7 @@ export async function initDb() {
   await ensureStaffPermissionsSchema();
   await ensureLicenceSchema();
   await ensureCashManagementSchema();
+  await ensureRefundSchema();
   await ensureBulkInventorySchema();
   await ensureAiSchema();
 }
@@ -401,7 +415,7 @@ export async function ensureCashManagementSchema() {
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         cash_session_id TEXT NOT NULL REFERENCES cash_sessions(id) ON DELETE CASCADE,
-        type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment')),
+        type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale')),
         direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
         amount NUMERIC(12,2) NOT NULL DEFAULT 0,
         sale_id TEXT,
@@ -442,7 +456,7 @@ export async function ensureCashManagementSchema() {
       id VARCHAR(64) PRIMARY KEY,
       tenant_id VARCHAR(64) NOT NULL,
       cash_session_id VARCHAR(64) NOT NULL,
-      type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment') NOT NULL,
+      type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale') NOT NULL,
       direction ENUM('in','out','neutral') NOT NULL DEFAULT 'neutral',
       amount DECIMAL(12,2) NOT NULL DEFAULT 0,
       sale_id VARCHAR(64),
@@ -456,7 +470,42 @@ export async function ensureCashManagementSchema() {
       FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE CASCADE
     )
   `);
+  await query(`ALTER TABLE cash_movements MODIFY type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale') NOT NULL`);
   await query(`UPDATE cash_sessions SET review_status = IF(status = 'open', 'in_progress', COALESCE(review_status, 'submitted')) WHERE review_status IS NULL`);
+}
+
+export async function ensureRefundSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS transaction_type TEXT DEFAULT 'sale'`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS parent_sale_id TEXT`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refund_status TEXT DEFAULT 'none'`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_amount NUMERIC(12,2) DEFAULT 0`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refund_reason TEXT`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_by TEXT`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS void_reason TEXT`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS voided_by TEXT`);
+    await query(`UPDATE sales SET transaction_type = COALESCE(transaction_type, 'sale'), refund_status = COALESCE(refund_status, 'none'), refunded_amount = COALESCE(refunded_amount, 0)`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE sales ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+
+  await addColumn(`transaction_type VARCHAR(24) DEFAULT 'sale' AFTER status`);
+  await addColumn(`parent_sale_id VARCHAR(64) AFTER transaction_type`);
+  await addColumn(`refund_status VARCHAR(24) DEFAULT 'none' AFTER parent_sale_id`);
+  await addColumn(`refunded_amount DECIMAL(12,2) DEFAULT 0 AFTER refund_status`);
+  await addColumn(`refund_reason TEXT AFTER refunded_amount`);
+  await addColumn(`refunded_by VARCHAR(64) AFTER refund_reason`);
+  await addColumn(`void_reason TEXT AFTER refunded_by`);
+  await addColumn(`voided_by VARCHAR(64) AFTER void_reason`);
+  await query(`UPDATE sales SET transaction_type = COALESCE(transaction_type, 'sale'), refund_status = COALESCE(refund_status, 'none'), refunded_amount = COALESCE(refunded_amount, 0)`);
 }
 
 export async function ensureBulkInventorySchema() {
@@ -641,6 +690,43 @@ export async function ensureAiSchema() {
   await addAiColumn(`api_key TEXT AFTER model`);
   await addAiColumn(`base_url VARCHAR(255) AFTER model`);
   await addAiColumn(`workspace_slug VARCHAR(128) AFTER base_url`);
+}
+
+export async function ensureCompanionDeviceAssignmentsSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS companion_device_assignments (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        device_id TEXT NOT NULL,
+        device_name TEXT NOT NULL,
+        workstation_id TEXT NOT NULL REFERENCES workstations(id) ON DELETE CASCADE,
+        default_mode TEXT DEFAULT 'remote_control' CHECK (default_mode IN ('remote_control','wireless_scanner','pole_display')),
+        assigned_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (tenant_id, device_id)
+      )
+    `);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS companion_device_assignments (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      device_id VARCHAR(128) NOT NULL,
+      device_name VARCHAR(255) NOT NULL,
+      workstation_id VARCHAR(64) NOT NULL,
+      default_mode ENUM('remote_control','wireless_scanner','pole_display') DEFAULT 'remote_control',
+      assigned_by VARCHAR(64),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_companion_device (tenant_id, device_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (workstation_id) REFERENCES workstations(id) ON DELETE CASCADE
+    )
+  `);
 }
 
 export async function ensureRestaurantInventoryTables() {

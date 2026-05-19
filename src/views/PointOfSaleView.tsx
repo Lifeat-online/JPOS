@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
-  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Maximize, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Settings, Printer
+  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Printer,
+  AlertTriangle, PauseCircle, PlayCircle, ScanLine, Smartphone, MonitorUp
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -10,15 +11,22 @@ import { CustomerSelector } from '../components/CustomerSelector';
 import { usePosStore } from '../store/usePosStore';
 import { WorkstationQueuePanel } from '../components/WorkstationQueuePanel';
 import { BillPrint } from '../components/BillPrint';
+import { PrinterReadinessPanel } from '../components/PrinterReadinessPanel';
+import { BarcodeScanner } from '../components/BarcodeScanner';
+import { getCompanionDeviceAssignment, recordCashMovement } from '../api';
+import { useSocket } from '../hooks/useSocket';
+import { JwtUser } from '../hooks/useAuth';
 
 interface PointOfSaleViewProps {
   products: Product[];
+  user: JwtUser | null;
   customers: Customer[];
   sales: Sale[];
   workstations: Workstation[];
   isProcessing: boolean;
   setIsProcessing: (val: boolean) => void;
   handleSaveOrder: (sendToKitchen: boolean) => Promise<void>;
+  handleParkSale: (label?: string) => Promise<string | null>;
   handleCheckout: (method: 'cash' | 'payfast' | 'card') => Promise<void>;
   handleWalletCheckout: () => Promise<void>;
   handleOpenTab: (tabName?: string) => Promise<void>;
@@ -36,19 +44,24 @@ interface PointOfSaleViewProps {
   onClearPointsDiscount: () => void;
   restaurantTables: RestaurantTable[];
   onSalesUpdated?: () => Promise<void>;
+  lastReceiptSale?: Sale | null;
+  onPrintLastReceipt?: () => void;
+  suppressBillPrint?: boolean;
 }
 
 export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
-  products, customers, sales, workstations, isProcessing, setIsProcessing, handleSaveOrder,
-  handleCheckout, handleWalletCheckout, handleOpenTab, handleOpenTable, setTenderModal, setTenderedAmount, setSplitPaymentModal,
+  products, user, customers, sales, workstations, isProcessing, setIsProcessing, handleSaveOrder,
+  handleParkSale, handleCheckout, handleWalletCheckout, handleOpenTab, handleOpenTable, setTenderModal, setTenderedAmount, setSplitPaymentModal,
   categoryTree, CATEGORIES, getCategoryIcon, getProductImage, openCashDrawer,
   pointsDiscount, onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated,
+  lastReceiptSale, onPrintLastReceipt, suppressBillPrint = false,
 }) => {
   const { 
     cart, addToCart, updateQuantity, clearCart, 
     activeSession, activeCategory, setActiveCategory,
     searchQuery, setSearchQuery, selectedCustomerId, setSelectedCustomerId,
     activeTableNumber, setActiveTableNumber, activeOrderId, setActiveOrderId,
+    setCart,
     currentUserStaff, config,
     isCartOpen, setIsCartOpen,
     tenantId,
@@ -61,12 +74,88 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [sidePanelMode, setSidePanelMode] = useState<'cart' | 'queue'>('cart');
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [selectedTableForOrder, setSelectedTableForOrder] = useState('');
+  const [drawerModalOpen, setDrawerModalOpen] = useState(false);
+  const [drawerReason, setDrawerReason] = useState('');
+  const [drawerCustomReason, setDrawerCustomReason] = useState('');
+  const [drawerError, setDrawerError] = useState('');
+  const [isRecordingDrawerOpen, setIsRecordingDrawerOpen] = useState(false);
+  const [stockNotice, setStockNotice] = useState<{ type: 'warning' | 'error'; message: string } | null>(null);
+  const [parkModalOpen, setParkModalOpen] = useState(false);
+  const [parkLabel, setParkLabel] = useState('');
+  const [parkError, setParkError] = useState('');
+  const [priceCheckProduct, setPriceCheckProduct] = useState<Product | null>(null);
+  const [priceCheckError, setPriceCheckError] = useState('');
+  const [companionMode, setCompanionMode] = useState<'terminal' | 'remote_control' | 'wireless_scanner' | 'pole_display'>(() => {
+    try {
+      return (window.localStorage.getItem('companion-mode') as any) || 'terminal';
+    } catch {
+      return 'terminal';
+    }
+  });
+  const [assignedCompanionMode, setAssignedCompanionMode] = useState<'remote_control' | 'wireless_scanner' | 'pole_display' | null>(null);
+  const [poleDisplayDeviceId, setPoleDisplayDeviceId] = useState<string | null>(null);
+  const [displaySnapshot, setDisplaySnapshot] = useState<any>(null);
+  const [longTermAssignment, setLongTermAssignment] = useState<any>(null);
+
+  const drawerReasons = [
+    'Make change',
+    'Check drawer',
+    'Cash drop',
+    'Manager count',
+    'Other',
+  ];
+
+  const getCartQuantityForProduct = (productId: string) => cart.reduce((sum, item) => (
+    item.id === productId || (item as any).productId === productId ? sum + Number(item.quantity || 0) : sum
+  ), 0);
+
+  const getStockInfo = (product: Product) => {
+    const stock = Number(product.stock || 0);
+    const minStock = Number(product.minStock ?? 10);
+    const inCart = getCartQuantityForProduct(product.id);
+    const remainingAfterCart = stock - inCart;
+    return { stock, minStock, inCart, remainingAfterCart };
+  };
+
+  const canAddProductToCart = (product: Product, showNotice = true) => {
+    const { stock, minStock, inCart, remainingAfterCart } = getStockInfo(product);
+
+    if (stock <= 0) {
+      if (showNotice) setStockNotice({ type: 'error', message: `${product.name} is out of stock. Ask a manager to adjust stock before selling it.` });
+      return false;
+    }
+
+    if (remainingAfterCart <= 0) {
+      if (showNotice) setStockNotice({ type: 'error', message: `Only ${stock} ${stock === 1 ? 'unit is' : 'units are'} available for ${product.name}. The cart already has ${inCart}.` });
+      return false;
+    }
+
+    if (stock <= minStock || remainingAfterCart - 1 <= minStock) {
+      if (showNotice) setStockNotice({ type: 'warning', message: `${product.name} is running low. ${Math.max(0, remainingAfterCart - 1)} will remain after this add.` });
+    } else if (showNotice) {
+      setStockNotice(null);
+    }
+
+    return true;
+  };
 
   const handleAddToCart = (product: Product) => {
+    if (assignedCompanionMode === 'remote_control' && terminalId) {
+      companionSocket.emit('companion_command', {
+        terminalId,
+        command: 'add_product',
+        data: { productId: product.id },
+      });
+      setStockNotice({ type: 'warning', message: `Sent ${product.name} to the active terminal.` });
+      return;
+    }
+
+    if (!canAddProductToCart(product)) return;
     if (product.modifiers && product.modifiers.length > 0) {
       setModifyingProduct(product);
     } else {
       addToCart(product);
+      setIsCartOpen(true);
     }
   };
 
@@ -92,6 +181,67 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     }));
   }, [restaurantTables]);
   const selectedTableLabel = activeRestaurantTables.find(t => t.id === (activeTableNumber || selectedTableForOrder))?.label || activeTableNumber || selectedTableForOrder;
+  const companionDeviceIdKey = `companion-device-id:${tenantId || 'local'}:${currentUserStaff?.id || 'staff'}`;
+  const companionDeviceId = useMemo(() => {
+    try {
+      const existing = window.localStorage.getItem(companionDeviceIdKey);
+      if (existing) return existing;
+      const created = `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      window.localStorage.setItem(companionDeviceIdKey, created);
+      return created;
+    } catch {
+      return `device_${Date.now()}`;
+    }
+  }, [companionDeviceIdKey]);
+  const effectiveWorkstationId = longTermAssignment?.workstationId || attachedWorkstationId || '';
+  const terminalId = tenantId && currentUserStaff?.id
+    ? effectiveWorkstationId
+      ? `workstation-terminal:${tenantId}:${effectiveWorkstationId}`
+      : `account-terminal:${tenantId}:${currentUserStaff.id}`
+    : '';
+  const companionSocket = useSocket({
+    user,
+    tenantId,
+    enabled: Boolean(tenantId && currentUserStaff?.id),
+  });
+  const parkedSales = useMemo(() => sales
+    .filter(s => (
+      s.status === 'open' &&
+      s.id !== activeOrderId &&
+      s.paymentMethod === 'pending' &&
+      !s.isTab &&
+      !s.tableNumber &&
+      s.transactionType !== 'refund' &&
+      s.transactionType !== 'void'
+    ))
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()), [sales, activeOrderId]);
+  const blockingStockIssues = useMemo(() => cart
+    .map(item => {
+      const productId = (item as any).productId || item.id;
+      const product = products.find(p => p.id === productId);
+      if (!product) return null;
+      const stock = Number(product.stock || 0);
+      const quantity = Number(item.quantity || 0);
+      if (stock <= 0) return `${item.name} is out of stock`;
+      if (quantity > stock) return `${item.name} has ${stock} available, cart has ${quantity}`;
+      return null;
+    })
+    .filter(Boolean) as string[], [cart, products]);
+  const hasBlockingStockIssues = blockingStockIssues.length > 0;
+  const cartSnapshot = useMemo(() => ({
+    items: cart.map(item => ({
+      id: (item as any).cartItemId || item.id,
+      name: item.name,
+      quantity: Number(item.quantity || 0),
+      price: Number(item.price || 0),
+      lineTotal: Number(item.price || 0) * Number(item.quantity || 0),
+    })),
+    total: amountDue,
+    subtotal: cartTotal,
+    itemCount: cart.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+    customerName: selectedCustomer?.name || '',
+    updatedAt: new Date().toISOString(),
+  }), [cart, amountDue, cartTotal, selectedCustomer?.name]);
 
   const saveToTable = async (tableNumber: string) => {
     if (!tableNumber) return;
@@ -99,6 +249,176 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     setSelectedTableForOrder(tableNumber);
     setTablePickerOpen(false);
   };
+
+  const defaultParkLabel = () => {
+    const customerName = selectedCustomerId ? customers.find(c => c.id === selectedCustomerId)?.name : '';
+    if (customerName) return customerName;
+    return `Parked ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  };
+
+  const openParkModal = () => {
+    setParkLabel(defaultParkLabel());
+    setParkError('');
+    setParkModalOpen(true);
+  };
+
+  const confirmParkSale = async () => {
+    if (hasBlockingStockIssues) {
+      setParkError('Fix the stock issue before parking this sale.');
+      return;
+    }
+    if (cart.length === 0) {
+      setParkError('Add at least one item before parking a sale.');
+      return;
+    }
+
+    const savedId = await handleParkSale(parkLabel);
+    if (savedId) {
+      setParkModalOpen(false);
+      setParkLabel('');
+      setParkError('');
+      setIsCartOpen(false);
+      await onSalesUpdated?.();
+    }
+  };
+
+  const resumeParkedSale = (sale: Sale) => {
+    setCart(sale.items.map((item: any) => ({
+      ...item,
+      id: item.productId || item.id,
+      cartItemId: item.id || item.cartItemId,
+      price: Number(item.price || 0),
+      quantity: Number(item.quantity || 0),
+    })));
+    setSelectedCustomerId(sale.customerId || null);
+    setActiveOrderId(sale.id);
+    setActiveTableNumber(null);
+    setStockNotice(null);
+    setIsCartOpen(true);
+  };
+
+  const handleBarcodeLookup = (barcode: string) => {
+    const cleaned = barcode.trim();
+    const product = products.find(p => String(p.barcode || '').trim() === cleaned);
+    setIsScanning(false);
+    if (assignedCompanionMode === 'wireless_scanner' && terminalId) {
+      companionSocket.emit('companion_command', {
+        terminalId,
+        command: 'barcode_lookup',
+        data: { barcode: cleaned },
+      });
+      setStockNotice({ type: 'warning', message: `Sent barcode ${cleaned} to the active terminal.` });
+      return;
+    }
+    if (!product) {
+      setPriceCheckProduct(null);
+      setPriceCheckError(`No product found for barcode ${cleaned}.`);
+      return;
+    }
+    setPriceCheckError('');
+    setPriceCheckProduct(product);
+  };
+
+  const updateCompanionMode = (mode: typeof companionMode) => {
+    setCompanionMode(mode);
+    setAssignedCompanionMode(null);
+    try {
+      window.localStorage.setItem('companion-mode', mode);
+    } catch {
+      // Mode still works for this session if storage is blocked.
+    }
+  };
+
+  useEffect(() => {
+    if (!tenantId || !companionDeviceId) return;
+    getCompanionDeviceAssignment(tenantId, companionDeviceId)
+      .then(assignment => {
+        setLongTermAssignment(assignment);
+        if (assignment?.defaultMode) {
+          setCompanionMode(assignment.defaultMode);
+          try {
+            window.localStorage.setItem('companion-mode', assignment.defaultMode);
+          } catch {
+            // Assignment still applies for this session.
+          }
+        }
+      })
+      .catch(() => setLongTermAssignment(null));
+  }, [tenantId, companionDeviceId]);
+
+  useEffect(() => {
+    if (!companionSocket.socket || !terminalId || !currentUserStaff?.id) return;
+
+    const socket = companionSocket.socket;
+    const onAssigned = (payload: any) => {
+      if (payload?.terminalId !== terminalId) return;
+      setAssignedCompanionMode(payload.assignedMode || null);
+      setPoleDisplayDeviceId(payload.poleDisplayDeviceId || null);
+      if (payload.requestedMode === 'pole_display' && payload.assignedMode !== 'pole_display') {
+        setStockNotice({ type: 'warning', message: 'Pole display is already paired. This device can still use remote control and wireless scanner.' });
+      }
+    };
+    const onState = (payload: any) => {
+      if (payload?.terminalId === terminalId) setPoleDisplayDeviceId(payload.poleDisplayDeviceId || null);
+    };
+    const onCommand = (payload: any) => {
+      if (companionMode !== 'terminal') return;
+      if (payload?.command === 'barcode_lookup') {
+        const barcode = String(payload.data?.barcode || '').trim();
+        const product = products.find(p => String(p.barcode || '').trim() === barcode);
+        if (product) {
+          handleAddToCart(product);
+        } else {
+          setStockNotice({ type: 'error', message: `Remote scanner sent ${barcode}, but no matching product was found.` });
+        }
+      } else if (payload?.command === 'add_product') {
+        const productId = String(payload.data?.productId || '');
+        const product = products.find(p => p.id === productId);
+        if (product) {
+          handleAddToCart(product);
+        }
+      } else if (payload?.command === 'clear_cart') {
+        clearCart();
+      }
+    };
+    const onDisplayUpdate = (payload: any) => {
+      if (payload?.terminalId === terminalId) setDisplaySnapshot(payload.data || null);
+    };
+
+    socket.on('companion_mode_assigned', onAssigned);
+    socket.on('companion_state', onState);
+    socket.on('companion_command', onCommand);
+    socket.on('terminal_display_update', onDisplayUpdate);
+
+    if (companionMode === 'terminal') {
+      companionSocket.emit('terminal_register', {
+        tenantId,
+        staffId: currentUserStaff.id,
+        terminalId,
+      });
+    } else {
+      companionSocket.emit('companion_join', {
+        tenantId,
+        staffId: currentUserStaff.id,
+        terminalId,
+        deviceId: companionDeviceId,
+        mode: companionMode,
+      });
+    }
+
+    return () => {
+      socket.off('companion_mode_assigned', onAssigned);
+      socket.off('companion_state', onState);
+      socket.off('companion_command', onCommand);
+      socket.off('terminal_display_update', onDisplayUpdate);
+    };
+  }, [companionSocket.socket, terminalId, companionMode, tenantId, currentUserStaff?.id, companionDeviceId, products, companionSocket.emit]);
+
+  useEffect(() => {
+    if (companionMode === 'terminal' && terminalId && companionSocket.isConnected) {
+      companionSocket.emit('terminal_display_update', { terminalId, data: cartSnapshot });
+    }
+  }, [companionMode, terminalId, companionSocket.isConnected, companionSocket.emit, cartSnapshot]);
 
   const attachedQueueCount = useMemo(() => {
     if (!attachedWorkstationId) return 0;
@@ -149,6 +469,44 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const printBill = () => {
     if (cart.length === 0) return;
     window.print();
+  };
+
+  const openDrawerModal = () => {
+    setDrawerReason('');
+    setDrawerCustomReason('');
+    setDrawerError('');
+    setDrawerModalOpen(true);
+  };
+
+  const confirmNoSaleDrawerOpen = async () => {
+    if (!tenantId || !activeSession?.id) {
+      setDrawerError('Open the register before using the cash drawer.');
+      return;
+    }
+
+    const reason = drawerReason === 'Other' ? drawerCustomReason.trim() : drawerReason;
+    if (reason.length < 3) {
+      setDrawerError('Choose or enter a reason before opening the drawer.');
+      return;
+    }
+
+    setIsRecordingDrawerOpen(true);
+    setDrawerError('');
+    try {
+      await recordCashMovement(tenantId, activeSession.id, {
+        type: 'no_sale',
+        direction: 'neutral',
+        amount: 0,
+        staffId: currentUserStaff?.id || null,
+        staffName: currentUserStaff?.name || null,
+        note: reason,
+      });
+      setDrawerModalOpen(false);
+    } catch (error: any) {
+      setDrawerError(error?.message || 'Could not record the drawer open.');
+    } finally {
+      setIsRecordingDrawerOpen(false);
+    }
   };
 
   const allowedCategories = useMemo(() => {
@@ -212,7 +570,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
   return (
     <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden relative">
-      {cart.length > 0 && (
+      {cart.length > 0 && !suppressBillPrint && (
         <BillPrint
           cart={cart}
           customer={selectedCustomer}
@@ -252,9 +610,9 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             <button 
               onClick={() => setIsScanning(true)}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-slate-50 dark:bg-[#0B1120] text-primary rounded-lg hover:bg-primary hover:text-white transition-all shadow-sm active:scale-95"
-              title="Scan Barcode"
+              title="Price check / scan barcode"
             >
-              <Maximize className="w-5 h-5" />
+              <ScanLine className="w-5 h-5" />
             </button>
           </div>
           <div className="sm:w-80 relative">
@@ -265,6 +623,21 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
               onAddNew={() => {}}
             />
           </div>
+          <button
+            type="button"
+            disabled={!lastReceiptSale || !onPrintLastReceipt}
+            onClick={onPrintLastReceipt}
+            className="sm:w-44 min-h-[48px] px-4 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-sm transition-all hover:border-primary/40 hover:text-primary disabled:opacity-40 disabled:hover:border-slate-200 dark:disabled:hover:border-slate-700/60 disabled:hover:text-slate-700 dark:disabled:hover:text-slate-200 active:scale-95 flex items-center justify-center gap-2"
+            title={lastReceiptSale ? `Reprint last receipt #${lastReceiptSale.id.slice(-8).toUpperCase()}` : 'No completed sale to reprint yet'}
+          >
+            <Printer className="w-4 h-4 shrink-0" />
+            <span className="min-w-0 text-left">
+              <span className="block text-[10px] font-black uppercase tracking-widest leading-none">Last receipt</span>
+              <span className="mt-1 block truncate text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                {lastReceiptSale ? `#${lastReceiptSale.id.slice(-8).toUpperCase()}` : 'None yet'}
+              </span>
+            </span>
+          </button>
           {config?.business?.isRestaurantMode && activeWorkstations.length > 0 && (
             <div className="sm:w-64 flex gap-2">
               <div className="relative flex-1">
@@ -299,6 +672,178 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
           )}
         </div>
 
+        <div className="mx-4 lg:mx-6 mb-2">
+          <PrinterReadinessPanel tenantId={tenantId} compact />
+        </div>
+
+        <div className="mx-4 lg:mx-6 mb-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <Smartphone className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Companion device</p>
+                <p className="mt-0.5 text-xs font-semibold text-slate-500">
+                  {companionMode === 'terminal'
+                    ? longTermAssignment
+                      ? `This device is assigned to ${longTermAssignment.workstationName || 'a workstation'} long term.${poleDisplayDeviceId ? ' Pole display paired.' : ''}`
+                      : `Devices logged in as ${currentUserStaff?.name || 'this staff member'} pair to this account automatically.${poleDisplayDeviceId ? ' Pole display paired.' : ''}`
+                    : assignedCompanionMode === 'pole_display'
+                      ? 'This device is acting as the pole display.'
+                      : assignedCompanionMode
+                        ? 'This device can control the account terminal and scan barcodes.'
+                        : 'Choose how this device should help this staff account.'}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { id: 'terminal', label: 'Terminal', icon: MonitorUp },
+                { id: 'remote_control', label: 'Remote', icon: Smartphone },
+                { id: 'wireless_scanner', label: 'Scanner', icon: ScanLine },
+                { id: 'pole_display', label: 'Display', icon: MonitorUp, disabled: Boolean(poleDisplayDeviceId && poleDisplayDeviceId !== companionDeviceId && assignedCompanionMode !== 'pole_display') },
+              ].map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  disabled={Boolean(option.disabled)}
+                  onClick={() => updateCompanionMode(option.id as typeof companionMode)}
+                  title={option.disabled ? 'A pole display is already paired to this terminal' : option.label}
+                  className={`h-10 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 border transition-all disabled:opacity-40 ${
+                    companionMode === option.id
+                      ? 'bg-primary text-white border-primary shadow-sm'
+                      : 'bg-slate-50 dark:bg-slate-950/50 text-slate-500 dark:text-slate-300 border-slate-100 dark:border-slate-800'
+                  }`}
+                >
+                  <option.icon className="w-3.5 h-3.5" />
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {assignedCompanionMode === 'wireless_scanner' && (
+            <button
+              type="button"
+              onClick={() => setIsScanning(true)}
+              className="mt-3 w-full h-12 rounded-xl bg-primary text-white text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95"
+            >
+              <ScanLine className="w-4 h-4" />
+              Scan to terminal
+            </button>
+          )}
+          {assignedCompanionMode === 'remote_control' && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Terminal total</p>
+                <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">R{Number(displaySnapshot?.total || 0).toFixed(2)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => companionSocket.emit('companion_command', { terminalId, command: 'clear_cart', data: {} })}
+                className="h-full min-h-14 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/40 text-rose-600 dark:text-rose-300 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Clear terminal
+              </button>
+            </div>
+          )}
+        </div>
+
+        {assignedCompanionMode === 'pole_display' && (
+          <div className="fixed inset-0 z-[120] bg-slate-950 text-white flex flex-col">
+            <div className="p-5 border-b border-white/10 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Pole display</p>
+                <h2 className="text-xl font-black">Customer display</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateCompanionMode('remote_control')}
+                className="h-10 px-4 rounded-xl bg-white/10 text-xs font-black uppercase tracking-widest"
+              >
+                Exit
+              </button>
+            </div>
+            <div className="flex-1 p-6 flex flex-col">
+              <div className="flex-1 space-y-3 overflow-y-auto">
+                {(displaySnapshot?.items || []).length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center text-white/50">
+                    <ShoppingCart className="w-16 h-16 mb-4" />
+                    <p className="text-sm font-black uppercase tracking-widest">Ready for next sale</p>
+                  </div>
+                ) : (
+                  displaySnapshot.items.map((item: any) => (
+                    <div key={item.id} className="flex items-center justify-between gap-4 rounded-2xl bg-white/10 p-4">
+                      <div>
+                        <p className="text-lg font-black">{item.name}</p>
+                        <p className="text-xs font-bold text-white/50">Qty {item.quantity}</p>
+                      </div>
+                      <p className="text-xl font-black">R{Number(item.lineTotal || 0).toFixed(2)}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="mt-6 rounded-3xl bg-primary p-6 flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/70">Total</p>
+                  <p className="mt-1 text-sm font-bold text-white/80">{displaySnapshot?.customerName || 'Walk-in customer'}</p>
+                </div>
+                <p className="text-5xl font-black">R{Number(displaySnapshot?.total || 0).toFixed(2)}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {stockNotice && (
+          <div className={`mx-4 lg:mx-6 mb-2 rounded-2xl border p-3 flex items-start justify-between gap-3 ${
+            stockNotice.type === 'error'
+              ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-900/10 dark:border-rose-900/40 dark:text-rose-300'
+              : 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/10 dark:border-amber-900/40 dark:text-amber-300'
+          }`}>
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <p className="text-xs font-bold">{stockNotice.message}</p>
+            </div>
+            <button type="button" onClick={() => setStockNotice(null)} className="text-current/70 hover:text-current">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {parkedSales.length > 0 && (
+          <div className="mx-4 lg:mx-6 mb-2 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/80 dark:bg-indigo-900/10 p-3">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <PauseCircle className="w-4 h-4 text-indigo-600 shrink-0" />
+                <p className="text-xs font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300">Parked sales</p>
+              </div>
+              <span className="text-[10px] font-black text-indigo-500">{parkedSales.length}</span>
+            </div>
+            <div className="flex gap-2 overflow-x-auto no-scrollbar">
+              {parkedSales.slice(0, 8).map(sale => {
+                const customer = sale.customerId ? customers.find(c => c.id === sale.customerId) : null;
+                const label = sale.tabName || customer?.name || `Sale #${sale.id.slice(-6).toUpperCase()}`;
+                return (
+                  <button
+                    key={sale.id}
+                    type="button"
+                    onClick={() => resumeParkedSale(sale)}
+                    className="min-w-[190px] rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/40 p-3 text-left shadow-sm active:scale-95 transition-all"
+                  >
+                    <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-300">
+                      <PlayCircle className="w-4 h-4 shrink-0" />
+                      <span className="text-xs font-black truncate">{label}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold text-slate-400">{sale.items.length} item{sale.items.length === 1 ? '' : 's'}</span>
+                      <span className="text-xs font-black text-slate-900 dark:text-white">R{Number(sale.total || 0).toFixed(2)}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {config?.business?.isRestaurantMode && activeWorkstations.length > 0 && !hasWorkstationPreference && (
           <div className="mx-4 lg:mx-6 mb-2 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-900/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
@@ -327,16 +872,26 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
         <div className="flex-1 overflow-y-auto p-4 lg:p-6 pt-2 grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 lg:gap-4 auto-rows-max lg:auto-rows-[160px] pb-24 lg:pb-6">
           <AnimatePresence>
-            {filteredProducts.map(product => (
+            {filteredProducts.map(product => {
+              const { stock, minStock, remainingAfterCart } = getStockInfo(product);
+              const isOutOfStock = stock <= 0 || remainingAfterCart <= 0;
+              const isLowStock = !isOutOfStock && (stock <= minStock || remainingAfterCart <= minStock);
+              return (
               <motion.div
                 key={product.id}
                 layout
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                whileTap={{ scale: 0.98 }}
+                whileTap={{ scale: isOutOfStock ? 1 : 0.98 }}
                 onClick={() => handleAddToCart(product)}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-2xl p-4 flex lg:flex-col justify-between items-center lg:items-start cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800 relative group shadow-sm active:border-primary gap-4 lg:gap-0"
+                className={`bg-white dark:bg-slate-900 border rounded-2xl p-4 flex lg:flex-col justify-between items-center lg:items-start transition-all relative group shadow-sm gap-4 lg:gap-0 ${
+                  isOutOfStock
+                    ? 'border-rose-200 dark:border-rose-900/50 opacity-70 cursor-not-allowed'
+                    : isLowStock
+                      ? 'border-amber-200 dark:border-amber-900/50 cursor-pointer hover:bg-amber-50/60 dark:hover:bg-amber-900/10 active:border-amber-400'
+                      : 'border-slate-200 dark:border-slate-700/60 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 active:border-primary'
+                }`}
               >
                 <div className="w-12 h-12 lg:w-10 lg:h-10 bg-slate-50 dark:bg-[#0B1120] rounded-xl flex items-center justify-center text-xl lg:text-lg group-hover:scale-110 transition-transform shrink-0 overflow-hidden">
                   <img src={getProductImage(product)} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -352,22 +907,25 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   )}
                   <div className="lg:hidden flex items-baseline gap-2 mt-1">
                      <span className="font-extrabold text-primary">R{Number(product.price).toFixed(2)}</span>
-                     <span className="text-[8px] font-black text-slate-300 dark:text-slate-600">{product.stock} Units</span>
+                     <span className={`text-[8px] font-black ${isOutOfStock ? 'text-rose-500' : isLowStock ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`}>
+                      {isOutOfStock ? 'Out' : `${remainingAfterCart} left`}
+                     </span>
                   </div>
                 </div>
                 <div className="hidden lg:flex items-end justify-between w-full mt-2">
                   <div className="font-extrabold text-lg text-primary tracking-tight">R{Number(product.price).toFixed(2)}</div>
-                  <div className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${product.stock < 10 ? 'bg-red-50 text-red-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
-                    {product.stock}
+                  <div className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${isOutOfStock ? 'bg-rose-50 text-rose-600' : isLowStock ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                    {isOutOfStock ? 'Out' : `${remainingAfterCart} left`}
                   </div>
                 </div>
                 <div className="absolute top-2 right-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1.5">
-                  <div className="p-1.5 bg-primary/10 text-primary rounded-lg hover:bg-primary hover:text-white transition-all shadow-sm" onClick={(e) => { e.stopPropagation(); handleAddToCart(product); }}>
-                    <Plus className="w-4 h-4" />
+                  <div className={`p-1.5 rounded-lg transition-all shadow-sm ${isOutOfStock ? 'bg-rose-50 text-rose-400' : 'bg-primary/10 text-primary hover:bg-primary hover:text-white'}`} onClick={(e) => { e.stopPropagation(); handleAddToCart(product); }}>
+                    {isOutOfStock ? <AlertTriangle className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                   </div>
                 </div>
               </motion.div>
-            ))}
+            );
+            })}
           </AnimatePresence>
         </div>
       </section>
@@ -470,8 +1028,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   cart.map((item, idx) => {
                     const cartId = (item as any).cartItemId || item.id;
                     const modifiers = (item as any).selectedModifiers || [];
+                    const product = products.find(p => p.id === ((item as any).productId || item.id));
+                    const stock = Number(product?.stock ?? item.stock ?? 0);
+                    const isOverAvailableStock = stock > 0 && Number(item.quantity || 0) >= stock;
+                    const isCartItemOutOfStock = stock <= 0 || Number(item.quantity || 0) > stock;
                     return (
-                      <div key={cartId} className="bg-white dark:bg-slate-900 p-4 rounded-2xl flex items-center justify-between border border-slate-100 dark:border-slate-800/60 shadow-sm transition-all hover:border-primary/20">
+                      <div key={cartId} className={`bg-white dark:bg-slate-900 p-4 rounded-2xl flex items-center justify-between border shadow-sm transition-all ${isCartItemOutOfStock ? 'border-rose-200 dark:border-rose-900/50' : 'border-slate-100 dark:border-slate-800/60 hover:border-primary/20'}`}>
                         <div className="flex-1 pr-4 min-w-0">
                           <p className="font-bold text-slate-900 dark:text-white text-sm truncate">{item.name}</p>
                           {modifiers.length > 0 && (
@@ -484,17 +1046,42 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                             </div>
                           )}
                           <p className="text-xs font-black text-primary mt-1">R{(Number(item.price) * Number(item.quantity)).toFixed(2)}</p>
+                          {isCartItemOutOfStock ? (
+                            <p className="mt-1 text-[10px] font-black text-rose-600 uppercase tracking-widest">Stock issue: {stock <= 0 ? 'out of stock' : `${stock} available`}</p>
+                          ) : isOverAvailableStock ? (
+                            <p className="mt-1 text-[10px] font-black text-amber-600 uppercase tracking-widest">No more available</p>
+                          ) : null}
                         </div>
                         <div className="flex items-center gap-4 bg-slate-50 dark:bg-[#0B1120] rounded-xl p-1 shrink-0">
                           <button onClick={() => updateQuantity(cartId, -1)} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-lg text-xs font-black shadow-sm active:scale-90">-</button>
                           <span className="font-black text-xs w-4 text-center">{item.quantity}</span>
-                          <button onClick={() => updateQuantity(cartId, 1)} className="w-8 h-8 flex items-center justify-center bg-primary text-white rounded-lg text-xs font-black shadow-sm active:scale-90">+</button>
+                          <button
+                            disabled={isOverAvailableStock || stock <= 0}
+                            onClick={() => {
+                              if (product && canAddProductToCart(product)) updateQuantity(cartId, 1);
+                            }}
+                            className="w-8 h-8 flex items-center justify-center bg-primary text-white rounded-lg text-xs font-black shadow-sm active:scale-90 disabled:opacity-40 disabled:active:scale-100"
+                          >
+                            +
+                          </button>
                         </div>
                       </div>
                     );
                   })
                 )}
               </div>
+
+              {hasBlockingStockIssues && (
+                <div className="mx-5 mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/10 dark:text-rose-300">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-widest">Fix stock before checkout</p>
+                      <p className="mt-1 text-xs font-semibold">{blockingStockIssues[0]}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="p-5 lg:p-6 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800/60 shadow-[0_-10px_40px_rgba(0,0,0,0.03)]">
                 {config?.business?.isRestaurantMode && activeTableNumber && (
@@ -550,7 +1137,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 </div>
 
                 <button
-                  disabled={isProcessing || cart.length === 0}
+                  disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                   onClick={printBill}
                   className="w-full mb-4 h-14 rounded-2xl bg-slate-50 dark:bg-[#0B1120] text-slate-700 dark:text-slate-200 font-black transition-all hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 active:scale-95 border border-slate-200 dark:border-slate-700/60 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
                 >
@@ -560,7 +1147,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   <button 
-                    disabled={isProcessing || cart.length === 0}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                     onClick={() => { setTenderModal({ isOpen: true, method: 'cash' }); setTenderedAmount(''); }}
                     className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-emerald-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-emerald-600/30"
                   >
@@ -568,7 +1155,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <span className="text-[9px] uppercase tracking-widest">CASH</span>
                   </button>
                   <button 
-                    disabled={isProcessing || cart.length === 0}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                     onClick={() => { setTenderModal({ isOpen: true, method: 'card' }); setTenderedAmount(''); }}
                     className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-slate-800/30"
                   >
@@ -576,7 +1163,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <span className="text-[9px] uppercase tracking-widest">CARD</span>
                   </button>
                   <button 
-                    disabled={isProcessing || cart.length === 0}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                     onClick={() => handleCheckout('payfast')}
                     className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-[#E84E1B] text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-payfast/20"
                   >
@@ -586,7 +1173,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 </div>
 
                 <button
-                  disabled={isProcessing || cart.length === 0}
+                  disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                   onClick={() => setSplitPaymentModal(true)}
                   className="w-full mb-4 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 border border-indigo-200 dark:border-indigo-800/50 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
                 >
@@ -597,7 +1184,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 {/* Wallet payment: only shown for selected clients with wallet funds. */}
                 {canPayWithCustomerWallet && (
                   <button
-                    disabled={isProcessing || cart.length === 0 || selectedCustomerWalletBalance < amountDue}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || selectedCustomerWalletBalance < amountDue}
                     onClick={handleWalletCheckout}
                     className="w-full mb-4 h-14 rounded-2xl bg-violet-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 shadow-lg shadow-violet-600/30 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
                   >
@@ -612,14 +1199,14 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 {config?.business?.isRestaurantMode && (
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <button 
-                      disabled={isProcessing || cart.length === 0}
+                      disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                       onClick={() => handleSaveOrder(false)}
                       className="h-14 rounded-2xl bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 text-xs uppercase tracking-widest flex items-center justify-center gap-2 border border-orange-200 dark:border-orange-800/50"
                     >
                       <span className="truncate">Hold</span>
                     </button>
                     <button 
-                      disabled={isProcessing || cart.length === 0}
+                      disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                       onClick={() => handleSaveOrder(true)}
                       className="h-14 rounded-2xl bg-orange-500 text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-orange-500/30 text-xs uppercase tracking-widest flex items-center justify-center gap-2"
                     >
@@ -632,7 +1219,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 {/* Bar Tab — only when a customer is selected */}
                 {config?.business?.isRestaurantMode && selectedCustomerId && (
                   <button
-                    disabled={isProcessing || cart.length === 0}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                     onClick={() => handleOpenTab(customers.find(c => c.id === selectedCustomerId)?.name)}
                     className="w-full mb-4 h-14 rounded-2xl bg-indigo-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
                   >
@@ -646,7 +1233,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
                 {config?.business?.isRestaurantMode && (
                   <button
-                    disabled={isProcessing || cart.length === 0}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                     onClick={() => {
                       const defaultTable = activeTableNumber || selectedTableForOrder || activeRestaurantTables[0]?.id || '';
                       setSelectedTableForOrder(defaultTable);
@@ -672,7 +1259,16 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <StickyNote className="w-4 h-4" />
                     <span className="text-[10px] font-bold uppercase tracking-widest">Note</span>
                   </button>
-                  <button onClick={openCashDrawer} title="Cash Drawer" className="flex-1 h-14 bg-slate-50 dark:bg-[#0B1120] text-emerald-500 rounded-2xl flex items-center justify-center hover:bg-emerald-50 hover:border-emerald-100 transition-all border border-slate-100 dark:border-slate-800/60 active:scale-95 gap-2">
+                  <button
+                    onClick={openParkModal}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
+                    title="Park this sale"
+                    className="flex-1 h-14 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-300 rounded-2xl flex items-center justify-center hover:bg-indigo-100 transition-all border border-indigo-100 dark:border-indigo-900/40 active:scale-95 gap-2 disabled:opacity-40"
+                  >
+                    <PauseCircle className="w-4 h-4" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest">Park</span>
+                  </button>
+                  <button onClick={openDrawerModal} title="Open drawer with reason" className="flex-1 h-14 bg-slate-50 dark:bg-[#0B1120] text-emerald-500 rounded-2xl flex items-center justify-center hover:bg-emerald-50 hover:border-emerald-100 transition-all border border-slate-100 dark:border-slate-800/60 active:scale-95 gap-2">
                     <Banknote className="w-4 h-4" />
                     <span className="text-[10px] font-bold uppercase tracking-widest">Drawer</span>
                   </button>
@@ -697,6 +1293,325 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       </AnimatePresence>
 
       <AnimatePresence>
+        {isScanning && (
+          <BarcodeScanner
+            title="Price Check"
+            subtitle="Scan without adding"
+            instructions="Scan a barcode to show the product, price, and stock. Nothing is added to the cart until you choose Add item."
+            onScan={handleBarcodeLookup}
+            onClose={() => setIsScanning(false)}
+          />
+        )}
+
+        {(priceCheckProduct || priceCheckError) && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            onClick={() => {
+              setPriceCheckProduct(null);
+              setPriceCheckError('');
+            }}
+          >
+            <motion.div
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 24, opacity: 0 }}
+              className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary">
+                    <ScanLine className="w-4 h-4" />
+                    Price check
+                  </div>
+                  <h3 className="mt-1 font-black text-lg text-slate-900 dark:text-white">
+                    {priceCheckProduct ? priceCheckProduct.name : 'Barcode not found'}
+                  </h3>
+                  <p className="text-xs font-medium text-slate-500 mt-0.5">
+                    {priceCheckProduct ? 'Review the item before adding it to the sale.' : priceCheckError}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setPriceCheckProduct(null);
+                    setPriceCheckError('');
+                  }}
+                  className="w-9 h-9 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-500 flex items-center justify-center shrink-0"
+                  aria-label="Close price check"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {priceCheckProduct ? (() => {
+                const { stock, minStock, remainingAfterCart } = getStockInfo(priceCheckProduct);
+                const isOut = stock <= 0 || remainingAfterCart <= 0;
+                const isLow = !isOut && (stock <= minStock || remainingAfterCart <= minStock);
+                return (
+                  <div className="p-5 space-y-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-20 h-20 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-950 shrink-0 border border-slate-100 dark:border-slate-800">
+                        <img src={getProductImage(priceCheckProduct)} alt={priceCheckProduct.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{priceCheckProduct.category}</p>
+                        <p className="mt-1 text-3xl font-black text-primary">R{Number(priceCheckProduct.price || 0).toFixed(2)}</p>
+                        <p className="mt-1 text-xs font-bold text-slate-500 truncate">{priceCheckProduct.barcode || 'No barcode saved'}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Stock</p>
+                        <p className={`mt-1 text-lg font-black ${isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-slate-900 dark:text-white'}`}>{stock}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">In cart</p>
+                        <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">{getCartQuantityForProduct(priceCheckProduct.id)}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">After add</p>
+                        <p className={`mt-1 text-lg font-black ${isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-slate-900 dark:text-white'}`}>{Math.max(0, remainingAfterCart - 1)}</p>
+                      </div>
+                    </div>
+
+                    <div className={`rounded-2xl border p-3 text-xs font-bold ${
+                      isOut
+                        ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-900/10 dark:border-rose-900/40 dark:text-rose-300'
+                        : isLow
+                          ? 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/10 dark:border-amber-900/40 dark:text-amber-300'
+                          : 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/10 dark:border-emerald-900/40 dark:text-emerald-300'
+                    }`}>
+                      {isOut ? 'This item cannot be added because available stock is already used.' : isLow ? 'This item can be sold, but stock is running low.' : 'This item is available to sell.'}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPriceCheckProduct(null);
+                          setPriceCheckError('');
+                          setIsScanning(true);
+                        }}
+                        className="h-12 flex-1 rounded-2xl border border-slate-200 dark:border-slate-700 text-sm font-black text-slate-600 dark:text-slate-300 flex items-center justify-center gap-2"
+                      >
+                        <ScanLine className="w-4 h-4" />
+                        Scan another
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isOut}
+                        onClick={() => {
+                          if (!canAddProductToCart(priceCheckProduct)) return;
+                          setPriceCheckProduct(null);
+                          handleAddToCart(priceCheckProduct);
+                        }}
+                        className="h-12 flex-1 rounded-2xl bg-primary text-sm font-black text-white shadow-lg shadow-primary/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add item
+                      </button>
+                    </div>
+                  </div>
+                );
+              })() : (
+                <div className="p-5 space-y-4">
+                  <div className="rounded-2xl bg-amber-50 border border-amber-200 p-4 text-sm font-bold text-amber-700 dark:bg-amber-900/10 dark:border-amber-900/40 dark:text-amber-300">
+                    {priceCheckError}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPriceCheckError('');
+                      setIsScanning(true);
+                    }}
+                    className="w-full h-12 rounded-2xl bg-primary text-sm font-black text-white shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                  >
+                    <ScanLine className="w-4 h-4" />
+                    Scan again
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+
+        {parkModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            onClick={() => setParkModalOpen(false)}
+          >
+            <motion.div
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 24, opacity: 0 }}
+              className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-indigo-600">
+                    <PauseCircle className="w-4 h-4" />
+                    Park sale
+                  </div>
+                  <h3 className="mt-1 font-black text-lg text-slate-900 dark:text-white">Save this cart for later?</h3>
+                  <p className="text-xs font-medium text-slate-500 mt-0.5">The register clears immediately so you can help the next customer.</p>
+                </div>
+                <button
+                  onClick={() => setParkModalOpen(false)}
+                  className="w-9 h-9 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-500 flex items-center justify-center shrink-0"
+                  aria-label="Close park sale"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {parkError && (
+                  <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3 text-sm font-bold text-rose-700">
+                    {parkError}
+                  </div>
+                )}
+
+                <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Cart total</span>
+                    <span className="text-xl font-black text-slate-900 dark:text-white">R{amountDue.toFixed(2)}</span>
+                  </div>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">{cart.length} item{cart.length === 1 ? '' : 's'} will be parked.</p>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Label</label>
+                  <input
+                    value={parkLabel}
+                    onChange={(e) => setParkLabel(e.target.value)}
+                    placeholder="e.g. Blue jacket customer"
+                    className="w-full h-12 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500/30"
+                  />
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setParkModalOpen(false)}
+                    className="h-12 flex-1 rounded-2xl border border-slate-200 dark:border-slate-700 text-sm font-black text-slate-600 dark:text-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={confirmParkSale}
+                    className="h-12 flex-1 rounded-2xl bg-indigo-600 text-sm font-black text-white shadow-lg shadow-indigo-600/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <PauseCircle className="w-5 h-5" />}
+                    Park sale
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {drawerModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            onClick={() => setDrawerModalOpen(false)}
+          >
+            <motion.div
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 24, opacity: 0 }}
+              className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-emerald-600">
+                    <Banknote className="w-4 h-4" />
+                    No sale drawer open
+                  </div>
+                  <h3 className="mt-1 font-black text-lg text-slate-900 dark:text-white">Why are you opening the drawer?</h3>
+                  <p className="text-xs font-medium text-slate-500 mt-0.5">This records a zero-value drawer event for cash-up review.</p>
+                </div>
+                <button
+                  onClick={() => setDrawerModalOpen(false)}
+                  className="w-9 h-9 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-500 flex items-center justify-center shrink-0"
+                  aria-label="Close drawer reason"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {drawerError && (
+                  <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3 text-sm font-bold text-rose-700">
+                    {drawerError}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  {drawerReasons.map(reason => (
+                    <button
+                      key={reason}
+                      type="button"
+                      onClick={() => setDrawerReason(reason)}
+                      className={`min-h-12 rounded-2xl border px-3 text-xs font-black uppercase tracking-widest transition-all ${
+                        drawerReason === reason
+                          ? 'border-emerald-500 bg-emerald-500 text-white'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-950'
+                      }`}
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+
+                {drawerReason === 'Other' && (
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Custom reason</label>
+                    <input
+                      value={drawerCustomReason}
+                      onChange={(e) => setDrawerCustomReason(e.target.value)}
+                      placeholder="e.g. Printer test, float check"
+                      className="w-full h-12 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-emerald-500/30"
+                    />
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setDrawerModalOpen(false)}
+                    className="h-12 flex-1 rounded-2xl border border-slate-200 dark:border-slate-700 text-sm font-black text-slate-600 dark:text-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isRecordingDrawerOpen}
+                    onClick={confirmNoSaleDrawerOpen}
+                    className="h-12 flex-1 rounded-2xl bg-emerald-600 text-sm font-black text-white shadow-lg shadow-emerald-600/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isRecordingDrawerOpen ? <Loader2 className="w-5 h-5 animate-spin" /> : <Banknote className="w-5 h-5" />}
+                    Record open
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
         {tablePickerOpen && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -756,7 +1671,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 )}
 
                 <button
-                  disabled={isProcessing || cart.length === 0 || !selectedTableForOrder}
+                  disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || !selectedTableForOrder}
                   onClick={() => saveToTable(selectedTableForOrder)}
                   className="w-full h-14 rounded-2xl bg-primary text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-40 active:scale-95 transition-all"
                 >
@@ -774,6 +1689,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
           product={modifyingProduct}
           onClose={() => setModifyingProduct(null)}
           onConfirm={(selections) => {
+            if (!canAddProductToCart(modifyingProduct)) return;
             addToCart(modifyingProduct, undefined, selections);
             setModifyingProduct(null);
             setIsCartOpen(true);

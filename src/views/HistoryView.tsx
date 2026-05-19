@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Clock, CreditCard, Hash, Package, Printer, ReceiptText, Search, User, Users, X } from 'lucide-react';
+import { AlertCircle, Ban, Clock, CreditCard, Hash, Loader2, Package, Printer, ReceiptText, RotateCcw, Search, User, Users, X } from 'lucide-react';
 import { AppConfig, Sale, Customer } from '../types';
 import { getDate } from '../utils/date';
 import { Receipt } from '../components/Receipt';
+import { refundSale, voidSale } from '../api';
+import { usePosStore } from '../store/usePosStore';
 
 interface HistoryViewProps {
   sales: Sale[];
@@ -12,12 +14,28 @@ interface HistoryViewProps {
   setSearchQuery: (query: string) => void;
   filterCustomerId: string | null;
   setFilterCustomerId: (id: string | null) => void;
+  onSalesUpdated?: () => Promise<void>;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
-  sales, customers, config, searchQuery, setSearchQuery, filterCustomerId, setFilterCustomerId
+  sales, customers, config, searchQuery, setSearchQuery, filterCustomerId, setFilterCustomerId, onSalesUpdated
 }) => {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundReason, setRefundReason] = useState('');
+  const [refundMethod, setRefundMethod] = useState<'cash' | 'card' | 'wallet'>('cash');
+  const [restockRefund, setRestockRefund] = useState(true);
+  const [refundQuantities, setRefundQuantities] = useState<Record<string, number>>({});
+  const [isRefunding, setIsRefunding] = useState(false);
+  const [refundError, setRefundError] = useState('');
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [restockVoid, setRestockVoid] = useState(true);
+  const [isVoiding, setIsVoiding] = useState(false);
+  const [voidError, setVoidError] = useState('');
+  const tenantId = usePosStore(s => s.tenantId);
+  const currentUserStaff = usePosStore(s => s.currentUserStaff);
+  const activeSession = usePosStore(s => s.activeSession);
 
   const filteredSales = useMemo(() => {
     return sales.filter(s => {
@@ -39,10 +57,118 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     : 'Unknown';
   const selectedSubtotal = selectedSale?.subtotal ?? selectedSale?.total ?? 0;
   const selectedTax = selectedSale?.taxAmount ?? 0;
+  const canRefundSelectedSale = Boolean(
+    selectedSale &&
+    selectedSale.status === 'completed' &&
+    selectedSale.transactionType !== 'refund' &&
+    selectedSale.refundStatus !== 'full'
+  );
+  const canVoidSelectedSale = Boolean(
+    selectedSale &&
+    selectedSale.status !== 'completed' &&
+    selectedSale.transactionType !== 'refund' &&
+    selectedSale.transactionType !== 'void'
+  );
+  const refundableItems = useMemo(() => selectedSale?.items || [], [selectedSale]);
+  const selectedRefundLines = useMemo(() => {
+    return refundableItems
+      .map(item => {
+        const id = (item as any).id || (item as any).productId || item.name;
+        const quantity = Math.max(0, Number(refundQuantities[id] || 0));
+        return { item, id, quantity, amount: Number(item.price || 0) * quantity };
+      })
+      .filter(line => line.quantity > 0);
+  }, [refundQuantities, refundableItems]);
+  const refundTotal = selectedRefundLines.reduce((sum, line) => sum + line.amount, 0);
 
   const printSelectedReceipt = () => {
     if (!selectedSale) return;
     window.print();
+  };
+
+  const openRefundFlow = () => {
+    if (!selectedSale) return;
+    const initial: Record<string, number> = {};
+    selectedSale.items.forEach(item => {
+      const id = (item as any).id || (item as any).productId || item.name;
+      initial[id] = Math.max(0, Number(item.quantity || 0));
+    });
+    setRefundQuantities(initial);
+    setRefundReason('');
+    setRefundMethod('cash');
+    setRestockRefund(true);
+    setRefundError('');
+    setRefundOpen(true);
+  };
+
+  const submitRefund = async () => {
+    if (!selectedSale || !tenantId) return;
+    setRefundError('');
+    if (selectedRefundLines.length === 0) {
+      setRefundError('Choose at least one item to refund.');
+      return;
+    }
+    if (refundReason.trim().length < 3) {
+      setRefundError('Add a short reason so the manager report is clear later.');
+      return;
+    }
+    if (refundMethod === 'cash' && !activeSession?.id) {
+      setRefundError('Open the register before processing a cash refund.');
+      return;
+    }
+
+    setIsRefunding(true);
+    try {
+      await refundSale(tenantId, selectedSale.id, {
+        items: selectedRefundLines.map(line => ({ saleItemId: line.id, quantity: line.quantity })),
+        reason: refundReason.trim(),
+        method: refundMethod,
+        restock: restockRefund,
+        staffId: currentUserStaff?.id || null,
+        staffName: currentUserStaff?.name || null,
+        cashSessionId: refundMethod === 'cash' ? activeSession?.id || null : null,
+      });
+      await onSalesUpdated?.();
+      setRefundOpen(false);
+      setSelectedSale(null);
+    } catch (error: any) {
+      setRefundError(error?.message || 'Refund could not be completed.');
+    } finally {
+      setIsRefunding(false);
+    }
+  };
+
+  const openVoidFlow = () => {
+    setVoidReason('');
+    setRestockVoid(true);
+    setVoidError('');
+    setVoidOpen(true);
+  };
+
+  const submitVoid = async () => {
+    if (!selectedSale || !tenantId) return;
+    setVoidError('');
+    if (voidReason.trim().length < 3) {
+      setVoidError('Add a short reason so this cancellation is easy to review later.');
+      return;
+    }
+
+    setIsVoiding(true);
+    try {
+      await voidSale(tenantId, selectedSale.id, {
+        reason: voidReason.trim(),
+        restock: restockVoid,
+        staffId: currentUserStaff?.id || null,
+        staffName: currentUserStaff?.name || null,
+      });
+      await onSalesUpdated?.();
+      setVoidOpen(false);
+      setSelectedSale(null);
+    } catch (error: any) {
+      setVoidError(error?.message || 'Order could not be voided.');
+    } finally {
+      setIsVoiding(false);
+    }
   };
 
   useEffect(() => {
@@ -139,9 +265,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     <td className="px-6 py-4 font-extrabold text-slate-900 dark:text-white">R{Number(sale.total || 0).toFixed(2)}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
-                        sale.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                        sale.transactionType === 'refund'
+                          ? 'bg-rose-100 text-rose-700'
+                          : sale.transactionType === 'void'
+                            ? 'bg-slate-200 text-slate-700'
+                          : sale.status === 'completed'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-amber-100 text-amber-700'
                       }`}>
-                        {sale.status}
+                        {sale.transactionType === 'refund' ? 'refund' : sale.transactionType === 'void' ? 'voided' : sale.refundStatus === 'full' ? 'refunded' : sale.refundStatus === 'partial' ? 'partial refund' : sale.status}
                       </span>
                       <span className="ml-2 text-[10px] font-bold text-primary opacity-0 transition-opacity group-hover:opacity-100">View</span>
                     </td>
@@ -188,6 +320,26 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     <Printer className="h-4 w-4" />
                     Reprint receipt
                   </button>
+                  {canRefundSelectedSale && (
+                    <button
+                      type="button"
+                      onClick={openRefundFlow}
+                      className="inline-flex min-h-[40px] flex-1 sm:flex-none items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-black text-rose-700 shadow-sm hover:bg-rose-100"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Refund / return
+                    </button>
+                  )}
+                  {canVoidSelectedSale && (
+                    <button
+                      type="button"
+                      onClick={openVoidFlow}
+                      className="inline-flex min-h-[40px] flex-1 sm:flex-none items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-black text-slate-700 shadow-sm hover:bg-slate-100"
+                    >
+                      <Ban className="h-4 w-4" />
+                      Void / cancel
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setSelectedSale(null)}
@@ -290,6 +442,250 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               </div>
             </div>
           </div>
+          {refundOpen && (
+            <div
+              className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/65 p-0 sm:p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="refund-dialog-title"
+            >
+              <div className="w-full max-w-2xl max-h-[92vh] overflow-hidden rounded-t-2xl sm:rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-slate-200 dark:border-slate-800 px-5 py-4">
+                  <div>
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-rose-600">
+                      <RotateCcw className="h-4 w-4" />
+                      Guided refund
+                    </div>
+                    <h3 id="refund-dialog-title" className="mt-1 text-xl font-black text-slate-900 dark:text-white">
+                      What should be returned?
+                    </h3>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
+                      Pick items, choose the refund method, then review before confirming.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRefundOpen(false)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900"
+                    aria-label="Close refund"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="max-h-[calc(92vh-88px)] overflow-y-auto p-5 space-y-5">
+                  {refundError && (
+                    <div className="flex gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">
+                      <AlertCircle className="h-5 w-5 shrink-0" />
+                      {refundError}
+                    </div>
+                  )}
+
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                    <div className="bg-slate-50 dark:bg-slate-900 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      Items to refund
+                    </div>
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {refundableItems.map(item => {
+                        const id = (item as any).id || (item as any).productId || item.name;
+                        const maxQty = Math.max(0, Number(item.quantity || 0));
+                        const qty = Math.max(0, Number(refundQuantities[id] || 0));
+                        return (
+                          <div key={id} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3">
+                            <div>
+                              <div className="text-sm font-black text-slate-800 dark:text-slate-100">{item.name}</div>
+                              <div className="mt-1 text-xs font-semibold text-slate-500">
+                                Sold {maxQty} at {currency}{Number(item.price || 0).toFixed(2)} each
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setRefundQuantities(q => ({ ...q, [id]: Math.max(0, qty - 1) }))}
+                                className="h-9 w-9 rounded-lg border border-slate-200 dark:border-slate-700 font-black"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min={0}
+                                max={maxQty}
+                                value={qty}
+                                onChange={event => {
+                                  const next = Math.max(0, Math.min(maxQty, Number(event.target.value || 0)));
+                                  setRefundQuantities(q => ({ ...q, [id]: next }));
+                                }}
+                                className="h-9 w-16 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-center text-sm font-black"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setRefundQuantities(q => ({ ...q, [id]: Math.min(maxQty, qty + 1) }))}
+                                className="h-9 w-9 rounded-lg border border-slate-200 dark:border-slate-700 font-black"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Refund method</label>
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        {(['cash', 'card', 'wallet'] as const).map(method => (
+                          <button
+                            key={method}
+                            type="button"
+                            onClick={() => setRefundMethod(method)}
+                            className={`h-11 rounded-xl border text-xs font-black uppercase tracking-widest ${refundMethod === method ? 'border-primary bg-primary text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}
+                          >
+                            {method}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3">
+                      <input
+                        type="checkbox"
+                        checked={restockRefund}
+                        onChange={event => setRestockRefund(event.target.checked)}
+                        className="h-5 w-5 accent-primary"
+                      />
+                      <span>
+                        <span className="block text-sm font-black text-slate-800 dark:text-slate-100">Return items to stock</span>
+                        <span className="block text-xs font-semibold text-slate-500">Turn off for damaged or wasted items.</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Reason</label>
+                    <textarea
+                      value={refundReason}
+                      onChange={event => setRefundReason(event.target.value)}
+                      placeholder="e.g. Wrong item, damaged item, customer changed order"
+                      className="mt-2 min-h-24 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-sm font-semibold outline-none focus:border-primary/50"
+                    />
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 dark:bg-slate-900 p-4">
+                    <div className="flex items-center justify-between text-sm font-bold text-slate-500">
+                      <span>Selected lines</span>
+                      <span>{selectedRefundLines.length}</span>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between border-t border-slate-200 dark:border-slate-800 pt-3 text-xl font-black text-slate-900 dark:text-white">
+                      <span>Refund total</span>
+                      <span>{currency}{refundTotal.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setRefundOpen(false)}
+                      className="h-12 flex-1 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-black text-slate-600 dark:text-slate-300"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isRefunding || refundTotal <= 0}
+                      onClick={submitRefund}
+                      className="h-12 flex-1 rounded-xl bg-rose-600 text-sm font-black text-white shadow-lg shadow-rose-600/20 disabled:opacity-50"
+                    >
+                      {isRefunding ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Confirm refund'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {voidOpen && (
+            <div
+              className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/65 p-0 sm:p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="void-dialog-title"
+            >
+              <div className="w-full max-w-lg rounded-t-2xl sm:rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-slate-200 dark:border-slate-800 px-5 py-4">
+                  <div>
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
+                      <Ban className="h-4 w-4" />
+                      Guided void
+                    </div>
+                    <h3 id="void-dialog-title" className="mt-1 text-xl font-black text-slate-900 dark:text-white">
+                      Cancel this order?
+                    </h3>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
+                      Use this for open orders, kitchen tickets, or mistakes before payment is completed.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setVoidOpen(false)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900"
+                    aria-label="Close void"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-5">
+                  {voidError && (
+                    <div className="flex gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">
+                      <AlertCircle className="h-5 w-5 shrink-0" />
+                      {voidError}
+                    </div>
+                  )}
+
+                  <label className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3">
+                    <input
+                      type="checkbox"
+                      checked={restockVoid}
+                      onChange={event => setRestockVoid(event.target.checked)}
+                      className="h-5 w-5 accent-primary"
+                    />
+                    <span>
+                      <span className="block text-sm font-black text-slate-800 dark:text-slate-100">Return items to stock</span>
+                      <span className="block text-xs font-semibold text-slate-500">Turn off if items are already prepared or wasted.</span>
+                    </span>
+                  </label>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Reason</label>
+                    <textarea
+                      value={voidReason}
+                      onChange={event => setVoidReason(event.target.value)}
+                      placeholder="e.g. Duplicate order, customer cancelled, entered by mistake"
+                      className="mt-2 min-h-24 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-sm font-semibold outline-none focus:border-primary/50"
+                    />
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setVoidOpen(false)}
+                      className="h-12 flex-1 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-black text-slate-600 dark:text-slate-300"
+                    >
+                      Keep order
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isVoiding}
+                      onClick={submitVoid}
+                      className="h-12 flex-1 rounded-xl bg-slate-800 text-sm font-black text-white shadow-lg shadow-slate-800/20 disabled:opacity-50"
+                    >
+                      {isVoiding ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Void order'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

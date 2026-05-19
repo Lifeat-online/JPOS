@@ -171,6 +171,22 @@ export function getTenantWorkstations(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/workstations`);
 }
 
+export function getCompanionDeviceAssignments(tenantId: string) {
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments`);
+}
+
+export function getCompanionDeviceAssignment(tenantId: string, deviceId: string) {
+  return apiGet<any | null>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`);
+}
+
+export function assignCompanionDevice(tenantId: string, deviceId: string, data: { deviceName: string; workstationId: string; defaultMode: string }) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`, data);
+}
+
+export function revokeCompanionDeviceAssignment(tenantId: string, deviceId: string) {
+  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`);
+}
+
 export function getTenantSales(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/sales`);
 }
@@ -307,6 +323,27 @@ export function updateSaleStatus(tenantId: string, saleId: string, status: strin
   return apiPut<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}`, { status });
 }
 
+export function refundSale(tenantId: string, saleId: string, data: {
+  items: { saleItemId: string; quantity: number }[];
+  reason: string;
+  method: 'cash' | 'card' | 'wallet';
+  restock?: boolean;
+  staffId?: string | null;
+  staffName?: string | null;
+  cashSessionId?: string | null;
+}) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}/refund`, data);
+}
+
+export function voidSale(tenantId: string, saleId: string, data: {
+  reason: string;
+  restock?: boolean;
+  staffId?: string | null;
+  staffName?: string | null;
+}) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}/void`, data);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Payout Requests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -329,6 +366,19 @@ export function updateCustomerPayoutRequest(tenantId: string, id: string, update
 
 export function createPayoutRequest(tenantId: string, data: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/payout-requests`, data);
+}
+
+export function recordCashMovement(tenantId: string, cashSessionId: string, data: {
+  type: string;
+  direction: 'in' | 'out' | 'neutral';
+  amount: number;
+  saleId?: string | null;
+  paymentId?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+  note?: string | null;
+}) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/cash-sessions/${cashSessionId}/movements`, data);
 }
 
 export function setupTenant(data: any) {
