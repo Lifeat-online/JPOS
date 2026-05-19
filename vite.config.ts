@@ -12,7 +12,15 @@ export default defineConfig(({mode}) => {
       : '/';
   const pwaOptions: Partial<VitePWAOptions> = {
     registerType: 'autoUpdate',
-    includeAssets: ['favicon.svg'],
+    includeAssets: [
+      'favicon.svg',
+      'apple-touch-icon.png',
+      'mstile-150x150.png',
+      'icons/icon-192.png',
+      'icons/icon-512.png',
+      'icons/maskable-icon-192.png',
+      'icons/maskable-icon-512.png',
+    ],
     manifest: {
       name: "Jimmy's POS",
       short_name: "Jimmy's POS",
@@ -26,10 +34,34 @@ export default defineConfig(({mode}) => {
       categories: ['business', 'productivity'],
       icons: [
         {
+          src: `${base}icons/icon-192.png`,
+          sizes: '192x192',
+          type: 'image/png',
+          purpose: 'any',
+        },
+        {
+          src: `${base}icons/icon-512.png`,
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'any',
+        },
+        {
+          src: `${base}icons/maskable-icon-192.png`,
+          sizes: '192x192',
+          type: 'image/png',
+          purpose: 'maskable',
+        },
+        {
+          src: `${base}icons/maskable-icon-512.png`,
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'maskable',
+        },
+        {
           src: `${base}favicon.svg`,
           sizes: 'any',
           type: 'image/svg+xml',
-          purpose: 'any maskable',
+          purpose: 'any',
         },
       ],
       shortcuts: [

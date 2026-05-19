@@ -900,6 +900,7 @@ export default function App() {
               return true;
             })}
             customers={customers}
+            config={config}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
             filterCustomerId={filterCustomerId}
