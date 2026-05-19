@@ -18,6 +18,7 @@ import { apiPost, apiPut, apiDelete, seedDemoData, clearSeededDemoData, clearAll
 import { useAuth } from './hooks/useAuth';
 import { useAppData } from './hooks/useAppData';
 import { useCheckout } from './hooks/useCheckout';
+import { useSocket } from './hooks/useSocket';
 import { usePosStore } from './store/usePosStore';
 
 import { WelcomeView } from './components/WelcomeView';
@@ -87,6 +88,7 @@ interface CompanionMenuState {
 function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDarkMode, logout, navigate,
   isFullscreen, toggleFullscreen, isKioskMode, enterKioskMode, exitKioskMode,
   canInstall, isInstalled, installApp, onShowInstallGuide, tenantId,
+  showCompanionTools,
 }: {
   user: any;
   currentUserStaff: any;
@@ -105,6 +107,7 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
   installApp: () => Promise<void>;
   onShowInstallGuide: () => void;
   tenantId?: string | null;
+  showCompanionTools: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [companionState, setCompanionState] = useState<CompanionMenuState>({
@@ -238,6 +241,7 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
             <PrinterReadinessPanel tenantId={tenantId} compact />
           </div>
 
+          {showCompanionTools && (
           <div className="p-3 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-start gap-3">
               <Smartphone className="w-5 h-5 text-primary shrink-0 mt-0.5" />
@@ -292,6 +296,7 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
               </div>
             )}
           </div>
+          )}
 
           {/* Actions */}
           <div className="p-2">
@@ -567,6 +572,46 @@ export default function App() {
   const addToCart = usePosStore(s => s.addToCart);
   const tenantId = usePosStore(s => s.tenantId);
   const effectiveActiveSession = storeActiveSession || activeSession;
+  const [activeAccountDeviceCount, setActiveAccountDeviceCount] = useState(1);
+  const accountDeviceId = useMemo(() => {
+    const staffId = currentUserStaff?.id || user?.id || 'staff';
+    const key = `companion-device-id:${tenantId || 'local'}:${staffId}`;
+    try {
+      const existing = window.localStorage.getItem(key);
+      if (existing) return existing;
+      const created = `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      window.localStorage.setItem(key, created);
+      return created;
+    } catch {
+      return `device_${Date.now()}`;
+    }
+  }, [tenantId, currentUserStaff?.id, user?.id]);
+  const accountPresenceSocket = useSocket({
+    user,
+    tenantId,
+    enabled: Boolean(user && tenantId && currentUserStaff?.id),
+  });
+  const showCompanionTools = activeAccountDeviceCount > 1;
+
+  useEffect(() => {
+    const socket = accountPresenceSocket.socket;
+    if (!socket || !tenantId || !currentUserStaff?.id) return;
+
+    const onPresence = (payload: any) => {
+      setActiveAccountDeviceCount(Number(payload?.activeDeviceCount || 1));
+    };
+
+    socket.on('account_device_presence', onPresence);
+    accountPresenceSocket.emit('account_device_active', {
+      tenantId,
+      staffId: currentUserStaff.id,
+      deviceId: accountDeviceId,
+    });
+
+    return () => {
+      socket.off('account_device_presence', onPresence);
+    };
+  }, [accountPresenceSocket.socket, accountPresenceSocket.emit, tenantId, currentUserStaff?.id, accountDeviceId]);
 
   // Sync server-side data into the Zustand store so components can read it without prop drilling
   useEffect(() => {
@@ -1000,6 +1045,7 @@ export default function App() {
             installApp={installApp}
             onShowInstallGuide={() => setShowInstallGuide(true)}
             tenantId={tenantId}
+            showCompanionTools={showCompanionTools}
           />
 
           {view === 'pos' && (

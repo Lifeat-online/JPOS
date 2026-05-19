@@ -17,6 +17,30 @@ export type SocketUser = {
 
 export function setupSocketIO(httpServer: any) {
   const poleDisplaysByTerminal = new Map<string, string>();
+  const accountDevices = new Map<string, Map<string, Set<string>>>();
+
+  const emitAccountDevicePresence = (presenceKey: string) => {
+    const devices = accountDevices.get(presenceKey);
+    const activeDeviceCount = devices ? devices.size : 0;
+    io.to(`account-devices:${presenceKey}`).emit("account_device_presence", {
+      activeDeviceCount,
+    });
+  };
+
+  const removeAccountDevicePresence = (socket: any) => {
+    const presenceKey = socket.data?.accountPresenceKey;
+    const deviceId = socket.data?.accountDeviceId;
+    if (!presenceKey || !deviceId) return;
+
+    const devices = accountDevices.get(presenceKey);
+    const sockets = devices?.get(deviceId);
+    sockets?.delete(socket.id);
+    if (sockets && sockets.size === 0) devices?.delete(deviceId);
+    if (devices && devices.size === 0) accountDevices.delete(presenceKey);
+
+    emitAccountDevicePresence(presenceKey);
+    socket.leave(`account-devices:${presenceKey}`);
+  };
 
   const io = new SocketIOServer(httpServer, {
     cors: {
@@ -86,6 +110,27 @@ export function setupSocketIO(httpServer: any) {
 
     socket.on("join_messages", (tenantId: string) => {
       socket.join(`tenant:${tenantId}:messages`);
+    });
+
+    socket.on("account_device_active", (payload: { tenantId?: string; staffId?: string; deviceId?: string }) => {
+      const tenantId = String(payload?.tenantId || "");
+      const staffId = String(payload?.staffId || "");
+      const deviceId = String(payload?.deviceId || socket.id);
+      if (!tenantId || !staffId || !deviceId) return;
+
+      removeAccountDevicePresence(socket);
+
+      const presenceKey = `${tenantId}:${staffId}`;
+      const devices = accountDevices.get(presenceKey) || new Map<string, Set<string>>();
+      const sockets = devices.get(deviceId) || new Set<string>();
+      sockets.add(socket.id);
+      devices.set(deviceId, sockets);
+      accountDevices.set(presenceKey, devices);
+
+      socket.data.accountPresenceKey = presenceKey;
+      socket.data.accountDeviceId = deviceId;
+      socket.join(`account-devices:${presenceKey}`);
+      emitAccountDevicePresence(presenceKey);
     });
 
     socket.on("terminal_register", (payload: { tenantId?: string; staffId?: string; terminalId?: string }) => {
@@ -178,6 +223,7 @@ export function setupSocketIO(httpServer: any) {
     // ── Disconnect Handler ────────────────────────────────────────────────────
 
     socket.on("disconnect", () => {
+      removeAccountDevicePresence(socket);
       if (socket.data?.companionMode === "pole_display" && socket.data?.terminalId) {
         const terminalId = String(socket.data.terminalId);
         const deviceId = String(socket.data.companionDeviceId || socket.id);
