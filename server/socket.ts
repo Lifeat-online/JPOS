@@ -18,12 +18,15 @@ export type SocketUser = {
 export function setupSocketIO(httpServer: any) {
   const poleDisplaysByTerminal = new Map<string, string>();
   const accountDevices = new Map<string, Map<string, Set<string>>>();
+  const activeTerminalByAccount = new Map<string, string>();
 
   const emitAccountDevicePresence = (presenceKey: string) => {
     const devices = accountDevices.get(presenceKey);
     const activeDeviceCount = devices ? devices.size : 0;
+    const activeTerminalDeviceId = activeTerminalByAccount.get(presenceKey) || null;
     io.to(`account-devices:${presenceKey}`).emit("account_device_presence", {
       activeDeviceCount,
+      activeTerminalDeviceId,
     });
   };
 
@@ -36,7 +39,15 @@ export function setupSocketIO(httpServer: any) {
     const sockets = devices?.get(deviceId);
     sockets?.delete(socket.id);
     if (sockets && sockets.size === 0) devices?.delete(deviceId);
-    if (devices && devices.size === 0) accountDevices.delete(presenceKey);
+    if (activeTerminalByAccount.get(presenceKey) === deviceId && (!devices || !devices.has(deviceId))) {
+      const nextDeviceId = devices ? Array.from(devices.keys())[0] : null;
+      if (nextDeviceId) activeTerminalByAccount.set(presenceKey, nextDeviceId);
+      else activeTerminalByAccount.delete(presenceKey);
+    }
+    if (devices && devices.size === 0) {
+      accountDevices.delete(presenceKey);
+      activeTerminalByAccount.delete(presenceKey);
+    }
 
     emitAccountDevicePresence(presenceKey);
     socket.leave(`account-devices:${presenceKey}`);
@@ -130,12 +141,35 @@ export function setupSocketIO(httpServer: any) {
       socket.data.accountPresenceKey = presenceKey;
       socket.data.accountDeviceId = deviceId;
       socket.join(`account-devices:${presenceKey}`);
+      if (!activeTerminalByAccount.get(presenceKey)) activeTerminalByAccount.set(presenceKey, deviceId);
       emitAccountDevicePresence(presenceKey);
     });
 
-    socket.on("terminal_register", (payload: { tenantId?: string; staffId?: string; terminalId?: string }) => {
+    socket.on("account_terminal_select", (payload: { tenantId?: string; staffId?: string; deviceId?: string }) => {
+      const tenantId = String(payload?.tenantId || "");
+      const staffId = String(payload?.staffId || "");
+      const deviceId = String(payload?.deviceId || socket.data.accountDeviceId || socket.id);
+      if (!tenantId || !staffId || !deviceId) return;
+
+      const presenceKey = `${tenantId}:${staffId}`;
+      activeTerminalByAccount.set(presenceKey, deviceId);
+      io.to(`account-devices:${presenceKey}`).emit("account_active_terminal_selected", {
+        activeTerminalDeviceId: deviceId,
+      });
+      emitAccountDevicePresence(presenceKey);
+    });
+
+    socket.on("terminal_register", (payload: { tenantId?: string; staffId?: string; terminalId?: string; deviceId?: string }) => {
       const terminalId = String(payload?.terminalId || "");
       if (!terminalId) return;
+      const tenantId = String(payload?.tenantId || "");
+      const staffId = String(payload?.staffId || "");
+      const deviceId = String(payload?.deviceId || socket.data.accountDeviceId || socket.id);
+      if (tenantId && staffId && deviceId) {
+        const presenceKey = `${tenantId}:${staffId}`;
+        if (!activeTerminalByAccount.get(presenceKey)) activeTerminalByAccount.set(presenceKey, deviceId);
+        emitAccountDevicePresence(presenceKey);
+      }
       socket.join(`terminal:${terminalId}`);
       socket.data.terminalId = terminalId;
       socket.data.deviceRole = "terminal";

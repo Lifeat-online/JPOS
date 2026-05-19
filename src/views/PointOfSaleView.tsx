@@ -139,7 +139,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   };
 
   const handleAddToCart = (product: Product) => {
-    if (assignedCompanionMode === 'remote_control' && terminalId) {
+    if (isRemoteControlMode && terminalId) {
       companionSocket.emit('companion_command', {
         terminalId,
         command: 'add_product',
@@ -203,6 +203,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     tenantId,
     enabled: Boolean(tenantId && currentUserStaff?.id),
   });
+  const isRemoteControlMode = companionMode !== 'terminal' && assignedCompanionMode === 'remote_control';
+  const isWirelessScannerMode = companionMode !== 'terminal' && assignedCompanionMode === 'wireless_scanner';
   const parkedSales = useMemo(() => sales
     .filter(s => (
       s.status === 'open' &&
@@ -300,7 +302,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     const cleaned = barcode.trim();
     const product = products.find(p => String(p.barcode || '').trim() === cleaned);
     setIsScanning(false);
-    if (assignedCompanionMode === 'wireless_scanner' && terminalId) {
+    if (isWirelessScannerMode && terminalId) {
       companionSocket.emit('companion_command', {
         terminalId,
         command: 'barcode_lookup',
@@ -340,16 +342,27 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       if (!terminalId) return;
       companionSocket.emit('companion_command', { terminalId, command: 'clear_cart', data: {} });
     };
+    const markTerminal = () => {
+      updateCompanionMode('terminal');
+      if (!tenantId || !currentUserStaff?.id) return;
+      companionSocket.emit('account_terminal_select', {
+        tenantId,
+        staffId: currentUserStaff.id,
+        deviceId: companionDeviceId,
+      });
+    };
 
     window.addEventListener('jpos:companion-mode-change', changeMode);
     window.addEventListener('jpos:companion-open-scanner', openScanner);
     window.addEventListener('jpos:companion-clear-terminal', clearTerminal);
+    window.addEventListener('jpos:companion-mark-terminal', markTerminal);
     return () => {
       window.removeEventListener('jpos:companion-mode-change', changeMode);
       window.removeEventListener('jpos:companion-open-scanner', openScanner);
       window.removeEventListener('jpos:companion-clear-terminal', clearTerminal);
+      window.removeEventListener('jpos:companion-mark-terminal', markTerminal);
     };
-  }, [terminalId, companionSocket.emit]);
+  }, [terminalId, tenantId, currentUserStaff?.id, companionDeviceId, companionSocket.emit]);
 
   useEffect(() => {
     const detail = {
@@ -363,9 +376,11 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       displaySnapshot,
     };
     window.dispatchEvent(new CustomEvent('jpos:companion-state', { detail }));
+    window.dispatchEvent(new CustomEvent('jpos:account-terminal-presence-request'));
 
     const resendState = () => {
       window.dispatchEvent(new CustomEvent('jpos:companion-state', { detail }));
+      window.dispatchEvent(new CustomEvent('jpos:account-terminal-presence-request'));
     };
     window.addEventListener('jpos:companion-state-request', resendState);
     return () => window.removeEventListener('jpos:companion-state-request', resendState);
@@ -401,6 +416,16 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     if (!companionSocket.socket || !terminalId || !currentUserStaff?.id) return;
 
     const socket = companionSocket.socket;
+    const onActiveTerminalSelected = (payload: any) => {
+      const activeDeviceId = String(payload?.activeTerminalDeviceId || '');
+      if (!activeDeviceId) return;
+      if (activeDeviceId === companionDeviceId) {
+        updateCompanionMode('terminal');
+      }
+      window.dispatchEvent(new CustomEvent('jpos:companion-state', {
+        detail: { activeTerminalDeviceId: activeDeviceId },
+      }));
+    };
     const onAssigned = (payload: any) => {
       if (payload?.terminalId !== terminalId) return;
       setAssignedCompanionMode(payload.assignedMode || null);
@@ -439,6 +464,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     socket.on('companion_mode_assigned', onAssigned);
     socket.on('companion_state', onState);
     socket.on('companion_command', onCommand);
+    socket.on('account_active_terminal_selected', onActiveTerminalSelected);
     socket.on('terminal_display_update', onDisplayUpdate);
 
     if (companionMode === 'terminal') {
@@ -446,6 +472,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
         tenantId,
         staffId: currentUserStaff.id,
         terminalId,
+        deviceId: companionDeviceId,
       });
     } else {
       companionSocket.emit('companion_join', {
@@ -461,6 +488,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       socket.off('companion_mode_assigned', onAssigned);
       socket.off('companion_state', onState);
       socket.off('companion_command', onCommand);
+      socket.off('account_active_terminal_selected', onActiveTerminalSelected);
       socket.off('terminal_display_update', onDisplayUpdate);
     };
   }, [companionSocket.socket, terminalId, companionMode, tenantId, currentUserStaff?.id, companionDeviceId, products, companionSocket.emit]);

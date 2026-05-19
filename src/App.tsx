@@ -78,6 +78,7 @@ interface CompanionMenuState {
   assignedCompanionMode: Exclude<CompanionMenuMode, 'terminal'> | null;
   poleDisplayDeviceId: string | null;
   companionDeviceId: string | null;
+  activeTerminalDeviceId: string | null;
   terminalId: string | null;
   staffName: string | null;
   longTermAssignment: any;
@@ -115,6 +116,7 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
     assignedCompanionMode: null,
     poleDisplayDeviceId: null,
     companionDeviceId: null,
+    activeTerminalDeviceId: null,
     terminalId: null,
     staffName: currentUserStaff?.name || null,
     longTermAssignment: null,
@@ -156,15 +158,28 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
     }));
     window.dispatchEvent(new CustomEvent('jpos:companion-mode-change', { detail: { mode } }));
   };
+  const markThisDeviceAsTerminal = () => {
+    setCompanionState(prev => ({
+      ...prev,
+      companionMode: 'terminal',
+      assignedCompanionMode: null,
+      activeTerminalDeviceId: prev.companionDeviceId,
+    }));
+    window.dispatchEvent(new CustomEvent('jpos:companion-mark-terminal'));
+  };
+  const isThisActiveTerminal = Boolean(
+    companionState.companionDeviceId &&
+    companionState.activeTerminalDeviceId === companionState.companionDeviceId
+  );
 
   const companionStatus = companionState.companionMode === 'terminal'
     ? companionState.longTermAssignment
-      ? `Assigned to ${companionState.longTermAssignment.workstationName || 'a workstation'} long term.${companionState.poleDisplayDeviceId ? ' Display paired.' : ''}`
-      : `Devices logged in as ${companionState.staffName || 'this staff member'} pair to this account automatically.${companionState.poleDisplayDeviceId ? ' Display paired.' : ''}`
+      ? `${isThisActiveTerminal ? 'Active target for companion devices. ' : ''}Full sale mode on ${companionState.longTermAssignment.workstationName || 'this workstation'}; sales use the open register for one cash-up.${companionState.poleDisplayDeviceId ? ' Display paired.' : ''}`
+      : `${isThisActiveTerminal ? 'Active target for companion devices. ' : ''}Full sale mode on this device; sales use the open register for one cash-up.${companionState.poleDisplayDeviceId ? ' Display paired.' : ''}`
     : companionState.assignedCompanionMode === 'pole_display'
       ? 'This device is acting as the customer display.'
-      : companionState.assignedCompanionMode
-        ? 'This device can control the terminal and scan barcodes.'
+    : companionState.assignedCompanionMode
+        ? 'This device sends taps and scans to the active terminal.'
         : 'Choose how this device should help this account.';
 
   const companionModeOptions: Array<{ id: CompanionMenuMode; label: string; icon: React.ElementType; disabled?: boolean }> = [
@@ -269,6 +284,19 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={markThisDeviceAsTerminal}
+              disabled={isThisActiveTerminal}
+              className={`mt-3 w-full h-11 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 border transition-all disabled:cursor-default ${
+                isThisActiveTerminal
+                  ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-slate-900 dark:bg-white border-slate-900 dark:border-white text-white dark:text-slate-950 active:scale-95'
+              }`}
+            >
+              <MonitorUp className="w-4 h-4" />
+              {isThisActiveTerminal ? 'Active companion target' : 'Use as companion target'}
+            </button>
             {companionState.assignedCompanionMode === 'wireless_scanner' && (
               <button
                 type="button"
@@ -291,7 +319,7 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
                   className="min-h-14 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/40 text-rose-600 dark:text-rose-300 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
                 >
                   <Trash2 className="w-4 h-4" />
-                  Clear terminal
+                  Clear active terminal
                 </button>
               </div>
             )}
@@ -573,6 +601,7 @@ export default function App() {
   const tenantId = usePosStore(s => s.tenantId);
   const effectiveActiveSession = storeActiveSession || activeSession;
   const [activeAccountDeviceCount, setActiveAccountDeviceCount] = useState(1);
+  const [activeAccountTerminalDeviceId, setActiveAccountTerminalDeviceId] = useState<string | null>(null);
   const accountDeviceId = useMemo(() => {
     const staffId = currentUserStaff?.id || user?.id || 'staff';
     const key = `companion-device-id:${tenantId || 'local'}:${staffId}`;
@@ -594,11 +623,31 @@ export default function App() {
   const showCompanionTools = activeAccountDeviceCount > 1;
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('jpos:account-terminal-presence', {
+      detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
+    }));
+  }, [activeAccountTerminalDeviceId]);
+
+  useEffect(() => {
+    const resendPresence = () => {
+      window.dispatchEvent(new CustomEvent('jpos:companion-state', {
+        detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
+      }));
+    };
+    window.addEventListener('jpos:account-terminal-presence-request', resendPresence);
+    return () => window.removeEventListener('jpos:account-terminal-presence-request', resendPresence);
+  }, [activeAccountTerminalDeviceId]);
+
+  useEffect(() => {
     const socket = accountPresenceSocket.socket;
     if (!socket || !tenantId || !currentUserStaff?.id) return;
 
     const onPresence = (payload: any) => {
       setActiveAccountDeviceCount(Number(payload?.activeDeviceCount || 1));
+      setActiveAccountTerminalDeviceId(payload?.activeTerminalDeviceId || null);
+      window.dispatchEvent(new CustomEvent('jpos:companion-state', {
+        detail: { activeTerminalDeviceId: payload?.activeTerminalDeviceId || null },
+      }));
     };
 
     socket.on('account_device_presence', onPresence);
