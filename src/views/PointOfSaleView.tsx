@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
   ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Printer,
-  AlertTriangle, PauseCircle, PlayCircle, ScanLine, Smartphone, MonitorUp
+  AlertTriangle, PauseCircle, PlayCircle, ScanLine
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -11,7 +11,6 @@ import { CustomerSelector } from '../components/CustomerSelector';
 import { usePosStore } from '../store/usePosStore';
 import { WorkstationQueuePanel } from '../components/WorkstationQueuePanel';
 import { BillPrint } from '../components/BillPrint';
-import { PrinterReadinessPanel } from '../components/PrinterReadinessPanel';
 import { BarcodeScanner } from '../components/BarcodeScanner';
 import { getCompanionDeviceAssignment, recordCashMovement } from '../api';
 import { useSocket } from '../hooks/useSocket';
@@ -328,6 +327,58 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       // Mode still works for this session if storage is blocked.
     }
   };
+
+  useEffect(() => {
+    const changeMode = (event: Event) => {
+      const mode = (event as CustomEvent<{ mode?: typeof companionMode }>).detail?.mode;
+      if (mode === 'terminal' || mode === 'remote_control' || mode === 'wireless_scanner' || mode === 'pole_display') {
+        updateCompanionMode(mode);
+      }
+    };
+    const openScanner = () => setIsScanning(true);
+    const clearTerminal = () => {
+      if (!terminalId) return;
+      companionSocket.emit('companion_command', { terminalId, command: 'clear_cart', data: {} });
+    };
+
+    window.addEventListener('jpos:companion-mode-change', changeMode);
+    window.addEventListener('jpos:companion-open-scanner', openScanner);
+    window.addEventListener('jpos:companion-clear-terminal', clearTerminal);
+    return () => {
+      window.removeEventListener('jpos:companion-mode-change', changeMode);
+      window.removeEventListener('jpos:companion-open-scanner', openScanner);
+      window.removeEventListener('jpos:companion-clear-terminal', clearTerminal);
+    };
+  }, [terminalId, companionSocket.emit]);
+
+  useEffect(() => {
+    const detail = {
+      companionMode,
+      assignedCompanionMode,
+      poleDisplayDeviceId,
+      companionDeviceId,
+      terminalId,
+      staffName: currentUserStaff?.name || null,
+      longTermAssignment,
+      displaySnapshot,
+    };
+    window.dispatchEvent(new CustomEvent('jpos:companion-state', { detail }));
+
+    const resendState = () => {
+      window.dispatchEvent(new CustomEvent('jpos:companion-state', { detail }));
+    };
+    window.addEventListener('jpos:companion-state-request', resendState);
+    return () => window.removeEventListener('jpos:companion-state-request', resendState);
+  }, [
+    companionMode,
+    assignedCompanionMode,
+    poleDisplayDeviceId,
+    companionDeviceId,
+    terminalId,
+    currentUserStaff?.name,
+    longTermAssignment,
+    displaySnapshot,
+  ]);
 
   useEffect(() => {
     if (!tenantId || !companionDeviceId) return;
@@ -668,82 +719,6 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   )}
                 </button>
               )}
-            </div>
-          )}
-        </div>
-
-        <div className="mx-4 lg:mx-6 mb-2">
-          <PrinterReadinessPanel tenantId={tenantId} compact />
-        </div>
-
-        <div className="mx-4 lg:mx-6 mb-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-sm">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            <div className="flex items-start gap-3 min-w-0">
-              <Smartphone className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Companion device</p>
-                <p className="mt-0.5 text-xs font-semibold text-slate-500">
-                  {companionMode === 'terminal'
-                    ? longTermAssignment
-                      ? `This device is assigned to ${longTermAssignment.workstationName || 'a workstation'} long term.${poleDisplayDeviceId ? ' Pole display paired.' : ''}`
-                      : `Devices logged in as ${currentUserStaff?.name || 'this staff member'} pair to this account automatically.${poleDisplayDeviceId ? ' Pole display paired.' : ''}`
-                    : assignedCompanionMode === 'pole_display'
-                      ? 'This device is acting as the pole display.'
-                      : assignedCompanionMode
-                        ? 'This device can control the account terminal and scan barcodes.'
-                        : 'Choose how this device should help this staff account.'}
-                </p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {[
-                { id: 'terminal', label: 'Terminal', icon: MonitorUp },
-                { id: 'remote_control', label: 'Remote', icon: Smartphone },
-                { id: 'wireless_scanner', label: 'Scanner', icon: ScanLine },
-                { id: 'pole_display', label: 'Display', icon: MonitorUp, disabled: Boolean(poleDisplayDeviceId && poleDisplayDeviceId !== companionDeviceId && assignedCompanionMode !== 'pole_display') },
-              ].map(option => (
-                <button
-                  key={option.id}
-                  type="button"
-                  disabled={Boolean(option.disabled)}
-                  onClick={() => updateCompanionMode(option.id as typeof companionMode)}
-                  title={option.disabled ? 'A pole display is already paired to this terminal' : option.label}
-                  className={`h-10 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 border transition-all disabled:opacity-40 ${
-                    companionMode === option.id
-                      ? 'bg-primary text-white border-primary shadow-sm'
-                      : 'bg-slate-50 dark:bg-slate-950/50 text-slate-500 dark:text-slate-300 border-slate-100 dark:border-slate-800'
-                  }`}
-                >
-                  <option.icon className="w-3.5 h-3.5" />
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {assignedCompanionMode === 'wireless_scanner' && (
-            <button
-              type="button"
-              onClick={() => setIsScanning(true)}
-              className="mt-3 w-full h-12 rounded-xl bg-primary text-white text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95"
-            >
-              <ScanLine className="w-4 h-4" />
-              Scan to terminal
-            </button>
-          )}
-          {assignedCompanionMode === 'remote_control' && (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Terminal total</p>
-                <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">R{Number(displaySnapshot?.total || 0).toFixed(2)}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => companionSocket.emit('companion_command', { terminalId, command: 'clear_cart', data: {} })}
-                className="h-full min-h-14 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/40 text-rose-600 dark:text-rose-300 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                Clear terminal
-              </button>
             </div>
           )}
         </div>

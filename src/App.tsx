@@ -8,7 +8,8 @@ import {
   LayoutGrid, History as HistoryIcon, Settings, Package, Banknote,
   Users, UserCog, Moon, Sun, ShoppingCart, AlertCircle, ChefHat, Utensils, Trophy,
   ChevronDown, LogOut, Wallet, TabletSmartphone, Maximize2, Minimize2, Monitor, Download,
-  Activity, Building2, BarChart3, Code2, MessageSquare, BrainCircuit
+  Activity, Building2, BarChart3, Code2, MessageSquare, BrainCircuit,
+  Smartphone, ScanLine, MonitorUp, Trash2
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -46,6 +47,7 @@ import { useClientPortal } from './hooks/useClientPortal';
 import { TabsView } from './views/TabsView';
 import { BarcodeScanner } from './components/BarcodeScanner';
 import { Receipt } from './components/Receipt';
+import { PrinterReadinessPanel } from './components/PrinterReadinessPanel';
 
 import { ProductModal } from './components/modals/ProductModal';
 import { CustomerModal } from './components/modals/CustomerModal';
@@ -68,10 +70,23 @@ const DEV_EMAIL = 'jameskoen78@gmail.com';
 
 export { DEFAULT_CATEGORY_TREE };
 
+type CompanionMenuMode = 'terminal' | 'remote_control' | 'wireless_scanner' | 'pole_display';
+
+interface CompanionMenuState {
+  companionMode: CompanionMenuMode;
+  assignedCompanionMode: Exclude<CompanionMenuMode, 'terminal'> | null;
+  poleDisplayDeviceId: string | null;
+  companionDeviceId: string | null;
+  terminalId: string | null;
+  staffName: string | null;
+  longTermAssignment: any;
+  displaySnapshot: any;
+}
+
 // ── User Menu Component ────────────────────────────────────────────────────────
 function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDarkMode, logout, navigate,
   isFullscreen, toggleFullscreen, isKioskMode, enterKioskMode, exitKioskMode,
-  canInstall, isInstalled, installApp, onShowInstallGuide,
+  canInstall, isInstalled, installApp, onShowInstallGuide, tenantId,
 }: {
   user: any;
   currentUserStaff: any;
@@ -89,8 +104,19 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
   isInstalled: boolean;
   installApp: () => Promise<void>;
   onShowInstallGuide: () => void;
+  tenantId?: string | null;
 }) {
   const [open, setOpen] = useState(false);
+  const [companionState, setCompanionState] = useState<CompanionMenuState>({
+    companionMode: 'terminal',
+    assignedCompanionMode: null,
+    poleDisplayDeviceId: null,
+    companionDeviceId: null,
+    terminalId: null,
+    staffName: currentUserStaff?.name || null,
+    longTermAssignment: null,
+    displaySnapshot: null,
+  });
   const ref = useRef<HTMLDivElement>(null);
   const walletBalance = currentUserStaff?.walletBalance || 0;
 
@@ -101,6 +127,58 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  useEffect(() => {
+    setCompanionState(prev => ({ ...prev, staffName: currentUserStaff?.name || null }));
+  }, [currentUserStaff?.name]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<Partial<CompanionMenuState>>).detail || {};
+      setCompanionState(prev => ({ ...prev, ...detail }));
+    };
+    window.addEventListener('jpos:companion-state', handler);
+    return () => window.removeEventListener('jpos:companion-state', handler);
+  }, []);
+
+  useEffect(() => {
+    if (open) window.dispatchEvent(new CustomEvent('jpos:companion-state-request'));
+  }, [open]);
+
+  const changeCompanionMode = (mode: CompanionMenuMode) => {
+    setCompanionState(prev => ({
+      ...prev,
+      companionMode: mode,
+      assignedCompanionMode: mode === 'terminal' ? null : prev.assignedCompanionMode,
+    }));
+    window.dispatchEvent(new CustomEvent('jpos:companion-mode-change', { detail: { mode } }));
+  };
+
+  const companionStatus = companionState.companionMode === 'terminal'
+    ? companionState.longTermAssignment
+      ? `Assigned to ${companionState.longTermAssignment.workstationName || 'a workstation'} long term.${companionState.poleDisplayDeviceId ? ' Display paired.' : ''}`
+      : `Devices logged in as ${companionState.staffName || 'this staff member'} pair to this account automatically.${companionState.poleDisplayDeviceId ? ' Display paired.' : ''}`
+    : companionState.assignedCompanionMode === 'pole_display'
+      ? 'This device is acting as the customer display.'
+      : companionState.assignedCompanionMode
+        ? 'This device can control the terminal and scan barcodes.'
+        : 'Choose how this device should help this account.';
+
+  const companionModeOptions: Array<{ id: CompanionMenuMode; label: string; icon: React.ElementType; disabled?: boolean }> = [
+    { id: 'terminal', label: 'Terminal', icon: MonitorUp },
+    { id: 'remote_control', label: 'Remote', icon: Smartphone },
+    { id: 'wireless_scanner', label: 'Scanner', icon: ScanLine },
+    {
+      id: 'pole_display',
+      label: 'Display',
+      icon: MonitorUp,
+      disabled: Boolean(
+        companionState.poleDisplayDeviceId &&
+        companionState.poleDisplayDeviceId !== companionState.companionDeviceId &&
+        companionState.assignedCompanionMode !== 'pole_display'
+      ),
+    },
+  ];
 
   return (
     <div className="relative" ref={ref}>
@@ -123,7 +201,7 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700/60 overflow-hidden z-50">
+        <div className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-1rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700/60 overflow-hidden z-50">
           {/* Profile header */}
           <div className="p-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3">
@@ -153,6 +231,66 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
                 My Profile
               </button>
             </div>
+          </div>
+
+          {/* Daily operation tools */}
+          <div className="p-3 border-b border-slate-100 dark:border-slate-800">
+            <PrinterReadinessPanel tenantId={tenantId} compact />
+          </div>
+
+          <div className="p-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-start gap-3">
+              <Smartphone className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Companion device</p>
+                <p className="mt-0.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 leading-snug">{companionStatus}</p>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-4 gap-1.5">
+              {companionModeOptions.map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  disabled={Boolean(option.disabled)}
+                  onClick={() => changeCompanionMode(option.id)}
+                  title={option.disabled ? 'A display is already paired to this terminal' : option.label}
+                  className={`h-10 rounded-xl text-[9px] font-black uppercase tracking-widest flex flex-col items-center justify-center gap-0.5 border transition-all disabled:opacity-40 ${
+                    companionState.companionMode === option.id
+                      ? 'bg-primary text-white border-primary shadow-sm'
+                      : 'bg-slate-50 dark:bg-slate-950/50 text-slate-500 dark:text-slate-300 border-slate-100 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <option.icon className="w-3.5 h-3.5" />
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            {companionState.assignedCompanionMode === 'wireless_scanner' && (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('jpos:companion-open-scanner'))}
+                className="mt-3 w-full h-11 rounded-xl bg-primary text-white text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95"
+              >
+                <ScanLine className="w-4 h-4" />
+                Scan to terminal
+              </button>
+            )}
+            {companionState.assignedCompanionMode === 'remote_control' && (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Terminal total</p>
+                  <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">R{Number(companionState.displaySnapshot?.total || 0).toFixed(2)}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('jpos:companion-clear-terminal'))}
+                  className="min-h-14 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/40 text-rose-600 dark:text-rose-300 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Clear terminal
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Actions */}
@@ -861,6 +999,7 @@ export default function App() {
             isInstalled={isInstalled}
             installApp={installApp}
             onShowInstallGuide={() => setShowInstallGuide(true)}
+            tenantId={tenantId}
           />
 
           {view === 'pos' && (
