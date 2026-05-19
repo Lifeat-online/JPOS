@@ -8,11 +8,11 @@ interface SplitPaymentModalProps {
   isProcessing: boolean;
   onConfirm: (payments: any[]) => void;
   onClose: () => void;
-  staffWalletBalance?: number;
+  customerWalletBalance?: number;
 }
 
 export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
-  isOpen, cartTotal, isProcessing, onConfirm, onClose, staffWalletBalance = 0
+  isOpen, cartTotal, isProcessing, onConfirm, onClose, customerWalletBalance = 0
 }) => {
   const [payments, setPayments] = useState<any[]>([]);
   const [currentMethod, setCurrentMethod] = useState<'cash' | 'card' | 'wallet'>('cash');
@@ -113,6 +113,7 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
                 </button>
                 <button
                   onClick={() => setCurrentMethod('wallet')}
+                  disabled={customerWalletBalance <= 0}
                   className={`flex-1 py-3 flex flex-col items-center gap-1 rounded-xl transition-all ${currentMethod === 'wallet' ? 'bg-white dark:bg-slate-800 shadow-sm text-primary' : 'text-slate-400'}`}
                 >
                   <Wallet className="w-5 h-5" />
@@ -133,6 +134,12 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
                     className="w-full text-2xl font-black px-4 py-4 bg-white dark:bg-[#0B1120] border-2 border-slate-200 dark:border-slate-700/60 rounded-2xl focus:outline-none focus:border-primary/50"
                   />
                 </div>
+
+                {currentMethod === 'wallet' && (
+                  <p className="text-[10px] font-black uppercase tracking-widest text-violet-500 px-1">
+                    Client wallet: R{Number(customerWalletBalance || 0).toFixed(2)}
+                  </p>
+                )}
 
                 {currentMethod === 'cash' && (
                   <div>
@@ -168,7 +175,7 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
 
                 <button
                   onClick={addPayment}
-                  disabled={!currentAmount || Number(currentAmount) <= 0 || (currentMethod === 'wallet' && Number(currentAmount) > staffWalletBalance)}
+                  disabled={!currentAmount || Number(currentAmount) <= 0 || (currentMethod === 'wallet' && (customerWalletBalance <= 0 || Number(currentAmount) > customerWalletBalance))}
                   className="w-full py-5 bg-slate-900 dark:bg-primary text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 flex justify-center items-center gap-2 mt-4"
                 >
                   <Plus className="w-4 h-4" />

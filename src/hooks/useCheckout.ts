@@ -280,6 +280,25 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
   const handleCheckout = async (method: 'cash' | 'payfast' | 'card' | 'wallet' | 'split', splitPayments?: any[]) => {
     if (cart.length === 0 || !tenantId) return;
+    const selectedCustomer = selectedCustomerId
+      ? customers.find(c => c.id === selectedCustomerId) || null
+      : null;
+    const walletAmount = method === 'wallet'
+      ? cartTotalAfterDiscount
+      : (splitPayments || []).reduce((sum, p) => sum + (p.method === 'wallet' ? Number(p.amount || 0) : 0), 0);
+
+    if (walletAmount > 0) {
+      const walletBalance = Number(selectedCustomer?.walletBalance || 0);
+      if (!selectedCustomer || walletBalance <= 0) {
+        alert('Select a client with a positive wallet balance before using wallet payment.');
+        return;
+      }
+      if (walletBalance < walletAmount) {
+        alert(`Client wallet balance is R${walletBalance.toFixed(2)}, which is not enough for this wallet payment.`);
+        return;
+      }
+    }
+
     setIsProcessing(true);
 
     try {
@@ -397,12 +416,12 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
             .catch(e => console.warn('Failed to update staff metrics:', e));
         }
         
-        // Handle Wallet deduction if split contains wallet
+        // Handle client wallet deduction if split contains wallet or wallet checkout is used
         if (method === 'split' || method === 'wallet') {
           const walletPayment = saleData.payments.find((p: any) => p.method === 'wallet');
-          if (walletPayment && currentUserStaff) {
-            await updateStaff(tenantId, currentUserStaff.id, {
-              walletBalance: (currentUserStaff.walletBalance || 0) - walletPayment.amount
+          if (walletPayment && selectedCustomer) {
+            await updateCustomer(tenantId, selectedCustomer.id, {
+              walletBalance: Number(selectedCustomer.walletBalance || 0) - Number(walletPayment.amount || 0)
             }).catch(e => console.warn('Failed to update wallet balance:', e));
           }
         }

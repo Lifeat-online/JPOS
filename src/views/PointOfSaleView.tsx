@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
-  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Maximize, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Settings
+  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Maximize, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Settings, Printer
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -9,6 +9,7 @@ import { Product, Customer, Sale, Workstation, RestaurantTable } from '../types'
 import { CustomerSelector } from '../components/CustomerSelector';
 import { usePosStore } from '../store/usePosStore';
 import { WorkstationQueuePanel } from '../components/WorkstationQueuePanel';
+import { BillPrint } from '../components/BillPrint';
 
 interface PointOfSaleViewProps {
   products: Product[];
@@ -70,6 +71,13 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   };
 
   const cartTotal = useMemo(() => cart.reduce((total, item) => total + (item.price * item.quantity), 0), [cart]);
+  const amountDue = Math.max(0, cartTotal - pointsDiscount);
+  const selectedCustomer = useMemo(
+    () => selectedCustomerId ? customers.find(c => c.id === selectedCustomerId) || null : null,
+    [customers, selectedCustomerId]
+  );
+  const selectedCustomerWalletBalance = Number(selectedCustomer?.walletBalance || 0);
+  const canPayWithCustomerWallet = Boolean(selectedCustomer && selectedCustomerWalletBalance > 0);
   const activeWorkstations = useMemo(() => workstations.filter(w => w.status === 'active'), [workstations]);
   const attachedWorkstation = activeWorkstations.find(w => w.id === attachedWorkstationId);
   const workstationPreferenceKey = `pos-attached-workstation:${tenantId || 'local'}`;
@@ -138,6 +146,11 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     }
   };
 
+  const printBill = () => {
+    if (cart.length === 0) return;
+    window.print();
+  };
+
   const allowedCategories = useMemo(() => {
     if (!currentUserStaff || currentUserStaff.role !== 'cashier') return CATEGORIES;
     const hasSectionRestriction = Array.isArray(currentUserStaff.assignedSections) && currentUserStaff.assignedSections.length > 0;
@@ -199,6 +212,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
   return (
     <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden relative">
+      {cart.length > 0 && (
+        <BillPrint
+          cart={cart}
+          customer={selectedCustomer}
+          config={config}
+          subtotal={cartTotal}
+          discount={pointsDiscount}
+        />
+      )}
       <nav className="w-full lg:w-24 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-700/60 flex lg:flex-col items-center py-2 lg:py-6 px-4 lg:px-0 gap-3 lg:gap-6 overflow-x-auto no-scrollbar shrink-0 shadow-sm lg:shadow-none z-10">
         {allowedCategories.map(cat => (
           <button
@@ -518,14 +540,23 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   </div>
                   <div className="text-right">
                     {pointsDiscount > 0 && (
-                      <div className="text-xs font-bold text-slate-400 line-through">R{(Number(cartTotal) + Number(pointsDiscount)).toFixed(2)}</div>
+                      <div className="text-xs font-bold text-slate-400 line-through">R{Number(cartTotal).toFixed(2)}</div>
                     )}
-                    <span className="font-black text-4xl text-slate-900 dark:text-white tracking-tighter">R{Number(cartTotal).toFixed(2)}</span>
+                    <span className="font-black text-4xl text-slate-900 dark:text-white tracking-tighter">R{Number(amountDue).toFixed(2)}</span>
                     {pointsDiscount > 0 && (
-                      <div className="text-[10px] font-bold text-emerald-500">−R{Number(pointsDiscount).toFixed(2)} discount applied</div>
+                      <div className="text-[10px] font-bold text-emerald-500">-R{Number(pointsDiscount).toFixed(2)} discount applied</div>
                     )}
                   </div>
                 </div>
+
+                <button
+                  disabled={isProcessing || cart.length === 0}
+                  onClick={printBill}
+                  className="w-full mb-4 h-14 rounded-2xl bg-slate-50 dark:bg-[#0B1120] text-slate-700 dark:text-slate-200 font-black transition-all hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 active:scale-95 border border-slate-200 dark:border-slate-700/60 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
+                >
+                  <Printer className="w-4 h-4" />
+                  Print Bill
+                </button>
 
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   <button 
@@ -563,17 +594,17 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   Split Payment
                 </button>
 
-                {/* Wallet payment — only shown if staff has a balance */}
-                {currentUserStaff && (currentUserStaff.walletBalance || 0) > 0 && (
+                {/* Wallet payment: only shown for selected clients with wallet funds. */}
+                {canPayWithCustomerWallet && (
                   <button
-                    disabled={isProcessing || cart.length === 0 || (currentUserStaff.walletBalance || 0) < cartTotal}
+                    disabled={isProcessing || cart.length === 0 || selectedCustomerWalletBalance < amountDue}
                     onClick={handleWalletCheckout}
                     className="w-full mb-4 h-14 rounded-2xl bg-violet-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 shadow-lg shadow-violet-600/30 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
                   >
                     <Wallet className="w-4 h-4" />
                     Pay with Wallet
                     <span className="ml-auto bg-white/20 px-2 py-0.5 rounded-lg text-[10px]">
-                      R{Number(currentUserStaff.walletBalance || 0).toFixed(2)} available
+                      R{selectedCustomerWalletBalance.toFixed(2)} available
                     </span>
                   </button>
                 )}

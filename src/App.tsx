@@ -424,7 +424,7 @@ export default function App() {
     tenantLoading, configLoading, isStaffLoading,
   } = useAppData(authLoading ? null : user);
 
-  const { cart, setCart, setActiveCategory, setSelectedCustomerId, setActiveTableNumber, setActiveOrderId } = usePosStore();
+  const { cart, setCart, setActiveCategory, setSelectedCustomerId, setActiveTableNumber, setActiveOrderId, selectedCustomerId } = usePosStore();
   const storeActiveSession = usePosStore(s => s.activeSession);
   const addToCart = usePosStore(s => s.addToCart);
   const tenantId = usePosStore(s => s.tenantId);
@@ -1110,7 +1110,7 @@ export default function App() {
             isOpen={checkout.splitPaymentModal}
             cartTotal={checkout.cartTotal}
             isProcessing={checkout.isProcessing}
-            staffWalletBalance={currentUserStaff?.walletBalance || 0}
+            customerWalletBalance={customers.find(c => c.id === selectedCustomerId)?.walletBalance || 0}
             onConfirm={(payments) => checkout.handleCheckout('split', payments)}
             onClose={() => checkout.setSplitPaymentModal(false)}
           />
