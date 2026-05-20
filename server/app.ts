@@ -4,6 +4,7 @@ import path from "path";
 import cors from "cors";
 import bodyParser from "body-parser";
 import crypto from "crypto";
+import fs from "fs/promises";
 import { fileURLToPath } from "url";
 import { getConnection, isPostgres, query } from "./db.js";
 import { initDb } from "./init-db.js";
@@ -139,6 +140,23 @@ function safeJsonField(value: unknown, fallback: any) {
   } catch {
     return fallback;
   }
+}
+
+function parseImageDataUrl(dataUrl: unknown) {
+  const value = String(dataUrl || "");
+  const match = value.match(/^data:(image\/(?:png|jpeg|jpg|webp|gif|svg\+xml));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+
+  const mimeType = match[1] === "image/jpg" ? "image/jpeg" : match[1];
+  const buffer = Buffer.from(match[2], "base64");
+  const extension =
+    mimeType === "image/png" ? "png" :
+    mimeType === "image/jpeg" ? "jpg" :
+    mimeType === "image/webp" ? "webp" :
+    mimeType === "image/gif" ? "gif" :
+    "svg";
+
+  return { buffer, mimeType, extension };
 }
 
 function cashSessionResponse(r: any) {
@@ -330,6 +348,7 @@ export async function createApp(io: any = null) {
   app.use(cors());
   app.use(bodyParser.json({ limit: "25mb" }));
   app.use(bodyParser.urlencoded({ extended: true, limit: "25mb" }));
+  app.use('/uploads', express.static(path.resolve(__dirname, '..', 'public', 'uploads')));
 
   if (process.env.JPOS_HOSTED === "true") {
     const { licenceRouter } = await import("./licenceServer.js");
@@ -810,6 +829,52 @@ export async function createApp(io: any = null) {
       }
       await updateAppConfig(req.params.tenantId, req.body);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/settings/logo", requireAuth, async (req, res) => {
+    try {
+      const context = await getTenantPackageContext(req.params.tenantId);
+      if (!hasPackageFeature(context.package.features, "own_logo")) {
+        return res.status(403).json({
+          error: "Feature not available on your package",
+          package: context.package.id,
+          feature: "own_logo",
+          upgrade: "Upgrade your JPOS package to upload your own logo",
+        });
+      }
+
+      const parsed = parseImageDataUrl(req.body?.dataUrl);
+      if (!parsed) {
+        return res.status(400).json({ error: "Upload a PNG, JPG, WebP, GIF, or SVG logo file" });
+      }
+      if (parsed.buffer.length > 2 * 1024 * 1024) {
+        return res.status(413).json({ error: "Logo file is too large. Use an image smaller than 2MB" });
+      }
+
+      const tenantId = req.params.tenantId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const uploadDir = path.resolve(__dirname, "..", "public", "uploads", "tenant-logos");
+      await fs.mkdir(uploadDir, { recursive: true });
+      const fileName = `${tenantId}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${parsed.extension}`;
+      await fs.writeFile(path.join(uploadDir, fileName), parsed.buffer);
+      const logoUrl = `/uploads/tenant-logos/${fileName}`;
+
+      const currentConfig = await getAppConfigByTenant(req.params.tenantId);
+      if (!currentConfig) {
+        return res.status(404).json({ error: "Tenant settings not found" });
+      }
+      const nextConfig = {
+        ...currentConfig,
+        business: {
+          ...(currentConfig.business || {}),
+          logoUrl,
+        },
+      };
+      await updateAppConfig(req.params.tenantId, nextConfig);
+
+      res.json({ logoUrl, config: nextConfig });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

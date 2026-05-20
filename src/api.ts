@@ -389,6 +389,10 @@ export function updateTenantConfig(tenantId: string, config: any) {
   return apiPut<any>(`/api/mariadb/tenants/${tenantId}/settings/app`, config);
 }
 
+export function uploadTenantLogo(tenantId: string, data: { dataUrl: string; filename: string; mimeType: string }) {
+  return apiPost<{ logoUrl: string; config?: any }>(`/api/mariadb/tenants/${tenantId}/settings/logo`, data);
+}
+
 export function seedProducts(tenantId: string, products: any[]) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/seed-products`, { products });
 }

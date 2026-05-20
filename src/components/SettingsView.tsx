@@ -1,9 +1,9 @@
 import { usePosStore } from '../store/usePosStore';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
-import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send, Smartphone, Printer, Eye, RotateCcw } from 'lucide-react';
+import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send, Smartphone, Printer, Eye, RotateCcw, Upload } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
-import { apiGet, apiPut, apiPost, apiDelete, assignCompanionDevice, getCompanionDeviceAssignments, getTenantPackageLimits, getAiSettings, listAiModels, revokeCompanionDeviceAssignment, testAiProvider, updateAiSettings, type TenantPackageLimitsResponse } from '../api';
+import { apiGet, apiPut, apiPost, apiDelete, assignCompanionDevice, getCompanionDeviceAssignments, getTenantPackageLimits, getAiSettings, listAiModels, revokeCompanionDeviceAssignment, testAiProvider, updateAiSettings, uploadTenantLogo, type TenantPackageLimitsResponse } from '../api';
 import { JPOS_PACKAGES } from '../../shared/packageCatalog';
 import type { AiModelOption, AiProviderName, AiRole, AiSettings } from '../types';
 import { buildReceiptPrintCss, getReceiptPaperProfile, RECEIPT_PAPER_OPTIONS, normalizeReceiptPrintSettings } from '../utils/receiptPrinting';
@@ -38,6 +38,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const [aiTestTranscript, setAiTestTranscript] = useState<Array<{ role: 'user' | 'assistant' | 'system'; text: string }>>([]);
   const [aiTestMedia, setAiTestMedia] = useState<Array<{ name: string; type: string; dataUrl: string }>>([]);
   const [printingReceiptTest, setPrintingReceiptTest] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
   const activeTabRef = useRef(activeTab);
   const aiSettingsRef = useRef<AiSettings | null>(aiSettings);
 
@@ -355,6 +357,47 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     setAiTestMedia(current => [...current, ...next].slice(0, 4));
   };
 
+  const uploadBusinessLogo = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file || !tenantId) return;
+    setLogoUploadError(null);
+    if (!canUseOwnLogo) {
+      setLogoUploadError('Logo uploads are available on Starter, Business, and White-label packages.');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setLogoUploadError('Upload an image file for the logo.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setLogoUploadError('Logo file is too large. Use an image smaller than 2MB.');
+      return;
+    }
+
+    setLogoUploading(true);
+    try {
+      const dataUrl = await readSettingsFileAsDataUrl(file);
+      const response = await uploadTenantLogo(tenantId, {
+        dataUrl,
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+      });
+      const nextConfig = response.config ? response.config as AppConfig : {
+        ...formData,
+        business: {
+          ...formData.business,
+          logoUrl: response.logoUrl,
+        },
+      } as AppConfig;
+      setFormData(nextConfig);
+      setConfig(nextConfig);
+    } catch (err: any) {
+      setLogoUploadError(err?.message || 'Logo upload failed.');
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
   useEffect(() => {
     setAiModels([]);
     setAiModelsError(null);
@@ -440,6 +483,12 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const packageTier = formData.business?.packageTier || packageLimits?.package.id || 'free';
   const selectedPackage = JPOS_PACKAGES.find(pkg => pkg.id === packageTier) || JPOS_PACKAGES[0];
   const canEditPackage = packageLimits?.source !== 'licence';
+  const canUseOwnLogo = Boolean(
+    packageLimits?.package.features.includes('own_logo') ||
+    packageLimits?.package.features.includes('full_branding') ||
+    selectedPackage.features.includes('own_logo') ||
+    selectedPackage.features.includes('full_branding')
+  );
   const aiProviders: Array<{ id: AiProviderName; label: string; defaultModel: string; note: string }> = [
     { id: 'openai', label: 'OpenAI', defaultModel: 'gpt-5-mini', note: 'Uses OPENAI_API_KEY on the server.' },
     { id: 'ollama', label: 'Ollama local', defaultModel: 'llama3.1', note: 'Uses local Ollama, default http://localhost:11434.' },
@@ -486,6 +535,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     .slice(0, 2)
     .map(part => part[0]?.toUpperCase())
     .join('') || 'JP';
+  const jimmyPosLogoUrl = '/icons/icon-512.png';
 
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50 dark:bg-slate-950">
@@ -496,14 +546,14 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
         </div>
 
         <div className="flex gap-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar">
-          <button 
+          <button
             onClick={() => setActiveTab('business')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'business' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Store className="w-4 h-4" />
             General
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('features')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'features' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
@@ -524,35 +574,35 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
             <BrainCircuit className="w-4 h-4" />
             AI
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('payment')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'payment' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <CreditCard className="w-4 h-4" />
             Payments
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('tax')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'tax' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Calculator className="w-4 h-4" />
             Tax
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('printing')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'printing' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Receipt className="w-4 h-4" />
             Receipts
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('loyalty')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'loyalty' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Award className="w-4 h-4" />
             Loyalty
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('categories')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'categories' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
@@ -560,7 +610,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
             Categories
           </button>
           {config.business?.isRestaurantMode && (
-            <button 
+            <button
               onClick={() => setActiveTab('workstations')}
               className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'workstations' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
             >
@@ -569,7 +619,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
             </button>
           )}
           {config.business?.isRestaurantMode && (
-            <button 
+            <button
               onClick={() => setActiveTab('tables')}
               className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'tables' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
             >
@@ -582,51 +632,136 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
         <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 space-y-6">
           {activeTab === 'business' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Business Name</label>
-                  <input 
-                    type="text" 
-                    value={formData.business?.name || ''}
-                    onChange={e => setFormData({...formData, business: {...formData.business, name: e.target.value}} as AppConfig)}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
-                  />
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Business Name</label>
+                    <input
+                      type="text"
+                      value={formData.business?.name || ''}
+                      onChange={e => setFormData({...formData, business: {...formData.business, name: e.target.value}} as AppConfig)}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Logo URL</label>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({...formData, business: {...formData.business, logoUrl: jimmyPosLogoUrl}} as AppConfig)}
+                        className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-primary/80"
+                      >
+                        Use Jimmy's POS
+                      </button>
+                    </div>
+                    <input
+                      type="url"
+                      value={formData.business?.logoUrl || ''}
+                      onChange={e => setFormData({...formData, business: {...formData.business, logoUrl: e.target.value}} as AppConfig)}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                    />
+                    <div className={`rounded-2xl border p-4 ${canUseOwnLogo ? 'border-primary/20 bg-primary/5' : 'border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-900/20'}`}>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-black text-slate-900 dark:text-white">Upload logo</p>
+                          <p className="mt-0.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                            {canUseOwnLogo ? 'PNG, JPG, WebP, GIF, or SVG up to 2MB.' : 'Available on paid packages with own-logo branding.'}
+                          </p>
+                        </div>
+                        <label className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-widest transition-all ${canUseOwnLogo ? 'bg-primary text-white hover:bg-primary/90' : 'cursor-not-allowed bg-slate-200 text-slate-400 dark:bg-slate-800'}`}>
+                          {logoUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                          {logoUploading ? 'Uploading' : 'Choose file'}
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                            disabled={!canUseOwnLogo || logoUploading}
+                            onChange={e => {
+                              uploadBusinessLogo(e.target.files);
+                              e.currentTarget.value = '';
+                            }}
+                            className="sr-only"
+                          />
+                        </label>
+                      </div>
+                      {logoUploadError && <p className="mt-3 text-xs font-bold text-rose-600 dark:text-rose-300">{logoUploadError}</p>}
+                    </div>
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Address</label>
+                    <input
+                      type="text"
+                      value={formData.business?.address || ''}
+                      onChange={e => setFormData({...formData, business: {...formData.business, address: e.target.value}} as AppConfig)}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Phone</label>
+                    <input
+                      type="text"
+                      value={formData.business?.phone || ''}
+                      onChange={e => setFormData({...formData, business: {...formData.business, phone: e.target.value}} as AppConfig)}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Currency Symbol</label>
+                    <input
+                      type="text"
+                      value={formData.business?.currency || ''}
+                      onChange={e => setFormData({...formData, business: {...formData.business, currency: e.target.value}} as AppConfig)}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Logo URL</label>
-                  <input 
-                    type="url" 
-                    value={formData.business?.logoUrl || ''}
-                    onChange={e => setFormData({...formData, business: {...formData.business, logoUrl: e.target.value}} as AppConfig)}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
-                  />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Address</label>
-                  <input 
-                    type="text" 
-                    value={formData.business?.address || ''}
-                    onChange={e => setFormData({...formData, business: {...formData.business, address: e.target.value}} as AppConfig)}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Phone</label>
-                  <input 
-                    type="text" 
-                    value={formData.business?.phone || ''}
-                    onChange={e => setFormData({...formData, business: {...formData.business, phone: e.target.value}} as AppConfig)}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Currency Symbol</label>
-                  <input 
-                    type="text" 
-                    value={formData.business?.currency || ''}
-                    onChange={e => setFormData({...formData, business: {...formData.business, currency: e.target.value}} as AppConfig)}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
-                  />
+
+                <div className="rounded-3xl border border-slate-100 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-950/60">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-black text-slate-900 dark:text-white">Settings Preview</h3>
+                      <p className="text-xs font-bold text-slate-400">Business identity</p>
+                    </div>
+                    <span className="rounded-lg bg-primary/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-primary">
+                      Tenant
+                    </span>
+                  </div>
+
+                  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="bg-slate-900 px-4 py-3 text-white dark:bg-slate-800">
+                      <div className="flex items-center gap-3">
+                        {formData.business?.logoUrl ? (
+                          <img src={formData.business.logoUrl} alt="Business logo preview" className="h-10 w-10 rounded-xl bg-white object-contain p-1" />
+                        ) : (
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-sm font-black text-white">{logoInitials}</div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-black leading-tight">{formData.business?.name || "Jimmy's POS"}</p>
+                          <p className="truncate text-[11px] font-bold text-slate-300">{formData.business?.phone || 'No phone set'}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 p-4">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Address</p>
+                        <p className="mt-1 text-sm font-bold text-slate-700 dark:text-slate-200">{formData.business?.address || 'No address set'}</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Currency</p>
+                          <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">{formData.business?.currency || 'R'}</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Mode</p>
+                          <p className="mt-1 text-sm font-black text-slate-900 dark:text-white">{formData.business?.isRestaurantMode ? 'Restaurant' : 'Retail'}</p>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-dashed border-slate-300 p-3 dark:border-slate-700">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Receipt logo</p>
+                        <p className="mt-1 break-all text-xs font-semibold text-slate-500 dark:text-slate-400">{formData.business?.logoUrl || 'Logo not set'}</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -636,8 +771,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
             <div className="space-y-6">
               <div className="space-y-4">
                 <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     id="restaurantMode"
                     checked={formData.business?.isRestaurantMode || false}
                     onChange={e => setFormData({...formData, business: {...formData.business, isRestaurantMode: e.target.checked}} as AppConfig)}
@@ -650,8 +785,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                 </div>
 
                 <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     id="loyaltyMode"
                     checked={formData.business?.enableLoyalty || false}
                     onChange={e => setFormData({...formData, business: {...formData.business, enableLoyalty: e.target.checked}} as AppConfig)}
@@ -1032,8 +1167,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                  <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">Accepted Methods</h3>
                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       id="enableCash"
                       checked={formData.enableCash !== false}
                       onChange={e => setFormData({...formData, enableCash: e.target.checked})}
@@ -1042,8 +1177,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                     <label htmlFor="enableCash" className="text-sm font-bold dark:text-white">Cash</label>
                   </div>
                   <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       id="enableCard"
                       checked={formData.enableCard !== false}
                       onChange={e => setFormData({...formData, enableCard: e.target.checked})}
@@ -1053,16 +1188,16 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   </div>
                  </div>
               </div>
-              
+
               <div className="space-y-4 pt-6 border-t border-slate-100 dark:border-slate-800">
                 <div>
                   <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">PayFast Integration</h3>
                   <p className="text-xs text-slate-500 mt-1">Accept online payments or payment links via PayFast.</p>
                 </div>
-                
+
                 <div className="flex items-center gap-3 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-900/50">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     id="sandbox"
                     checked={formData.payfastSandbox}
                     onChange={e => setFormData({...formData, payfastSandbox: e.target.checked})}
@@ -1074,8 +1209,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-xs font-black uppercase tracking-widest text-slate-500">Merchant ID</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={formData.payfastMerchantId || ''}
                       onChange={e => setFormData({...formData, payfastMerchantId: e.target.value})}
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
@@ -1083,8 +1218,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-black uppercase tracking-widest text-slate-500">Merchant Key</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={formData.payfastMerchantKey || ''}
                       onChange={e => setFormData({...formData, payfastMerchantKey: e.target.value})}
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
@@ -1092,8 +1227,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   </div>
                   <div className="space-y-2 sm:col-span-2">
                     <label className="text-xs font-black uppercase tracking-widest text-slate-500">Passphrase</label>
-                    <input 
-                      type="password" 
+                    <input
+                      type="password"
                       value={formData.payfastPassphrase || ''}
                       onChange={e => setFormData({...formData, payfastPassphrase: e.target.value})}
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
@@ -1109,8 +1244,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase tracking-widest text-slate-500">Tax/VAT Name</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.business?.taxName || 'VAT'}
                     onChange={e => setFormData({...formData, business: {...formData.business, taxName: e.target.value}} as AppConfig)}
                     className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
@@ -1119,18 +1254,18 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase tracking-widest text-slate-500">Tax Rate (%)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     value={formData.business?.taxRate || ''}
                     onChange={e => setFormData({...formData, business: {...formData.business, taxRate: parseFloat(e.target.value)}} as AppConfig)}
                     className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
                   />
                 </div>
-                
+
                 <div className="space-y-2 sm:col-span-2">
                   <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       id="taxInclusive"
                       checked={formData.business?.taxInclusive !== false}
                       onChange={e => setFormData({...formData, business: {...formData.business, taxInclusive: e.target.checked}} as AppConfig)}
@@ -1431,7 +1566,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                     <label className="text-xs font-black uppercase tracking-widest text-slate-500">Points Earned Per [Currency Spent]</label>
                     <div className="flex items-center gap-4">
                       <span className="text-sm font-bold text-slate-500">Earn 1 point for every</span>
-                      <input 
+                      <input
                         type="number"
                         min="1"
                         value={formData.business?.pointsEarnedPerCurrency || ''}
@@ -1442,12 +1577,12 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                       <span className="text-sm font-bold text-slate-500">{formData.business?.currency || 'USD'} spent.</span>
                     </div>
                   </div>
-                  
+
                   <div className="space-y-2 sm:col-span-2 pt-6 border-t border-slate-100 dark:border-slate-800">
                     <label className="text-xs font-black uppercase tracking-widest text-slate-500">Discount Redemption Value</label>
                     <div className="flex items-center gap-4">
                       <span className="text-sm font-bold text-slate-500">Redeem</span>
-                      <input 
+                      <input
                         type="number"
                         min="1"
                         value={formData.business?.pointsRequiredForDiscount || ''}
@@ -1456,7 +1591,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                         placeholder="100"
                       />
                       <span className="text-sm font-bold text-slate-500">points for a discount of</span>
-                      <input 
+                      <input
                         type="number"
                         min="1"
                         value={formData.business?.discountAmountForPoints || ''}
@@ -1473,7 +1608,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   <Award className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">Loyalty is Disabled</h3>
                   <p className="text-sm text-slate-500 mb-6 max-w-md mx-auto">Enable the loyalty program in the Features tab to let your customers earn points on their purchases.</p>
-                  <button 
+                  <button
                     onClick={() => setActiveTab('features')}
                     className="px-6 py-2 bg-white dark:bg-slate-900 text-primary border border-slate-200 dark:border-slate-700 font-bold rounded-xl shadow-sm text-sm"
                   >
@@ -1506,7 +1641,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                         <button onClick={() => removeSection(section)} className="text-red-500 p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><Trash2 className="w-4 h-4" /></button>
                       </div>
                     </div>
-                    
+
                     <div className="space-y-2 p-2 pt-0">
                       {Object.entries(categories).map(([category, subcategories]) => (
                         <div key={category} className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-3 rounded-xl ml-4">
@@ -1803,7 +1938,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           {/* Save button — hidden on workstations tab (it has its own save) */}
           {activeTab !== 'workstations' && activeTab !== 'tables' && activeTab !== 'ai' && (
           <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
-            <button 
+            <button
               onClick={handleSave}
               disabled={isSaving}
               className="px-8 py-4 bg-primary text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center gap-3 hover:bg-primary/90 transition-all shadow-xl shadow-primary/20"
@@ -1823,9 +1958,9 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
               Add {categoryInput.type.charAt(0).toUpperCase() + categoryInput.type.slice(1)}
             </h3>
             {categoryInput.section && <p className="text-xs text-slate-500 mb-2">in {categoryInput.section} {categoryInput.category ? `> ${categoryInput.category}` : ''}</p>}
-            <input 
+            <input
               autoFocus
-              type="text" 
+              type="text"
               value={inputValue}
               onChange={e => setInputValue(e.target.value)}
               className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none mb-6"
@@ -1833,13 +1968,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
               onKeyDown={e => { if (e.key === 'Enter') handleInputSubmit(); }}
             />
             <div className="flex gap-2 justify-end">
-              <button 
+              <button
                 onClick={() => setCategoryInput({ isOpen: false, type: 'section' })}
                 className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl"
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={handleInputSubmit}
                 disabled={!inputValue.trim()}
                 className="px-4 py-2 bg-primary text-white font-bold rounded-xl disabled:opacity-50"
