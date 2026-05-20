@@ -501,16 +501,19 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const receiptPrint = normalizeReceiptPrintSettings(formData.business?.receiptPrint);
   const receiptProfile = getReceiptPaperProfile(receiptPrint);
   const updateReceiptPrint = (updates: Partial<typeof receiptPrint>) => {
-    setFormData({
-      ...formData,
-      business: {
-        ...formData.business,
-        receiptPrint: {
-          ...receiptPrint,
-          ...updates,
+    setFormData(current => {
+      const currentReceiptPrint = normalizeReceiptPrintSettings(current.business?.receiptPrint);
+      return {
+        ...current,
+        business: {
+          ...current.business,
+          receiptPrint: {
+            ...currentReceiptPrint,
+            ...updates,
+          },
         },
-      },
-    } as AppConfig);
+      } as AppConfig;
+    });
   };
   const resetReceiptPrint = () => {
     updateReceiptPrint({
@@ -536,6 +539,22 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     .map(part => part[0]?.toUpperCase())
     .join('') || 'JP';
   const jimmyPosLogoUrl = '/icons/icon-512.png';
+  const receiptPreviewLogoPx =
+    receiptPrint.logoMode === 'large' ? 76 :
+    receiptPrint.logoMode === 'compact' ? 32 :
+    receiptPrint.logoMode === 'none' || !receiptPrint.showLogo ? 0 :
+    52;
+  const receiptPreviewKey = [
+    receiptPrint.paperSize,
+    receiptProfile.widthMm,
+    receiptPrint.fontSizePx,
+    receiptPrint.logoMode,
+    receiptPrint.showLogo,
+    receiptPrint.itemNameMode,
+    formData.business?.logoUrl || 'no-logo',
+    formData.business?.receiptHeader || 'no-header',
+    formData.business?.receiptFooter || 'no-footer',
+  ].join(':');
 
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50 dark:bg-slate-950">
@@ -632,8 +651,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
         <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 space-y-6">
           {activeTab === 'business' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-xs font-black uppercase tracking-widest text-slate-500">Business Name</label>
                     <input
@@ -713,56 +731,6 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
                     />
                   </div>
-                </div>
-
-                <div className="rounded-3xl border border-slate-100 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-950/60">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="font-black text-slate-900 dark:text-white">Settings Preview</h3>
-                      <p className="text-xs font-bold text-slate-400">Business identity</p>
-                    </div>
-                    <span className="rounded-lg bg-primary/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-primary">
-                      Tenant
-                    </span>
-                  </div>
-
-                  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="bg-slate-900 px-4 py-3 text-white dark:bg-slate-800">
-                      <div className="flex items-center gap-3">
-                        {formData.business?.logoUrl ? (
-                          <img src={formData.business.logoUrl} alt="Business logo preview" className="h-10 w-10 rounded-xl bg-white object-contain p-1" />
-                        ) : (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-sm font-black text-white">{logoInitials}</div>
-                        )}
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-black leading-tight">{formData.business?.name || "Jimmy's POS"}</p>
-                          <p className="truncate text-[11px] font-bold text-slate-300">{formData.business?.phone || 'No phone set'}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3 p-4">
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Address</p>
-                        <p className="mt-1 text-sm font-bold text-slate-700 dark:text-slate-200">{formData.business?.address || 'No address set'}</p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Currency</p>
-                          <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">{formData.business?.currency || 'R'}</p>
-                        </div>
-                        <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Mode</p>
-                          <p className="mt-1 text-sm font-black text-slate-900 dark:text-white">{formData.business?.isRestaurantMode ? 'Restaurant' : 'Retail'}</p>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-dashed border-slate-300 p-3 dark:border-slate-700">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Receipt logo</p>
-                        <p className="mt-1 break-all text-xs font-semibold text-slate-500 dark:text-slate-400">{formData.business?.logoUrl || 'Logo not set'}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
           )}
@@ -1323,7 +1291,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                 })}
               </div>
 
-              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-6">
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_440px] gap-6">
                 <div className="space-y-6">
                   <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-800/40">
                     <div className="mb-4 flex items-center gap-2">
@@ -1451,28 +1419,57 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 xl:sticky xl:top-4">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div>
-                      <h4 className="font-black text-slate-900 dark:text-white">Live Preview</h4>
-                      <p className="text-xs font-bold text-slate-400">{receiptProfile.label}</p>
+                      <h4 className="font-black text-slate-900 dark:text-white">Receipt Preview</h4>
+                      <p className="text-xs font-bold text-slate-400">Updates as you edit these receipt settings.</p>
                     </div>
                     <span className="rounded-lg bg-primary/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-primary">{receiptProfile.widthMm}mm</span>
                   </div>
+                  <div className="mb-4 grid grid-cols-3 gap-2">
+                    <div className="rounded-xl bg-slate-50 p-2 text-center dark:bg-slate-800">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Paper</p>
+                      <p className="mt-1 text-xs font-black text-slate-800 dark:text-white">{receiptProfile.label}</p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 p-2 text-center dark:bg-slate-800">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Text</p>
+                      <p className="mt-1 text-xs font-black text-slate-800 dark:text-white">{receiptPrint.fontSizePx}px</p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 p-2 text-center dark:bg-slate-800">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Logo</p>
+                      <p className="mt-1 text-xs font-black text-slate-800 dark:text-white">{receiptPrint.showLogo ? `${receiptPrint.logoMode} ${receiptPreviewLogoPx}px` : 'off'}</p>
+                    </div>
+                  </div>
                   <div className="overflow-x-auto rounded-2xl bg-slate-100 p-4 dark:bg-slate-950">
                     <div
+                      key={receiptPreviewKey}
                       className="mx-auto bg-white p-4 font-mono text-black shadow-lg"
                       style={{
-                        width: receiptProfile.isThermal ? `${Math.min(receiptProfile.widthMm * 2.5, 270)}px` : '270px',
+                        width: receiptProfile.isThermal ? `${Math.min(receiptProfile.widthMm * 3.2, 360)}px` : '360px',
                         fontSize: Math.max(10, Math.min(14, receiptProfile.fontSizePx)),
                       }}
                     >
                       <div className="text-center">
                         {receiptPrint.showLogo && receiptPrint.logoMode !== 'none' && (
                           formData.business?.logoUrl ? (
-                            <img src={formData.business.logoUrl} alt="Receipt preview logo" className="mx-auto mb-2 max-w-[80%] object-contain" style={{ maxHeight: receiptPrint.logoMode === 'large' ? 64 : receiptPrint.logoMode === 'compact' ? 30 : 44 }} />
+                            <img
+                              src={formData.business.logoUrl}
+                              alt="Receipt preview logo"
+                              className="mx-auto mb-2 max-w-[80%] object-contain transition-all duration-150"
+                              style={{ width: receiptPreviewLogoPx, height: receiptPreviewLogoPx }}
+                            />
                           ) : (
-                            <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full border-2 border-black text-sm font-black">{logoInitials}</div>
+                            <div
+                              className="mx-auto mb-2 flex items-center justify-center rounded-full border-2 border-black font-black transition-all duration-150"
+                              style={{
+                                width: receiptPreviewLogoPx,
+                                height: receiptPreviewLogoPx,
+                                fontSize: Math.max(10, Math.round(receiptPreviewLogoPx / 3)),
+                              }}
+                            >
+                              {logoInitials}
+                            </div>
                           )
                         )}
                         <div className="text-[1.25em] font-black uppercase leading-tight">{formData.business?.name || "JIMMY'S POS"}</div>
