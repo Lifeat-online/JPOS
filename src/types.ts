@@ -176,12 +176,23 @@ export interface BusinessSettings {
   currency?: string;
   receiptHeader?: string;
   receiptFooter?: string;
+  receiptPrint?: ReceiptPrintSettings;
   isRestaurantMode?: boolean;
   // Loyalty
   enableLoyalty?: boolean;
   pointsEarnedPerCurrency?: number;
   pointsRequiredForDiscount?: number;
   discountAmountForPoints?: number;
+}
+
+export interface ReceiptPrintSettings {
+  paperSize?: '58mm' | '80mm' | '112mm' | 'a4' | 'letter' | 'custom';
+  customPaperWidthMm?: number;
+  marginMm?: number;
+  fontSizePx?: number;
+  showLogo?: boolean;
+  logoMode?: 'none' | 'compact' | 'standard' | 'large';
+  itemNameMode?: 'wrap' | 'truncate';
 }
 
 export interface CategoryTree {

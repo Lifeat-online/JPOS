@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sale, AppConfig } from '../types';
 import { getDate } from '../utils/date';
+import { buildReceiptPrintCss, getReceiptPaperProfile } from '../utils/receiptPrinting';
 
 interface ReceiptProps {
   sale: Sale;
@@ -15,19 +16,30 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
   const subtotal = sale.subtotal ?? sale.total;
   const taxAmount = sale.taxAmount ?? (taxRate ? (taxInclusive ? subtotal - subtotal / (1 + taxRate / 100) : subtotal * (taxRate / 100)) : 0);
   const isRefund = sale.transactionType === 'refund' || Number(sale.total || 0) < 0;
+  const printProfile = getReceiptPaperProfile(config?.business?.receiptPrint);
+  const showLogo = Boolean(config?.business?.logoUrl && printProfile.showLogo && printProfile.logoMode !== 'none');
+  const itemNameClass = printProfile.itemNameMode === 'truncate' ? 'truncate' : 'receipt-text';
 
   const createdAt = getDate(sale.createdAt);
   const isValidDate = !isNaN(createdAt.getTime());
   const dateDisplay = isValidDate ? createdAt.toLocaleString() : '';
 
   return (
-    <div className="receipt-print-only fixed inset-0 bg-white text-black z-[9999] hidden p-4 flex-col text-[12px] font-mono leading-tight max-w-[80mm] mx-auto">
+    <div
+      className="receipt-print-only fixed inset-0 bg-white text-black z-[9999] hidden flex-col font-mono leading-tight mx-auto"
+      style={{ width: printProfile.contentWidth, maxWidth: printProfile.maxWidth, fontSize: printProfile.fontSizePx }}
+    >
       {/* Header */}
       <div className="text-center mb-4">
-        {config?.business?.logoUrl && (
-          <img src={config.business.logoUrl} alt="logo" className="h-12 mx-auto mb-2 object-contain" />
+        {showLogo && (
+          <img
+            src={config.business!.logoUrl}
+            alt="Business logo"
+            className="mx-auto mb-2 object-contain"
+            style={{ maxHeight: printProfile.logoMaxHeight, maxWidth: '80%' }}
+          />
         )}
-        <h1 className="font-bold text-xl uppercase mb-1">{config?.business?.name || "JIMMY'S POS"}</h1>
+        <h1 className="font-bold text-[1.35em] uppercase mb-1 receipt-text">{config?.business?.name || "JIMMY'S POS"}</h1>
         {config?.business?.address && <p>{config.business.address}</p>}
         {config?.business?.phone && <p>{config.business.phone}</p>}
         <div className="border-b border-black border-dashed my-2" />
@@ -54,8 +66,8 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
           <span className="w-20 text-right">Price</span>
         </div>
         {sale.items.map((item, idx) => (
-          <div key={idx} className="flex justify-between mb-1">
-            <span className="flex-1 pr-2 truncate">{item.name}</span>
+          <div key={idx} className="receipt-row flex justify-between mb-1">
+            <span className={`flex-1 pr-2 ${itemNameClass}`}>{item.name}</span>
             <span className="w-8 text-right">{item.quantity}</span>
             <span className="w-20 text-right">{currency}{(Number(item.price || 0) * Number(item.quantity || 0)).toFixed(2)}</span>
           </div>
@@ -156,18 +168,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
       </div>
 
       <style dangerouslySetInnerHTML={{__html: `
-        @media print {
-          body * { visibility: hidden; }
-          .receipt-print-only, .receipt-print-only * { visibility: visible; }
-          .receipt-print-only {
-            display: flex !important;
-            position: absolute;
-            left: 0; top: 0;
-            width: 80mm;
-            padding: 4mm;
-            margin: 0;
-          }
-        }
+        ${buildReceiptPrintCss('receipt-print-only', config?.business?.receiptPrint)}
       `}} />
     </div>
   );

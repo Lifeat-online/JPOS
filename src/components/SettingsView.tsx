@@ -6,6 +6,7 @@ import { DEFAULT_CATEGORY_TREE } from '../constants';
 import { apiGet, apiPut, apiPost, apiDelete, assignCompanionDevice, getCompanionDeviceAssignments, getTenantPackageLimits, getAiSettings, listAiModels, revokeCompanionDeviceAssignment, testAiProvider, updateAiSettings, type TenantPackageLimitsResponse } from '../api';
 import { JPOS_PACKAGES } from '../../shared/packageCatalog';
 import type { AiModelOption, AiProviderName, AiRole, AiSettings } from '../types';
+import { RECEIPT_PAPER_OPTIONS, normalizeReceiptPrintSettings } from '../utils/receiptPrinting';
 
 function readSettingsFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -434,6 +435,19 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     { id: 'openrouter', label: 'OpenRouter', defaultModel: 'openai/gpt-5-mini', note: 'Uses OPENROUTER_API_KEY on the server.' },
   ];
   const selectedAiProvider = aiSettings ? aiProviders.find(provider => provider.id === aiSettings.provider) : null;
+  const receiptPrint = normalizeReceiptPrintSettings(formData.business?.receiptPrint);
+  const updateReceiptPrint = (updates: Partial<typeof receiptPrint>) => {
+    setFormData({
+      ...formData,
+      business: {
+        ...formData.business,
+        receiptPrint: {
+          ...receiptPrint,
+          ...updates,
+        },
+      },
+    } as AppConfig);
+  };
 
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50 dark:bg-slate-950">
@@ -1096,8 +1110,95 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
 
           {activeTab === 'printing' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Printer / Paper Size</label>
+                  <select
+                    value={receiptPrint.paperSize}
+                    onChange={e => updateReceiptPrint({ paperSize: e.target.value as typeof receiptPrint.paperSize })}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                  >
+                    {RECEIPT_PAPER_OPTIONS.map(option => (
+                      <option key={option.id} value={option.id}>{option.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-500">Supports common thermal rolls and normal office printers.</p>
+                </div>
+
+                {receiptPrint.paperSize === 'custom' && (
+                  <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Custom Width (mm)</label>
+                    <input
+                      type="number"
+                      min="40"
+                      max="216"
+                      value={receiptPrint.customPaperWidthMm}
+                      onChange={e => updateReceiptPrint({ customPaperWidthMm: parseFloat(e.target.value) || 80 })}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                    />
+                    <p className="text-xs text-slate-500">Use the printable paper width shown in the printer driver.</p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Receipt Margin (mm)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="12"
+                    step="0.5"
+                    value={receiptPrint.marginMm}
+                    onChange={e => updateReceiptPrint({ marginMm: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                  />
+                  <p className="text-xs text-slate-500">Small margins work best on roll printers; office printers usually need more.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Text Size</label>
+                  <input
+                    type="number"
+                    min="9"
+                    max="16"
+                    value={receiptPrint.fontSizePx}
+                    onChange={e => updateReceiptPrint({ fontSizePx: parseFloat(e.target.value) || 12 })}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                  />
+                  <p className="text-xs text-slate-500">Lower sizes fit narrow 58 mm printers; larger sizes are easier to read.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Logo on Receipts</label>
+                  <select
+                    value={receiptPrint.showLogo ? receiptPrint.logoMode : 'none'}
+                    onChange={e => {
+                      const logoMode = e.target.value as typeof receiptPrint.logoMode;
+                      updateReceiptPrint({ showLogo: logoMode !== 'none', logoMode });
+                    }}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                  >
+                    <option value="none">Do not print logo</option>
+                    <option value="compact">Compact logo</option>
+                    <option value="standard">Standard logo</option>
+                    <option value="large">Large logo</option>
+                  </select>
+                  <p className="text-xs text-slate-500">Uses the business logo URL from the Business tab.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Long Product Names</label>
+                  <select
+                    value={receiptPrint.itemNameMode}
+                    onChange={e => updateReceiptPrint({ itemNameMode: e.target.value as typeof receiptPrint.itemNameMode })}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                  >
+                    <option value="wrap">Wrap to the next line</option>
+                    <option value="truncate">Keep one line</option>
+                  </select>
+                  <p className="text-xs text-slate-500">Wrapping is safer for detailed restaurant items and narrow paper.</p>
+                </div>
+
+                <div className="space-y-2 lg:col-span-2">
                   <label className="text-xs font-black uppercase tracking-widest text-slate-500">Receipt Header Format</label>
                   <textarea 
                     value={formData.business?.receiptHeader || ''}
@@ -1107,7 +1208,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   />
                   <p className="text-xs text-slate-500">Placed at the very top of print receipts.</p>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 lg:col-span-2">
                   <label className="text-xs font-black uppercase tracking-widest text-slate-500">Receipt Footer Messages</label>
                   <textarea 
                     value={formData.business?.receiptFooter || ''}

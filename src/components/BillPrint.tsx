@@ -1,5 +1,6 @@
 import React from 'react';
 import { AppConfig, CartItem, Customer, OrderItem } from '../types';
+import { buildReceiptPrintCss, getReceiptPaperProfile } from '../utils/receiptPrinting';
 
 interface BillPrintProps {
   cart: (CartItem | OrderItem)[];
@@ -19,14 +20,25 @@ export const BillPrint: React.FC<BillPrintProps> = ({ cart, customer, config, su
     : 0;
   const totalBeforeDiscount = taxInclusive ? subtotal : subtotal + taxAmount;
   const totalDue = Math.max(0, totalBeforeDiscount - discount);
+  const printProfile = getReceiptPaperProfile(config?.business?.receiptPrint);
+  const showLogo = Boolean(config?.business?.logoUrl && printProfile.showLogo && printProfile.logoMode !== 'none');
+  const itemNameClass = printProfile.itemNameMode === 'truncate' ? 'truncate' : 'receipt-text';
 
   return (
-    <div className="bill-print-only fixed inset-0 bg-white text-black z-[9999] hidden p-4 flex-col text-[12px] font-mono leading-tight max-w-[80mm] mx-auto">
+    <div
+      className="bill-print-only fixed inset-0 bg-white text-black z-[9999] hidden flex-col font-mono leading-tight mx-auto"
+      style={{ width: printProfile.contentWidth, maxWidth: printProfile.maxWidth, fontSize: printProfile.fontSizePx }}
+    >
       <div className="text-center mb-4">
-        {config?.business?.logoUrl && (
-          <img src={config.business.logoUrl} alt="logo" className="h-12 mx-auto mb-2 object-contain" />
+        {showLogo && (
+          <img
+            src={config.business!.logoUrl}
+            alt="Business logo"
+            className="mx-auto mb-2 object-contain"
+            style={{ maxHeight: printProfile.logoMaxHeight, maxWidth: '80%' }}
+          />
         )}
-        <h1 className="font-bold text-xl uppercase mb-1">{config?.business?.name || "JIMMY'S POS"}</h1>
+        <h1 className="font-bold text-[1.35em] uppercase mb-1 receipt-text">{config?.business?.name || "JIMMY'S POS"}</h1>
         {config?.business?.address && <p>{config.business.address}</p>}
         {config?.business?.phone && <p>{config.business.phone}</p>}
         <div className="border-b border-black border-dashed my-2" />
@@ -43,9 +55,9 @@ export const BillPrint: React.FC<BillPrintProps> = ({ cart, customer, config, su
           <span className="w-20 text-right">Price</span>
         </div>
         {cart.map((item, idx) => (
-          <div key={`${item.id}-${idx}`} className="mb-1">
+          <div key={`${item.id}-${idx}`} className="receipt-row mb-1">
             <div className="flex justify-between">
-              <span className="flex-1 pr-2 truncate">{item.name}</span>
+              <span className={`flex-1 pr-2 ${itemNameClass}`}>{item.name}</span>
               <span className="w-8 text-right">{item.quantity}</span>
               <span className="w-20 text-right">{currency}{(Number(item.price || 0) * Number(item.quantity || 0)).toFixed(2)}</span>
             </div>
@@ -87,18 +99,7 @@ export const BillPrint: React.FC<BillPrintProps> = ({ cart, customer, config, su
       <p className="text-center text-[11px]">Please check your bill before payment.</p>
 
       <style dangerouslySetInnerHTML={{__html: `
-        @media print {
-          body * { visibility: hidden; }
-          .bill-print-only, .bill-print-only * { visibility: visible; }
-          .bill-print-only {
-            display: flex !important;
-            position: absolute;
-            left: 0; top: 0;
-            width: 80mm;
-            padding: 4mm;
-            margin: 0;
-          }
-        }
+        ${buildReceiptPrintCss('bill-print-only', config?.business?.receiptPrint)}
       `}} />
     </div>
   );
