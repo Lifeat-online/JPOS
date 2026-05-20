@@ -3,19 +3,25 @@ import { motion } from 'motion/react';
 import {
   ArrowRight,
   BarChart3,
+  BellRing,
   Building2,
   ChartNoAxesCombined,
   CheckCircle2,
   ChefHat,
   Clock3,
   CreditCard,
+  Download,
+  Globe2,
   Lock,
+  Maximize2,
+  MessageSquare,
   Moon,
   Package,
   ReceiptText,
   ScanBarcode,
   ShoppingBag,
   ShoppingCart,
+  Smartphone,
   Store,
   Sun,
   UserCircle,
@@ -42,6 +48,8 @@ const fadeUp = (delay = 0) => ({
 
 const navLinks = [
   { label: 'Features', href: '#features' },
+  { label: 'Mobile', href: '#mobile' },
+  { label: 'Workstations', href: '#workstations' },
   { label: 'Workflows', href: '#workflows' },
   { label: 'Industries', href: '#industries' },
   { label: 'Packages', href: '/packages' },
@@ -71,13 +79,28 @@ const featureCards = [
   },
   {
     icon: Utensils,
-    title: 'Restaurant and takeaway tools',
-    desc: 'Run tables, tabs, kitchen queues, takeaway orders, and workstation tickets without bolting on a second system.',
+    title: 'Restaurant, takeaway, and workstation flow',
+    desc: 'Run tables, tabs, takeaway orders, kitchen/bar workstations, ticket acceptance, ready status, and order notifications.',
   },
   {
     icon: BarChart3,
     title: 'Reports owners can use',
     desc: 'See sales, stock movement, customer activity, staff performance, wallet balances, and daily operating totals.',
+  },
+  {
+    icon: Smartphone,
+    title: 'Mobile terminals and companion devices',
+    desc: 'Use a phone or tablet as a full browser-based POS terminal for taking orders away from the main counter.',
+  },
+  {
+    icon: Download,
+    title: 'Installable PWA',
+    desc: 'Install Jimmy\'s POS on desktop, Android, iPhone, or iPad, with fullscreen and kiosk controls for a cleaner app-like setup.',
+  },
+  {
+    icon: Globe2,
+    title: 'Works from any browser',
+    desc: 'Run the POS from a desktop, laptop, tablet, or phone browser without locking the business into one device type.',
   },
 ];
 
@@ -90,7 +113,7 @@ const workflows = [
   {
     icon: ChefHat,
     title: 'Food service',
-    steps: ['Open a table or tab', 'Send items to the kitchen', 'Track order status', 'Close out with the customer'],
+    steps: ['Open a table, tab, or takeaway order', 'Route items to the right workstation', 'Accept and mark items ready', 'Notify the team when orders are ready'],
   },
   {
     icon: WalletCards,
@@ -101,6 +124,16 @@ const workflows = [
     icon: Lock,
     title: 'Management control',
     steps: ['Assign staff roles', 'Review cash sessions', 'Check reports', 'Adjust settings when the business changes'],
+  },
+  {
+    icon: Smartphone,
+    title: 'Mobile order-taking flow',
+    steps: ['Log in on the same account from a phone', 'Open the normal POS or workstation view', 'Take orders away from the bar', 'Send orders through the same kitchen and cash-up flow'],
+  },
+  {
+    icon: Download,
+    title: 'Install and kiosk flow',
+    steps: ['Install on desktop, Android, iPhone, or iPad', 'Enter fullscreen for the shop floor', 'Use kiosk mode where needed', 'Keep controls in the profile menu'],
   },
 ];
 
@@ -158,6 +191,77 @@ const liveMetrics = [
   { label: 'Today', value: 'R18,420', trend: '+12%' },
   { label: 'Open tabs', value: '14', trend: 'live' },
   { label: 'Stock alerts', value: '6', trend: 'check' },
+];
+
+const mobileFeatures = [
+  {
+    icon: Smartphone,
+    title: 'Phone as a full POS terminal',
+    desc: 'A cashier or barman can log in from a mobile browser and use the normal POS/workstation flow to take orders away from the counter.',
+  },
+  {
+    icon: Globe2,
+    title: 'Works in any browser',
+    desc: 'Use Jimmy\'s POS from desktop, laptop, tablet, Android, iPhone, or iPad browsers, with optional PWA installation for a cleaner app feel.',
+  },
+  {
+    icon: Utensils,
+    title: 'Same workstation on mobile',
+    desc: 'Open the same workstation view from a mobile device when staff need to take orders outside the bar or away from the main till.',
+  },
+  {
+    icon: ScanBarcode,
+    title: 'Wireless scanner option',
+    desc: 'When needed, a phone camera can act as a barcode scanner for the active terminal.',
+  },
+  {
+    icon: ChartNoAxesCombined,
+    title: 'Customer display mode',
+    desc: 'Turn a spare screen into a customer-facing display for the active register.',
+  },
+  {
+    icon: Maximize2,
+    title: 'Fullscreen and kiosk controls',
+    desc: 'Open the POS in fullscreen or kiosk mode so the device feels like dedicated shop-floor hardware.',
+  },
+  {
+    icon: Lock,
+    title: 'Optional device pairing',
+    desc: 'Admins and devs can bind a physical mobile/browser device to a workstation when a device should remember its role.',
+  },
+];
+
+const workstationFeatures = [
+  {
+    icon: ChefHat,
+    title: 'Dedicated workstation views',
+    desc: 'Kitchen, bar, and production stations can each work from their own queue instead of sharing one crowded order screen.',
+  },
+  {
+    icon: Clock3,
+    title: 'Pending and accepted tickets',
+    desc: 'Incoming station items show as pending, then staff can accept them so everyone knows the order is being prepared.',
+  },
+  {
+    icon: CheckCircle2,
+    title: 'Ready-for-delivery status',
+    desc: 'When a station marks an item ready, the order item is updated and removed from the active prep queue.',
+  },
+  {
+    icon: BellRing,
+    title: 'Automatic ready notifications',
+    desc: 'Ready items post a system notification into team messages with the table/tab/takeaway label, item quantity, and workstation name.',
+  },
+  {
+    icon: MessageSquare,
+    title: 'Message badges and alerts',
+    desc: 'Team messages poll for updates, unread counts appear in navigation, and ready alerts show as centered notification pills.',
+  },
+  {
+    icon: BarChart3,
+    title: 'Live workstation queue reporting',
+    desc: 'The live dashboard tracks pending, accepted, ready, queue counts, oldest tickets, and prep timing by workstation.',
+  },
 ];
 
 const visualPanels = [
@@ -307,7 +411,7 @@ function VisualWorkflowPanels() {
             Visual workflows that make the platform feel alive.
           </h2>
           <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
-            The home page now shows the product as a working operating system: counter, kitchen, customer, and owner views all moving together.
+            The platform works as a connected operating system: counter, kitchen, mobile devices, customer views, and owner reports all moving together.
           </p>
         </motion.div>
 
@@ -350,6 +454,196 @@ function VisualWorkflowPanels() {
             </motion.div>
           ))}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function MobileFeatureShowcase() {
+  return (
+    <section id="mobile" className="border-y border-slate-200 bg-white px-4 py-16 dark:border-slate-800 dark:bg-slate-950 sm:px-6 lg:px-10">
+      <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[0.9fr_1.1fr]">
+        <motion.div {...fadeUp(0)} className="relative mx-auto w-full max-w-md">
+          <div className="absolute inset-8 rounded-[2.5rem] bg-blue-500/20 blur-3xl" />
+          <div className="relative mx-auto w-[min(100%,21rem)] rounded-[2.4rem] border border-slate-300 bg-slate-950 p-3 shadow-[0_34px_120px_-35px_rgba(15,23,42,0.9)] dark:border-slate-700">
+            <div className="rounded-[1.9rem] bg-white p-4 text-slate-950 dark:bg-slate-900 dark:text-white">
+              <div className="mx-auto mb-4 h-1.5 w-16 rounded-full bg-slate-300 dark:bg-slate-700" />
+              <div className="rounded-2xl bg-gradient-to-br from-slate-950 to-blue-950 p-4 text-white">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-200">Mobile mode</p>
+                    <h3 className="mt-1 text-2xl font-black">Bar phone</h3>
+                  </div>
+                  <motion.div
+                    animate={{ scale: [1, 1.08, 1] }}
+                    transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+                    className="rounded-xl bg-emerald-400 px-3 py-2 text-[10px] font-black text-emerald-950"
+                  >
+                    Active
+                  </motion.div>
+                </div>
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  {[
+                    ['Browser', 'Any device'],
+                    ['Orders', 'Away from bar'],
+                    ['Scanner', 'Camera scan'],
+                    ['Display', 'Customer view'],
+                  ].map(([label, value], index) => (
+                    <motion.div
+                      key={label}
+                      animate={{ y: [0, index % 2 ? 3 : -3, 0] }}
+                      transition={{ duration: 4 + index * 0.2, repeat: Infinity, ease: 'easeInOut' }}
+                      className="rounded-xl border border-white/10 bg-white/10 p-3"
+                    >
+                      <p className="text-xs font-black">{label}</p>
+                      <p className="mt-1 text-[10px] font-semibold text-blue-100">{value}</p>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                <div className="flex items-center justify-between">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Active target</p>
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Live</span>
+                </div>
+                <p className="mt-2 text-lg font-black">Bar workstation</p>
+                <div className="mt-4 h-2 rounded-full bg-slate-200 dark:bg-slate-800">
+                  <motion.div
+                    animate={{ width: ['35%', '82%', '35%'] }}
+                    transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+                    className="h-2 rounded-full bg-blue-600"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {['PWA', 'Full', 'Kiosk'].map((item) => (
+                  <div key={item} className="rounded-xl bg-slate-100 p-3 text-center text-xs font-black text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        <div>
+          <motion.div {...fadeUp(0.06)} className="max-w-3xl">
+            <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Mobile, browser, and PWA access</p>
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
+              Staff can take the same POS/workstation workflow onto a phone or tablet.
+            </h2>
+            <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
+              Jimmy&apos;s POS works from any modern browser. A cashier or barman can log in on a mobile device, open the same POS or workstation view, and take orders away from the counter when the operation needs it.
+            </p>
+          </motion.div>
+
+          <div className="mt-10 grid gap-4 md:grid-cols-2">
+            {mobileFeatures.map((item, index) => (
+              <motion.div key={item.title} {...fadeUp(0.04 * index)} className={cardClass}>
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                  <item.icon className="h-5 w-5" />
+                </div>
+                <h3 className="mt-5 text-lg font-black tracking-tight text-slate-950 dark:text-white">{item.title}</h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">{item.desc}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function WorkstationNotificationShowcase() {
+  return (
+    <section id="workstations" className="px-4 py-16 sm:px-6 lg:px-10">
+      <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[1.08fr_0.92fr]">
+        <div>
+          <motion.div {...fadeUp(0)} className="max-w-3xl">
+            <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Workstations and ready notifications</p>
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
+              Orders move from POS to station to ready alert without staff chasing each other.
+            </h2>
+            <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
+              Products can be routed to kitchen, bar, or other workstations. Each station gets its own queue, accepts tickets, marks items ready, and automatically notifies the team when an order is ready for delivery.
+            </p>
+          </motion.div>
+
+          <div className="mt-10 grid gap-4 md:grid-cols-2">
+            {workstationFeatures.map((item, index) => (
+              <motion.div key={item.title} {...fadeUp(0.04 * index)} className={cardClass}>
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300">
+                  <item.icon className="h-5 w-5" />
+                </div>
+                <h3 className="mt-5 text-lg font-black tracking-tight text-slate-950 dark:text-white">{item.title}</h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">{item.desc}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
+        <motion.div
+          {...fadeUp(0.12)}
+          className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 p-4 text-white shadow-[0_34px_120px_-42px_rgba(15,23,42,0.85)] dark:border-slate-800"
+        >
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-orange-300">Bar workstation</p>
+                <h3 className="mt-1 text-2xl font-black">3 active tickets</h3>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500 text-white">
+                <ChefHat className="h-6 w-6" />
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {[
+                ['Table 4', '2x Burger combo', 'pending', 'Accept'],
+                ['Tab Thabo', '1x Coffee', 'accepted', 'Ready'],
+                ['Takeaway', '3x Chips', 'accepted', 'Ready'],
+              ].map(([label, item, status, action], index) => (
+                <motion.div
+                  key={`${label}-${item}`}
+                  animate={{ x: [0, index === 0 ? 4 : -4, 0] }}
+                  transition={{ duration: 5 + index * 0.3, repeat: Infinity, ease: 'easeInOut' }}
+                  className={`rounded-xl border p-4 ${
+                    status === 'pending'
+                      ? 'border-orange-400/30 bg-orange-500/15'
+                      : 'border-blue-400/30 bg-blue-500/15'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-black">{label}</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-300">{item}</p>
+                    </div>
+                    <span className="rounded-lg bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white/80">
+                      {status}
+                    </span>
+                  </div>
+                  <div className="mt-4 rounded-lg bg-white px-3 py-2 text-center text-xs font-black uppercase tracking-widest text-slate-950">
+                    {action}
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+
+            <motion.div
+              animate={{ opacity: [0.75, 1, 0.75], y: [0, -4, 0] }}
+              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+              className="mt-5 rounded-2xl border border-emerald-400/30 bg-emerald-400/15 p-4 text-center"
+            >
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-400 text-emerald-950">
+                <BellRing className="h-5 w-5" />
+              </div>
+              <p className="text-sm font-black">Tab Thabo - 1x Coffee is READY (Bar)</p>
+              <p className="mt-1 text-xs font-semibold text-emerald-100">System notification posted to team messages</p>
+            </motion.div>
+          </div>
+        </motion.div>
       </div>
     </section>
   );
@@ -426,7 +720,7 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
                 See what Jimmy&apos;s POS actually does before you book a demo.
               </h1>
               <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600 dark:text-slate-300">
-                Jimmy&apos;s POS is for businesses that need a sales screen, stock control, staff permissions, customer accounts, restaurant workflows, cash control, and useful reports in one place.
+                Jimmy&apos;s POS is for businesses that need a browser-based sales screen, stock control, staff permissions, customer accounts, restaurant workflows, cash control, mobile order-taking, and useful reports in one place.
               </p>
               <div className="mt-5 inline-flex max-w-full items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left dark:border-slate-800 dark:bg-slate-900">
                 <div className="flex shrink-0 overflow-hidden rounded-sm border border-slate-300 dark:border-slate-700">
@@ -450,10 +744,10 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
                   <ArrowRight className="h-5 w-5" />
                 </button>
                 <a
-                  href="#features"
+                  href="#mobile"
                   className="inline-flex items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white px-7 py-3.5 text-base font-bold text-slate-900 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
                 >
-                  View features
+                  View mobile tools
                 </a>
                 <button
                   onClick={onStartSetup}
@@ -493,6 +787,10 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             </div>
           </div>
         </section>
+
+        <MobileFeatureShowcase />
+
+        <WorkstationNotificationShowcase />
 
         <VisualWorkflowPanels />
 

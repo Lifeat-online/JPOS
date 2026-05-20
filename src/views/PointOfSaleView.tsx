@@ -84,14 +84,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [parkError, setParkError] = useState('');
   const [priceCheckProduct, setPriceCheckProduct] = useState<Product | null>(null);
   const [priceCheckError, setPriceCheckError] = useState('');
-  const [companionMode, setCompanionMode] = useState<'terminal' | 'remote_control' | 'wireless_scanner' | 'pole_display'>(() => {
+  const [companionMode, setCompanionMode] = useState<'terminal' | 'wireless_scanner' | 'pole_display'>(() => {
     try {
-      return (window.localStorage.getItem('companion-mode') as any) || 'terminal';
+      const saved = window.localStorage.getItem('companion-mode');
+      return saved === 'wireless_scanner' || saved === 'pole_display' ? saved : 'terminal';
     } catch {
       return 'terminal';
     }
   });
-  const [assignedCompanionMode, setAssignedCompanionMode] = useState<'remote_control' | 'wireless_scanner' | 'pole_display' | null>(null);
+  const [assignedCompanionMode, setAssignedCompanionMode] = useState<'wireless_scanner' | 'pole_display' | null>(null);
   const [poleDisplayDeviceId, setPoleDisplayDeviceId] = useState<string | null>(null);
   const [displaySnapshot, setDisplaySnapshot] = useState<any>(null);
   const [longTermAssignment, setLongTermAssignment] = useState<any>(null);
@@ -139,16 +140,6 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   };
 
   const handleAddToCart = (product: Product) => {
-    if (isRemoteControlMode && terminalId) {
-      companionSocket.emit('companion_command', {
-        terminalId,
-        command: 'add_product',
-        data: { productId: product.id },
-      });
-      setStockNotice({ type: 'warning', message: `Sent ${product.name} to the active terminal.` });
-      return;
-    }
-
     if (!canAddProductToCart(product)) return;
     if (product.modifiers && product.modifiers.length > 0) {
       setModifyingProduct(product);
@@ -203,7 +194,6 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     tenantId,
     enabled: Boolean(tenantId && currentUserStaff?.id),
   });
-  const isRemoteControlMode = companionMode !== 'terminal' && assignedCompanionMode === 'remote_control';
   const isWirelessScannerMode = companionMode !== 'terminal' && assignedCompanionMode === 'wireless_scanner';
   const parkedSales = useMemo(() => sales
     .filter(s => (
@@ -333,15 +323,11 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   useEffect(() => {
     const changeMode = (event: Event) => {
       const mode = (event as CustomEvent<{ mode?: typeof companionMode }>).detail?.mode;
-      if (mode === 'terminal' || mode === 'remote_control' || mode === 'wireless_scanner' || mode === 'pole_display') {
+      if (mode === 'terminal' || mode === 'wireless_scanner' || mode === 'pole_display') {
         updateCompanionMode(mode);
       }
     };
     const openScanner = () => setIsScanning(true);
-    const clearTerminal = () => {
-      if (!terminalId) return;
-      companionSocket.emit('companion_command', { terminalId, command: 'clear_cart', data: {} });
-    };
     const markTerminal = () => {
       updateCompanionMode('terminal');
       if (!tenantId || !currentUserStaff?.id) return;
@@ -354,12 +340,10 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
     window.addEventListener('jpos:companion-mode-change', changeMode);
     window.addEventListener('jpos:companion-open-scanner', openScanner);
-    window.addEventListener('jpos:companion-clear-terminal', clearTerminal);
     window.addEventListener('jpos:companion-mark-terminal', markTerminal);
     return () => {
       window.removeEventListener('jpos:companion-mode-change', changeMode);
       window.removeEventListener('jpos:companion-open-scanner', openScanner);
-      window.removeEventListener('jpos:companion-clear-terminal', clearTerminal);
       window.removeEventListener('jpos:companion-mark-terminal', markTerminal);
     };
   }, [terminalId, tenantId, currentUserStaff?.id, companionDeviceId, companionSocket.emit]);
@@ -400,7 +384,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     getCompanionDeviceAssignment(tenantId, companionDeviceId)
       .then(assignment => {
         setLongTermAssignment(assignment);
-        if (assignment?.defaultMode) {
+        if (assignment?.defaultMode === 'wireless_scanner' || assignment?.defaultMode === 'pole_display') {
           setCompanionMode(assignment.defaultMode);
           try {
             window.localStorage.setItem('companion-mode', assignment.defaultMode);
@@ -431,7 +415,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       setAssignedCompanionMode(payload.assignedMode || null);
       setPoleDisplayDeviceId(payload.poleDisplayDeviceId || null);
       if (payload.requestedMode === 'pole_display' && payload.assignedMode !== 'pole_display') {
-        setStockNotice({ type: 'warning', message: 'Pole display is already paired. This device can still use remote control and wireless scanner.' });
+        setStockNotice({ type: 'warning', message: 'Pole display is already paired. This device can still use wireless scanner mode.' });
       }
     };
     const onState = (payload: any) => {
@@ -445,16 +429,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
         if (product) {
           handleAddToCart(product);
         } else {
-          setStockNotice({ type: 'error', message: `Remote scanner sent ${barcode}, but no matching product was found.` });
+          setStockNotice({ type: 'error', message: `Wireless scanner sent ${barcode}, but no matching product was found.` });
         }
-      } else if (payload?.command === 'add_product') {
-        const productId = String(payload.data?.productId || '');
-        const product = products.find(p => p.id === productId);
-        if (product) {
-          handleAddToCart(product);
-        }
-      } else if (payload?.command === 'clear_cart') {
-        clearCart();
       }
     };
     const onDisplayUpdate = (payload: any) => {
@@ -760,7 +736,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => updateCompanionMode('remote_control')}
+                onClick={() => updateCompanionMode('terminal')}
                 className="h-10 px-4 rounded-xl bg-white/10 text-xs font-black uppercase tracking-widest"
               >
                 Exit

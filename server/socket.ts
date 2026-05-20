@@ -182,14 +182,14 @@ export function setupSocketIO(httpServer: any) {
     socket.on("companion_join", (payload: { terminalId?: string; deviceId?: string; mode?: string }) => {
       const terminalId = String(payload?.terminalId || "");
       const deviceId = String(payload?.deviceId || socket.id);
-      const requestedMode = payload?.mode === "pole_display" ? "pole_display" : payload?.mode === "wireless_scanner" ? "wireless_scanner" : "remote_control";
+      const requestedMode = payload?.mode === "pole_display" ? "pole_display" : "wireless_scanner";
       if (!terminalId) return;
 
       let assignedMode = requestedMode;
       const currentPoleDisplay = poleDisplaysByTerminal.get(terminalId);
       if (requestedMode === "pole_display") {
         if (currentPoleDisplay && currentPoleDisplay !== deviceId) {
-          assignedMode = "remote_control";
+          assignedMode = "wireless_scanner";
         } else {
           poleDisplaysByTerminal.set(terminalId, deviceId);
         }
@@ -216,6 +216,7 @@ export function setupSocketIO(httpServer: any) {
     socket.on("companion_command", (payload: { terminalId?: string; command?: string; data?: any }) => {
       const terminalId = String(payload?.terminalId || socket.data.terminalId || "");
       if (!terminalId || !payload?.command) return;
+      if (payload.command !== "barcode_lookup") return;
       socket.to(`terminal:${terminalId}`).emit("companion_command", {
         command: payload.command,
         data: payload.data || {},

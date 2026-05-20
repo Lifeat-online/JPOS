@@ -9,7 +9,7 @@ import {
   Users, UserCog, Moon, Sun, ShoppingCart, AlertCircle, ChefHat, Utensils, Trophy,
   ChevronDown, LogOut, Wallet, TabletSmartphone, Maximize2, Minimize2, Monitor, Download,
   Activity, Building2, BarChart3, Code2, MessageSquare, BrainCircuit,
-  Smartphone, ScanLine, MonitorUp, Trash2
+  Smartphone, ScanLine, MonitorUp
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -71,7 +71,7 @@ const DEV_EMAIL = 'jameskoen78@gmail.com';
 
 export { DEFAULT_CATEGORY_TREE };
 
-type CompanionMenuMode = 'terminal' | 'remote_control' | 'wireless_scanner' | 'pole_display';
+type CompanionMenuMode = 'terminal' | 'wireless_scanner' | 'pole_display';
 
 interface CompanionMenuState {
   companionMode: CompanionMenuMode;
@@ -178,13 +178,12 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
       : `${isThisActiveTerminal ? 'Active target for companion devices. ' : ''}Full sale mode on this device; sales use the open register for one cash-up.${companionState.poleDisplayDeviceId ? ' Display paired.' : ''}`
     : companionState.assignedCompanionMode === 'pole_display'
       ? 'This device is acting as the customer display.'
-    : companionState.assignedCompanionMode
-        ? 'This device sends taps and scans to the active terminal.'
-        : 'Choose how this device should help this account.';
+    : companionState.assignedCompanionMode === 'wireless_scanner'
+      ? 'This device scans barcodes to the active terminal.'
+      : 'Choose how this device should help this account.';
 
   const companionModeOptions: Array<{ id: CompanionMenuMode; label: string; icon: React.ElementType; disabled?: boolean }> = [
     { id: 'terminal', label: 'Terminal', icon: MonitorUp },
-    { id: 'remote_control', label: 'Remote', icon: Smartphone },
     { id: 'wireless_scanner', label: 'Scanner', icon: ScanLine },
     {
       id: 'pole_display',
@@ -306,22 +305,6 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
                 <ScanLine className="w-4 h-4" />
                 Scan to terminal
               </button>
-            )}
-            {companionState.assignedCompanionMode === 'remote_control' && (
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <div className="rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Terminal total</p>
-                  <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">R{Number(companionState.displaySnapshot?.total || 0).toFixed(2)}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => window.dispatchEvent(new CustomEvent('jpos:companion-clear-terminal'))}
-                  className="min-h-14 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/40 text-rose-600 dark:text-rose-300 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Clear active terminal
-                </button>
-              </div>
             )}
           </div>
           )}

@@ -179,7 +179,7 @@ export function getCompanionDeviceAssignment(tenantId: string, deviceId: string)
   return apiGet<any | null>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`);
 }
 
-export function assignCompanionDevice(tenantId: string, deviceId: string, data: { deviceName: string; workstationId: string; defaultMode: string }) {
+export function assignCompanionDevice(tenantId: string, deviceId: string, data: { deviceName: string; workstationId: string; defaultMode: 'wireless_scanner' | 'pole_display' }) {
   return apiPut<any>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`, data);
 }
 

@@ -58,7 +58,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     }
   });
   const [companionWorkstationId, setCompanionWorkstationId] = useState('');
-  const [companionDefaultMode, setCompanionDefaultMode] = useState<'remote_control' | 'wireless_scanner' | 'pole_display'>('remote_control');
+  const [companionDefaultMode, setCompanionDefaultMode] = useState<'wireless_scanner' | 'pole_display'>('wireless_scanner');
   const [companionSaving, setCompanionSaving] = useState(false);
   const [wsModal, setWsModal] = useState<{ isOpen: boolean; ws: Partial<Workstation> | null }>({ isOpen: false, ws: null });
   const [wsSaving, setWsSaving] = useState(false);
@@ -1350,7 +1350,6 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                         onChange={event => setCompanionDefaultMode(event.target.value as typeof companionDefaultMode)}
                         className="w-full h-12 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none"
                       >
-                        <option value="remote_control">Remote</option>
                         <option value="wireless_scanner">Scanner</option>
                         <option value="pole_display">Pole display</option>
                       </select>

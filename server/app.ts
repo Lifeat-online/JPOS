@@ -1603,9 +1603,9 @@ export async function createApp(io: any = null) {
       const deviceId = String(req.params.deviceId || "").trim();
       const workstationId = String(req.body?.workstationId || "").trim();
       const deviceName = String(req.body?.deviceName || "Mobile device").trim().slice(0, 120);
-      const defaultMode = ["remote_control", "wireless_scanner", "pole_display"].includes(req.body?.defaultMode)
+      const defaultMode = ["wireless_scanner", "pole_display"].includes(req.body?.defaultMode)
         ? req.body.defaultMode
-        : "remote_control";
+        : "wireless_scanner";
       if (!deviceId || !workstationId) {
         return res.status(400).json({ error: "Device and workstation are required" });
       }
