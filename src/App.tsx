@@ -822,10 +822,10 @@ export default function App() {
   }, [receiptPrintPending, receiptToPrint]);
 
   // Dev role — hardcoded to the dev email, bypasses tenant role system
-  const isDev = user?.email === DEV_EMAIL;
+  const isDev = String(user?.email || '').trim().toLowerCase() === DEV_EMAIL || user?.role === 'dev';
 
   // Nav items based on role — split into primary (always visible) and secondary (dropdown)
-  const roleForPermissions = currentUserRole as StaffRole | null;
+  const roleForPermissions = (isDev ? 'dev' : currentUserRole) as StaffRole | null;
   const permissionOptions = useMemo(
     () => ({
       isDev,
@@ -851,11 +851,11 @@ export default function App() {
   
   // Redirect if current view is not allowed — but never redirect a dev user away from /dev or anyone from /profile
   useEffect(() => {
-    if (!currentUserRole) return;
+    if (!roleForPermissions) return;
     if (!canAccessView(roleForPermissions, view, permissionOptions)) {
       navigate(`/${getDefaultView(roleForPermissions, permissionOptions)}`);
     }
-  }, [currentUserRole, roleForPermissions, view, permissionOptions, navigate]);
+  }, [roleForPermissions, view, permissionOptions, navigate]);
 
   // CRUD handlers
   const saveProduct = async (e: React.FormEvent) => {
@@ -1059,7 +1059,7 @@ export default function App() {
   }
 
   if (!config?.setupCompleted) {
-    if (currentUserRole === 'admin') {
+    if (roleForPermissions === 'admin' || roleForPermissions === 'dev') {
       return <SetupWizard user={user} config={config} />;
     } else {
       return (
@@ -1079,7 +1079,7 @@ export default function App() {
     }
   }
 
-  if (currentUserRole === null) {
+  if (roleForPermissions === null) {
     return (
       <div className="h-screen w-full bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 text-center">
         <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-6">

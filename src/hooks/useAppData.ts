@@ -17,6 +17,9 @@ import {
 } from '../api';
 import { canLoadDataset, type StaffRole } from '../permissions';
 
+const DEV_EMAIL = 'jameskoen78@gmail.com';
+const DEV_TENANT_ID = 'tenant1';
+
 export const DEFAULT_CONFIG: AppConfig = {
   payfastMerchantId: '10000100',
   payfastMerchantKey: '46f0cd694581a',
@@ -113,6 +116,14 @@ export function useAppData(user: User | null) {
       }
 
       setTenantLoading(true);
+      const userEmail = String(user.email || '').trim().toLowerCase();
+      if (userEmail === DEV_EMAIL) {
+        if (!active) return;
+        setTenantId(DEV_TENANT_ID);
+        setTenantLoading(false);
+        return;
+      }
+
       try {
         const userRecord = await getUserByUid(user.uid);
         if (userRecord?.tenant_id) {
@@ -151,9 +162,35 @@ export function useAppData(user: User | null) {
 
   useEffect(() => {
     if (user && !isStaffLoading) {
-      const s = staff.find(s => s.email === user.email) ?? null;
-      setCurrentUserStaff(s);
-      setCurrentUserRole(s?.role ?? null);
+      const userEmail = String(user.email || '').trim().toLowerCase();
+      const s = staff.find(s => String(s.email || '').trim().toLowerCase() === userEmail) ?? null;
+      if (s) {
+        setCurrentUserStaff(s);
+        setCurrentUserRole(s.role);
+        return;
+      }
+
+      if (userEmail === DEV_EMAIL || user.role === 'dev') {
+        setCurrentUserStaff({
+          id: user.uid || user.id || 'dev',
+          name: user.displayName || user.name || user.email || 'Dev',
+          role: 'dev',
+          email: user.email,
+          status: 'active',
+          permissions: { canAccessDevTools: true },
+          assignedSections: [],
+          assignedCategories: [],
+          walletBalance: 0,
+          discountPercent: 0,
+          createdAt: new Date().toISOString(),
+          badges: [],
+        });
+        setCurrentUserRole('dev');
+        return;
+      }
+
+      setCurrentUserStaff(null);
+      setCurrentUserRole(null);
     } else if (!user) {
       setCurrentUserStaff(null);
       setCurrentUserRole(null);
