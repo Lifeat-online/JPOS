@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { Request, Response } from 'express';
 import { query, getConnection } from './db.js';
-import { seedDemoData } from './demo-seed.js';
+import { seedDemoData, type DemoSeedMode } from './demo-seed.js';
 import { ensureBulkInventorySchema } from './init-db.js';
 import { getHostedPackage } from '../shared/packageCatalog.js';
 import { 
@@ -53,7 +53,11 @@ function buildAuthResponse(staff: {
   };
 }
 
-async function ensureDemoTenant() {
+function parseDemoMode(value: unknown): DemoSeedMode {
+  return value === 'retail' ? 'retail' : 'restaurant';
+}
+
+async function ensureDemoTenant(mode: DemoSeedMode) {
   const tenantId = 'demo-tenant-001';
   const staffId = 'demo-admin-001';
   const email = 'demo@jimmyspos.test';
@@ -108,7 +112,7 @@ async function ensureDemoTenant() {
       name: tenantName,
       currency: 'R',
       taxRate: 15,
-      isRestaurantMode: true,
+      isRestaurantMode: mode === 'restaurant',
       enableLoyalty: true,
       pointsEarnedPerCurrency: 1,
       pointsRequiredForDiscount: 100,
@@ -141,7 +145,7 @@ async function ensureDemoTenant() {
   }
 
   await ensureBulkInventorySchema();
-  await seedDemoData(tenantId, 'restaurant');
+  await seedDemoData(tenantId, mode);
 
   return {
     id: staffId,
@@ -153,10 +157,11 @@ async function ensureDemoTenant() {
   };
 }
 
-export async function handleStartDemo(_req: Request, res: Response) {
+export async function handleStartDemo(req: Request, res: Response) {
   try {
-    const staff = await ensureDemoTenant();
-    res.json({ ...buildAuthResponse(staff), seeded: true });
+    const mode = parseDemoMode(req.body?.mode);
+    const staff = await ensureDemoTenant(mode);
+    res.json({ ...buildAuthResponse(staff), seeded: true, mode });
   } catch (error) {
     console.error('Demo start error:', error);
     res.status(500).json({ error: 'Unable to start demo workspace' });

@@ -15,7 +15,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { apiPost, apiPut, apiDelete, seedDemoData, clearSeededDemoData, clearAllSales } from './api';
 
-import { useAuth } from './hooks/useAuth';
+import { useAuth, type DemoMode } from './hooks/useAuth';
 import { useAppData } from './hooks/useAppData';
 import { useCheckout } from './hooks/useCheckout';
 import { useSocket } from './hooks/useSocket';
@@ -551,7 +551,7 @@ export default function App() {
   const [enrollmentLoading, setEnrollmentLoading] = useState(false);
 
   const handleAdminLogin = () => { setLoginMode('staff'); clearError(); setLoginModalOpen(true); };
-  const handleTryNow = async () => { setLoginMode('staff'); clearError(); await startDemo(); };
+  const handleTryNow = async (mode: DemoMode = 'restaurant') => { setLoginMode('staff'); clearError(); await startDemo(mode); };
   const handleStartSetup = () => { setLoginMode('staff'); clearError(); setEnrollmentModalOpen(true); };
   const handleClientLogin = async () => { setLoginMode('client'); await login(); };
   const handleLogout = async () => { setLoginMode(null); await logout(); navigate('/'); };

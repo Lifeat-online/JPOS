@@ -33,7 +33,7 @@ import { PackagesPricing } from './PackagesPricing';
 
 interface WelcomeViewProps {
   onLogin: () => void;
-  onTryNow: () => void;
+  onTryNow: (mode?: 'retail' | 'restaurant') => void;
   onStartSetup: () => void;
   onClientLogin: () => void;
   isDarkMode: boolean;
@@ -459,6 +459,31 @@ function VisualWorkflowPanels() {
   );
 }
 
+function SouthAfricanFlag() {
+  return (
+    <svg
+      viewBox="0 0 60 40"
+      aria-label="South African flag"
+      role="img"
+      className="h-8 w-12 shrink-0 rounded-sm shadow-sm ring-1 ring-slate-200 dark:ring-slate-700"
+    >
+      <clipPath id="sa-flag-clip">
+        <rect width="60" height="40" rx="2" />
+      </clipPath>
+      <g clipPath="url(#sa-flag-clip)">
+        <path fill="#de3831" d="M0 0h60v20H30L0 0z" />
+        <path fill="#002395" d="M0 40h60V20H30L0 40z" />
+        <path fill="#fff" d="M0 0l31.5 20L0 40h11.5l31.5-20L11.5 0H0z" />
+        <path fill="#fff" d="M28 14h32v12H28z" />
+        <path fill="#007a4d" d="M0 3.75 25.75 20 0 36.25h10.25L36 20 10.25 3.75H0z" />
+        <path fill="#007a4d" d="M30 16h30v8H30z" />
+        <path fill="#ffb612" d="M0 6.5 21.5 20 0 33.5V6.5z" />
+        <path fill="#000" d="M0 9.5 17 20 0 30.5v-21z" />
+      </g>
+    </svg>
+  );
+}
+
 function MobileFeatureShowcase() {
   return (
     <section id="mobile" className="border-y border-slate-200 bg-white px-4 py-16 dark:border-slate-800 dark:bg-slate-950 sm:px-6 lg:px-10">
@@ -700,12 +725,6 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
               <UserCircle className="h-4 w-4" />
               Admin Login
             </button>
-            <button
-              onClick={onTryNow}
-              className="flex items-center gap-2 rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
-            >
-              Try Now
-            </button>
           </div>
         </div>
       </header>
@@ -723,24 +742,26 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
                 Jimmy&apos;s POS is for businesses that need a browser-based sales screen, stock control, staff permissions, customer accounts, restaurant workflows, cash control, mobile order-taking, and useful reports in one place.
               </p>
               <div className="mt-5 inline-flex max-w-full items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left dark:border-slate-800 dark:bg-slate-900">
-                <div className="flex shrink-0 overflow-hidden rounded-sm border border-slate-300 dark:border-slate-700">
-                  <span className="h-7 w-2.5 bg-green-600" />
-                  <span className="h-7 w-2.5 bg-yellow-400" />
-                  <span className="h-7 w-2.5 bg-slate-950 dark:bg-slate-100" />
-                  <span className="h-7 w-2.5 bg-red-600" />
-                  <span className="h-7 w-2.5 bg-blue-700" />
-                </div>
+                <SouthAfricanFlag />
                 <p className="text-sm font-bold leading-6 text-slate-800 dark:text-slate-200">
-                  Proudly South African platform, built for local retailers, restaurants, takeaways, and growing operators.
+                  South African-built POS for retailers, restaurants, takeaways, and growing operators, with multi-currency support for broader markets.
                 </p>
               </div>
 
               <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <button
-                  onClick={onTryNow}
+                  onClick={() => onTryNow('retail')}
                   className="inline-flex items-center justify-center gap-3 rounded-lg bg-blue-600 px-7 py-3.5 text-base font-bold text-white transition hover:bg-blue-500"
                 >
-                  Try the POS
+                  <Store className="h-5 w-5" />
+                  Try Retail Mode
+                </button>
+                <button
+                  onClick={() => onTryNow('restaurant')}
+                  className="inline-flex items-center justify-center gap-3 rounded-lg bg-amber-500 px-7 py-3.5 text-base font-bold text-slate-950 transition hover:bg-amber-400"
+                >
+                  <Utensils className="h-5 w-5" />
+                  Try Restaurant Mode
                   <ArrowRight className="h-5 w-5" />
                 </button>
                 <a
@@ -973,10 +994,18 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             </div>
             <div className="flex flex-col gap-3 sm:flex-row md:flex-col">
               <button
-                onClick={onTryNow}
+                onClick={() => onTryNow('retail')}
                 className="inline-flex items-center justify-center gap-3 rounded-lg bg-white px-7 py-3.5 text-base font-bold text-slate-950 transition hover:bg-slate-100"
               >
-                Try Now
+                <Store className="h-5 w-5" />
+                Try Retail Mode
+              </button>
+              <button
+                onClick={() => onTryNow('restaurant')}
+                className="inline-flex items-center justify-center gap-3 rounded-lg border border-white/20 bg-white/10 px-7 py-3.5 text-base font-bold text-white transition hover:bg-white/15"
+              >
+                <Utensils className="h-5 w-5" />
+                Try Restaurant Mode
                 <ArrowRight className="h-5 w-5" />
               </button>
               <button
@@ -997,7 +1026,7 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
               </div>
               <div className="text-center sm:text-left">
                 <p className="font-black text-slate-900 dark:text-white">Jimmy&apos;s POS</p>
-                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Proudly South African. Sales, stock, staff, customers, cash, and reports.</p>
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">South African-built, multi-currency POS for sales, stock, staff, customers, cash, and reports.</p>
               </div>
             </div>
             <button

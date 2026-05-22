@@ -5,7 +5,12 @@ import App from './App.tsx';
 import { BrowserRouter } from 'react-router-dom';
 import './index.css';
 
-registerSW({ immediate: true });
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    updateSW(true);
+  },
+});
 
 const baseUrl = import.meta.env.BASE_URL || '/';
 const routerBasename = baseUrl === '/' ? '/' : baseUrl.replace(/\/$/, '');

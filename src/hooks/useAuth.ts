@@ -44,6 +44,8 @@ interface AuthState {
   error: string | null;
 }
 
+export type DemoMode = 'retail' | 'restaurant';
+
 // ── Token storage helpers ──────────────────────────────────────────────────
 
 const KEYS = {
@@ -229,10 +231,14 @@ export function useAuth() {
     }
   }, [persistAuthResponse]);
 
-  const startDemo = useCallback(async (): Promise<boolean> => {
+  const startDemo = useCallback(async (mode: DemoMode = 'restaurant'): Promise<boolean> => {
     setState(s => ({ ...s, authLoading: true, error: null }));
     try {
-      const res = await fetch('/api/demo/start', { method: 'POST' });
+      const res = await fetch('/api/demo/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
       const data = await res.json();
       if (!res.ok) {
         setState(s => ({ ...s, authLoading: false, error: data.error || 'Unable to start demo' }));

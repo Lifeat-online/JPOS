@@ -2261,7 +2261,19 @@ export async function createApp(io: any = null) {
     const distDir = path.resolve(__dirname, '..', 'dist');
     const staticMountPath = basePath || '/';
 
-    app.use(staticMountPath, express.static(distDir));
+    app.use(staticMountPath, express.static(distDir, {
+      setHeaders(res, filePath) {
+        const fileName = path.basename(filePath);
+        if (fileName === 'sw.js' || fileName === 'manifest.webmanifest' || fileName === 'index.html') {
+          res.setHeader('Cache-Control', 'no-store');
+          return;
+        }
+
+        if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    }));
 
     if (basePath) {
       app.get('/', (req, res) => {
