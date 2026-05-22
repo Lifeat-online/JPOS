@@ -1471,6 +1471,9 @@ export async function createApp(io: any = null) {
         notes: r.notes,
         loyaltyPoints: r.loyalty_points,
         walletBalance: r.wallet_balance,
+        accountEnabled: Boolean(r.account_enabled),
+        accountLimit: r.account_limit !== null ? Number(r.account_limit) : 0,
+        accountBalance: r.account_balance !== null ? Number(r.account_balance) : 0,
         uid: r.uid,
         createdAt: r.created_at,
         updatedAt: r.updated_at

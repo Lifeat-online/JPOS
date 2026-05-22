@@ -473,7 +473,7 @@ async function getBusinessDataset(tenantId: string) {
     ),
     query<any>("SELECT * FROM cash_sessions WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 150", [tenantId]),
     query<any>("SELECT * FROM cash_movements WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 300", [tenantId]),
-    query<any>("SELECT id, name, wallet_balance, loyalty_points, created_at FROM customers WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 300", [tenantId]),
+    query<any>("SELECT id, name, wallet_balance, account_enabled, account_limit, account_balance, loyalty_points, created_at FROM customers WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 300", [tenantId]),
     query<any>("SELECT business FROM app_settings WHERE tenant_id = ? LIMIT 1", [tenantId]),
     query<any>("SELECT COUNT(*) AS active_registers FROM cash_sessions WHERE tenant_id = ? AND status = 'open'", [tenantId]),
   ]);
@@ -522,6 +522,9 @@ function buildDeterministicInsights(tenantId: string, dataset: any): AiInsight[]
   const openOrders = dataset.sales.filter((s: any) => ["open", "kitchen", "pending"].includes(s.status)).length;
   const activeStaff = dataset.staff.filter((s: any) => s.status === "active").length;
   const atRiskCustomers = dataset.customers.filter((c: any) => toNumber(c.wallet_balance) > 0).length;
+  const accountCustomers = dataset.customers.filter((c: any) => Number(c.account_enabled || 0) === 1 || toNumber(c.account_balance) > 0);
+  const accountOwing = accountCustomers.reduce((sum: number, c: any) => sum + toNumber(c.account_balance), 0);
+  const overLimitAccounts = accountCustomers.filter((c: any) => toNumber(c.account_balance) > toNumber(c.account_limit) && toNumber(c.account_limit) > 0);
   const insights: AiInsight[] = [];
 
   insights.push(makeInsight(tenantId, "sales", revenue > 0 ? "success" : "info", "Sales pulse", `Completed revenue is R${revenue.toFixed(2)} across ${completedSales.length} completed sales.`, `Use the R${avgOrder.toFixed(2)} average order value as the baseline for upsells and combos.`, [`Completed sales: ${completedSales.length}`, `Average order: R${avgOrder.toFixed(2)}`], 82));
@@ -541,6 +544,7 @@ function buildDeterministicInsights(tenantId: string, dataset: any): AiInsight[]
   }
 
   insights.push(makeInsight(tenantId, "customer", atRiskCustomers > 0 ? "info" : "success", "Customer wallet liability", `${atRiskCustomers} customers currently have wallet balances.`, "Keep wallet liability visible during cash planning and payout review.", [`Customers with wallet balances: ${atRiskCustomers}`], 75));
+  insights.push(makeInsight(tenantId, "customer", overLimitAccounts.length > 0 ? "warning" : accountOwing > 0 ? "info" : "success", "Account receivables", accountOwing > 0 ? `Customer accounts currently owe R${accountOwing.toFixed(2)}.` : "No customer account debt is currently visible.", overLimitAccounts.length > 0 ? "Review over-limit customers before extending more account credit." : "Monitor account debt alongside cash flow and follow up on older balances.", [`Active/customer accounts: ${accountCustomers.length}`, `Over limit accounts: ${overLimitAccounts.length}`], accountOwing > 0 ? 84 : 72));
   return insights.slice(0, 8);
 }
 
@@ -769,6 +773,8 @@ async function callProviderForInsights(settings: AiSettings, deterministic: AiIn
       staffCount: dataset.staff.length,
       recentSalesCount: dataset.sales.length,
       recentCashSessions: dataset.cashSessions.length,
+      accountOwing: dataset.customers.reduce((sum: number, c: any) => sum + toNumber(c.account_balance), 0),
+      activeAccountCustomers: dataset.customers.filter((c: any) => Number(c.account_enabled || 0) === 1).length,
       restaurantMode: Boolean(dataset.business?.isRestaurantMode),
     },
   });

@@ -134,6 +134,9 @@ export async function getCustomersByTenant(tenantId: string) {
        notes,
        loyalty_points AS loyaltyPoints,
        wallet_balance AS walletBalance,
+       account_enabled AS accountEnabled,
+       account_limit AS accountLimit,
+       account_balance AS accountBalance,
        uid,
        created_at AS createdAt,
        updated_at AS updatedAt
@@ -146,6 +149,9 @@ export async function getCustomersByTenant(tenantId: string) {
     ...r,
     loyaltyPoints: r.loyaltyPoints !== null ? Number(r.loyaltyPoints) : 0,
     walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
+    accountEnabled: Boolean(r.accountEnabled),
+    accountLimit: r.accountLimit !== null ? Number(r.accountLimit) : 0,
+    accountBalance: r.accountBalance !== null ? Number(r.accountBalance) : 0,
   }));
 }
 

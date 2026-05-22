@@ -67,6 +67,10 @@ export const CustomerSchema = z.object({
   notes: z.string().optional(),
   loyaltyPoints: z.number().min(0).optional(),
   walletBalance: z.number().min(0).optional(),
+  accountEnabled: z.boolean().optional(),
+  accountLimit: z.number().min(0).optional(),
+  accountBalance: z.number().min(0).optional(),
+  accountBalanceDelta: z.number().optional(),
   uid: z.string().optional()
 });
 
@@ -104,11 +108,19 @@ export const SaleSchema = z.object({
   taxAmount: z.number().min(0).nullish(),
   taxRate: z.number().min(0).nullish(),
   taxInclusive: z.boolean().nullish(),
-  paymentMethod: z.enum(['cash', 'payfast', 'card', 'wallet', 'pending']).nullish(),
+  paymentMethod: z.enum(['cash', 'payfast', 'card', 'wallet', 'account', 'pending']).nullish(),
   tenderedAmount: z.number().min(0).nullish(),
   changeAmount: z.number().min(0).nullish(),
   tipAmount: z.number().min(0).nullish(),
   cashOutAmount: z.number().min(0).nullish(),
+  payments: z.array(z.object({
+    method: z.enum(['cash', 'payfast', 'card', 'wallet', 'account']),
+    amount: z.number().min(0),
+    tenderedAmount: z.number().min(0).nullish(),
+    changeAmount: z.number().min(0).nullish(),
+    tipAmount: z.number().min(0).nullish(),
+    cashOutAmount: z.number().min(0).nullish()
+  })).optional(),
   pointsDiscount: z.number().min(0).nullish(),
   status: z.enum(['pending', 'completed', 'failed', 'open', 'kitchen']).nullish(),
   customerId: z.string().nullish(),

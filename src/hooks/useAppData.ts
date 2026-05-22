@@ -218,6 +218,9 @@ export function useAppData(user: User | null) {
           ...c,
           loyaltyPoints: Number(c.loyaltyPoints || 0),
           walletBalance: Number(c.walletBalance || 0),
+          accountEnabled: Boolean(c.accountEnabled),
+          accountLimit: Number(c.accountLimit || 0),
+          accountBalance: Number(c.accountBalance || 0),
         }));
         setCustomers(sanitized);
       } catch (err) {

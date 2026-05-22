@@ -26,8 +26,9 @@ interface PointOfSaleViewProps {
   setIsProcessing: (val: boolean) => void;
   handleSaveOrder: (sendToKitchen: boolean) => Promise<void>;
   handleParkSale: (label?: string) => Promise<string | null>;
-  handleCheckout: (method: 'cash' | 'payfast' | 'card') => Promise<void>;
+  handleCheckout: (method: 'cash' | 'payfast' | 'card' | 'account') => Promise<void>;
   handleWalletCheckout: () => Promise<void>;
+  handleAccountCheckout: () => Promise<void>;
   handleOpenTab: (tabName?: string) => Promise<void>;
   handleOpenTable: (tableNumber: string) => Promise<void>;
   setTenderModal: (modal: { isOpen: boolean, method: 'cash' | 'card' | null }) => void;
@@ -50,7 +51,7 @@ interface PointOfSaleViewProps {
 
 export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   products, user, customers, sales, workstations, isProcessing, setIsProcessing, handleSaveOrder,
-  handleParkSale, handleCheckout, handleWalletCheckout, handleOpenTab, handleOpenTable, setTenderModal, setTenderedAmount, setSplitPaymentModal,
+  handleParkSale, handleCheckout, handleWalletCheckout, handleAccountCheckout, handleOpenTab, handleOpenTable, setTenderModal, setTenderedAmount, setSplitPaymentModal,
   categoryTree, CATEGORIES, getCategoryIcon, getProductImage, openCashDrawer,
   pointsDiscount, onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated,
   lastReceiptSale, onPrintLastReceipt, suppressBillPrint = false,
@@ -157,6 +158,10 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   );
   const selectedCustomerWalletBalance = Number(selectedCustomer?.walletBalance || 0);
   const canPayWithCustomerWallet = Boolean(selectedCustomer && selectedCustomerWalletBalance > 0);
+  const selectedCustomerAccountLimit = Number(selectedCustomer?.accountLimit || 0);
+  const selectedCustomerAccountBalance = Number(selectedCustomer?.accountBalance || 0);
+  const selectedCustomerAccountRemaining = Math.max(0, selectedCustomerAccountLimit - selectedCustomerAccountBalance);
+  const canPayWithCustomerAccount = Boolean(selectedCustomer?.accountEnabled && selectedCustomerAccountRemaining > 0);
   const activeWorkstations = useMemo(() => workstations.filter(w => w.status === 'active'), [workstations]);
   const attachedWorkstation = activeWorkstations.find(w => w.id === attachedWorkstationId);
   const workstationPreferenceKey = `pos-attached-workstation:${tenantId || 'local'}`;
@@ -983,8 +988,13 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                         {customers.find(c => c.id === selectedCustomerId)?.name}
                       </div>
                       <div className="text-[9px] font-bold text-slate-500">
-                        {customers.find(c => c.id === selectedCustomerId)?.points || 0} Points Available
+                        {selectedCustomer?.loyaltyPoints || selectedCustomer?.points || 0} Points Available
                       </div>
+                      {(selectedCustomer?.accountEnabled || selectedCustomerAccountBalance > 0) && (
+                        <div className="text-[9px] font-black text-amber-600 dark:text-amber-400">
+                          Account: R{selectedCustomerAccountBalance.toFixed(2)} owing / R{selectedCustomerAccountLimit.toFixed(2)} limit
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1050,7 +1060,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 )}
               </div>
 
-              {hasBlockingStockIssues && (
+                {hasBlockingStockIssues && (
                 <div className="mx-5 mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/10 dark:text-rose-300">
                   <div className="flex items-start gap-2">
                     <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -1067,6 +1077,29 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   <div className="flex justify-between items-center mb-4 p-3 bg-primary/10 rounded-xl border border-primary/20">
                     <span className="font-bold text-primary flex items-center gap-2"><Utensils className="w-4 h-4"/> Table {activeTableNumber}</span>
                     <button onClick={() => { setActiveTableNumber(null); setActiveOrderId(null); }} className="text-xs font-bold text-slate-500 hover:text-slate-700">Clear</button>
+                  </div>
+                )}
+
+                {(selectedCustomer?.accountEnabled || selectedCustomerAccountBalance > 0) && (
+                  <div className={`mx-5 mb-4 rounded-2xl border p-3 ${
+                    selectedCustomerAccountRemaining < amountDue
+                      ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/10 dark:text-amber-200'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-900/10 dark:text-emerald-200'
+                  }`}>
+                    <div className="flex items-start gap-2">
+                      <CreditCard className="w-4 h-4 mt-0.5 shrink-0" />
+                      <div className="w-full">
+                        <p className="text-xs font-black uppercase tracking-widest">Customer account</p>
+                        <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] font-black uppercase tracking-widest">
+                          <span>Total R{selectedCustomerAccountLimit.toFixed(2)}</span>
+                          <span>Owing R{selectedCustomerAccountBalance.toFixed(2)}</span>
+                          <span>Left R{selectedCustomerAccountRemaining.toFixed(2)}</span>
+                        </div>
+                        {selectedCustomerAccountRemaining < amountDue && (
+                          <p className="mt-2 text-[10px] font-bold">This order is above the remaining account allowance.</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
                 <div className="flex justify-between items-center mb-6">
@@ -1171,6 +1204,20 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     Pay with Wallet
                     <span className="ml-auto bg-white/20 px-2 py-0.5 rounded-lg text-[10px]">
                       R{selectedCustomerWalletBalance.toFixed(2)} available
+                    </span>
+                  </button>
+                )}
+
+                {canPayWithCustomerAccount && (
+                  <button
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || selectedCustomerAccountRemaining < amountDue}
+                    onClick={handleAccountCheckout}
+                    className="w-full mb-4 h-14 rounded-2xl bg-amber-500 text-white font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 shadow-lg shadow-amber-500/30 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    Put on Account
+                    <span className="ml-auto bg-white/20 px-2 py-0.5 rounded-lg text-[10px]">
+                      R{selectedCustomerAccountRemaining.toFixed(2)} left
                     </span>
                   </button>
                 )}

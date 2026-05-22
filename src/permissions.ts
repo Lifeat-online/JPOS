@@ -16,6 +16,7 @@ import {
   Users,
   Utensils,
   Wallet,
+  ReceiptText,
 } from 'lucide-react';
 import type React from 'react';
 import type { Staff, StaffPermissions } from './types';
@@ -32,6 +33,7 @@ export type AppView =
   | 'live'
   | 'inventory'
   | 'customers'
+  | 'accounts'
   | 'staff'
   | 'wallets'
   | 'leaderboard'
@@ -59,17 +61,17 @@ type AccessOptions = {
 const ROLE_VIEWS: Record<StaffRole, AppView[]> = {
   admin: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
-    'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile',
+    'inventory', 'customers', 'accounts', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile',
     'ai', 'packages',
   ],
   dev: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
-    'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile', 'dev',
+    'inventory', 'customers', 'accounts', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile', 'dev',
     'ai', 'packages',
   ],
   manager: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
-    'inventory', 'customers', 'leaderboard', 'reports', 'ai', 'profile',
+    'inventory', 'customers', 'accounts', 'leaderboard', 'reports', 'ai', 'profile',
     'packages',
   ],
   cashier: ['pos', 'history', 'messages', 'cash', 'profile'],
@@ -87,6 +89,7 @@ const VIEW_META: Record<AppView, NavItem> = {
   live: { id: 'live', icon: Activity, label: 'Live', group: 'Operations' },
   inventory: { id: 'inventory', icon: Package, label: 'Inventory', group: 'Operations' },
   customers: { id: 'customers', icon: Users, label: 'Customers', group: 'Operations' },
+  accounts: { id: 'accounts', icon: ReceiptText, label: 'Accounts', group: 'Management' },
   staff: { id: 'staff', icon: Users, label: 'Staff', group: 'Management' },
   wallets: { id: 'wallets', icon: Wallet, label: 'Wallets', group: 'Management' },
   leaderboard: { id: 'leaderboard', icon: Trophy, label: 'Leaderboard', group: 'Management' },
@@ -111,6 +114,7 @@ const PERMISSION_VIEW_MAP: Array<[keyof StaffPermissions, AppView]> = [
   ['canViewLive', 'live'],
   ['canManageInventory', 'inventory'],
   ['canManageCustomers', 'customers'],
+  ['canManageCustomers', 'accounts'],
   ['canManageStaff', 'staff'],
   ['canManageWallets', 'wallets'],
   ['canViewLeaderboard', 'leaderboard'],

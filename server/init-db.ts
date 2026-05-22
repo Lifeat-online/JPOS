@@ -71,6 +71,9 @@ CREATE TABLE IF NOT EXISTS customers (
   notes TEXT,
   loyalty_points INTEGER DEFAULT 0,
   wallet_balance NUMERIC(12,2) DEFAULT 0,
+  account_enabled SMALLINT DEFAULT 0 CHECK (account_enabled IN (0, 1)),
+  account_limit NUMERIC(12,2) DEFAULT 0,
+  account_balance NUMERIC(12,2) DEFAULT 0,
   uid TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -134,7 +137,7 @@ CREATE TABLE IF NOT EXISTS sales (
   tax_amount NUMERIC(12,2) DEFAULT 0,
   tax_rate NUMERIC(5,2) DEFAULT 0,
   tax_inclusive SMALLINT DEFAULT 0 CHECK (tax_inclusive IN (0, 1)),
-  payment_method TEXT DEFAULT 'pending' CHECK (payment_method IN ('cash','payfast','card','wallet','pending')),
+  payment_method TEXT DEFAULT 'pending' CHECK (payment_method IN ('cash','payfast','card','wallet','account','pending')),
   tendered_amount NUMERIC(12,2) DEFAULT 0,
   change_amount NUMERIC(12,2) DEFAULT 0,
   tip_amount NUMERIC(12,2) DEFAULT 0,
@@ -310,7 +313,7 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
 CREATE TABLE IF NOT EXISTS sale_payments (
   id TEXT PRIMARY KEY,
   sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
-  method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet')),
+  method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet','account')),
   amount NUMERIC(12,2) NOT NULL DEFAULT 0,
   tendered_amount NUMERIC(12,2) DEFAULT 0,
   change_amount NUMERIC(12,2) DEFAULT 0,
@@ -378,10 +381,84 @@ export async function initDb() {
 
   await ensureStaffPermissionsSchema();
   await ensureLicenceSchema();
+  await ensureSalePaymentsTable();
+  await ensureCustomerAccountSchema();
   await ensureCashManagementSchema();
   await ensureRefundSchema();
   await ensureBulkInventorySchema();
   await ensureAiSchema();
+}
+
+export async function ensureCustomerAccountSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS account_enabled SMALLINT DEFAULT 0`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS account_limit NUMERIC(12,2) DEFAULT 0`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS account_balance NUMERIC(12,2) DEFAULT 0`);
+    await query(`UPDATE customers SET account_enabled = COALESCE(account_enabled, 0), account_limit = COALESCE(account_limit, 0), account_balance = COALESCE(account_balance, 0)`);
+    await query(`
+      DO $$
+      DECLARE
+        constraint_name text;
+      BEGIN
+        SELECT con.conname INTO constraint_name
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = ANY(con.conkey)
+        WHERE rel.relname = 'sales'
+          AND att.attname = 'payment_method'
+          AND con.contype = 'c'
+        LIMIT 1;
+
+        IF constraint_name IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE sales DROP CONSTRAINT %I', constraint_name);
+        END IF;
+
+        ALTER TABLE sales
+          ADD CONSTRAINT sales_payment_method_check
+          CHECK (payment_method IN ('cash','payfast','card','wallet','account','pending'));
+      END $$;
+    `);
+    await query(`
+      DO $$
+      DECLARE
+        constraint_name text;
+      BEGIN
+        SELECT con.conname INTO constraint_name
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = ANY(con.conkey)
+        WHERE rel.relname = 'sale_payments'
+          AND att.attname = 'method'
+          AND con.contype = 'c'
+        LIMIT 1;
+
+        IF constraint_name IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE sale_payments DROP CONSTRAINT %I', constraint_name);
+        END IF;
+
+        ALTER TABLE sale_payments
+          ADD CONSTRAINT sale_payments_method_check
+          CHECK (method IN ('cash','payfast','card','wallet','account'));
+      END $$;
+    `);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE customers ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+
+  await addColumn(`account_enabled TINYINT(1) DEFAULT 0 AFTER wallet_balance`);
+  await addColumn(`account_limit DECIMAL(12,2) DEFAULT 0 AFTER account_enabled`);
+  await addColumn(`account_balance DECIMAL(12,2) DEFAULT 0 AFTER account_limit`);
+  await query(`UPDATE customers SET account_enabled = COALESCE(account_enabled, 0), account_limit = COALESCE(account_limit, 0), account_balance = COALESCE(account_balance, 0)`);
+  await query(`ALTER TABLE sales MODIFY payment_method ENUM('cash','payfast','card','wallet','account','pending') DEFAULT 'pending'`);
+  await query(`ALTER TABLE sale_payments MODIFY method ENUM('cash','payfast','card','wallet','account') NOT NULL`);
 }
 
 export async function ensureStaffPermissionsSchema() {
@@ -850,7 +927,7 @@ export async function ensureSalePaymentsTable() {
       CREATE TABLE IF NOT EXISTS sale_payments (
         id TEXT PRIMARY KEY,
         sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
-        method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet')),
+        method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet','account')),
         amount NUMERIC(12,2) NOT NULL DEFAULT 0,
         tendered_amount NUMERIC(12,2) DEFAULT 0,
         change_amount NUMERIC(12,2) DEFAULT 0,
@@ -867,7 +944,7 @@ export async function ensureSalePaymentsTable() {
     CREATE TABLE IF NOT EXISTS sale_payments (
       id VARCHAR(64) PRIMARY KEY,
       sale_id VARCHAR(64) NOT NULL,
-      method ENUM('cash','payfast','card','wallet') NOT NULL,
+      method ENUM('cash','payfast','card','wallet','account') NOT NULL,
       amount DECIMAL(12,2) NOT NULL DEFAULT 0,
       tendered_amount DECIMAL(12,2) DEFAULT 0,
       change_amount DECIMAL(12,2) DEFAULT 0,

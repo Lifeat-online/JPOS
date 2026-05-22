@@ -29,6 +29,7 @@ import { PointOfSaleView } from './views/PointOfSaleView';
 import { HistoryView } from './views/HistoryView';
 import { InventoryView } from './views/InventoryView';
 import { CustomersView } from './views/CustomersView';
+import { AccountsView } from './views/AccountsView';
 import { StaffView } from './views/StaffView';
 import { ReportsView } from './views/ReportsView';
 import { LiveView } from './views/LiveView';
@@ -1138,6 +1139,7 @@ export default function App() {
             handleParkSale={checkout.handleParkSale}
             handleCheckout={checkout.handleCheckout}
             handleWalletCheckout={checkout.handleWalletCheckout}
+            handleAccountCheckout={checkout.handleAccountCheckout}
             handleOpenTab={checkout.handleOpenTab}
             handleOpenTable={checkout.handleOpenTable}
             setTenderModal={checkout.setTenderModal}
@@ -1197,8 +1199,16 @@ export default function App() {
             }}
           />
         )}
+        {view === 'accounts' && (
+          <AccountsView
+            customers={customers}
+            sales={sales}
+            onEditCustomer={(customer) => setCustomerModal({ isOpen: true, customer })}
+            onViewOrders={(id) => { setFilterCustomerId(id); navigate('/history'); }}
+          />
+        )}
         {view === 'live' && <LiveView tenantId={tenantId} />}
-        {view === 'reports' && <ReportsView sales={sales} tenantId={tenantId} />}
+        {view === 'reports' && <ReportsView sales={sales} customers={customers} tenantId={tenantId} />}
         {view === 'ai' && <AiCopilotView tenantId={tenantId} />}
         {view === 'staff' && (
           <StaffView
@@ -1377,6 +1387,8 @@ export default function App() {
             cartTotal={checkout.cartTotal}
             isProcessing={checkout.isProcessing}
             customerWalletBalance={customers.find(c => c.id === selectedCustomerId)?.walletBalance || 0}
+            customerAccountEnabled={Boolean(customers.find(c => c.id === selectedCustomerId)?.accountEnabled)}
+            customerAccountRemaining={Math.max(0, Number(customers.find(c => c.id === selectedCustomerId)?.accountLimit || 0) - Number(customers.find(c => c.id === selectedCustomerId)?.accountBalance || 0))}
             onConfirm={(payments) => checkout.handleCheckout('split', payments)}
             onClose={() => checkout.setSplitPaymentModal(false)}
           />

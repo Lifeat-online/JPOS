@@ -43,6 +43,23 @@ describe('validation middleware', () => {
     expect(CustomerUpdateSchema.safeParse({ walletBalance: -1 }).success).toBe(false);
   });
 
+  it('accepts customer account fields and account sales', () => {
+    expect(CustomerUpdateSchema.safeParse({
+      accountEnabled: true,
+      accountLimit: 500,
+      accountBalance: 125,
+    }).success).toBe(true);
+
+    expect(SaleSchema.safeParse({
+      items: [{ id: 'prod_1', name: 'Coffee', price: 32, quantity: 1 }],
+      total: 32,
+      subtotal: 32,
+      paymentMethod: 'account',
+      status: 'completed',
+      customerId: 'cust_1',
+    }).success).toBe(true);
+  });
+
   it('allows wallet-only staff updates while keeping staff creation strict', () => {
     expect(StaffSchema.safeParse({ walletBalance: 10 }).success).toBe(false);
     expect(StaffUpdateSchema.safeParse({ walletBalance: 10 }).success).toBe(true);

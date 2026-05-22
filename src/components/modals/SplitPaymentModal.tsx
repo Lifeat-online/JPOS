@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Plus, Trash2, Loader2, Wallet, CreditCard, Banknote } from 'lucide-react';
+import { X, Plus, Trash2, Loader2, Wallet, CreditCard, Banknote, ReceiptText } from 'lucide-react';
 
 interface SplitPaymentModalProps {
   isOpen: boolean;
@@ -9,19 +9,23 @@ interface SplitPaymentModalProps {
   onConfirm: (payments: any[]) => void;
   onClose: () => void;
   customerWalletBalance?: number;
+  customerAccountRemaining?: number;
+  customerAccountEnabled?: boolean;
 }
 
 export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
-  isOpen, cartTotal, isProcessing, onConfirm, onClose, customerWalletBalance = 0
+  isOpen, cartTotal, isProcessing, onConfirm, onClose, customerWalletBalance = 0, customerAccountRemaining = 0, customerAccountEnabled = false
 }) => {
   const [payments, setPayments] = useState<any[]>([]);
-  const [currentMethod, setCurrentMethod] = useState<'cash' | 'card' | 'wallet'>('cash');
+  const [currentMethod, setCurrentMethod] = useState<'cash' | 'card' | 'wallet' | 'account'>('cash');
   const [currentAmount, setCurrentAmount] = useState<string>('');
   const [tenderedAmount, setTenderedAmount] = useState<string>('');
   const [overageAction, setOverageAction] = useState<'tip' | 'cashout'>('tip');
 
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
   const remaining = Math.max(0, cartTotal - totalPaid);
+  const accountPaid = payments.reduce((sum, p) => sum + (p.method === 'account' ? Number(p.amount || 0) : 0), 0);
+  const accountRemainingAfterPayments = Math.max(0, Number(customerAccountRemaining || 0) - accountPaid);
 
   const addPayment = () => {
     const amount = Number(currentAmount);
@@ -119,6 +123,14 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
                   <Wallet className="w-5 h-5" />
                   <span className="text-[10px] font-black uppercase tracking-widest">Wallet</span>
                 </button>
+                <button
+                  onClick={() => setCurrentMethod('account')}
+                  disabled={!customerAccountEnabled || accountRemainingAfterPayments <= 0}
+                  className={`flex-1 py-3 flex flex-col items-center gap-1 rounded-xl transition-all ${currentMethod === 'account' ? 'bg-white dark:bg-slate-800 shadow-sm text-primary' : 'text-slate-400'} disabled:opacity-30`}
+                >
+                  <ReceiptText className="w-5 h-5" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Account</span>
+                </button>
               </div>
 
               <div className="space-y-4">
@@ -138,6 +150,12 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
                 {currentMethod === 'wallet' && (
                   <p className="text-[10px] font-black uppercase tracking-widest text-violet-500 px-1">
                     Client wallet: R{Number(customerWalletBalance || 0).toFixed(2)}
+                  </p>
+                )}
+
+                {currentMethod === 'account' && (
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 px-1">
+                    Account remaining: R{accountRemainingAfterPayments.toFixed(2)}
                   </p>
                 )}
 
@@ -175,7 +193,7 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
 
                 <button
                   onClick={addPayment}
-                  disabled={!currentAmount || Number(currentAmount) <= 0 || (currentMethod === 'wallet' && (customerWalletBalance <= 0 || Number(currentAmount) > customerWalletBalance))}
+                  disabled={!currentAmount || Number(currentAmount) <= 0 || (currentMethod === 'wallet' && (customerWalletBalance <= 0 || Number(currentAmount) > customerWalletBalance)) || (currentMethod === 'account' && (!customerAccountEnabled || Number(currentAmount) > accountRemainingAfterPayments))}
                   className="w-full py-5 bg-slate-900 dark:bg-primary text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 flex justify-center items-center gap-2 mt-4"
                 >
                   <Plus className="w-4 h-4" />
@@ -198,7 +216,7 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
                   >
                     <div className="flex items-center gap-4">
                       <div className="p-3 bg-white dark:bg-[#0B1120] rounded-xl text-primary">
-                        {p.method === 'cash' ? <Banknote className="w-5 h-5" /> : p.method === 'card' ? <CreditCard className="w-5 h-5" /> : <Wallet className="w-5 h-5" />}
+                        {p.method === 'cash' ? <Banknote className="w-5 h-5" /> : p.method === 'card' ? <CreditCard className="w-5 h-5" /> : p.method === 'account' ? <ReceiptText className="w-5 h-5" /> : <Wallet className="w-5 h-5" />}
                       </div>
                       <div>
                         <span className="text-sm font-black text-slate-900 dark:text-white block uppercase tracking-tight">{p.method}</span>

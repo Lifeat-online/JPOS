@@ -88,8 +88,8 @@ export async function createCustomer(
   await query(
     `INSERT INTO customers (
       id, tenant_id, name, email, phone, address, notes,
-      loyalty_points, wallet_balance, uid, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      loyalty_points, wallet_balance, account_enabled, account_limit, account_balance, uid, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
     [
       id,
       tenantId,
@@ -100,10 +100,19 @@ export async function createCustomer(
       customer.notes || null,
       customer.loyaltyPoints || 0,
       customer.walletBalance || 0,
+      customer.accountEnabled ? 1 : 0,
+      customer.accountLimit || 0,
+      customer.accountBalance || 0,
       customer.uid || null,
     ]
   );
-  return { id, ...customer };
+  return {
+    id,
+    ...customer,
+    accountEnabled: Boolean(customer.accountEnabled),
+    accountLimit: Number(customer.accountLimit || 0),
+    accountBalance: Number(customer.accountBalance || 0),
+  };
 }
 
 export async function createStaff(
@@ -335,6 +344,22 @@ export async function updateCustomer(
     fields.push("wallet_balance = ?");
     values.push(updates.walletBalance);
   }
+  if (updates.accountEnabled !== undefined) {
+    fields.push("account_enabled = ?");
+    values.push(updates.accountEnabled ? 1 : 0);
+  }
+  if (updates.accountLimit !== undefined) {
+    fields.push("account_limit = ?");
+    values.push(updates.accountLimit);
+  }
+  if (updates.accountBalance !== undefined) {
+    fields.push("account_balance = ?");
+    values.push(updates.accountBalance);
+  }
+  if ((updates as any).accountBalanceDelta !== undefined) {
+    fields.push("account_balance = GREATEST(0, COALESCE(account_balance, 0) + ?)");
+    values.push((updates as any).accountBalanceDelta);
+  }
 
   fields.push("updated_at = NOW()");
   values.push(tenantId, customerId);
@@ -354,6 +379,9 @@ export async function updateCustomer(
       notes: r.notes,
       loyaltyPoints: r.loyalty_points !== null ? Number(r.loyalty_points) : 0,
       walletBalance: r.wallet_balance !== null ? Number(r.wallet_balance) : 0,
+      accountEnabled: Boolean(r.account_enabled),
+      accountLimit: r.account_limit !== null ? Number(r.account_limit) : 0,
+      accountBalance: r.account_balance !== null ? Number(r.account_balance) : 0,
       uid: r.uid,
       createdAt: r.created_at,
       updatedAt: r.updated_at
@@ -379,6 +407,9 @@ export async function updateCustomer(
     notes: r.notes,
     loyaltyPoints: r.loyalty_points !== null ? Number(r.loyalty_points) : 0,
     walletBalance: r.wallet_balance !== null ? Number(r.wallet_balance) : 0,
+    accountEnabled: Boolean(r.account_enabled),
+    accountLimit: r.account_limit !== null ? Number(r.account_limit) : 0,
+    accountBalance: r.account_balance !== null ? Number(r.account_balance) : 0,
     uid: r.uid,
     createdAt: r.created_at,
     updatedAt: r.updated_at

@@ -44,7 +44,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   });
   const [checkoutModal, setCheckoutModal] = useState<{
     isOpen: boolean;
-    paymentMethod: 'cash' | 'payfast' | 'card' | 'wallet' | 'split' | null;
+    paymentMethod: 'cash' | 'payfast' | 'card' | 'wallet' | 'account' | 'split' | null;
     saleData?: any;
   }>({ isOpen: false, paymentMethod: null });
   const [splitPaymentModal, setSplitPaymentModal] = useState(false);
@@ -318,7 +318,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     }
   };
 
-  const handleCheckout = async (method: 'cash' | 'payfast' | 'card' | 'wallet' | 'split', splitPayments?: any[]) => {
+  const handleCheckout = async (method: 'cash' | 'payfast' | 'card' | 'wallet' | 'account' | 'split', splitPayments?: any[]) => {
     if (cart.length === 0 || !tenantId) return;
     const selectedCustomer = selectedCustomerId
       ? customers.find(c => c.id === selectedCustomerId) || null
@@ -326,6 +326,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     const walletAmount = method === 'wallet'
       ? cartTotalAfterDiscount
       : (splitPayments || []).reduce((sum, p) => sum + (p.method === 'wallet' ? Number(p.amount || 0) : 0), 0);
+    const accountAmount = method === 'account'
+      ? cartTotalAfterDiscount
+      : (splitPayments || []).reduce((sum, p) => sum + (p.method === 'account' ? Number(p.amount || 0) : 0), 0);
 
     if (walletAmount > 0) {
       const walletBalance = Number(selectedCustomer?.walletBalance || 0);
@@ -335,6 +338,20 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       }
       if (walletBalance < walletAmount) {
         alert(`Client wallet balance is R${walletBalance.toFixed(2)}, which is not enough for this wallet payment.`);
+        return;
+      }
+    }
+
+    if (accountAmount > 0) {
+      const accountLimit = Number(selectedCustomer?.accountLimit || 0);
+      const accountBalance = Number(selectedCustomer?.accountBalance || 0);
+      const accountRemaining = Math.max(0, accountLimit - accountBalance);
+      if (!selectedCustomer || !selectedCustomer.accountEnabled) {
+        alert('Select a client with an active account before using account payment.');
+        return;
+      }
+      if (accountRemaining < accountAmount) {
+        alert(`Client account remaining is R${accountRemaining.toFixed(2)}, which is not enough for this account payment.`);
         return;
       }
     }
@@ -361,12 +378,12 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         saleData.payments = splitPayments;
         // Logic to determine primary payment method for legacy field if needed
         saleData.paymentMethod = splitPayments.length > 1 ? 'cash' : (splitPayments[0]?.method || 'cash');
-      } else if (method === 'cash' || method === 'card' || method === 'wallet') {
-        const overage = method === 'wallet' ? 0 : Math.max(0, Number(tenderedAmount || 0) - cartTotalAfterDiscount);
+      } else if (method === 'cash' || method === 'card' || method === 'wallet' || method === 'account') {
+        const overage = (method === 'wallet' || method === 'account') ? 0 : Math.max(0, Number(tenderedAmount || 0) - cartTotalAfterDiscount);
         const p: any = {
           method: method,
           amount: cartTotalAfterDiscount,
-          tenderedAmount: Number(tenderedAmount || cartTotalAfterDiscount),
+          tenderedAmount: method === 'account' ? cartTotalAfterDiscount : Number(tenderedAmount || cartTotalAfterDiscount),
           changeAmount: method === 'cash' ? overage : 0,
           tipAmount: (method === 'card' && cardOverageAction === 'tip') ? overage : 0,
           cashOutAmount: (method === 'card' && cardOverageAction === 'cashout') ? overage : 0,
@@ -465,6 +482,14 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
             }).catch(e => console.warn('Failed to update wallet balance:', e));
           }
         }
+        if (method === 'split' || method === 'account') {
+          const accountPayment = saleData.payments.find((p: any) => p.method === 'account');
+          if (accountPayment && selectedCustomer) {
+            await updateCustomer(tenantId, selectedCustomer.id, {
+              accountBalanceDelta: Number(accountPayment.amount || 0)
+            }).catch(e => console.warn('Failed to update account balance:', e));
+          }
+        }
 
         resetAfterCheckout();
         setTenderModal({ isOpen: false, method: null });
@@ -509,6 +534,10 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     await handleCheckout('wallet');
   };
 
+  const handleAccountCheckout = async () => {
+    await handleCheckout('account');
+  };
+
   return {
     isProcessing, setIsProcessing,
     tenderedAmount, setTenderedAmount,
@@ -528,5 +557,6 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     handleOpenTable,
     handleCheckout,
     handleWalletCheckout,
+    handleAccountCheckout,
   };
 }

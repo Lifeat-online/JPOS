@@ -1,5 +1,5 @@
 import React from 'react';
-import { UserPlus, Edit, TabletSmartphone } from 'lucide-react';
+import { UserPlus, Edit, TabletSmartphone, ReceiptText } from 'lucide-react';
 import { Customer, Sale } from '../types';
 
 interface CustomersViewProps {
@@ -98,6 +98,27 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                     </div>
                     <span className="font-black text-indigo-700 dark:text-indigo-400 text-sm">R{Number(openTab.total || 0).toFixed(2)}</span>
                   </button>
+                )}
+
+                {(c.accountEnabled || Number(c.accountBalance || 0) > 0) && (
+                  <div className="grid grid-cols-3 gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-200">
+                    <div>
+                      <p className="text-[8px] font-black uppercase tracking-widest opacity-70">Limit</p>
+                      <p className="text-xs font-black">R{Number(c.accountLimit || 0).toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-black uppercase tracking-widest opacity-70">Owing</p>
+                      <p className="text-xs font-black">R{Number(c.accountBalance || 0).toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-black uppercase tracking-widest opacity-70">Left</p>
+                      <p className="text-xs font-black">R{Math.max(0, Number(c.accountLimit || 0) - Number(c.accountBalance || 0)).toFixed(2)}</p>
+                    </div>
+                    <div className="col-span-3 flex items-center gap-2 text-[9px] font-black uppercase tracking-widest">
+                      <ReceiptText className="w-3 h-3" />
+                      {c.accountEnabled ? 'Account active' : 'Account disabled'}
+                    </div>
+                  </div>
                 )}
 
                 <div className="pt-2 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between">

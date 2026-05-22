@@ -84,6 +84,9 @@ CREATE TABLE IF NOT EXISTS customers (
   notes TEXT,
   loyalty_points INTEGER DEFAULT 0,
   wallet_balance NUMERIC(12,2) DEFAULT 0,
+  account_enabled SMALLINT DEFAULT 0 CHECK (account_enabled IN (0, 1)),
+  account_limit NUMERIC(12,2) DEFAULT 0,
+  account_balance NUMERIC(12,2) DEFAULT 0,
   uid TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -147,7 +150,7 @@ CREATE TABLE IF NOT EXISTS sales (
   tax_amount NUMERIC(12,2) DEFAULT 0,
   tax_rate NUMERIC(5,2) DEFAULT 0,
   tax_inclusive SMALLINT DEFAULT 0 CHECK (tax_inclusive IN (0, 1)),
-  payment_method TEXT DEFAULT 'pending' CHECK (payment_method IN ('cash','payfast','card','wallet','pending')),
+  payment_method TEXT DEFAULT 'pending' CHECK (payment_method IN ('cash','payfast','card','wallet','account','pending')),
   tendered_amount NUMERIC(12,2) DEFAULT 0,
   change_amount NUMERIC(12,2) DEFAULT 0,
   tip_amount NUMERIC(12,2) DEFAULT 0,
@@ -191,7 +194,7 @@ CREATE TABLE IF NOT EXISTS sale_items (
 CREATE TABLE IF NOT EXISTS sale_payments (
   id TEXT PRIMARY KEY,
   sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
-  method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet')),
+  method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet','account')),
   amount NUMERIC(12,2) NOT NULL DEFAULT 0,
   tendered_amount NUMERIC(12,2) DEFAULT 0,
   change_amount NUMERIC(12,2) DEFAULT 0,

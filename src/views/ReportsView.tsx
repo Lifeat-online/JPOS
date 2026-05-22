@@ -1,24 +1,33 @@
 import React from 'react';
-import { Sale } from '../types';
+import { Customer, Sale } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
-import { TrendingUp, Users, Presentation, DollarSign } from 'lucide-react';
+import { TrendingUp, Users, Presentation, DollarSign, ReceiptText } from 'lucide-react';
 import { format, subDays, isSameDay } from 'date-fns';
 import { getDate } from '../utils/date';
 import { AiInsightStrip } from '../components/AiInsightStrip';
 
 interface ReportsViewProps {
   sales: Sale[];
+  customers: Customer[];
   tenantId?: string | null;
 }
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-export const ReportsView: React.FC<ReportsViewProps> = ({ sales, tenantId }) => {
+export const ReportsView: React.FC<ReportsViewProps> = ({ sales, customers, tenantId }) => {
   // Aggregate data
   const completedSales = sales.filter(s => s.status === 'completed');
   
   const totalRevenue = completedSales.reduce((acc, sale) => acc + sale.total, 0);
   const avgOrderValue = completedSales.length > 0 ? totalRevenue / completedSales.length : 0;
+  const accountCustomers = customers.filter(c => c.accountEnabled || Number(c.accountBalance || 0) > 0);
+  const accountOwing = accountCustomers.reduce((sum, c) => sum + Number(c.accountBalance || 0), 0);
+  const accountLimit = accountCustomers.reduce((sum, c) => sum + Number(c.accountLimit || 0), 0);
+  const accountSales = completedSales.reduce((sum, sale) => {
+    const accountPayments = sale.payments?.filter(p => p.method === 'account') || [];
+    if (accountPayments.length > 0) return sum + accountPayments.reduce((acc, p) => acc + Number(p.amount || 0), 0);
+    return sum + (sale.paymentMethod === 'account' ? Number(sale.total || 0) : 0);
+  }, 0);
   
   // Daily Revenue (last 7 days)
   const dailyData = Array.from({ length: 7 }).map((_, i) => {
@@ -96,6 +105,36 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ sales, tenantId }) => 
               <div className="text-2xl font-black text-slate-800 dark:text-white">
                 {completedSales.reduce((acc, s) => acc + s.items.reduce((iAcc, item) => iAcc + item.quantity, 0), 0)}
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
+            <div className="w-14 h-14 bg-rose-50 dark:bg-rose-900/20 text-rose-500 rounded-2xl flex items-center justify-center">
+              <ReceiptText className="w-7 h-7" />
+            </div>
+            <div>
+              <div className="text-sm font-bold uppercase tracking-widest text-slate-400 mb-1">Account Owing</div>
+              <div className="text-2xl font-black text-slate-800 dark:text-white">R{accountOwing.toFixed(2)}</div>
+            </div>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
+            <div className="w-14 h-14 bg-amber-50 dark:bg-amber-900/20 text-amber-500 rounded-2xl flex items-center justify-center">
+              <DollarSign className="w-7 h-7" />
+            </div>
+            <div>
+              <div className="text-sm font-bold uppercase tracking-widest text-slate-400 mb-1">Account Sales</div>
+              <div className="text-2xl font-black text-slate-800 dark:text-white">R{accountSales.toFixed(2)}</div>
+            </div>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
+            <div className="w-14 h-14 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500 rounded-2xl flex items-center justify-center">
+              <Users className="w-7 h-7" />
+            </div>
+            <div>
+              <div className="text-sm font-bold uppercase tracking-widest text-slate-400 mb-1">Credit Left</div>
+              <div className="text-2xl font-black text-slate-800 dark:text-white">R{Math.max(0, accountLimit - accountOwing).toFixed(2)}</div>
             </div>
           </div>
         </div>

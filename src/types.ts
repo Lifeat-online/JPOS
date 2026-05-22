@@ -47,7 +47,7 @@ export interface OrderItem extends CartItem {
 export interface SalePayment {
   id: string;
   saleId: string;
-  method: 'cash' | 'payfast' | 'card' | 'wallet';
+  method: 'cash' | 'payfast' | 'card' | 'wallet' | 'account';
   amount: number;
   tenderedAmount?: number;
   changeAmount?: number;
@@ -64,7 +64,7 @@ export interface Sale {
   taxAmount?: number;
   taxRate?: number;
   taxInclusive?: boolean;
-  paymentMethod: 'cash' | 'payfast' | 'card' | 'wallet' | 'pending';
+  paymentMethod: 'cash' | 'payfast' | 'card' | 'wallet' | 'account' | 'pending';
   /** @deprecated use payments array for multi-tender sales */
   tenderedAmount?: number;
   /** @deprecated use payments array for multi-tender sales */
@@ -159,9 +159,15 @@ export interface Customer {
   loyaltyPoints?: number;
   /** Customer wallet balance (for refunds, credits, etc.) */
   walletBalance?: number;
+  /** Customer account credit switch and balances */
+  accountEnabled?: boolean;
+  accountLimit?: number;
+  accountBalance?: number;
+  accountBalanceDelta?: number;
   /** Firebase Auth UID if the customer has a portal account */
   uid?: string;
   createdAt?: any;
+  updatedAt?: any;
 }
 
 export interface BusinessSettings {

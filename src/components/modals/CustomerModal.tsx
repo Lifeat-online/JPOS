@@ -18,6 +18,9 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
 
   const inputClass = 'w-full px-4 py-3 bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-semibold text-slate-900 dark:text-white';
   const labelClass = 'text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest px-1';
+  const accountLimit = Number(customer.accountLimit || 0);
+  const accountBalance = Number(customer.accountBalance || 0);
+  const accountRemaining = Math.max(0, accountLimit - accountBalance);
 
   return (
     <motion.div
@@ -26,7 +29,7 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
     >
       <motion.div
         initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-        className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-md w-full shadow-2xl"
+        className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto"
       >
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
@@ -73,6 +76,53 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
               value={customer.notes || ''}
               onChange={e => onChange({ ...customer, notes: e.target.value })}
             />
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-slate-50/70 dark:bg-[#0B1120] p-4 space-y-4">
+            <label className="flex items-center justify-between gap-3">
+              <div>
+                <span className="block text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
+                  Customer Account
+                </span>
+                <span className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mt-1">
+                  Allow this customer to buy on account up to a limit.
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean(customer.accountEnabled)}
+                onChange={e => onChange({ ...customer, accountEnabled: e.target.checked })}
+                className="h-5 w-5 accent-primary"
+              />
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-1">
+                <label className={labelClass}>Limit</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className={inputClass}
+                  value={customer.accountLimit ?? ''}
+                  onChange={e => onChange({ ...customer, accountLimit: Number(e.target.value || 0) })}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Owing</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className={inputClass}
+                  value={customer.accountBalance ?? ''}
+                  onChange={e => onChange({ ...customer, accountBalance: Number(e.target.value || 0) })}
+                />
+              </div>
+              <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-2">
+                <span className={labelClass}>Remaining</span>
+                <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">R{accountRemaining.toFixed(2)}</p>
+              </div>
+            </div>
           </div>
 
           <div className="flex gap-3 mt-8">
