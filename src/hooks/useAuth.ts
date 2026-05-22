@@ -54,21 +54,48 @@ const KEYS = {
   USER:    'jpos_user',
 } as const;
 
+const DEV_EMAIL = 'jameskoen78@gmail.com';
+const DEV_TENANT_ID = 'tenant1';
+
 let refreshPromise: Promise<boolean> | null = null;
+
+function normalizeAuthUser(user: JwtUser | null): JwtUser | null {
+  if (!user) return null;
+
+  const email = String(user.email || '').trim().toLowerCase();
+  if (email !== DEV_EMAIL) return user;
+
+  return {
+    ...user,
+    id: user.id || user.uid || 'dev',
+    uid: user.uid || user.id || 'dev',
+    email: DEV_EMAIL,
+    role: 'dev',
+    tenantId: DEV_TENANT_ID,
+    tenantName: user.tenantName || "Jimmy's POS",
+    displayName: user.displayName ?? user.name ?? 'Dev',
+    photoURL: user.photoURL ?? null,
+  };
+}
 
 function getStoredUser(): JwtUser | null {
   try {
     const raw = localStorage.getItem(KEYS.USER);
-    return raw ? JSON.parse(raw) : null;
+    const user = raw ? normalizeAuthUser(JSON.parse(raw)) : null;
+    if (user && raw !== JSON.stringify(user)) {
+      localStorage.setItem(KEYS.USER, JSON.stringify(user));
+    }
+    return user;
   } catch {
     return null;
   }
 }
 
 function persistSession(accessToken: string, refreshToken: string, user: JwtUser) {
+  const normalizedUser = normalizeAuthUser(user) || user;
   localStorage.setItem(KEYS.ACCESS,  accessToken);
   localStorage.setItem(KEYS.REFRESH, refreshToken);
-  localStorage.setItem(KEYS.USER,    JSON.stringify(user));
+  localStorage.setItem(KEYS.USER,    JSON.stringify(normalizedUser));
 }
 
 function clearSession() {
@@ -196,9 +223,10 @@ export function useAuth() {
       displayName: data.user.name,
       photoURL:    null,
     };
+    const normalizedUser = normalizeAuthUser(user) || user;
 
-    persistSession(data.accessToken, data.refreshToken, user);
-    setState({ user, authLoading: false, error: null });
+    persistSession(data.accessToken, data.refreshToken, normalizedUser);
+    setState({ user: normalizedUser, authLoading: false, error: null });
   }, []);
 
   const login = useCallback(async (credentials?: LoginCredentials): Promise<boolean> => {

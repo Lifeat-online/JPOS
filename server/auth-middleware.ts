@@ -28,6 +28,8 @@ function getJwtSecret() {
 const JWT_SECRET = getJwtSecret();
 const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '8h') as SignOptions['expiresIn'];
 const REFRESH_TOKEN_EXPIRES_IN = (process.env.REFRESH_TOKEN_EXPIRES_IN || '7d') as SignOptions['expiresIn'];
+export const DEV_EMAIL = 'jameskoen78@gmail.com';
+export const DEV_TENANT_ID = 'tenant1';
 
 // Extend Express Request type to include user
 declare global {
@@ -54,6 +56,27 @@ export type AuthTokenPayload = {
   staffId: string;
 }
 
+export function normalizeEmail(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+export function isDevEmail(value: unknown): boolean {
+  return normalizeEmail(value) === DEV_EMAIL;
+}
+
+export function normalizeAuthTokenPayload(payload: AuthTokenPayload): AuthTokenPayload {
+  if (!isDevEmail(payload.email)) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    email: DEV_EMAIL,
+    tenantId: DEV_TENANT_ID,
+    role: 'dev',
+  };
+}
+
 export function generateAccessToken(payload: AuthTokenPayload): string {
   const options: SignOptions = { expiresIn: JWT_EXPIRES_IN };
   return jwt.sign(payload, JWT_SECRET, options);
@@ -67,7 +90,7 @@ export function generateRefreshToken(payload: AuthTokenPayload): string {
 export function verifyToken(token: string): AuthTokenPayload | null {
   try {
     const options: VerifyOptions = { complete: false };
-    return jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
+    return normalizeAuthTokenPayload(jwt.verify(token, JWT_SECRET) as AuthTokenPayload);
   } catch (error) {
     return null;
   }

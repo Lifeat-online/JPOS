@@ -8,7 +8,12 @@ import {
   generateAccessToken, 
   generateRefreshToken, 
   verifyToken, 
-  AuthTokenPayload 
+  AuthTokenPayload,
+  DEV_EMAIL,
+  DEV_TENANT_ID,
+  isDevEmail,
+  normalizeEmail,
+  normalizeAuthTokenPayload,
 } from './auth-middleware.js';
 
 // Hash password for storage
@@ -20,6 +25,54 @@ export async function hashPassword(password: string): Promise<string> {
 // Verify password against hash
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
+}
+
+type StaffAuthRow = {
+  id: string;
+  tenant_id: string;
+  tenant_name?: string;
+  name: string;
+  role: string;
+  email: string;
+  password_hash?: string | null;
+  status?: string;
+};
+
+async function ensureTenantExists(tenantId: string, tenantName: string) {
+  const tenants = await query<any>('SELECT id, name FROM tenants WHERE id = ? LIMIT 1', [tenantId]);
+  if (tenants.length > 0) {
+    return tenants[0].name || tenantName;
+  }
+
+  await query('INSERT INTO tenants (id, name, created_at, updated_at) VALUES (?, ?, NOW(), NOW())', [tenantId, tenantName]);
+  return tenantName;
+}
+
+async function normalizeDevStaff(staff: StaffAuthRow): Promise<StaffAuthRow> {
+  const tenantName = await ensureTenantExists(DEV_TENANT_ID, staff.tenant_name || "Jimmy's POS");
+  const nextStaff: StaffAuthRow = {
+    ...staff,
+    tenant_id: DEV_TENANT_ID,
+    tenant_name: tenantName,
+    role: 'dev',
+    email: DEV_EMAIL,
+    status: 'active',
+  };
+
+  try {
+    await query(
+      'UPDATE staff SET tenant_id = ?, role = ?, email = ?, status = ?, updated_at = NOW() WHERE id = ?',
+      [DEV_TENANT_ID, 'dev', DEV_EMAIL, 'active', staff.id]
+    );
+    await query(
+      'UPDATE users SET tenant_id = ?, email = ?, name = ?, updated_at = NOW() WHERE uid = ?',
+      [DEV_TENANT_ID, DEV_EMAIL, staff.name, staff.id]
+    );
+  } catch (error) {
+    console.warn('Unable to persist Dev staff tenant normalization:', error);
+  }
+
+  return nextStaff;
 }
 
 function buildAuthResponse(staff: {
@@ -256,8 +309,10 @@ export async function handleEnrollment(req: Request, res: Response) {
 export async function handleLogin(req: Request, res: Response) {
   try {
     const { email, password, tenantId } = (req.body ?? {}) as any;
+    const emailValue = normalizeEmail(email);
+    const isDev = isDevEmail(emailValue);
 
-    if (!email || !password) {
+    if (!emailValue || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
@@ -268,14 +323,21 @@ export async function handleLogin(req: Request, res: Response) {
         t.name as tenant_name
       FROM staff s
       JOIN tenants t ON s.tenant_id = t.id
-      WHERE s.email = ? AND s.status = 'active'
+      WHERE LOWER(s.email) = ? AND s.status = 'active'
     `;
-    const params: any[] = [email.toLowerCase()];
+    const params: any[] = [emailValue];
 
-    if (tenantId) {
+    if (!isDev && tenantId) {
       sql += ` AND s.tenant_id = ?`;
       params.push(tenantId);
     }
+
+    if (isDev) {
+      sql += ` ORDER BY CASE WHEN s.tenant_id = ? THEN 0 ELSE 1 END`;
+      params.push(DEV_TENANT_ID);
+    }
+
+    sql += ` LIMIT 1`;
 
     const rows = await query<any>(sql, params);
 
@@ -283,7 +345,7 @@ export async function handleLogin(req: Request, res: Response) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const staff = rows[0];
+    const staff = rows[0] as StaffAuthRow;
 
     // If no password_hash is set, reject login
     if (!staff.password_hash) {
@@ -296,7 +358,8 @@ export async function handleLogin(req: Request, res: Response) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    res.json(buildAuthResponse(staff));
+    const authStaff = isDev ? await normalizeDevStaff(staff) : staff;
+    res.json(buildAuthResponse(authStaff));
 
   } catch (error) {
     console.error('Login error:', error);
@@ -327,14 +390,14 @@ export async function handleRefreshToken(req: Request, res: Response) {
     }
 
     // Create clean payload without exp property for new tokens
-    const cleanPayload: AuthTokenPayload = {
+    const cleanPayload: AuthTokenPayload = normalizeAuthTokenPayload({
       uid: payload.uid,
       email: payload.email,
       name: payload.name,
       tenantId: payload.tenantId,
       role: payload.role,
       staffId: payload.staffId
-    };
+    });
 
     // Generate new access token
     const newAccessToken = generateAccessToken(cleanPayload);
