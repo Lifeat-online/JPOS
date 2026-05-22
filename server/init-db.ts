@@ -381,10 +381,10 @@ export async function initDb() {
   }
 
   await ensureStaffPermissionsSchema();
-  await ensurePersonDiscountSchema();
   await ensureLicenceSchema();
   await ensureSalePaymentsTable();
   await ensureCustomerAccountSchema();
+  await ensurePersonDiscountSchema();
   await ensureCashManagementSchema();
   await ensureRefundSchema();
   await ensureBulkInventorySchema();

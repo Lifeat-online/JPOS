@@ -7,7 +7,10 @@ const {
   ensureBulkInventorySchema,
   ensureCashManagementSchema,
   ensureCompanionDeviceAssignmentsSchema,
+  ensureCustomerAccountSchema,
+  ensurePersonDiscountSchema,
   ensurePushNotificationSchema,
+  ensureRefundSchema,
   ensureSalePaymentsTable,
   ensureStaffRoleSupportsChef,
   ensureStaffPermissionsSchema,
@@ -22,8 +25,17 @@ await ensureStaffRoleSupportsChef().catch((err: unknown) => {
 await ensureStaffPermissionsSchema().catch((err: unknown) => {
   console.warn("Failed to ensure staff permissions schema:", err);
 });
+await ensureCustomerAccountSchema().catch((err: unknown) => {
+  console.warn("Failed to ensure customer account schema:", err);
+});
+await ensurePersonDiscountSchema().catch((err: unknown) => {
+  console.warn("Failed to ensure person discount schema:", err);
+});
 await ensureCashManagementSchema().catch((err: unknown) => {
   console.warn("Failed to ensure cash management schema:", err);
+});
+await ensureRefundSchema().catch((err: unknown) => {
+  console.warn("Failed to ensure refund schema:", err);
 });
 await ensureCompanionDeviceAssignmentsSchema().catch((err: unknown) => {
   console.warn("Failed to ensure companion device assignment schema:", err);
