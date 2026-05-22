@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS customers (
   account_enabled TINYINT(1) DEFAULT 0,
   account_limit DECIMAL(12,2) DEFAULT 0,
   account_balance DECIMAL(12,2) DEFAULT 0,
+  discount_percent DECIMAL(5,2) DEFAULT 0,
   uid VARCHAR(128),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -110,6 +111,7 @@ CREATE TABLE IF NOT EXISTS staff (
   pay_type ENUM('hourly','salary'),
   accumulated_leave INT DEFAULT 0,
   wallet_balance DECIMAL(12,2) DEFAULT 0,
+  discount_percent DECIMAL(5,2) DEFAULT 0,
   metrics JSON DEFAULT JSON_OBJECT(),
   badges JSON DEFAULT JSON_ARRAY(),
   rank VARCHAR(128),
@@ -288,6 +290,37 @@ CREATE TABLE IF NOT EXISTS messages (
   read_by JSON DEFAULT JSON_ARRAY(),
   is_dev_broadcast BOOLEAN DEFAULT FALSE,
   is_system BOOLEAN DEFAULT FALSE,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS push_notification_settings (
+  tenant_id VARCHAR(64) PRIMARY KEY,
+  vapid_public_key TEXT,
+  vapid_private_key TEXT,
+  subject VARCHAR(255) NOT NULL DEFAULT 'mailto:dev@jimmyspos.local',
+  enabled BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  staff_id VARCHAR(64),
+  endpoint VARCHAR(500) NOT NULL,
+  p256dh VARCHAR(255) NOT NULL,
+  auth VARCHAR(255) NOT NULL,
+  expiration_time TIMESTAMP NULL,
+  device_label VARCHAR(160),
+  user_agent VARCHAR(500),
+  disabled_at TIMESTAMP NULL,
+  last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_push_subscription_endpoint (tenant_id, endpoint),
+  INDEX idx_push_subscriptions_tenant (tenant_id),
+  INDEX idx_push_subscriptions_staff (tenant_id, staff_id),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 

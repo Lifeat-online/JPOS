@@ -71,6 +71,7 @@ export const CustomerSchema = z.object({
   accountLimit: z.number().min(0).optional(),
   accountBalance: z.number().min(0).optional(),
   accountBalanceDelta: z.number().optional(),
+  discountPercent: z.number().min(0).max(100).optional(),
   uid: z.string().optional()
 });
 
@@ -89,7 +90,8 @@ export const StaffSchema = z.object({
   payRate: z.number().min(0).optional(),
   payType: z.enum(['hourly', 'salary']).optional(),
   accumulatedLeave: z.number().min(0).optional(),
-  walletBalance: z.number().min(0).optional()
+  walletBalance: z.number().min(0).optional(),
+  discountPercent: z.number().min(0).max(100).optional()
 });
 
 export const StaffUpdateSchema = StaffSchema.partial();

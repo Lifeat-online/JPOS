@@ -132,6 +132,7 @@ export interface Staff {
   accumulatedLeave?: number;
   walletBalance?: number;
   walletBalanceDelta?: number;
+  discountPercent?: number;
   createdAt: any;
   metrics?: {
     totalTips?: number;
@@ -166,6 +167,10 @@ export interface Customer {
   accountBalanceDelta?: number;
   /** Firebase Auth UID if the customer has a portal account */
   uid?: string;
+  profileType?: 'customer' | 'staff';
+  staffId?: string;
+  staffRole?: Staff['role'];
+  discountPercent?: number;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -189,6 +194,18 @@ export interface BusinessSettings {
   pointsEarnedPerCurrency?: number;
   pointsRequiredForDiscount?: number;
   discountAmountForPoints?: number;
+  roleDiscounts?: Partial<Record<Staff['role'], number>>;
+  happyHourDiscounts?: HappyHourDiscount[];
+}
+
+export interface HappyHourDiscount {
+  id: string;
+  name: string;
+  enabled: boolean;
+  discountPercent: number;
+  days: number[];
+  startTime: string;
+  endTime: string;
 }
 
 export interface ReceiptPrintSettings {

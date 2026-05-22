@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { isPostgres, query } from "./db.js";
 import { ensureLicenceSchema } from "./licenceSchema.js";
+import { ensurePushNotificationSchema } from "./pushNotifications.js";
 
 dotenv.config();
 
@@ -380,13 +381,41 @@ export async function initDb() {
   }
 
   await ensureStaffPermissionsSchema();
+  await ensurePersonDiscountSchema();
   await ensureLicenceSchema();
   await ensureSalePaymentsTable();
   await ensureCustomerAccountSchema();
   await ensureCashManagementSchema();
   await ensureRefundSchema();
   await ensureBulkInventorySchema();
+  await ensurePushNotificationSchema();
   await ensureAiSchema();
+}
+
+export { ensurePushNotificationSchema };
+
+export async function ensurePersonDiscountSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS discount_percent NUMERIC(5,2) DEFAULT 0`);
+    await query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS discount_percent NUMERIC(5,2) DEFAULT 0`);
+    await query(`UPDATE customers SET discount_percent = COALESCE(discount_percent, 0)`);
+    await query(`UPDATE staff SET discount_percent = COALESCE(discount_percent, 0)`);
+    return;
+  }
+
+  const addColumn = async (table: 'customers' | 'staff', definition: string) => {
+    try {
+      await query(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+
+  await addColumn('customers', `discount_percent DECIMAL(5,2) DEFAULT 0 AFTER account_balance`);
+  await addColumn('staff', `discount_percent DECIMAL(5,2) DEFAULT 0 AFTER wallet_balance`);
+  await query(`UPDATE customers SET discount_percent = COALESCE(discount_percent, 0)`);
+  await query(`UPDATE staff SET discount_percent = COALESCE(discount_percent, 0)`);
 }
 
 export async function ensureCustomerAccountSchema() {

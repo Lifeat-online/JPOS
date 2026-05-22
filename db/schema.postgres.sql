@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS customers (
   account_enabled SMALLINT DEFAULT 0 CHECK (account_enabled IN (0, 1)),
   account_limit NUMERIC(12,2) DEFAULT 0,
   account_balance NUMERIC(12,2) DEFAULT 0,
+  discount_percent NUMERIC(5,2) DEFAULT 0,
   uid TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -109,6 +110,7 @@ CREATE TABLE IF NOT EXISTS staff (
   pay_type TEXT CHECK (pay_type IN ('hourly','salary')),
   accumulated_leave INTEGER DEFAULT 0,
   wallet_balance NUMERIC(12,2) DEFAULT 0,
+  discount_percent NUMERIC(5,2) DEFAULT 0,
   metrics TEXT DEFAULT '{}'::TEXT,
   badges TEXT DEFAULT '[]'::TEXT,
   rank TEXT,
@@ -277,6 +279,36 @@ CREATE TABLE IF NOT EXISTS messages (
   is_dev_broadcast SMALLINT DEFAULT 0 CHECK (is_dev_broadcast IN (0, 1)),
   is_system SMALLINT DEFAULT 0 CHECK (is_system IN (0, 1))
 );
+
+CREATE TABLE IF NOT EXISTS push_notification_settings (
+  tenant_id TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  vapid_public_key TEXT,
+  vapid_private_key TEXT,
+  subject TEXT NOT NULL DEFAULT 'mailto:dev@jimmyspos.local',
+  enabled SMALLINT DEFAULT 1 CHECK (enabled IN (0, 1)),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  staff_id TEXT,
+  endpoint TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  expiration_time TIMESTAMPTZ NULL,
+  device_label TEXT,
+  user_agent TEXT,
+  disabled_at TIMESTAMPTZ NULL,
+  last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (tenant_id, endpoint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_tenant ON push_subscriptions (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_staff ON push_subscriptions (tenant_id, staff_id);
 
 CREATE TABLE IF NOT EXISTS purchase_orders (
   id TEXT PRIMARY KEY,

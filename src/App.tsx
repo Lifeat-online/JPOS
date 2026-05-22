@@ -61,6 +61,8 @@ import { SplitPaymentModal } from './components/modals/SplitPaymentModal';
 
 import { Product, Customer, Staff, Sale } from './types';
 import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage } from './constants';
+import { buildPosCustomerProfiles } from './utils/customerProfiles';
+import { playRealtimeAttention } from './utils/pushNotifications';
 
 import { MessagingView } from './views/MessagingView';
 import { useMessaging } from './hooks/useMessaging';
@@ -584,6 +586,10 @@ export default function App() {
   const addToCart = usePosStore(s => s.addToCart);
   const tenantId = usePosStore(s => s.tenantId);
   const effectiveActiveSession = storeActiveSession || activeSession;
+  const posCustomerProfiles = useMemo(
+    () => buildPosCustomerProfiles(customers, staff),
+    [customers, staff]
+  );
   const [activeAccountDeviceCount, setActiveAccountDeviceCount] = useState(1);
   const [activeAccountTerminalDeviceId, setActiveAccountTerminalDeviceId] = useState<string | null>(null);
   const accountDeviceId = useMemo(() => {
@@ -604,6 +610,7 @@ export default function App() {
     tenantId,
     enabled: Boolean(user && tenantId && currentUserStaff?.id),
   });
+  const realtimeAlertIds = useRef<Set<string>>(new Set());
   const showCompanionTools = activeAccountDeviceCount > 1;
 
   useEffect(() => {
@@ -646,6 +653,57 @@ export default function App() {
     };
   }, [accountPresenceSocket.socket, accountPresenceSocket.emit, tenantId, currentUserStaff?.id, accountDeviceId]);
 
+  useEffect(() => {
+    const socket = accountPresenceSocket.socket;
+    if (!socket || !tenantId) return;
+
+    const alertOnce = (key: string, pattern?: number[]) => {
+      if (realtimeAlertIds.current.has(key)) return;
+      realtimeAlertIds.current.add(key);
+      window.setTimeout(() => realtimeAlertIds.current.delete(key), 10_000);
+      playRealtimeAttention(pattern);
+    };
+
+    const onSalesUpdate = (payload: any) => {
+      const saleId = payload?.sale?.id || payload?.saleId || Date.now();
+      alertOnce(`sale:${payload?.type || 'update'}:${saleId}`, [150, 70, 150]);
+    };
+
+    const onMessagesUpdate = (payload: any) => {
+      const message = payload?.message;
+      if (!message?.isSystemNotification && !message?.isSystem && message?.senderRole !== 'workstation') return;
+      alertOnce(`message:${message.id || Date.now()}`, [120, 60, 120]);
+    };
+
+    accountPresenceSocket.joinMessages(tenantId);
+    socket.on('sales_update', onSalesUpdate);
+    socket.on('messages_update', onMessagesUpdate);
+
+    return () => {
+      socket.off('sales_update', onSalesUpdate);
+      socket.off('messages_update', onMessagesUpdate);
+      accountPresenceSocket.leaveMessages(tenantId);
+    };
+  }, [accountPresenceSocket.socket, accountPresenceSocket.joinMessages, accountPresenceSocket.leaveMessages, tenantId]);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    const onServiceWorkerMessage = (event: MessageEvent) => {
+      const message = event.data || {};
+      if (message.type === 'jpos-push-notification') {
+        playRealtimeAttention([90, 45, 90]);
+      }
+      if (message.type === 'jpos-notification-open' && message.url) {
+        const target = String(message.url || '/');
+        navigate(target.startsWith('/') ? target : `/${target}`);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', onServiceWorkerMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onServiceWorkerMessage);
+  }, [navigate]);
+
   // Sync server-side data into the Zustand store so components can read it without prop drilling
   useEffect(() => {
     usePosStore.getState().setCurrentUserStaff(currentUserStaff);
@@ -663,7 +721,7 @@ export default function App() {
     usePosStore.getState().setWorkstations(workstations);
   }, [workstations]);
 
-  const checkout = useCheckout({ user, tenantId, currentUserStaff, customers, activeSession: effectiveActiveSession, config, refreshSales });
+  const checkout = useCheckout({ user, tenantId, currentUserStaff, customers: posCustomerProfiles, activeSession: effectiveActiveSession, config, refreshSales });
 
   // Messaging
   const messaging = useMessaging({ user, tenantId, currentUserStaff, staff });
@@ -1130,7 +1188,7 @@ export default function App() {
           <PointOfSaleView
             products={products}
             user={user}
-            customers={customers}
+            customers={posCustomerProfiles}
             sales={sales}
             workstations={workstations}
             isProcessing={checkout.isProcessing}
@@ -1151,6 +1209,8 @@ export default function App() {
             getProductImage={getProductImage}
             openCashDrawer={() => navigate('/cash')}
             pointsDiscount={checkout.pointsDiscount}
+            pricingDiscount={checkout.pricingDiscount}
+            totalDiscount={checkout.totalDiscount}
             onRedeemPoints={checkout.redeemPoints}
             onClearPointsDiscount={checkout.clearPointsDiscount}
             restaurantTables={restaurantTables}
@@ -1166,7 +1226,7 @@ export default function App() {
               if (currentUserRole === 'cashier' && (s as any).staffId !== currentUserStaff?.id) return false;
               return true;
             })}
-            customers={customers}
+            customers={posCustomerProfiles}
             config={config}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
@@ -1248,7 +1308,7 @@ export default function App() {
         {view === 'tabs' && (
           <TabsView
             sales={sales}
-            customers={customers}
+            customers={posCustomerProfiles}
             onResumeTab={(sale) => {
               setCart(sale.items);
               usePosStore.getState().setSelectedCustomerId(sale.customerId || null);
@@ -1277,7 +1337,7 @@ export default function App() {
           <WorkstationView
             sales={sales}
             workstations={workstations}
-            customers={customers}
+            customers={posCustomerProfiles}
             currentUserStaff={currentUserStaff}
             onSalesUpdated={refreshSales}
           />

@@ -78,6 +78,23 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
             />
           </div>
 
+          <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/70 dark:bg-emerald-900/10 p-4">
+            <label className={labelClass}>Individual Discount %</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              className={inputClass}
+              value={customer.discountPercent ?? ''}
+              onChange={e => onChange({ ...customer, discountPercent: Number(e.target.value || 0) })}
+              placeholder="0"
+            />
+            <p className="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              Applied automatically in the POS when this customer is selected.
+            </p>
+          </div>
+
           <div className="rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-slate-50/70 dark:bg-[#0B1120] p-4 space-y-4">
             <label className="flex items-center justify-between gap-3">
               <div>

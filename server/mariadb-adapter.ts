@@ -137,6 +137,7 @@ export async function getCustomersByTenant(tenantId: string) {
        account_enabled AS accountEnabled,
        account_limit AS accountLimit,
        account_balance AS accountBalance,
+       discount_percent AS discountPercent,
        uid,
        created_at AS createdAt,
        updated_at AS updatedAt
@@ -152,6 +153,7 @@ export async function getCustomersByTenant(tenantId: string) {
     accountEnabled: Boolean(r.accountEnabled),
     accountLimit: r.accountLimit !== null ? Number(r.accountLimit) : 0,
     accountBalance: r.accountBalance !== null ? Number(r.accountBalance) : 0,
+    discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
   }));
 }
 
@@ -172,6 +174,7 @@ export async function getStaffByTenant(tenantId: string) {
        pay_type AS payType,
        accumulated_leave AS accumulatedLeave,
        wallet_balance AS walletBalance,
+       discount_percent AS discountPercent,
        metrics,
        badges,
        rank,
@@ -188,6 +191,8 @@ export async function getStaffByTenant(tenantId: string) {
     permissions: safeParse(r.permissions, {}),
     assignedSections: safeParse(r.assignedSections, []),
     assignedCategories: safeParse(r.assignedCategories, []),
+    walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
+    discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
     metrics: safeParse(r.metrics, {}),
     badges: safeParse(r.badges, []),
   }));
@@ -387,7 +392,8 @@ export async function getMessagesByTenant(tenantId: string, limit = 100) {
        created_at AS createdAt,
        read_by AS readBy,
        is_dev_broadcast AS isDevBroadcast,
-       is_system AS isSystem
+       is_system AS isSystem,
+       is_system AS isSystemNotification
      FROM messages
      WHERE tenant_id = ?
      ORDER BY created_at DESC
@@ -409,7 +415,8 @@ export async function getMessagesByChannel(tenantId: string, channel: string, li
        created_at AS createdAt,
        read_by AS readBy,
        is_dev_broadcast AS isDevBroadcast,
-       is_system AS isSystem
+       is_system AS isSystem,
+       is_system AS isSystemNotification
      FROM messages
      WHERE tenant_id = ? AND channel = ?
      ORDER BY created_at ASC

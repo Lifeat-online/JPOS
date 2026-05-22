@@ -159,6 +159,34 @@ export function getTenantConfig(tenantId: string) {
   return apiGet<any>(`/api/mariadb/tenants/${tenantId}/config`);
 }
 
+export type PushNotificationStatus = {
+  configured: boolean;
+  enabled: boolean;
+  publicKey: string | null;
+  subject: string;
+  subscriptionCount: number;
+  activeSubscriptionCount: number;
+};
+
+export type PushSendResult = {
+  attempted: number;
+  sent: number;
+  failed: number;
+  skipped?: string;
+};
+
+export function getPushNotificationStatus(tenantId: string) {
+  return apiGet<PushNotificationStatus>(`/api/mariadb/tenants/${tenantId}/push/status`);
+}
+
+export function generatePushVapidKeys(tenantId: string, subject?: string) {
+  return apiPost<PushNotificationStatus>(`/api/mariadb/tenants/${tenantId}/push/vapid/generate`, { subject });
+}
+
+export function sendTestPushNotification(tenantId: string) {
+  return apiPost<PushSendResult>(`/api/mariadb/tenants/${tenantId}/push/test`, {});
+}
+
 export function getTenantCustomers(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/customers`);
 }

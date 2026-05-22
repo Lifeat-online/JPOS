@@ -112,6 +112,13 @@ import {
   testAiProviderContact,
 } from "./ai.js";
 import { applyApprovedInventoryAgentSteps, generateInventoryAgentProposal } from "./aiInventoryAgent.js";
+import {
+  generateTenantVapidKeys,
+  getPushOverview,
+  removePushSubscription,
+  savePushSubscription,
+  sendPushNotification,
+} from "./pushNotifications.js";
 
 dotenv.config();
 
@@ -130,6 +137,15 @@ function canManageCash(role: unknown) {
 function canManageCompanionDevices(role: unknown) {
   const r = normalizeRole(role);
   return r === "admin" || r === "dev";
+}
+
+function canManagePush(role: unknown) {
+  const r = normalizeRole(role);
+  return r === "admin" || r === "manager" || r === "dev";
+}
+
+function canGenerateVapidKeys(role: unknown) {
+  return normalizeRole(role) === "dev";
 }
 
 function safeJsonField(value: unknown, fallback: any) {
@@ -336,6 +352,7 @@ function generatePayFastSignature(data: any, passphrase?: string) {
 
 export async function createApp(io: any = null) {
   const app = express();
+  if (io) app.set("io", io);
   
   // Force production mode if running on Railway
   if (process.env.RAILWAY_ENVIRONMENT_ID || process.env.RAILWAY_PROJECT_ID) {
@@ -468,6 +485,43 @@ export async function createApp(io: any = null) {
     if (normalizeRole(req.user?.role) === "dev") return next();
     return requirePackageFeature("ai")(req, res, next);
   }
+
+  const realtimeIo = () => app.get("io") || io;
+
+  const workstationItemsForSale = (sale: any) => {
+    const items = Array.isArray(sale?.items) ? sale.items : [];
+    return items.filter((item: any) => item?.workstationId || item?.workstation_id);
+  };
+
+  const orderLabelForPush = (sale: any) => {
+    if (sale?.isTab) return sale?.tabName ? `Tab ${sale.tabName}` : "Tab order";
+    if (sale?.tableNumber || sale?.table_number) return `Table ${sale.tableNumber || sale.table_number}`;
+    return "Takeaway order";
+  };
+
+  const sendWorkstationOrderPush = async (tenantId: string, sale: any) => {
+    const wsItems = workstationItemsForSale(sale);
+    if (wsItems.length === 0) return;
+
+    await sendPushNotification(tenantId, {
+      title: "New workstation order",
+      body: `${orderLabelForPush(sale)} has ${wsItems.length} item${wsItems.length === 1 ? "" : "s"} waiting in the workstation queue.`,
+      url: "/workstation",
+      tag: `workstation-order-${sale.id}`,
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      vibrate: [160, 70, 160],
+      data: {
+        type: "workstation_order",
+        saleId: sale.id,
+      },
+      actions: [
+        { action: "open-workstation", title: "Open queue" },
+      ],
+    }, { urgency: "high", ttl: 300 }).catch((err) => {
+      console.warn("Workstation push failed:", err?.message || err);
+    });
+  };
 
   // Security Headers
   app.use((req, res, next) => {
@@ -620,6 +674,80 @@ export async function createApp(io: any = null) {
     try {
       const config = await getAppConfigByTenant(req.params.tenantId);
       res.json(config);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/push/status", requireAuth, async (req, res) => {
+    try {
+      res.json(await getPushOverview(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/push/vapid/generate", requireAuth, async (req, res) => {
+    try {
+      if (!canGenerateVapidKeys(req.user?.role)) {
+        return res.status(403).json({ error: "Only Dev users can generate VAPID keys" });
+      }
+      res.json(await generateTenantVapidKeys(req.params.tenantId, req.body?.subject));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/push/subscriptions", requireAuth, async (req, res) => {
+    try {
+      const overview = await savePushSubscription(
+        req.params.tenantId,
+        req.user?.staffId || req.user?.uid || null,
+        req.body?.subscription || req.body,
+        {
+          deviceLabel: req.body?.deviceLabel,
+          userAgent: req.get("user-agent") || "",
+        }
+      );
+      res.json(overview);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/push/subscriptions", requireAuth, async (req, res) => {
+    try {
+      const endpoint = String(req.body?.endpoint || req.query.endpoint || "").trim();
+      if (!endpoint) {
+        return res.status(400).json({ error: "Push subscription endpoint is required" });
+      }
+      res.json(await removePushSubscription(req.params.tenantId, endpoint));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/push/test", requireAuth, async (req, res) => {
+    try {
+      if (!canManagePush(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers, admins, and devs can send test push notifications" });
+      }
+      const staffIds = req.user?.staffId ? [String(req.user.staffId)] : undefined;
+      const result = await sendPushNotification(req.params.tenantId, {
+        title: "JPOS push test",
+        body: "Browser push is ready for workstation orders, ready messages, and staff alerts.",
+        url: "/messages",
+        tag: `dev-push-test-${Date.now()}`,
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+        requireInteraction: true,
+        vibrate: [120, 60, 120],
+        data: { type: "dev_push_test" },
+        actions: [
+          { action: "open-messages", title: "Open messages" },
+        ],
+      }, { staffIds, urgency: "high", ttl: 60 });
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -921,12 +1049,14 @@ export async function createApp(io: any = null) {
       const sale = await createSale(req.params.tenantId, req.body);
       
       // Broadcast to workstations if order has workstation items
-      if (io && sale.items && Array.isArray(sale.items)) {
+      const liveIo = realtimeIo();
+      if (liveIo && sale.items && Array.isArray(sale.items)) {
         const hasWorkstationItems = sale.items.some((item: any) => item.workstationId);
         if (hasWorkstationItems) {
-          broadcastSalesUpdate(io, req.params.tenantId, sale.id);
+          broadcastSalesUpdate(liveIo, req.params.tenantId, sale.id);
         }
       }
+      await sendWorkstationOrderPush(req.params.tenantId, sale);
       
       res.json(sale);
     } catch (err: any) {
@@ -955,6 +1085,11 @@ export async function createApp(io: any = null) {
         return;
       }
       const sale = await updateSale(req.params.tenantId, req.params.saleId, req.body);
+      const liveIo = realtimeIo();
+      if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, sale.id);
+      if (req.body?.status === "kitchen") {
+        await sendWorkstationOrderPush(req.params.tenantId, sale);
+      }
       res.json(sale);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -974,7 +1109,8 @@ export async function createApp(io: any = null) {
         staffId: req.body.staffId || req.user?.staffId || null,
         staffName: req.body.staffName || req.user?.name || null,
       });
-      broadcastSalesUpdate(io, req.params.tenantId, refund.id);
+      const liveIo = realtimeIo();
+      if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, refund.id);
       res.json(refund);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -994,7 +1130,8 @@ export async function createApp(io: any = null) {
         staffId: req.body.staffId || req.user?.staffId || null,
         staffName: req.body.staffName || req.user?.name || null,
       });
-      broadcastSalesUpdate(io, req.params.tenantId, voided.id);
+      const liveIo = realtimeIo();
+      if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, voided.id);
       res.json(voided);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -1004,6 +1141,8 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/sales/:saleId/items/:itemId", requireAuth, async (req, res) => {
     try {
       await updateSaleItem(req.params.tenantId, req.params.saleId, req.params.itemId, req.body);
+      const liveIo = realtimeIo();
+      if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, req.params.saleId);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1331,6 +1470,34 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/messages", requireAuth, async (req, res) => {
     try {
       const data = await createMessage(req.params.tenantId, req.body);
+      const liveIo = realtimeIo();
+      if (liveIo) {
+        broadcastToMessages(liveIo, req.params.tenantId, {
+          type: "new_message",
+          message: data,
+        });
+      }
+      if (req.body?.isSystemNotification || req.body?.isSystem || req.body?.senderRole === "workstation") {
+        await sendPushNotification(req.params.tenantId, {
+          title: req.body?.senderName ? `${req.body.senderName} notification` : "Staff notification",
+          body: String(req.body?.text || "New staff notification"),
+          url: "/messages",
+          tag: `staff-message-${data.id}`,
+          icon: "/icons/icon-192.png",
+          badge: "/icons/icon-192.png",
+          vibrate: [130, 70, 130],
+          data: {
+            type: "staff_message",
+            messageId: data.id,
+            channel: req.body?.channel || "general",
+          },
+          actions: [
+            { action: "open-messages", title: "Open messages" },
+          ],
+        }, { urgency: "high", ttl: 300 }).catch((err) => {
+          console.warn("Staff message push failed:", err?.message || err);
+        });
+      }
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2320,7 +2487,8 @@ export async function startServer() {
   
   // Create HTTP server and attach Socket.IO
   const httpServer = http.createServer(app);
-  setupSocketIO(httpServer);
+  const io = setupSocketIO(httpServer);
+  app.set("io", io);
   
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);

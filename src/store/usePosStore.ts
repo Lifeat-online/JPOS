@@ -10,6 +10,7 @@ interface PosState {
   tenantId: string | null;
   workstations: Workstation[];
   // UI state
+  activeSection: string;
   activeCategory: string;
   searchQuery: string;
   selectedCustomerId: string | null;
@@ -27,6 +28,7 @@ interface PosState {
   setActiveSession: (session: any | null) => void;
   setTenantId: (id: string | null) => void;
   setWorkstations: (ws: Workstation[]) => void;
+  setActiveSection: (section: string) => void;
   setActiveCategory: (category: string) => void;
   setSearchQuery: (query: string) => void;
   setSelectedCustomerId: (id: string | null) => void;
@@ -45,6 +47,7 @@ export const usePosStore = create<PosState>((set) => ({
   activeSession: null,
   tenantId: null,
   workstations: [],
+  activeSection: 'All',
   activeCategory: 'All',
   searchQuery: '',
   selectedCustomerId: null,
@@ -103,6 +106,7 @@ export const usePosStore = create<PosState>((set) => ({
   setActiveSession: (session) => set({ activeSession: session }),
   setTenantId: (id) => set({ tenantId: id }),
   setWorkstations: (ws) => set({ workstations: ws }),
+  setActiveSection: (section) => set({ activeSection: section, activeCategory: 'All' }),
   setActiveCategory: (category) => set({ activeCategory: category }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setSelectedCustomerId: (id) => set({ selectedCustomerId: id }),

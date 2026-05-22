@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, UserPlus, Users, X, ChevronDown, Check } from 'lucide-react';
+import { Search, UserPlus, Users, X, ChevronDown, Check, Badge } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Customer } from '../types';
 
@@ -19,10 +19,12 @@ export function CustomerSelector({ customers, selectedId, onSelect, onAddNew }: 
 
   const selectedCustomer = customers.find(c => c.id === selectedId);
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase()) || 
+  const normalizedSearch = search.toLowerCase();
+  const filteredCustomers = customers.filter(c =>
+    c.name.toLowerCase().includes(normalizedSearch) ||
+    (c.profileType === 'staff' && 'staff'.includes(normalizedSearch)) ||
     (c.phone && c.phone.includes(search)) ||
-    (c.email && c.email.toLowerCase().includes(search.toLowerCase()))
+    (c.email && c.email.toLowerCase().includes(normalizedSearch))
   ).slice(0, 8); // Limit results for performance/UI
 
   useEffect(() => {
@@ -112,7 +114,7 @@ export function CustomerSelector({ customers, selectedId, onSelect, onAddNew }: 
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder="Seach by name or phone..."
+                  placeholder="Search by name, phone, email, or staff..."
                   className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-medium transition-all text-slate-900 dark:text-white"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -148,12 +150,25 @@ export function CustomerSelector({ customers, selectedId, onSelect, onAddNew }: 
                   className={`w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/80 transition-colors text-left border-t border-slate-50 dark:border-slate-800/50 ${selectedId === customer.id ? 'bg-primary/5' : ''} ${highlightedIndex === index ? 'bg-slate-100/50 dark:bg-slate-800/50' : ''}`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-black text-[10px]">
-                      {customer.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-[10px] ${
+                      customer.profileType === 'staff'
+                        ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                        : 'bg-primary/10 text-primary'
+                    }`}>
+                      {customer.profileType === 'staff'
+                        ? <Badge className="w-4 h-4" />
+                        : customer.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
                     </div>
                     <div className="min-w-0">
-                      <div className={`text-sm font-bold truncate ${selectedId === customer.id ? 'text-primary' : 'text-slate-800 dark:text-slate-100'}`}>
-                        {customer.name}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`text-sm font-bold truncate ${selectedId === customer.id ? 'text-primary' : 'text-slate-800 dark:text-slate-100'}`}>
+                          {customer.name}
+                        </span>
+                        {customer.profileType === 'staff' && (
+                          <span className="shrink-0 rounded-full bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                            Staff
+                          </span>
+                        )}
                       </div>
                       <div className="text-[10px] text-slate-400 font-bold tracking-tight truncate">
                         {customer.phone || customer.email || 'No contact info'}

@@ -88,8 +88,8 @@ export async function createCustomer(
   await query(
     `INSERT INTO customers (
       id, tenant_id, name, email, phone, address, notes,
-      loyalty_points, wallet_balance, account_enabled, account_limit, account_balance, uid, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      loyalty_points, wallet_balance, account_enabled, account_limit, account_balance, discount_percent, uid, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
     [
       id,
       tenantId,
@@ -103,6 +103,7 @@ export async function createCustomer(
       customer.accountEnabled ? 1 : 0,
       customer.accountLimit || 0,
       customer.accountBalance || 0,
+      customer.discountPercent || 0,
       customer.uid || null,
     ]
   );
@@ -112,6 +113,7 @@ export async function createCustomer(
     accountEnabled: Boolean(customer.accountEnabled),
     accountLimit: Number(customer.accountLimit || 0),
     accountBalance: Number(customer.accountBalance || 0),
+    discountPercent: Number(customer.discountPercent || 0),
   };
 }
 
@@ -124,8 +126,8 @@ export async function createStaff(
     `INSERT INTO staff (
       id, tenant_id, name, role, email, phone, status,
       permissions, assigned_sections, assigned_categories, id_number, pay_rate, pay_type,
-      accumulated_leave, wallet_balance, metrics, badges, rank, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      accumulated_leave, wallet_balance, discount_percent, metrics, badges, rank, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
     [
       id,
       tenantId,
@@ -142,6 +144,7 @@ export async function createStaff(
       staff.payType || null,
       staff.accumulatedLeave || 0,
       staff.walletBalance || 0,
+      staff.discountPercent || 0,
       staff.metrics ? JSON.stringify(staff.metrics) : "{}",
       staff.badges ? JSON.stringify(staff.badges) : "[]",
       staff.rank || null,
@@ -356,6 +359,10 @@ export async function updateCustomer(
     fields.push("account_balance = ?");
     values.push(updates.accountBalance);
   }
+  if (updates.discountPercent !== undefined) {
+    fields.push("discount_percent = ?");
+    values.push(updates.discountPercent || 0);
+  }
   if ((updates as any).accountBalanceDelta !== undefined) {
     fields.push("account_balance = GREATEST(0, COALESCE(account_balance, 0) + ?)");
     values.push((updates as any).accountBalanceDelta);
@@ -382,6 +389,7 @@ export async function updateCustomer(
       accountEnabled: Boolean(r.account_enabled),
       accountLimit: r.account_limit !== null ? Number(r.account_limit) : 0,
       accountBalance: r.account_balance !== null ? Number(r.account_balance) : 0,
+      discountPercent: r.discount_percent !== null ? Number(r.discount_percent) : 0,
       uid: r.uid,
       createdAt: r.created_at,
       updatedAt: r.updated_at
@@ -410,6 +418,7 @@ export async function updateCustomer(
     accountEnabled: Boolean(r.account_enabled),
     accountLimit: r.account_limit !== null ? Number(r.account_limit) : 0,
     accountBalance: r.account_balance !== null ? Number(r.account_balance) : 0,
+    discountPercent: r.discount_percent !== null ? Number(r.discount_percent) : 0,
     uid: r.uid,
     createdAt: r.created_at,
     updatedAt: r.updated_at
@@ -480,6 +489,10 @@ export async function updateStaff(
     fields.push("wallet_balance = COALESCE(wallet_balance, 0) + ?");
     values.push(updates.walletBalanceDelta);
   }
+  if (updates.discountPercent !== undefined) {
+    fields.push("discount_percent = ?");
+    values.push(updates.discountPercent || 0);
+  }
   if (updates.metrics !== undefined) {
     fields.push("metrics = ?");
     values.push(JSON.stringify(updates.metrics));
@@ -513,6 +526,7 @@ export async function updateStaff(
         pay_type AS payType,
         accumulated_leave AS accumulatedLeave,
         wallet_balance AS walletBalance,
+        discount_percent AS discountPercent,
         metrics,
         badges,
         rank,
@@ -528,6 +542,8 @@ export async function updateStaff(
       permissions: safeParse(r.permissions, {}),
       assignedSections: safeParse(r.assignedSections, []),
       assignedCategories: safeParse(r.assignedCategories, []),
+      walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
+      discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
       metrics: safeParse(r.metrics, {}),
       badges: safeParse(r.badges, []),
     } as Staff;
@@ -554,6 +570,7 @@ export async function updateStaff(
       pay_type AS payType,
       accumulated_leave AS accumulatedLeave,
       wallet_balance AS walletBalance,
+      discount_percent AS discountPercent,
       metrics,
       badges,
       rank,
@@ -569,6 +586,8 @@ export async function updateStaff(
     permissions: safeParse(r.permissions, {}),
     assignedSections: safeParse(r.assignedSections, []),
     assignedCategories: safeParse(r.assignedCategories, []),
+    walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
+    discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
     metrics: safeParse(r.metrics, {}),
     badges: safeParse(r.badges, []),
   } as Staff;
@@ -1781,7 +1800,7 @@ export async function createMessage(
       data.text,
       JSON.stringify(data.readBy || []),
       data.isDevBroadcast ? 1 : 0,
-      data.isSystem ? 1 : 0,
+      data.isSystem || data.isSystemNotification ? 1 : 0,
     ]
   );
   return { id, ...data };

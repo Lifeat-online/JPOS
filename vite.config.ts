@@ -81,6 +81,7 @@ export default defineConfig(({mode}) => {
       cleanupOutdatedCaches: true,
       clientsClaim: true,
       skipWaiting: true,
+      importScripts: ['push-sw-addon.js'],
       globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
       navigateFallback: `${base}index.html`,
       runtimeCaching: [

@@ -8,6 +8,8 @@ import { Customer, Staff, AppConfig } from '../types';
 import { usePosStore } from '../store/usePosStore';
 import { apiPost, apiPut, createSale, updateCustomer, updateStaff, getSaleById } from '../api';
 import { useSocket } from './useSocket';
+import { isStaffCustomerProfile } from '../utils/customerProfiles';
+import { getApplicablePricingDiscount } from '../utils/discounts';
 
 interface CheckoutDeps {
   user: JwtUser | null;
@@ -67,7 +69,15 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   }, [cartSubtotal, taxRate, taxInclusive]);
 
   const cartTotal = taxInclusive ? cartSubtotal : cartSubtotal + taxAmount;
-  const cartTotalAfterDiscount = Math.max(0, cartTotal - pointsDiscount);
+  const selectedCustomer = selectedCustomerId
+    ? customers.find(c => c.id === selectedCustomerId) || null
+    : null;
+  const pricingDiscount = useMemo(
+    () => getApplicablePricingDiscount(cartTotal, selectedCustomer, config),
+    [cartTotal, selectedCustomer, config]
+  );
+  const totalDiscount = Math.min(cartTotal, Number(pointsDiscount || 0) + Number(pricingDiscount.amount || 0));
+  const cartTotalAfterDiscount = Math.max(0, cartTotal - totalDiscount);
 
   const stampOrderItems = (items: any[], delivered = false) => {
     const now = new Date().toISOString();
@@ -87,7 +97,8 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     if (!pointsRequiredForDiscount || !discountAmountForPoints) return;
     if (customerPoints < pointsRequiredForDiscount) return;
     const setsOfPoints = Math.floor(customerPoints / pointsRequiredForDiscount);
-    const discount = Math.min(setsOfPoints * discountAmountForPoints, cartTotal);
+    const discountableTotal = Math.max(0, cartTotal - Number(pricingDiscount.amount || 0));
+    const discount = Math.min(setsOfPoints * discountAmountForPoints, discountableTotal);
     setPointsDiscount(discount);
   };
 
@@ -98,6 +109,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     if (!selectedCustomerId || !config?.business?.enableLoyalty || !config?.business?.pointsEarnedPerCurrency || !tenantId) return;
     const pointsEarned = Math.floor(amountPaid / config.business.pointsEarnedPerCurrency);
     const customer = customers.find(c => c.id === selectedCustomerId);
+    if (isStaffCustomerProfile(customer)) return;
     const currentPoints = customer?.loyaltyPoints || customer?.points || 0;
     let pointsConsumed = 0;
     if (pointsDiscount > 0 && config.business.pointsRequiredForDiscount && config.business.discountAmountForPoints) {
@@ -134,7 +146,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         status: sendToWorkstations ? 'kitchen' : 'open',
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
-        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
+        ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
       };
       if (activeTableNumber) saleData.tableNumber = activeTableNumber;
 
@@ -190,7 +202,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         tabName: label?.trim() || null,
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
-        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
+        ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
       };
 
       let saleId = activeOrderId;
@@ -231,7 +243,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         tabName: tabName || null,
         customerId: selectedCustomerId,
         staffId: currentUserStaff?.id || null,
-        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
+        ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
       };
 
       let saleId = activeOrderId;
@@ -284,7 +296,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         tabName: null,
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
-        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
+        ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
       };
 
       let saleId = activeOrderId;
@@ -320,9 +332,6 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
   const handleCheckout = async (method: 'cash' | 'payfast' | 'card' | 'wallet' | 'account' | 'split', splitPayments?: any[]) => {
     if (cart.length === 0 || !tenantId) return;
-    const selectedCustomer = selectedCustomerId
-      ? customers.find(c => c.id === selectedCustomerId) || null
-      : null;
     const walletAmount = method === 'wallet'
       ? cartTotalAfterDiscount
       : (splitPayments || []).reduce((sum, p) => sum + (p.method === 'wallet' ? Number(p.amount || 0) : 0), 0);
@@ -370,7 +379,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         status: method === 'payfast' ? 'pending' : 'completed',
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
-        ...(pointsDiscount > 0 ? { pointsDiscount } : {}),
+        ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
         ...(activeTableNumber ? { tableNumber: activeTableNumber } : {}),
       };
 
@@ -542,7 +551,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     isProcessing, setIsProcessing,
     tenderedAmount, setTenderedAmount,
     cardOverageAction, setCardOverageAction,
-    pointsDiscount, redeemPoints, clearPointsDiscount,
+    pointsDiscount, pricingDiscount, totalDiscount, redeemPoints, clearPointsDiscount,
     tenderModal, setTenderModal,
     checkoutModal, setCheckoutModal,
     splitPaymentModal, setSplitPaymentModal,

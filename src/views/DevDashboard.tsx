@@ -5,20 +5,27 @@ import {
 } from '../types';
 import {
   generateLicence,
+  generatePushVapidKeys,
   getLicenceInfo,
+  getPushNotificationStatus,
   getTenantCashSessions,
   revokeLicence,
+  sendTestPushNotification,
   type GenerateLicenceResponse,
   type LicenceFeature,
   type LicenceInfoResponse,
   type LicenceTier,
+  type PushNotificationStatus,
+  type PushSendResult,
 } from '../api';
 import {
   Terminal, Database, Shield, Activity, Zap,
   Copy, CheckCircle2, XCircle, AlertTriangle, ExternalLink,
   Download, Trash2, RefreshCw, Code2, Server, Wifi, FlaskConical, KeyRound,
+  Bell, Send, Smartphone,
 } from 'lucide-react';
 import { getDate } from '../utils/date';
+import { getBrowserPushSupport, subscribeBrowserToPush, unsubscribeBrowserFromPush } from '../utils/pushNotifications';
 
 // ─── App constants ────────────────────────────────────────────────────
 const APP_VERSION = String('0.0.1');
@@ -122,7 +129,7 @@ export function DevDashboard({
   onClearSeeded,
   onClearSales,
 }: DevDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'health' | 'licences' | 'console' | 'actions' | 'tests'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'health' | 'licences' | 'notifications' | 'console' | 'actions' | 'tests'>('overview');
   const [dataSubTab, setDataSubTab] = useState<'products' | 'customers' | 'staff' | 'sales' | 'workstations'>('products');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logCounter, setLogCounter] = useState(0);
@@ -143,6 +150,11 @@ export function DevDashboard({
   const [generatedLicence, setGeneratedLicence] = useState<GenerateLicenceResponse | null>(null);
   const [licenceActionStatus, setLicenceActionStatus] = useState<{ type: 'ok' | 'error'; message: string } | null>(null);
   const [revokeForm, setRevokeForm] = useState({ licenceId: '', reason: '' });
+  const [pushStatus, setPushStatus] = useState<PushNotificationStatus | null>(null);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushSubject, setPushSubject] = useState('mailto:dev@jimmyspos.local');
+  const [pushActionStatus, setPushActionStatus] = useState<{ type: 'ok' | 'error'; message: string } | null>(null);
+  const [pushLastSend, setPushLastSend] = useState<PushSendResult | null>(null);
 
   useEffect(() => {
     if (activeTab !== 'tests' || !tenantId) return;
@@ -214,6 +226,25 @@ export function DevDashboard({
     if (activeTab !== 'licences') return;
     void loadLicenceInfo();
   }, [activeTab]);
+
+  const loadPushStatus = async () => {
+    if (!tenantId) return;
+    setPushLoading(true);
+    try {
+      const status = await getPushNotificationStatus(tenantId);
+      setPushStatus(status);
+      setPushSubject(status.subject || 'mailto:dev@jimmyspos.local');
+    } catch (err: any) {
+      setPushActionStatus({ type: 'error', message: err?.message || 'Failed to load push status' });
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'notifications') return;
+    void loadPushStatus();
+  }, [activeTab, tenantId]);
 
   // ── Test suite state ─────────────────────────────────────────────────
   const TEST_DEFINITIONS: TestDef[] = [
@@ -629,12 +660,77 @@ export function DevDashboard({
     }
   };
 
+  const handleGeneratePushKeys = async () => {
+    if (!tenantId) return;
+    setPushLoading(true);
+    setPushActionStatus(null);
+    try {
+      const status = await generatePushVapidKeys(tenantId, pushSubject.trim() || undefined);
+      setPushStatus(status);
+      setPushSubject(status.subject || pushSubject);
+      setPushActionStatus({ type: 'ok', message: 'VAPID keys created and saved for this tenant.' });
+    } catch (err: any) {
+      setPushActionStatus({ type: 'error', message: err?.message || 'Failed to generate VAPID keys' });
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const handleSubscribeBrowser = async () => {
+    if (!tenantId || !pushStatus?.publicKey) return;
+    setPushLoading(true);
+    setPushActionStatus(null);
+    try {
+      const status = await subscribeBrowserToPush(tenantId, pushStatus.publicKey, `${user.email || 'Dev'} browser`);
+      setPushStatus(status);
+      setPushActionStatus({ type: 'ok', message: 'This browser is enrolled for push notifications.' });
+    } catch (err: any) {
+      setPushActionStatus({ type: 'error', message: err?.message || 'Browser push subscription failed' });
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const handleUnsubscribeBrowser = async () => {
+    if (!tenantId) return;
+    setPushLoading(true);
+    setPushActionStatus(null);
+    try {
+      const status = await unsubscribeBrowserFromPush(tenantId);
+      if (status) setPushStatus(status);
+      else await loadPushStatus();
+      setPushActionStatus({ type: 'ok', message: 'This browser was removed from push notifications.' });
+    } catch (err: any) {
+      setPushActionStatus({ type: 'error', message: err?.message || 'Browser push unsubscribe failed' });
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const handleSendPushTest = async () => {
+    if (!tenantId) return;
+    setPushLoading(true);
+    setPushActionStatus(null);
+    setPushLastSend(null);
+    try {
+      const result = await sendTestPushNotification(tenantId);
+      setPushLastSend(result);
+      setPushActionStatus({ type: 'ok', message: `Test push attempted ${result.attempted}, sent ${result.sent}, failed ${result.failed}.` });
+      await loadPushStatus();
+    } catch (err: any) {
+      setPushActionStatus({ type: 'error', message: err?.message || 'Test push failed' });
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
   // ── Tab definitions ──────────────────────────────────────────────────
   const tabs = [
     { id: 'overview', label: 'Overview', icon: Server },
     { id: 'data', label: 'Data Explorer', icon: Database },
     { id: 'health', label: 'App Health', icon: Activity },
     { id: 'licences', label: 'Licences', icon: KeyRound },
+    { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'console', label: `Console${logs.length > 0 ? ` (${logs.length})` : ''}`, icon: Terminal },
     { id: 'actions', label: 'Quick Actions', icon: Zap },
     { id: 'tests', label: 'Test Suite', icon: FlaskConical },
@@ -1271,6 +1367,138 @@ export function DevDashboard({
         {/* ═══════════════════════════════════════════════════════════════
             TAB 4 — TEST SUITE
         ═══════════════════════════════════════════════════════════════ */}
+        {activeTab === 'notifications' && (
+          <div className="space-y-5 max-w-5xl mx-auto">
+            <div className="grid lg:grid-cols-[1.2fr_1fr] gap-5">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-violet-500" />
+                    <h3 className="font-black text-slate-800 dark:text-white">Web Push Runtime</h3>
+                  </div>
+                  <button
+                    onClick={loadPushStatus}
+                    disabled={pushLoading}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-60 active:scale-95 transition-all"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${pushLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <CheckRow
+                    ok={Boolean(pushStatus?.configured)}
+                    warn={Boolean(pushStatus && !pushStatus.configured)}
+                    label={pushStatus?.configured ? 'VAPID keys are configured' : 'VAPID keys are not configured'}
+                  />
+                  <CheckRow
+                    ok={getBrowserPushSupport(pushStatus?.publicKey).supported}
+                    warn={!getBrowserPushSupport(pushStatus?.publicKey).supported}
+                    label={getBrowserPushSupport(pushStatus?.publicKey).supported ? 'This browser can enroll for push' : getBrowserPushSupport(pushStatus?.publicKey).reason || 'Browser push unavailable'}
+                  />
+                </div>
+
+                <div className="grid sm:grid-cols-3 gap-3 mt-4">
+                  {[
+                    { label: 'Active devices', value: String(pushStatus?.activeSubscriptionCount ?? 0) },
+                    { label: 'All subscriptions', value: String(pushStatus?.subscriptionCount ?? 0) },
+                    { label: 'Status', value: pushStatus?.configured ? 'Ready' : 'Setup needed' },
+                  ].map(item => (
+                    <div key={item.label} className="rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 p-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{item.label}</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-white">{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {pushStatus?.publicKey && (
+                  <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <p className="text-xs font-black uppercase tracking-widest text-slate-400">Public key</p>
+                      <CopyBtn text={pushStatus.publicKey} label="Copy" />
+                    </div>
+                    <p className="font-mono text-xs text-slate-600 dark:text-slate-300 break-all">{pushStatus.publicKey}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-5">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-4">
+                    <KeyRound className="w-4 h-4 text-emerald-500" />
+                    <h3 className="font-black text-slate-800 dark:text-white">VAPID Keys</h3>
+                  </div>
+                  <label className="space-y-1 block">
+                    <span className="text-xs font-bold text-slate-500">Subject</span>
+                    <input
+                      value={pushSubject}
+                      onChange={(e) => setPushSubject(e.target.value)}
+                      placeholder="mailto:dev@yourdomain.com"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                  </label>
+                  <button
+                    onClick={handleGeneratePushKeys}
+                    disabled={!tenantId || pushLoading}
+                    className="mt-4 w-full px-4 py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+                  >
+                    Generate VAPID Keys
+                  </button>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Smartphone className="w-4 h-4 text-blue-500" />
+                    <h3 className="font-black text-slate-800 dark:text-white">This Browser</h3>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <button
+                      onClick={handleSubscribeBrowser}
+                      disabled={!tenantId || !pushStatus?.publicKey || pushLoading}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+                    >
+                      <Bell className="w-4 h-4" />
+                      Enable Push
+                    </button>
+                    <button
+                      onClick={handleUnsubscribeBrowser}
+                      disabled={!tenantId || pushLoading}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 active:scale-95 transition-all"
+                    >
+                      <XCircle className="w-4 h-4" />
+                      Disable
+                    </button>
+                  </div>
+                  <button
+                    onClick={handleSendPushTest}
+                    disabled={!tenantId || !pushStatus?.configured || pushLoading}
+                    className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+                  >
+                    <Send className="w-4 h-4" />
+                    Send Test Push
+                  </button>
+                  {pushLastSend && (
+                    <p className="mt-3 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      Attempted {pushLastSend.attempted}, sent {pushLastSend.sent}, failed {pushLastSend.failed}.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {pushActionStatus && (
+              <div className={`rounded-2xl border p-4 text-sm font-semibold ${
+                pushActionStatus.type === 'ok'
+                  ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+              }`}>
+                {pushActionStatus.message}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'tests' && (
           <div className="space-y-5 max-w-4xl mx-auto">
             {/* Automated Test Suite Status */}

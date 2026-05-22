@@ -272,6 +272,23 @@ export const StaffModal: React.FC<StaffModalProps> = ({
             </div>
           </div>
 
+          <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/70 dark:bg-emerald-900/10 p-4 space-y-2">
+            <label className={labelClass}>Individual Staff Discount %</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              className={inputClass}
+              value={staff.discountPercent ?? ''}
+              onChange={e => onChange({ ...staff, discountPercent: Number(e.target.value || 0) })}
+              placeholder="0"
+            />
+            <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              Applied automatically when this staff member is selected as the buyer in POS.
+            </p>
+          </div>
+
           <div className="space-y-1">
             <label className={labelClass}>Password (Optional)</label>
             <input type="password" minLength={6} className={inputClass}

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
   ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Printer,
-  AlertTriangle, PauseCircle, PlayCircle, ScanLine
+  AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronLeft, LayoutGrid, PanelLeft
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -15,6 +15,7 @@ import { BarcodeScanner } from '../components/BarcodeScanner';
 import { getCompanionDeviceAssignment, recordCashMovement } from '../api';
 import { useSocket } from '../hooks/useSocket';
 import { JwtUser } from '../hooks/useAuth';
+import type { AppliedDiscount } from '../utils/discounts';
 
 interface PointOfSaleViewProps {
   products: Product[];
@@ -40,6 +41,8 @@ interface PointOfSaleViewProps {
   getProductImage: (product: Partial<Product>) => string;
   openCashDrawer: () => void;
   pointsDiscount: number;
+  pricingDiscount: AppliedDiscount;
+  totalDiscount: number;
   onRedeemPoints: (customerId: string, points: number) => void;
   onClearPointsDiscount: () => void;
   restaurantTables: RestaurantTable[];
@@ -53,12 +56,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   products, user, customers, sales, workstations, isProcessing, setIsProcessing, handleSaveOrder,
   handleParkSale, handleCheckout, handleWalletCheckout, handleAccountCheckout, handleOpenTab, handleOpenTable, setTenderModal, setTenderedAmount, setSplitPaymentModal,
   categoryTree, CATEGORIES, getCategoryIcon, getProductImage, openCashDrawer,
-  pointsDiscount, onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated,
+  pointsDiscount, pricingDiscount, totalDiscount, onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated,
   lastReceiptSale, onPrintLastReceipt, suppressBillPrint = false,
 }) => {
   const { 
     cart, addToCart, updateQuantity, clearCart, 
-    activeSession, activeCategory, setActiveCategory,
+    activeSession, activeSection, setActiveSection, activeCategory, setActiveCategory,
     searchQuery, setSearchQuery, selectedCustomerId, setSelectedCustomerId,
     activeTableNumber, setActiveTableNumber, activeOrderId, setActiveOrderId,
     setCart,
@@ -79,6 +82,11 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [drawerCustomReason, setDrawerCustomReason] = useState('');
   const [drawerError, setDrawerError] = useState('');
   const [isRecordingDrawerOpen, setIsRecordingDrawerOpen] = useState(false);
+  const [terminalCategoryLayout, setTerminalCategoryLayout] = useState<'sidebar' | 'grid'>(() => {
+    if (typeof window === 'undefined') return 'sidebar';
+    return window.localStorage.getItem('jpos-terminal-category-layout') === 'grid' ? 'grid' : 'sidebar';
+  });
+  const [gridShowingProducts, setGridShowingProducts] = useState(false);
   const [stockNotice, setStockNotice] = useState<{ type: 'warning' | 'error'; message: string } | null>(null);
   const [parkModalOpen, setParkModalOpen] = useState(false);
   const [parkLabel, setParkLabel] = useState('');
@@ -151,7 +159,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   };
 
   const cartTotal = useMemo(() => cart.reduce((total, item) => total + (item.price * item.quantity), 0), [cart]);
-  const amountDue = Math.max(0, cartTotal - pointsDiscount);
+  const amountDue = Math.max(0, cartTotal - totalDiscount);
   const selectedCustomer = useMemo(
     () => selectedCustomerId ? customers.find(c => c.id === selectedCustomerId) || null : null,
     [customers, selectedCustomerId]
@@ -569,12 +577,52 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     }
   };
 
+  const categorySections = useMemo(() => Object.keys(categoryTree || {}), [categoryTree]);
+
+  const allowedSections = useMemo(() => {
+    if (!currentUserStaff || currentUserStaff.role !== 'cashier') return ['All', ...categorySections];
+    const hasSectionRestriction = Array.isArray(currentUserStaff.assignedSections) && currentUserStaff.assignedSections.length > 0;
+    const hasCategoryRestriction = Array.isArray(currentUserStaff.assignedCategories) && currentUserStaff.assignedCategories.length > 0;
+
+    if (!hasSectionRestriction && !hasCategoryRestriction) return ['All', ...categorySections];
+
+    const allowedSectionSet = new Set<string>();
+
+    if (hasSectionRestriction) {
+      currentUserStaff.assignedSections!.forEach(sec => {
+        if (categoryTree[sec]) allowedSectionSet.add(sec);
+      });
+    }
+
+    if (hasCategoryRestriction) {
+      currentUserStaff.assignedCategories!.forEach(cat => {
+        categorySections.forEach(sec => {
+          if (categoryTree[sec]?.[cat]) allowedSectionSet.add(sec);
+        });
+      });
+    }
+
+    return ['All', ...Array.from(allowedSectionSet)];
+  }, [currentUserStaff, categoryTree, categorySections]);
+
+  const categoriesForSection = useMemo(() => {
+    if (activeSection === 'All') {
+      const categories = allowedSections
+        .filter(sec => sec !== 'All')
+        .flatMap(sec => Object.keys(categoryTree[sec] || {}));
+      return ['All', ...Array.from(new Set(categories))];
+    }
+
+    return ['All', ...Object.keys(categoryTree[activeSection] || {})];
+  }, [activeSection, allowedSections, categoryTree]);
+
   const allowedCategories = useMemo(() => {
-    if (!currentUserStaff || currentUserStaff.role !== 'cashier') return CATEGORIES;
+    const baseCategories = activeSection === 'All' ? CATEGORIES : categoriesForSection;
+    if (!currentUserStaff || currentUserStaff.role !== 'cashier') return baseCategories;
     const hasSectionRestriction = Array.isArray(currentUserStaff.assignedSections) && currentUserStaff.assignedSections.length > 0;
     const hasCategoryRestriction = Array.isArray(currentUserStaff.assignedCategories) && currentUserStaff.assignedCategories.length > 0;
     
-    if (!hasSectionRestriction && !hasCategoryRestriction) return CATEGORIES;
+    if (!hasSectionRestriction && !hasCategoryRestriction) return baseCategories;
 
     const allowedCatSet = new Set<string>();
     
@@ -588,8 +636,45 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       currentUserStaff.assignedCategories!.forEach(cat => allowedCatSet.add(cat));
     }
 
-    return ["All", ...Array.from(allowedCatSet)];
-  }, [currentUserStaff, categoryTree, CATEGORIES]);
+    return baseCategories.filter(cat => cat === 'All' || allowedCatSet.has(cat));
+  }, [activeSection, currentUserStaff, categoryTree, CATEGORIES, categoriesForSection]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('jpos-terminal-category-layout', terminalCategoryLayout);
+    } catch {
+      // Layout preference is nice to keep, but should not block selling.
+    }
+  }, [terminalCategoryLayout]);
+
+  useEffect(() => {
+    if (!allowedSections.includes(activeSection)) {
+      setActiveSection('All');
+      return;
+    }
+
+    if (!allowedCategories.includes(activeCategory)) {
+      setActiveCategory('All');
+    }
+  }, [activeSection, activeCategory, allowedSections, allowedCategories, setActiveSection, setActiveCategory]);
+
+  const selectSection = (section: string) => {
+    setActiveSection(section);
+    setGridShowingProducts(false);
+  };
+
+  const selectCategory = (category: string) => {
+    setActiveCategory(category);
+    setGridShowingProducts(true);
+  };
+
+  const sectionProductCount = (section: string) => products.filter(p => section === 'All' || p.section === section).length;
+
+  const categoryProductCount = (category: string) => products.filter(p => {
+    const matchesSection = activeSection === 'All' || p.section === activeSection;
+    const matchesCategory = category === 'All' || p.category === category;
+    return matchesSection && matchesCategory;
+  }).length;
 
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
@@ -605,11 +690,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
         }
       }
 
+      const matchesSection = activeSection === "All" || p.section === activeSection;
       const matchesCategory = activeCategory === "All" || p.category === activeCategory;
       const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesCategory && matchesSearch;
+      return matchesSection && matchesCategory && matchesSearch;
     });
-  }, [products, activeCategory, searchQuery, currentUserStaff]);
+  }, [products, activeSection, activeCategory, searchQuery, currentUserStaff]);
 
   if (!activeSession) {
     return (
@@ -636,14 +722,32 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
           customer={selectedCustomer}
           config={config}
           subtotal={cartTotal}
-          discount={pointsDiscount}
+          discount={totalDiscount}
         />
       )}
-      <nav className="w-full lg:w-24 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-700/60 flex lg:flex-col items-center py-2 lg:py-6 px-4 lg:px-0 gap-3 lg:gap-6 overflow-x-auto no-scrollbar shrink-0 shadow-sm lg:shadow-none z-10">
+      {terminalCategoryLayout === 'sidebar' && (
+      <nav className="w-full lg:w-28 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-700/60 flex lg:flex-col items-center py-2 lg:py-5 px-4 lg:px-2 gap-3 overflow-x-auto no-scrollbar shrink-0 shadow-sm lg:shadow-none z-10">
+        {allowedSections.map(section => (
+          <button
+            key={`section-${section}`}
+            onClick={() => selectSection(section)}
+            className={`min-w-[84px] lg:w-full h-14 lg:h-[72px] rounded-xl flex flex-col items-center justify-center gap-1 transition-all border-2 shrink-0 ${
+              activeSection === section
+              ? 'bg-[#eff6ff] text-primary border-[#bfdbfe] shadow-sm'
+              : 'text-slate-400 dark:text-slate-500 border-transparent bg-slate-50 dark:bg-[#0B1120] lg:bg-transparent lg:dark:bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <span className="text-base lg:text-xl">{section === 'All' ? <ShoppingBag className="w-5 h-5" /> : getCategoryIcon(section)}</span>
+            <span className="max-w-full px-1 text-center text-[9px] lg:text-[10px] font-bold uppercase tracking-wide leading-tight truncate">{section}</span>
+          </button>
+        ))}
+
+        <div className="hidden lg:block w-full h-px bg-slate-100 dark:bg-slate-800" />
+
         {allowedCategories.map(cat => (
           <button
             key={cat}
-            onClick={() => setActiveCategory(cat)}
+            onClick={() => selectCategory(cat)}
             className={`min-w-[80px] lg:w-16 h-12 lg:h-16 rounded-xl flex flex-col items-center justify-center gap-1 transition-all border-2 shrink-0 ${
               activeCategory === cat 
               ? 'bg-[#eff6ff] text-primary border-[#bfdbfe] shadow-sm' 
@@ -655,6 +759,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
           </button>
         ))}
       </nav>
+      )}
 
       <section className="flex-1 flex flex-col min-w-0 min-h-0 bg-slate-50/30">
         <div className="p-4 lg:p-6 pb-2 flex flex-col sm:flex-row gap-3 lg:gap-4 shrink-0">
@@ -673,6 +778,24 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
               title="Price check / scan barcode"
             >
               <ScanLine className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex h-12 lg:h-[54px] shrink-0 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setTerminalCategoryLayout('sidebar')}
+              className={`w-12 rounded-lg flex items-center justify-center transition-all ${terminalCategoryLayout === 'sidebar' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+              title="Sections and categories in the sidebar"
+            >
+              <PanelLeft className="w-5 h-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => { setTerminalCategoryLayout('grid'); setGridShowingProducts(false); }}
+              className={`w-12 rounded-lg flex items-center justify-center transition-all ${terminalCategoryLayout === 'grid' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+              title="Sections and categories in the product area"
+            >
+              <LayoutGrid className="w-5 h-5" />
             </button>
           </div>
           <div className="sm:w-80 relative">
@@ -854,6 +977,68 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
           </div>
         )}
 
+        {terminalCategoryLayout === 'grid' && !searchQuery.trim() && !gridShowingProducts && (
+          <div className="flex-1 overflow-y-auto p-4 lg:p-6 pt-2 pb-24 lg:pb-6">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-primary">{activeSection === 'All' ? 'Sections' : activeSection}</p>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">{activeSection === 'All' ? 'Choose a section' : 'Choose a category'}</h3>
+              </div>
+              {activeSection !== 'All' && (
+                <button
+                  type="button"
+                  onClick={() => selectSection('All')}
+                  className="h-10 px-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 text-xs font-black text-slate-500 dark:text-slate-300 flex items-center gap-2 shadow-sm"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Sections
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 lg:gap-4">
+              {activeSection === 'All' ? (
+                allowedSections.filter(section => section !== 'All').map(section => (
+                  <button
+                    key={section}
+                    type="button"
+                    onClick={() => selectSection(section)}
+                    className="min-h-[132px] rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 p-5 text-left shadow-sm transition-all hover:border-primary/40 hover:shadow-md active:scale-[0.99]"
+                  >
+                    <div className="mb-5 w-12 h-12 rounded-xl bg-[#eff6ff] text-primary flex items-center justify-center text-xl">{getCategoryIcon(section)}</div>
+                    <div className="font-black text-slate-900 dark:text-white truncate">{section}</div>
+                    <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{sectionProductCount(section)} products</div>
+                  </button>
+                ))
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveCategory('All'); setGridShowingProducts(true); }}
+                    className="min-h-[132px] rounded-2xl border border-primary/20 bg-primary/5 p-5 text-left shadow-sm transition-all hover:border-primary/50 active:scale-[0.99]"
+                  >
+                    <div className="mb-5 w-12 h-12 rounded-xl bg-primary text-white flex items-center justify-center"><Rows className="w-6 h-6" /></div>
+                    <div className="font-black text-slate-900 dark:text-white truncate">All {activeSection}</div>
+                    <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-primary">{categoryProductCount('All')} products</div>
+                  </button>
+                  {allowedCategories.filter(cat => cat !== 'All').map(cat => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => selectCategory(cat)}
+                      className="min-h-[132px] rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 p-5 text-left shadow-sm transition-all hover:border-primary/40 hover:shadow-md active:scale-[0.99]"
+                    >
+                      <div className="mb-5 w-12 h-12 rounded-xl bg-slate-50 dark:bg-[#0B1120] text-xl flex items-center justify-center">{getCategoryIcon(cat)}</div>
+                      <div className="font-black text-slate-900 dark:text-white truncate">{cat}</div>
+                      <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{categoryProductCount(cat)} products</div>
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {(terminalCategoryLayout !== 'grid' || searchQuery.trim() || gridShowingProducts) && (
         <div className="flex-1 overflow-y-auto p-4 lg:p-6 pt-2 grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 lg:gap-4 auto-rows-max lg:auto-rows-[160px] pb-24 lg:pb-6">
           <AnimatePresence>
             {filteredProducts.map(product => {
@@ -912,6 +1097,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             })}
           </AnimatePresence>
         </div>
+        )}
       </section>
 
       {attachedWorkstation && (
@@ -1138,12 +1324,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     })()}
                   </div>
                   <div className="text-right">
-                    {pointsDiscount > 0 && (
+                    {totalDiscount > 0 && (
                       <div className="text-xs font-bold text-slate-400 line-through">R{Number(cartTotal).toFixed(2)}</div>
                     )}
                     <span className="font-black text-4xl text-slate-900 dark:text-white tracking-tighter">R{Number(amountDue).toFixed(2)}</span>
-                    {pointsDiscount > 0 && (
-                      <div className="text-[10px] font-bold text-emerald-500">-R{Number(pointsDiscount).toFixed(2)} discount applied</div>
+                    {totalDiscount > 0 && (
+                      <div className="text-[10px] font-bold text-emerald-500">
+                        -R{Number(totalDiscount).toFixed(2)} discount applied
+                        {pricingDiscount.amount > 0 ? ` (${pricingDiscount.label})` : ''}
+                      </div>
                     )}
                   </div>
                 </div>

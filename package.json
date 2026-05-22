@@ -21,6 +21,7 @@
     "@tailwindcss/vite": "^4.1.14",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^5.0.4",
     "bcryptjs": "^3.0.3",
     "body-parser": "^2.2.2",
@@ -42,6 +43,7 @@
     "recharts": "^3.8.1",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.7.5",
+    "web-push": "^3.6.7",
     "zod": "^4.4.3",
     "zustand": "^5.0.12"
   },

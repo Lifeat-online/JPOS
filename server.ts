@@ -7,6 +7,7 @@ const {
   ensureBulkInventorySchema,
   ensureCashManagementSchema,
   ensureCompanionDeviceAssignmentsSchema,
+  ensurePushNotificationSchema,
   ensureSalePaymentsTable,
   ensureStaffRoleSupportsChef,
   ensureStaffPermissionsSchema,
@@ -26,6 +27,9 @@ await ensureCashManagementSchema().catch((err: unknown) => {
 });
 await ensureCompanionDeviceAssignmentsSchema().catch((err: unknown) => {
   console.warn("Failed to ensure companion device assignment schema:", err);
+});
+await ensurePushNotificationSchema().catch((err: unknown) => {
+  console.warn("Failed to ensure push notification schema:", err);
 });
 await ensureBulkInventorySchema().catch((err: unknown) => {
   console.warn("Failed to ensure bulk inventory schema:", err);

@@ -1,7 +1,7 @@
 import { usePosStore } from '../store/usePosStore';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
-import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send, Smartphone, Printer, Eye, RotateCcw, Upload } from 'lucide-react';
+import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send, Smartphone, Printer, Eye, RotateCcw, Upload, Clock } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
 import { apiGet, apiPut, apiPost, apiDelete, assignCompanionDevice, getCompanionDeviceAssignments, getTenantPackageLimits, getAiSettings, listAiModels, revokeCompanionDeviceAssignment, testAiProvider, updateAiSettings, uploadTenantLogo, type TenantPackageLimitsResponse } from '../api';
 import { JPOS_PACKAGES } from '../../shared/packageCatalog';
@@ -25,7 +25,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     categories: config.categories || DEFAULT_CATEGORY_TREE
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'business' | 'package' | 'ai' | 'payment' | 'categories' | 'features' | 'printing' | 'tax' | 'loyalty' | 'workstations' | 'tables'>('business');
+  const [activeTab, setActiveTab] = useState<'business' | 'package' | 'ai' | 'payment' | 'categories' | 'features' | 'printing' | 'tax' | 'loyalty' | 'discounts' | 'workstations' | 'tables'>('business');
   const [packageLimits, setPackageLimits] = useState<TenantPackageLimitsResponse | null>(null);
   const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
   const [aiSaving, setAiSaving] = useState(false);
@@ -555,6 +555,75 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     formData.business?.receiptHeader || 'no-header',
     formData.business?.receiptFooter || 'no-footer',
   ].join(':');
+  const discountRoles = [
+    { id: 'cashier', label: 'Cashiers' },
+    { id: 'chef', label: 'Kitchen / chefs' },
+    { id: 'manager', label: 'Managers' },
+    { id: 'admin', label: 'Administrators' },
+    { id: 'dev', label: 'Developers' },
+  ] as const;
+  const dayOptions = [
+    { id: 0, label: 'Sun' },
+    { id: 1, label: 'Mon' },
+    { id: 2, label: 'Tue' },
+    { id: 3, label: 'Wed' },
+    { id: 4, label: 'Thu' },
+    { id: 5, label: 'Fri' },
+    { id: 6, label: 'Sat' },
+  ];
+  const setRoleDiscount = (role: typeof discountRoles[number]['id'], value: number) => {
+    setFormData({
+      ...formData,
+      business: {
+        ...formData.business,
+        roleDiscounts: {
+          ...(formData.business?.roleDiscounts || {}),
+          [role]: Math.max(0, Math.min(100, Number(value || 0))),
+        },
+      },
+    } as AppConfig);
+  };
+  const addHappyHourRule = () => {
+    const rules = formData.business?.happyHourDiscounts || [];
+    setFormData({
+      ...formData,
+      business: {
+        ...formData.business,
+        happyHourDiscounts: [
+          ...rules,
+          {
+            id: `hh_${Date.now()}`,
+            name: 'Happy hour',
+            enabled: true,
+            discountPercent: 15,
+            days: [5],
+            startTime: '17:00',
+            endTime: '19:00',
+          },
+        ],
+      },
+    } as AppConfig);
+  };
+  const updateHappyHourRule = (id: string, updates: Record<string, any>) => {
+    setFormData({
+      ...formData,
+      business: {
+        ...formData.business,
+        happyHourDiscounts: (formData.business?.happyHourDiscounts || []).map(rule => (
+          rule.id === id ? { ...rule, ...updates } : rule
+        )),
+      },
+    } as AppConfig);
+  };
+  const removeHappyHourRule = (id: string) => {
+    setFormData({
+      ...formData,
+      business: {
+        ...formData.business,
+        happyHourDiscounts: (formData.business?.happyHourDiscounts || []).filter(rule => rule.id !== id),
+      },
+    } as AppConfig);
+  };
 
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50 dark:bg-slate-950">
@@ -620,6 +689,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           >
             <Award className="w-4 h-4" />
             Loyalty
+          </button>
+          <button
+            onClick={() => setActiveTab('discounts')}
+            className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'discounts' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
+          >
+            <Clock className="w-4 h-4" />
+            Discounts
           </button>
           <button
             onClick={() => setActiveTab('categories')}
@@ -1613,6 +1689,161 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'discounts' && (
+            <div className="space-y-8">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-5">
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">Automatic POS discounts</h3>
+                <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
+                  The POS applies the best active discount for the selected buyer. Individual customer and staff discounts are set on their profiles.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <h4 className="text-sm font-black uppercase tracking-widest text-slate-500">Staff role discounts</h4>
+                  <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">Useful for standard staff meals or shift-drink policies.</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {discountRoles.map(role => (
+                    <div key={role.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">{role.label}</label>
+                      <div className="mt-2 flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={formData.business?.roleDiscounts?.[role.id] ?? ''}
+                          onChange={e => setRoleDiscount(role.id, Number(e.target.value || 0))}
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                          placeholder="0"
+                        />
+                        <span className="text-sm font-black text-slate-400">%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h4 className="text-sm font-black uppercase tracking-widest text-slate-500">Happy hour</h4>
+                    <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">Create time windows that discount everyone during active service periods.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addHappyHourRule}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-xs font-black uppercase tracking-widest text-white"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add window
+                  </button>
+                </div>
+
+                {(formData.business?.happyHourDiscounts || []).length === 0 && (
+                  <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-8 text-center">
+                    <Clock className="mx-auto h-10 w-10 text-slate-300 dark:text-slate-600" />
+                    <p className="mt-3 text-sm font-bold text-slate-500 dark:text-slate-400">No happy-hour windows configured.</p>
+                  </div>
+                )}
+
+                {(formData.business?.happyHourDiscounts || []).map(rule => (
+                  <div key={rule.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(rule.enabled)}
+                          onChange={e => updateHappyHourRule(rule.id, { enabled: e.target.checked })}
+                          className="h-5 w-5 accent-primary"
+                        />
+                        <span className="text-sm font-black text-slate-900 dark:text-white">Active</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeHappyHourRule(rule.id)}
+                        className="rounded-xl p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="text-xs font-black uppercase tracking-widest text-slate-500">Name</label>
+                        <input
+                          type="text"
+                          value={rule.name}
+                          onChange={e => updateHappyHourRule(rule.id, { name: e.target.value })}
+                          className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-black uppercase tracking-widest text-slate-500">Discount</label>
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={rule.discountPercent}
+                            onChange={e => updateHappyHourRule(rule.id, { discountPercent: Math.max(0, Math.min(100, Number(e.target.value || 0))) })}
+                            className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                          />
+                          <span className="text-sm font-black text-slate-400">%</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs font-black uppercase tracking-widest text-slate-500">Start</label>
+                          <input
+                            type="time"
+                            value={rule.startTime}
+                            onChange={e => updateHappyHourRule(rule.id, { startTime: e.target.value })}
+                            className="mt-2 w-full px-3 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-black uppercase tracking-widest text-slate-500">End</label>
+                          <input
+                            type="time"
+                            value={rule.endTime}
+                            onChange={e => updateHappyHourRule(rule.id, { endTime: e.target.value })}
+                            className="mt-2 w-full px-3 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 ring-primary/20 text-sm font-bold dark:text-white outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {dayOptions.map(day => {
+                        const selected = rule.days?.includes(day.id);
+                        return (
+                          <button
+                            key={day.id}
+                            type="button"
+                            onClick={() => {
+                              const nextDays = selected
+                                ? (rule.days || []).filter(id => id !== day.id)
+                                : [...(rule.days || []), day.id].sort();
+                              updateHappyHourRule(rule.id, { days: nextDays });
+                            }}
+                            className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest border transition-all ${
+                              selected
+                                ? 'bg-primary text-white border-primary'
+                                : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            {day.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
