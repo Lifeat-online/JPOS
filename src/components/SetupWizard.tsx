@@ -21,13 +21,13 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
     taxRate: config.business?.taxRate?.toString() || '15',
   });
 
-  const isBusinessValid = Boolean(formData.businessName.trim());
-
   const handleSave = async (isSkipping: boolean = false) => {
     setSaveError(null);
     setIsSaving(true);
     try {
-      const businessName = isSkipping ? 'My Business' : formData.businessName.trim();
+      const businessName = isSkipping
+        ? (config.business?.name || 'My Business')
+        : (formData.businessName.trim() || config.business?.name || 'My Business');
       const setupConfig: AppConfig = {
         ...config,
         setupCompleted: true,
@@ -57,7 +57,7 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
       window.location.reload();
     } catch (error: any) {
       console.error('Failed to complete setup:', error);
-      setSaveError('Unable to save setup. Please check your connection and try again.');
+      setSaveError(error?.message || 'Unable to save setup. Please check your connection and try again.');
     } finally {
       setIsSaving(false);
     }
@@ -160,7 +160,7 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
 
           <button 
             onClick={() => handleSave(false)}
-            disabled={!isBusinessValid || isSaving}
+            disabled={isSaving}
             className="w-full py-4 bg-primary text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-primary/20"
           >
             {isSaving ? (

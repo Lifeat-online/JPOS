@@ -1754,29 +1754,80 @@ export async function updateAppConfig(
   tenantId: string,
   config: AppConfig
 ): Promise<void> {
+  const businessName = String(config.business?.name || tenantId).trim() || tenantId;
+
   await query(
-    `UPDATE app_settings
-     SET payfast_merchant_id = ?,
-         payfast_merchant_key = ?,
-         payfast_passphrase = ?,
-         payfast_sandbox = ?,
-         business = ?,
-         categories = ?,
-         slug = ?,
-         setup_completed = ?,
-         updated_at = NOW()
-     WHERE tenant_id = ?`,
-    [
-      config.payfastMerchantId,
-      config.payfastMerchantKey,
-      config.payfastPassphrase,
-      config.payfastSandbox ? 1 : 0,
-      JSON.stringify(config.business || {}),
-      JSON.stringify(config.categories || {}),
-      config.slug || null,
-      config.setupCompleted ? 1 : 0,
-      tenantId
-    ]
+    isPostgres()
+      ? `INSERT INTO tenants (id, name, created_at, updated_at)
+         VALUES (?, ?, NOW(), NOW())
+         ON CONFLICT (id) DO NOTHING`
+      : `INSERT INTO tenants (id, name, created_at, updated_at)
+         VALUES (?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE id = id`,
+    [tenantId, businessName]
+  );
+
+  const values = [
+    tenantId,
+    config.payfastMerchantId || PAYFAST_MERCHANT_ID || "10000100",
+    config.payfastMerchantKey || PAYFAST_MERCHANT_KEY || "46f0cd694581a",
+    config.payfastPassphrase || PAYFAST_PASSPHRASE || "jt7v60h69n8a1",
+    config.payfastSandbox ? 1 : 0,
+    JSON.stringify(config.business || {}),
+    JSON.stringify(config.categories || {}),
+    config.slug || null,
+    config.setupCompleted ? 1 : 0,
+  ];
+
+  await query(
+    isPostgres()
+      ? `INSERT INTO app_settings (
+           tenant_id,
+           payfast_merchant_id,
+           payfast_merchant_key,
+           payfast_passphrase,
+           payfast_sandbox,
+           business,
+           categories,
+           slug,
+           setup_completed,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+         ON CONFLICT (tenant_id) DO UPDATE SET
+           payfast_merchant_id = EXCLUDED.payfast_merchant_id,
+           payfast_merchant_key = EXCLUDED.payfast_merchant_key,
+           payfast_passphrase = EXCLUDED.payfast_passphrase,
+           payfast_sandbox = EXCLUDED.payfast_sandbox,
+           business = EXCLUDED.business,
+           categories = EXCLUDED.categories,
+           slug = EXCLUDED.slug,
+           setup_completed = EXCLUDED.setup_completed,
+           updated_at = NOW()`
+      : `INSERT INTO app_settings (
+           tenant_id,
+           payfast_merchant_id,
+           payfast_merchant_key,
+           payfast_passphrase,
+           payfast_sandbox,
+           business,
+           categories,
+           slug,
+           setup_completed,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE
+           payfast_merchant_id = VALUES(payfast_merchant_id),
+           payfast_merchant_key = VALUES(payfast_merchant_key),
+           payfast_passphrase = VALUES(payfast_passphrase),
+           payfast_sandbox = VALUES(payfast_sandbox),
+           business = VALUES(business),
+           categories = VALUES(categories),
+           slug = VALUES(slug),
+           setup_completed = VALUES(setup_completed),
+           updated_at = NOW()`,
+    values
   );
 }
 
