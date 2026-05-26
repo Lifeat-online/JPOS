@@ -33,6 +33,26 @@ type WalletCashMovementInput = {
   applyWalletDelta?: boolean;
 };
 
+type CashCustodyTransferInput = {
+  fromType?: string | null;
+  fromId?: string | null;
+  fromName?: string | null;
+  toType?: string | null;
+  toId?: string | null;
+  toName?: string | null;
+  cashSessionId?: string | null;
+  expectedAmount?: number | string | null;
+  countedAmount?: number | string | null;
+  countedBreakdown?: Record<string, number> | null;
+  note?: string | null;
+};
+
+type CashCustodyTransferDecisionInput = {
+  countedAmount?: number | string | null;
+  countedBreakdown?: Record<string, number> | null;
+  note?: string | null;
+};
+
 const MOVEMENT_TYPES = new Set([
   "safe_drop",
   "cash_added",
@@ -43,6 +63,14 @@ const MOVEMENT_TYPES = new Set([
   "register_close",
   "manager_adjustment",
   "transfer",
+]);
+
+const CUSTODY_PARTY_TYPES = new Set([
+  "register",
+  "staff",
+  "manager_float",
+  "safe",
+  "petty_cash",
 ]);
 
 function makeId(prefix: string) {
@@ -86,6 +114,39 @@ function normalizeDirection(value: unknown, type: string) {
   return defaultDirection(type);
 }
 
+function normalizeCustodyPartyType(value: unknown, fallback: string) {
+  const type = String(value || fallback).trim();
+  return CUSTODY_PARTY_TYPES.has(type) ? type : fallback;
+}
+
+function normalizeBreakdown(value: unknown) {
+  if (!value || typeof value !== "object") return {};
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, qty]) => {
+    const numericKey = Number.parseFloat(key);
+    const numericQty = toNumber(qty);
+    if (Number.isFinite(numericKey) && numericKey > 0 && numericQty > 0) {
+      acc[String(numericKey)] = Number(numericQty.toFixed(0));
+    }
+    return acc;
+  }, {});
+}
+
+function breakdownTotal(value: Record<string, number>) {
+  return Number(Object.entries(value).reduce((sum, [denomination, qty]) => {
+    return sum + Number.parseFloat(denomination) * toNumber(qty);
+  }, 0).toFixed(2));
+}
+
+function isManagerHeldCash(type: string) {
+  return type === "manager_float" || type === "safe";
+}
+
+function transferMovementDirection(fromType: string, toType: string) {
+  if (isManagerHeldCash(toType) && !isManagerHeldCash(fromType)) return "in";
+  if (isManagerHeldCash(fromType) && !isManagerHeldCash(toType)) return "out";
+  return "neutral";
+}
+
 function rowToMovement(row: any) {
   return {
     id: row.id,
@@ -114,6 +175,49 @@ function rowToMovement(row: any) {
   };
 }
 
+function rowToTransfer(row: any) {
+  if (!row) return null;
+  const expectedAmount = toNumber(row.expectedAmount ?? row.expected_amount);
+  const countedAmount = toNumber(row.countedAmount ?? row.counted_amount);
+  const variance = toNumber(row.variance);
+  const countedBreakdown = (() => {
+    const value = row.countedBreakdown ?? row.counted_breakdown;
+    if (!value) return {};
+    if (typeof value !== "string") return value;
+    try { return JSON.parse(value); } catch { return {}; }
+  })();
+
+  return {
+    id: row.id,
+    tenantId: row.tenantId ?? row.tenant_id,
+    status: row.status,
+    fromType: row.fromType ?? row.from_type,
+    fromId: row.fromId ?? row.from_id,
+    fromName: row.fromName ?? row.from_name,
+    toType: row.toType ?? row.to_type,
+    toId: row.toId ?? row.to_id,
+    toName: row.toName ?? row.to_name,
+    cashSessionId: row.cashSessionId ?? row.cash_session_id,
+    expectedAmount,
+    countedAmount,
+    variance,
+    countedBreakdown,
+    note: row.note,
+    requestedBy: row.requestedBy ?? row.requested_by,
+    requestedByName: row.requestedByName ?? row.requested_by_name,
+    confirmedBy: row.confirmedBy ?? row.confirmed_by,
+    confirmedByName: row.confirmedByName ?? row.confirmed_by_name,
+    cancelledBy: row.cancelledBy ?? row.cancelled_by,
+    cancelledByName: row.cancelledByName ?? row.cancelled_by_name,
+    cancelReason: row.cancelReason ?? row.cancel_reason,
+    requestedAt: row.requestedAt ?? row.requested_at,
+    confirmedAt: row.confirmedAt ?? row.confirmed_at,
+    cancelledAt: row.cancelledAt ?? row.cancelled_at,
+    createdAt: row.createdAt ?? row.created_at,
+    updatedAt: row.updatedAt ?? row.updated_at,
+  };
+}
+
 async function insertManagerCashMovement(conn: Pick<Awaited<ReturnType<typeof getConnection>>, "query">, movement: any) {
   await conn.query(
     `INSERT INTO manager_cash_movements (
@@ -139,6 +243,48 @@ async function insertManagerCashMovement(conn: Pick<Awaited<ReturnType<typeof ge
       json(movement.countedBreakdown, {}),
       movement.createdBy || null,
       movement.createdByName || null,
+    ]
+  );
+}
+
+async function insertRegisterTransferMovement(conn: Pick<Awaited<ReturnType<typeof getConnection>>, "query">, transfer: any, actor: Actor) {
+  const amount = toNumber(transfer.countedAmount);
+  if (!transfer.cashSessionId || amount <= 0) return;
+
+  const fromType = String(transfer.fromType || "");
+  const toType = String(transfer.toType || "");
+  if (fromType !== "register" && toType !== "register") return;
+
+  const delta = fromType === "register" ? -amount : amount;
+  const movementType = fromType === "register" ? "cash_drop" : "cash_added";
+  const direction = fromType === "register" ? "out" : "in";
+
+  await conn.query(
+    `UPDATE cash_sessions
+        SET expected_cash = COALESCE(expected_cash, 0) + ?,
+            updated_at = NOW()
+      WHERE tenant_id = ? AND id = ? AND status = 'open'`,
+    [delta, transfer.tenantId, transfer.cashSessionId]
+  );
+
+  await conn.query(
+    `INSERT INTO cash_movements (
+      id, tenant_id, cash_session_id, type, direction, amount, sale_id, payment_id,
+      staff_id, staff_name, created_by, note, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    [
+      makeId("cm"),
+      transfer.tenantId,
+      transfer.cashSessionId,
+      movementType,
+      direction,
+      amount,
+      null,
+      null,
+      transfer.fromType === "staff" ? transfer.fromId : transfer.toType === "staff" ? transfer.toId : null,
+      transfer.fromType === "staff" ? transfer.fromName : transfer.toType === "staff" ? transfer.toName : null,
+      actor.staffId || null,
+      `Custody transfer confirmed: ${transfer.fromName || transfer.fromType} to ${transfer.toName || transfer.toType}`,
     ]
   );
 }
@@ -184,6 +330,258 @@ export async function recordManagerCashMovement(tenantId: string, input: Manager
   });
 
   return movement;
+}
+
+export async function createCashCustodyTransfer(tenantId: string, input: CashCustodyTransferInput, actor: Actor = {}) {
+  const fromType = normalizeCustodyPartyType(input.fromType, "manager_float");
+  const toType = normalizeCustodyPartyType(input.toType, "register");
+  if (fromType === toType) throw new Error("Choose two different cash custody points.");
+
+  const countedBreakdown = normalizeBreakdown(input.countedBreakdown);
+  const countedFromBreakdown = breakdownTotal(countedBreakdown);
+  const expectedAmount = Number(toNumber(input.expectedAmount).toFixed(2));
+  const countedAmount = Number((toNumber(input.countedAmount) || countedFromBreakdown || 0).toFixed(2));
+  if (expectedAmount <= 0) throw new Error("Enter the expected transfer amount.");
+
+  const id = makeId("cct");
+  const transfer = {
+    id,
+    tenantId,
+    status: "pending_confirmation",
+    fromType,
+    fromId: cleanString(input.fromId, 64),
+    fromName: cleanString(input.fromName, 255) || fromType.replace(/_/g, " "),
+    toType,
+    toId: cleanString(input.toId, 64),
+    toName: cleanString(input.toName, 255) || toType.replace(/_/g, " "),
+    cashSessionId: cleanString(input.cashSessionId, 64),
+    expectedAmount,
+    countedAmount,
+    variance: Number((countedAmount - expectedAmount).toFixed(2)),
+    countedBreakdown,
+    note: cleanString(input.note, 500),
+    requestedBy: actor.staffId || null,
+    requestedByName: actor.staffName || null,
+  };
+
+  await query(
+    `INSERT INTO cash_custody_transfers (
+       id, tenant_id, status, from_type, from_id, from_name, to_type, to_id, to_name,
+       cash_session_id, expected_amount, counted_amount, variance, counted_breakdown,
+       note, requested_by, requested_by_name, requested_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())`,
+    [
+      transfer.id,
+      transfer.tenantId,
+      transfer.status,
+      transfer.fromType,
+      transfer.fromId,
+      transfer.fromName,
+      transfer.toType,
+      transfer.toId,
+      transfer.toName,
+      transfer.cashSessionId,
+      transfer.expectedAmount,
+      transfer.countedAmount,
+      transfer.variance,
+      json(transfer.countedBreakdown, {}),
+      transfer.note,
+      transfer.requestedBy,
+      transfer.requestedByName,
+    ]
+  );
+
+  await recordAuditEvent({ query } as any, {
+    tenantId,
+    action: "cash_transfer.requested",
+    entityType: "cash_custody_transfer",
+    entityId: id,
+    staffId: actor.staffId || null,
+    staffName: actor.staffName || null,
+    source: "cash_management",
+    details: transfer,
+  });
+
+  return transfer;
+}
+
+export async function getCashCustodyTransfers(tenantId: string, status?: string | null, limit = 25) {
+  const params: any[] = [tenantId];
+  let statusClause = "";
+  if (status && ["pending_confirmation", "confirmed", "cancelled"].includes(status)) {
+    statusClause = " AND status = ?";
+    params.push(status);
+  }
+  params.push(Math.max(1, Math.min(200, Math.round(toNumber(limit) || 25))));
+
+  const rows = await query<any>(
+    `SELECT id,
+            tenant_id AS tenantId,
+            status,
+            from_type AS fromType,
+            from_id AS fromId,
+            from_name AS fromName,
+            to_type AS toType,
+            to_id AS toId,
+            to_name AS toName,
+            cash_session_id AS cashSessionId,
+            expected_amount AS expectedAmount,
+            counted_amount AS countedAmount,
+            variance,
+            counted_breakdown AS countedBreakdown,
+            note,
+            requested_by AS requestedBy,
+            requested_by_name AS requestedByName,
+            confirmed_by AS confirmedBy,
+            confirmed_by_name AS confirmedByName,
+            cancelled_by AS cancelledBy,
+            cancelled_by_name AS cancelledByName,
+            cancel_reason AS cancelReason,
+            requested_at AS requestedAt,
+            confirmed_at AS confirmedAt,
+            cancelled_at AS cancelledAt,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+       FROM cash_custody_transfers
+      WHERE tenant_id = ?${statusClause}
+      ORDER BY created_at DESC
+      LIMIT ?`,
+    params
+  );
+  return rows.map(rowToTransfer);
+}
+
+export async function confirmCashCustodyTransfer(tenantId: string, transferId: string, input: CashCustodyTransferDecisionInput = {}, actor: Actor = {}) {
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query<any>(
+      `SELECT *
+         FROM cash_custody_transfers
+        WHERE tenant_id = ? AND id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, transferId]
+    );
+    const current = rowToTransfer(rows[0]);
+    if (!current?.id) throw new Error("Cash transfer not found.");
+    if (current.status !== "pending_confirmation") throw new Error("Only pending transfers can be confirmed.");
+    if (current.requestedBy && current.requestedBy === actor.staffId && actor.role !== "admin" && actor.role !== "dev") {
+      throw new Error("A second manager or admin must confirm this cash handover.");
+    }
+
+    const countedBreakdown = Object.keys(normalizeBreakdown(input.countedBreakdown)).length > 0
+      ? normalizeBreakdown(input.countedBreakdown)
+      : normalizeBreakdown(current.countedBreakdown);
+    const countedFromBreakdown = breakdownTotal(countedBreakdown);
+    const countedAmount = Number((toNumber(input.countedAmount) || countedFromBreakdown || current.countedAmount || current.expectedAmount).toFixed(2));
+    if (countedAmount <= 0) throw new Error("Enter the confirmed counted amount.");
+
+    const confirmedTransfer = {
+      ...current,
+      status: "confirmed",
+      countedAmount,
+      variance: Number((countedAmount - current.expectedAmount).toFixed(2)),
+      countedBreakdown,
+      confirmedBy: actor.staffId || null,
+      confirmedByName: actor.staffName || null,
+      note: cleanString(input.note, 500) || current.note,
+    };
+
+    await conn.query(
+      `UPDATE cash_custody_transfers
+          SET status = 'confirmed',
+              counted_amount = ?,
+              variance = ?,
+              counted_breakdown = ?,
+              note = ?,
+              confirmed_by = ?,
+              confirmed_by_name = ?,
+              confirmed_at = NOW(),
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [
+        confirmedTransfer.countedAmount,
+        confirmedTransfer.variance,
+        json(confirmedTransfer.countedBreakdown, {}),
+        confirmedTransfer.note,
+        confirmedTransfer.confirmedBy,
+        confirmedTransfer.confirmedByName,
+        tenantId,
+        transferId,
+      ]
+    );
+
+    const direction = transferMovementDirection(current.fromType, current.toType);
+    if (direction !== "neutral") {
+      await insertManagerCashMovement(conn, {
+        id: makeId("mcm"),
+        tenantId,
+        movementType: "transfer",
+        direction,
+        amount: countedAmount,
+        cashSessionId: current.cashSessionId,
+        staffId: current.fromType === "staff" ? current.fromId : current.toType === "staff" ? current.toId : null,
+        staffName: current.fromType === "staff" ? current.fromName : current.toType === "staff" ? current.toName : null,
+        customerId: null,
+        customerName: null,
+        sourceType: "custody_transfer",
+        referenceId: transferId,
+        category: "cash_custody",
+        note: `Confirmed transfer from ${current.fromName || current.fromType} to ${current.toName || current.toType}`,
+        countedBreakdown,
+        createdBy: actor.staffId || null,
+        createdByName: actor.staffName || null,
+      });
+    }
+
+    await insertRegisterTransferMovement(conn, confirmedTransfer, actor);
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: "cash_transfer.confirmed",
+      entityType: "cash_custody_transfer",
+      entityId: transferId,
+      staffId: actor.staffId || null,
+      staffName: actor.staffName || null,
+      source: "cash_management",
+      details: confirmedTransfer,
+    });
+    await conn.commit();
+    return confirmedTransfer;
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function cancelCashCustodyTransfer(tenantId: string, transferId: string, input: CashCustodyTransferDecisionInput = {}, actor: Actor = {}) {
+  const reason = cleanString(input.note, 500);
+  await query(
+    `UPDATE cash_custody_transfers
+        SET status = 'cancelled',
+            cancel_reason = ?,
+            cancelled_by = ?,
+            cancelled_by_name = ?,
+            cancelled_at = NOW(),
+            updated_at = NOW()
+      WHERE tenant_id = ? AND id = ? AND status = 'pending_confirmation'`,
+    [reason, actor.staffId || null, actor.staffName || null, tenantId, transferId]
+  );
+
+  await recordAuditEvent({ query } as any, {
+    tenantId,
+    action: "cash_transfer.cancelled",
+    entityType: "cash_custody_transfer",
+    entityId: transferId,
+    staffId: actor.staffId || null,
+    staffName: actor.staffName || null,
+    source: "cash_management",
+    details: { reason },
+  });
+
+  return { success: true };
 }
 
 export async function recordWalletCashMovement(tenantId: string, input: WalletCashMovementInput, actor: Actor = {}) {
@@ -317,7 +715,7 @@ export async function getManagerCashSummary(tenantId: string) {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  const [managerRows, openRows, pendingRows, walletRows, payoutRows, todayRows, recentMovements] = await Promise.all([
+  const [managerRows, openRows, pendingRows, walletRows, payoutRows, todayRows, custodyRows, recentMovements] = await Promise.all([
     query<any>(
       `SELECT COALESCE(SUM(CASE
                 WHEN direction = 'in' THEN amount
@@ -366,6 +764,15 @@ export async function getManagerCashSummary(tenantId: string) {
         WHERE tenant_id = ? AND created_at >= ?`,
       [tenantId, todayStart]
     ),
+    query<any>(
+      `SELECT
+          COUNT(CASE WHEN status = 'pending_confirmation' THEN 1 END) AS pendingCustodyTransfers,
+          COUNT(CASE WHEN status = 'confirmed' AND confirmed_at >= ? THEN 1 END) AS custodyTransfersToday,
+          COALESCE(SUM(CASE WHEN status = 'confirmed' AND confirmed_at >= ? THEN ABS(variance) ELSE 0 END), 0) AS custodyVarianceToday
+         FROM cash_custody_transfers
+        WHERE tenant_id = ?`,
+      [todayStart, todayStart, tenantId]
+    ),
     getManagerCashMovements(tenantId, 8),
   ]);
 
@@ -394,6 +801,9 @@ export async function getManagerCashSummary(tenantId: string) {
     cashUpsToManagerToday: toNumber(todayRows[0]?.cashUpsToManagerToday),
     pettyCashToday: toNumber(todayRows[0]?.pettyCashToday),
     walletCashToday: toNumber(todayRows[0]?.walletCashToday),
+    pendingCustodyTransfers: toNumber(custodyRows[0]?.pendingCustodyTransfers),
+    custodyTransfersToday: toNumber(custodyRows[0]?.custodyTransfersToday),
+    custodyVarianceToday: toNumber(custodyRows[0]?.custodyVarianceToday),
     recentMovements,
     generatedAt: new Date().toISOString(),
   };

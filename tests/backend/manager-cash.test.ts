@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { getManagerCashSummary, recordManagerCashMovement, recordWalletCashMovement, transferCashSessionToManagerFloat } from '../../server/managerCash.js';
+import { confirmCashCustodyTransfer, createCashCustodyTransfer, getManagerCashSummary, recordManagerCashMovement, recordWalletCashMovement, transferCashSessionToManagerFloat } from '../../server/managerCash.js';
 
 vi.mock('../../server/db.js', () => ({
   getConnection: vi.fn(),
@@ -32,6 +32,9 @@ describe('manager cash float', () => {
       if (sql.includes('safeDropsToday')) {
         return Promise.resolve([{ safeDropsToday: '100.00', cashUpsToManagerToday: '50.00', pettyCashToday: '20.00', walletCashToday: '30.00' }]);
       }
+      if (sql.includes('pendingCustodyTransfers')) {
+        return Promise.resolve([{ pendingCustodyTransfers: '2', custodyTransfersToday: '3', custodyVarianceToday: '7.50' }]);
+      }
       if (sql.includes('SELECT id,') && sql.includes('manager_cash_movements')) {
         return Promise.resolve([{
           id: 'mcm_1',
@@ -55,6 +58,9 @@ describe('manager cash float', () => {
       walletLiability: 120,
       pendingPayouts: 40,
       availableAfterWalletLiability: 750,
+      pendingCustodyTransfers: 2,
+      custodyTransfersToday: 3,
+      custodyVarianceToday: 7.5,
     });
     expect(summary.recentMovements[0]).toMatchObject({ movementType: 'safe_drop', amount: 100 });
   });
@@ -81,6 +87,93 @@ describe('manager cash float', () => {
       expect.arrayContaining(['tenant_1', 'manager_cash.petty_cash', 'manager_cash_movement'])
     );
     expect(movement).toMatchObject({ movementType: 'petty_cash', direction: 'out', amount: 35 });
+  });
+
+  it('creates pending cash custody transfers with counted variance and audit trail', async () => {
+    (dbModule.query as any).mockResolvedValue({});
+
+    const transfer = await createCashCustodyTransfer('tenant_1', {
+      fromType: 'manager_float',
+      toType: 'register',
+      toName: 'Jess register',
+      cashSessionId: 'cs_1',
+      expectedAmount: 200,
+      countedBreakdown: { '100': 1, '50': 1, '20': 2, '10': 1 },
+      note: 'Float top-up',
+    }, {
+      staffId: 'mgr_1',
+      staffName: 'Manager',
+      role: 'manager',
+    });
+
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO cash_custody_transfers'),
+      expect.arrayContaining(['tenant_1', 'pending_confirmation', 'manager_float', null, 'manager float', 'register', null, 'Jess register', 'cs_1', 200, 200, 0])
+    );
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'cash_transfer.requested', 'cash_custody_transfer'])
+    );
+    expect(transfer).toMatchObject({ status: 'pending_confirmation', expectedAmount: 200, countedAmount: 200, variance: 0 });
+  });
+
+  it('confirms cash custody transfers into manager cash and register ledgers', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      query: vi.fn((sql: string) => {
+        if (sql.includes('FROM cash_custody_transfers')) {
+          return Promise.resolve([[{
+            id: 'cct_1',
+            tenant_id: 'tenant_1',
+            status: 'pending_confirmation',
+            from_type: 'register',
+            from_id: 'cs_1',
+            from_name: 'Jess register',
+            to_type: 'manager_float',
+            to_id: null,
+            to_name: 'Manager float',
+            cash_session_id: 'cs_1',
+            expected_amount: '200.00',
+            counted_amount: '195.00',
+            variance: '-5.00',
+            counted_breakdown: '{"100":1,"50":1,"20":2,"5":1}',
+            note: 'Safe drop',
+            requested_by: 'staff_1',
+            requested_by_name: 'Jess',
+          }]]);
+        }
+        return Promise.resolve([[]]);
+      }),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    const transfer = await confirmCashCustodyTransfer('tenant_1', 'cct_1', {}, {
+      staffId: 'mgr_1',
+      staffName: 'Manager',
+      role: 'manager',
+    });
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE cash_custody_transfers"),
+      expect.arrayContaining([195, -5])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO manager_cash_movements'),
+      expect.arrayContaining(['tenant_1', 'transfer', 'in', 195, 'cs_1'])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE cash_sessions'),
+      [-195, 'tenant_1', 'cs_1']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO cash_movements'),
+      expect.arrayContaining(['tenant_1', 'cs_1', 'cash_drop', 'out', 195])
+    );
+    expect(conn.commit).toHaveBeenCalled();
+    expect(transfer).toMatchObject({ status: 'confirmed', countedAmount: 195, variance: -5 });
   });
 
   it('moves reconciled cash-ups into the manager float once', async () => {

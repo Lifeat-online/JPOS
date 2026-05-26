@@ -343,6 +343,39 @@ export interface ManagerCashMovement {
   createdAt?: any;
 }
 
+export type CashCustodyTransferPartyType = 'register' | 'staff' | 'manager_float' | 'safe' | 'petty_cash';
+export type CashCustodyTransferStatus = 'pending_confirmation' | 'confirmed' | 'cancelled';
+
+export interface CashCustodyTransfer {
+  id: string;
+  tenantId: string;
+  status: CashCustodyTransferStatus;
+  fromType: CashCustodyTransferPartyType;
+  fromId?: string | null;
+  fromName?: string | null;
+  toType: CashCustodyTransferPartyType;
+  toId?: string | null;
+  toName?: string | null;
+  cashSessionId?: string | null;
+  expectedAmount: number;
+  countedAmount: number;
+  variance: number;
+  countedBreakdown?: Record<string, number>;
+  note?: string | null;
+  requestedBy?: string | null;
+  requestedByName?: string | null;
+  confirmedBy?: string | null;
+  confirmedByName?: string | null;
+  cancelledBy?: string | null;
+  cancelledByName?: string | null;
+  cancelReason?: string | null;
+  requestedAt?: any;
+  confirmedAt?: any;
+  cancelledAt?: any;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
 export interface ManagerCashSummary {
   managerFloat: number;
   openRegisterCash: number;
@@ -359,6 +392,9 @@ export interface ManagerCashSummary {
   cashUpsToManagerToday: number;
   pettyCashToday: number;
   walletCashToday: number;
+  pendingCustodyTransfers: number;
+  custodyTransfersToday: number;
+  custodyVarianceToday: number;
   recentMovements: ManagerCashMovement[];
   generatedAt: string;
 }

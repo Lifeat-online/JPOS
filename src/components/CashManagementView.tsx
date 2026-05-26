@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CashSession, CashTransaction, ManagerCashMovementType, ManagerCashSummary, Sale, Staff } from '../types';
-import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank } from 'lucide-react';
+import { CashCustodyTransfer, CashCustodyTransferPartyType, CashSession, CashTransaction, ManagerCashMovementType, ManagerCashSummary, Sale, Staff } from '../types';
+import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank, ArrowLeftRight } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
-import { apiGet, apiPost, apiPut, getManagerCashSummary, recordCashMovement, recordManagerCashMovement } from '../api';
+import { apiGet, apiPost, apiPut, cancelCashCustodyTransfer, confirmCashCustodyTransfer, createCashCustodyTransfer, getCashCustodyTransfers, getManagerCashSummary, recordCashMovement, recordManagerCashMovement } from '../api';
 import { PrinterReadinessPanel } from './PrinterReadinessPanel';
 import { usePrinterReadiness } from '../hooks/usePrinterReadiness';
 
@@ -58,6 +58,14 @@ const MANAGER_MOVEMENT_TYPES: Array<{
   { id: 'wallet_cash_in', label: 'Wallet cash in', helper: 'Cash received for a wallet top-up.', direction: 'in' },
   { id: 'wallet_cash_out', label: 'Wallet cash out', helper: 'Cash paid out against wallet balance.', direction: 'out' },
   { id: 'transfer', label: 'Transfer', helper: 'Move cash in or out with a clear handover note.' },
+];
+
+const CUSTODY_PARTY_TYPES: Array<{ id: CashCustodyTransferPartyType; label: string }> = [
+  { id: 'manager_float', label: 'Manager float' },
+  { id: 'safe', label: 'Safe' },
+  { id: 'register', label: 'Register' },
+  { id: 'staff', label: 'Staff member' },
+  { id: 'petty_cash', label: 'Petty cash box' },
 ];
 
 function DenominationCounter({ breakdown, setBreakdown, total }: { breakdown: Record<string, number>, setBreakdown: (b: Record<string, number>) => void, total: number }) {
@@ -122,6 +130,15 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
   const [managerMovementAmount, setManagerMovementAmount] = useState('');
   const [managerMovementNote, setManagerMovementNote] = useState('');
   const [managerMovementMessage, setManagerMovementMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [custodyTransfers, setCustodyTransfers] = useState<CashCustodyTransfer[]>([]);
+  const [transferFromType, setTransferFromType] = useState<CashCustodyTransferPartyType>('manager_float');
+  const [transferToType, setTransferToType] = useState<CashCustodyTransferPartyType>('register');
+  const [transferCashSessionId, setTransferCashSessionId] = useState('');
+  const [transferCounterpartyName, setTransferCounterpartyName] = useState('');
+  const [transferExpectedAmount, setTransferExpectedAmount] = useState('');
+  const [transferCountedBreakdown, setTransferCountedBreakdown] = useState<Record<string, number>>({});
+  const [transferNote, setTransferNote] = useState('');
+  const [transferMessage, setTransferMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
 
   const toNumber = (value: unknown): number => {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -135,6 +152,11 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
   const activeSession = sessions.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id);
   const canManageCash = ['admin', 'manager', 'dev'].includes(currentUserStaff?.role || '');
   const pendingReview = sessions.filter(s => s.status === 'closed' && (s.reviewStatus || 'submitted') !== 'reconciled');
+  const openRegisterSessions = sessions.filter(s => s.status === 'open');
+  const pendingCustodyTransfers = custodyTransfers.filter(t => t.status === 'pending_confirmation');
+  const transferCountedAmount = Object.entries(transferCountedBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
+  const transferExpectedNumber = toNumber(transferExpectedAmount);
+  const transferVariancePreview = Number((transferCountedAmount - transferExpectedNumber).toFixed(2));
   const today = new Date().toDateString();
   const isToday = (date: any) => {
     if (!date) return false;
@@ -209,6 +231,11 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
       detail: zReport.unreconciledSessions.length === 0 ? 'All cash-ups reconciled' : `${zReport.unreconciledSessions.length} cash-up${zReport.unreconciledSessions.length === 1 ? '' : 's'} need review`,
     },
     {
+      label: 'Confirm cash handovers',
+      ok: pendingCustodyTransfers.length === 0,
+      detail: pendingCustodyTransfers.length === 0 ? 'No pending cash handovers' : `${pendingCustodyTransfers.length} handover${pendingCustodyTransfers.length === 1 ? '' : 's'} need confirmation`,
+    },
+    {
       label: 'Receipt printer checked',
       ok: printerReadiness.isReadyToday,
       detail: printerReadiness.isReadyToday ? 'Printer test passed today' : printerReadiness.needsAttention ? 'Printer needs attention before final reports' : 'Run a test print before closing',
@@ -240,9 +267,15 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
       }));
       setCashMovements(Object.fromEntries(movementPairs));
       if (canManageCash) {
-        setManagerCash(await getManagerCashSummary(tenantId).catch(() => null));
+        const [cashSummary, transfers] = await Promise.all([
+          getManagerCashSummary(tenantId).catch(() => null),
+          getCashCustodyTransfers(tenantId, { limit: 30 }).catch(() => []),
+        ]);
+        setManagerCash(cashSummary);
+        setCustodyTransfers(transfers);
       } else {
         setManagerCash(null);
+        setCustodyTransfers([]);
       }
       usePosStore.getState().setActiveSession(normalized.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id) || null);
     } catch (err) {
@@ -407,6 +440,99 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
     }
   };
 
+  const requestCustodyTransfer = async () => {
+    if (!tenantId || !currentUserStaff || !canManageCash) return;
+    const expectedAmount = toNumber(transferExpectedAmount);
+    const countedAmount = Number(transferCountedAmount.toFixed(2));
+    const registerSide = transferFromType === 'register' || transferToType === 'register';
+    const selectedSession = openRegisterSessions.find(session => session.id === transferCashSessionId);
+    const counterpartyName = transferCounterpartyName.trim();
+    setTransferMessage(null);
+
+    if (transferFromType === transferToType) {
+      setTransferMessage({ tone: 'error', text: 'Choose two different cash points.' });
+      return;
+    }
+    if (expectedAmount <= 0) {
+      setTransferMessage({ tone: 'error', text: 'Enter the expected amount to hand over.' });
+      return;
+    }
+    if (countedAmount <= 0) {
+      setTransferMessage({ tone: 'error', text: 'Count the cash handed over before requesting confirmation.' });
+      return;
+    }
+    if (registerSide && !selectedSession) {
+      setTransferMessage({ tone: 'error', text: 'Choose the register involved in this handover.' });
+      return;
+    }
+    if ((transferFromType === 'staff' || transferToType === 'staff') && counterpartyName.length < 2) {
+      setTransferMessage({ tone: 'error', text: 'Enter the staff member name for the handover.' });
+      return;
+    }
+    if (transferNote.trim().length < 3) {
+      setTransferMessage({ tone: 'error', text: 'Add a short handover note.' });
+      return;
+    }
+
+    const sideName = (type: CashCustodyTransferPartyType) => {
+      if (type === 'register') return selectedSession ? `${selectedSession.staffName} register` : 'Register';
+      if (type === 'staff') return counterpartyName;
+      return CUSTODY_PARTY_TYPES.find(party => party.id === type)?.label || type.replace(/_/g, ' ');
+    };
+
+    setIsProcessing(true);
+    try {
+      await createCashCustodyTransfer(tenantId, {
+        fromType: transferFromType,
+        fromId: transferFromType === 'register' ? selectedSession?.id || null : null,
+        fromName: sideName(transferFromType),
+        toType: transferToType,
+        toId: transferToType === 'register' ? selectedSession?.id || null : null,
+        toName: sideName(transferToType),
+        cashSessionId: selectedSession?.id || null,
+        expectedAmount,
+        countedAmount,
+        countedBreakdown: transferCountedBreakdown,
+        note: transferNote.trim(),
+      });
+      setTransferExpectedAmount('');
+      setTransferCounterpartyName('');
+      setTransferCashSessionId('');
+      setTransferCountedBreakdown({});
+      setTransferNote('');
+      setTransferMessage({ tone: 'success', text: 'Cash handover requested. A second manager or admin should confirm the count.' });
+      await fetchSessions();
+    } catch (err: any) {
+      setTransferMessage({ tone: 'error', text: err?.message || 'Could not request this cash handover.' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const decideCustodyTransfer = async (transfer: CashCustodyTransfer, action: 'confirm' | 'cancel') => {
+    if (!tenantId || !canManageCash) return;
+    setTransferMessage(null);
+    setIsProcessing(true);
+    try {
+      if (action === 'confirm') {
+        await confirmCashCustodyTransfer(tenantId, transfer.id, {
+          countedAmount: transfer.countedAmount || transfer.expectedAmount,
+          countedBreakdown: transfer.countedBreakdown || {},
+          note: transfer.note || null,
+        });
+        setTransferMessage({ tone: 'success', text: 'Cash handover confirmed and posted to the cash ledger.' });
+      } else {
+        await cancelCashCustodyTransfer(tenantId, transfer.id, { note: 'Cancelled from Cash Management' });
+        setTransferMessage({ tone: 'success', text: 'Cash handover cancelled.' });
+      }
+      await fetchSessions();
+    } catch (err: any) {
+      setTransferMessage({ tone: 'error', text: err?.message || 'Could not update this cash handover.' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const reviewBadge = (session: CashSession) => {
     const status = session.reviewStatus || (session.status === 'open' ? 'in_progress' : 'submitted');
     if (status === 'reconciled') return 'bg-emerald-100 text-emerald-700';
@@ -468,13 +594,15 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
               {[
                 { label: 'Manager float', value: managerCash.managerFloat, icon: Landmark, tone: 'text-primary' },
                 { label: 'Open registers', value: managerCash.openRegisterCash, icon: DollarSign, tone: 'text-emerald-600' },
                 { label: 'Pending cash-ups', value: managerCash.pendingCashUpCash, icon: ClipboardCheck, tone: 'text-amber-600' },
                 { label: 'Wallet liability', value: managerCash.walletLiability, icon: Wallet, tone: 'text-blue-600' },
                 { label: 'Pending payouts', value: managerCash.pendingPayouts, icon: PiggyBank, tone: 'text-rose-600' },
+                { label: 'Pending handovers', value: managerCash.pendingCustodyTransfers, icon: ArrowLeftRight, tone: 'text-purple-600', count: true },
+                { label: 'Handover variance', value: managerCash.custodyVarianceToday, icon: AlertCircle, tone: managerCash.custodyVarianceToday === 0 ? 'text-emerald-600' : 'text-orange-600' },
               ].map(card => {
                 const Icon = card.icon;
                 return (
@@ -483,7 +611,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
                       <Icon className={`w-4 h-4 ${card.tone}`} />
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{card.label}</p>
                     </div>
-                    <p className={`mt-2 text-xl font-black ${card.tone}`}>R{card.value.toFixed(2)}</p>
+                    <p className={`mt-2 text-xl font-black ${card.tone}`}>{card.count ? Number(card.value || 0) : `R${Number(card.value || 0).toFixed(2)}`}</p>
                   </div>
                 );
               })}
@@ -598,6 +726,187 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4 space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
+                <div>
+                  <h4 className="font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <ArrowLeftRight className="w-5 h-5 text-primary" />
+                    Cash custody handover
+                  </h4>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Request register, staff, safe, or manager-float transfers with counted cash and second-person confirmation.</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 px-4 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Pending</p>
+                  <p className="text-xl font-black text-slate-900 dark:text-white">{pendingCustodyTransfers.length}</p>
+                </div>
+              </div>
+
+              {transferMessage && (
+                <div className={`rounded-xl border p-3 text-sm font-bold ${
+                  transferMessage.tone === 'success'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-rose-200 bg-rose-50 text-rose-700'
+                }`}>{transferMessage.text}</div>
+              )}
+
+              <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">From</label>
+                      <select
+                        value={transferFromType}
+                        onChange={e => setTransferFromType(e.target.value as CashCustodyTransferPartyType)}
+                        className="w-full h-12 px-3 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-bold"
+                      >
+                        {CUSTODY_PARTY_TYPES.map(type => <option key={type.id} value={type.id}>{type.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">To</label>
+                      <select
+                        value={transferToType}
+                        onChange={e => setTransferToType(e.target.value as CashCustodyTransferPartyType)}
+                        className="w-full h-12 px-3 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-bold"
+                      >
+                        {CUSTODY_PARTY_TYPES.map(type => <option key={type.id} value={type.id}>{type.label}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {(transferFromType === 'register' || transferToType === 'register') && (
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Register</label>
+                      <select
+                        value={transferCashSessionId}
+                        onChange={e => setTransferCashSessionId(e.target.value)}
+                        className="w-full h-12 px-3 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-bold"
+                      >
+                        <option value="">Choose open register</option>
+                        {openRegisterSessions.map(session => (
+                          <option key={session.id} value={session.id}>{session.staffName} - R{toNumber((session as any).expectedCash).toFixed(2)} expected</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {(transferFromType === 'staff' || transferToType === 'staff') && (
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Staff member</label>
+                      <input
+                        value={transferCounterpartyName}
+                        onChange={e => setTransferCounterpartyName(e.target.value)}
+                        placeholder="Name on handover"
+                        className="w-full h-12 px-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-bold"
+                      />
+                    </div>
+                  )}
+
+                  <div className="grid gap-3 sm:grid-cols-[130px_1fr]">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Expected</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={transferExpectedAmount}
+                        onChange={e => setTransferExpectedAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full h-12 px-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Handover note</label>
+                      <input
+                        value={transferNote}
+                        onChange={e => setTransferNote(e.target.value)}
+                        placeholder="e.g. Float top-up for register 2"
+                        className="w-full h-12 px-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <DenominationCounter breakdown={transferCountedBreakdown} setBreakdown={setTransferCountedBreakdown} total={transferCountedAmount} />
+
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      ['Expected', transferExpectedNumber],
+                      ['Counted', transferCountedAmount],
+                      ['Variance', transferVariancePreview],
+                    ].map(([label, value]) => (
+                      <div key={label as string} className="rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                        <p className={`mt-1 text-sm font-black ${label === 'Variance' && Number(value) !== 0 ? 'text-orange-600' : 'text-slate-900 dark:text-white'}`}>R{Number(value || 0).toFixed(2)}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={requestCustodyTransfer}
+                    className="w-full h-12 rounded-xl bg-primary text-white font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-all"
+                  >
+                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowLeftRight className="w-4 h-4" />}
+                    Request handover
+                  </button>
+                </div>
+
+                <div className="rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
+                  <div className="px-4 py-3 bg-slate-50 dark:bg-slate-950/50 text-[10px] font-black uppercase tracking-widest text-slate-500">Pending handovers</div>
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[540px] overflow-y-auto custom-scrollbar">
+                    {pendingCustodyTransfers.length === 0 ? (
+                      <div className="p-6 text-sm font-bold text-slate-500">No cash handovers waiting for confirmation.</div>
+                    ) : pendingCustodyTransfers.map(transfer => {
+                      const needsSecondPerson = transfer.requestedBy && transfer.requestedBy === currentUserStaff?.id && currentUserStaff?.role === 'manager';
+                      return (
+                        <div key={transfer.id} className="p-4 space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-black text-slate-900 dark:text-white">{transfer.fromName || transfer.fromType} to {transfer.toName || transfer.toType}</p>
+                              <p className="mt-1 text-xs font-semibold text-slate-500">{transfer.note || 'Cash custody handover'}</p>
+                              <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">Requested by {transfer.requestedByName || 'manager'}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-black text-slate-900 dark:text-white">R{transfer.expectedAmount.toFixed(2)}</p>
+                              <p className={`mt-1 text-[10px] font-black uppercase tracking-widest ${transfer.variance === 0 ? 'text-emerald-600' : 'text-orange-600'}`}>
+                                Variance R{transfer.variance.toFixed(2)}
+                              </p>
+                            </div>
+                          </div>
+                          {needsSecondPerson && (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                              A second manager or admin must confirm this handover.
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              disabled={isProcessing || Boolean(needsSecondPerson)}
+                              onClick={() => decideCustodyTransfer(transfer, 'confirm')}
+                              className="h-11 rounded-xl bg-emerald-500 text-white font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                              Confirm
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isProcessing}
+                              onClick={() => decideCustodyTransfer(transfer, 'cancel')}
+                              className="h-11 rounded-xl bg-rose-500 text-white font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                              <XCircle className="w-4 h-4" />
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>

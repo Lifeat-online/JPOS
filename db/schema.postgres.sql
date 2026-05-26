@@ -275,6 +275,39 @@ CREATE TABLE IF NOT EXISTS manager_cash_movements (
 CREATE INDEX IF NOT EXISTS idx_manager_cash_tenant_created ON manager_cash_movements (tenant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_manager_cash_reference ON manager_cash_movements (tenant_id, movement_type, reference_id);
 
+CREATE TABLE IF NOT EXISTS cash_custody_transfers (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending_confirmation' CHECK (status IN ('pending_confirmation','confirmed','cancelled')),
+  from_type TEXT NOT NULL CHECK (from_type IN ('register','staff','manager_float','safe','petty_cash')),
+  from_id TEXT,
+  from_name TEXT,
+  to_type TEXT NOT NULL CHECK (to_type IN ('register','staff','manager_float','safe','petty_cash')),
+  to_id TEXT,
+  to_name TEXT,
+  cash_session_id TEXT REFERENCES cash_sessions(id) ON DELETE SET NULL,
+  expected_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  counted_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  variance NUMERIC(12,2) NOT NULL DEFAULT 0,
+  counted_breakdown TEXT DEFAULT '{}'::TEXT,
+  note TEXT,
+  requested_by TEXT,
+  requested_by_name TEXT,
+  confirmed_by TEXT,
+  confirmed_by_name TEXT,
+  cancelled_by TEXT,
+  cancelled_by_name TEXT,
+  cancel_reason TEXT,
+  requested_at TIMESTAMPTZ DEFAULT NOW(),
+  confirmed_at TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_custody_tenant_status ON cash_custody_transfers (tenant_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_cash_custody_session ON cash_custody_transfers (tenant_id, cash_session_id);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

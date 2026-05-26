@@ -237,6 +237,36 @@ CREATE TABLE IF NOT EXISTS manager_cash_movements (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS cash_custody_transfers (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending_confirmation' CHECK (status IN ('pending_confirmation','confirmed','cancelled')),
+  from_type TEXT NOT NULL CHECK (from_type IN ('register','staff','manager_float','safe','petty_cash')),
+  from_id TEXT,
+  from_name TEXT,
+  to_type TEXT NOT NULL CHECK (to_type IN ('register','staff','manager_float','safe','petty_cash')),
+  to_id TEXT,
+  to_name TEXT,
+  cash_session_id TEXT REFERENCES cash_sessions(id) ON DELETE SET NULL,
+  expected_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  counted_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  variance NUMERIC(12,2) NOT NULL DEFAULT 0,
+  counted_breakdown TEXT DEFAULT '{}'::TEXT,
+  note TEXT,
+  requested_by TEXT,
+  requested_by_name TEXT,
+  confirmed_by TEXT,
+  confirmed_by_name TEXT,
+  cancelled_by TEXT,
+  cancelled_by_name TEXT,
+  cancel_reason TEXT,
+  requested_at TIMESTAMPTZ DEFAULT NOW(),
+  confirmed_at TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS customer_payout_requests (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -581,6 +611,39 @@ export async function ensureCashManagementSchema() {
     `);
     await query(`CREATE INDEX IF NOT EXISTS idx_manager_cash_tenant_created ON manager_cash_movements (tenant_id, created_at)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_manager_cash_reference ON manager_cash_movements (tenant_id, movement_type, reference_id)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS cash_custody_transfers (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'pending_confirmation' CHECK (status IN ('pending_confirmation','confirmed','cancelled')),
+        from_type TEXT NOT NULL CHECK (from_type IN ('register','staff','manager_float','safe','petty_cash')),
+        from_id TEXT,
+        from_name TEXT,
+        to_type TEXT NOT NULL CHECK (to_type IN ('register','staff','manager_float','safe','petty_cash')),
+        to_id TEXT,
+        to_name TEXT,
+        cash_session_id TEXT REFERENCES cash_sessions(id) ON DELETE SET NULL,
+        expected_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        counted_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        variance NUMERIC(12,2) NOT NULL DEFAULT 0,
+        counted_breakdown TEXT DEFAULT '{}'::TEXT,
+        note TEXT,
+        requested_by TEXT,
+        requested_by_name TEXT,
+        confirmed_by TEXT,
+        confirmed_by_name TEXT,
+        cancelled_by TEXT,
+        cancelled_by_name TEXT,
+        cancel_reason TEXT,
+        requested_at TIMESTAMPTZ DEFAULT NOW(),
+        confirmed_at TIMESTAMPTZ,
+        cancelled_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_cash_custody_tenant_status ON cash_custody_transfers (tenant_id, status, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_cash_custody_session ON cash_custody_transfers (tenant_id, cash_session_id)`);
     await query(`UPDATE cash_sessions SET review_status = CASE WHEN status = 'open' THEN 'in_progress' ELSE COALESCE(review_status, 'submitted') END WHERE review_status IS NULL`);
     return;
   }
@@ -647,6 +710,41 @@ export async function ensureCashManagementSchema() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_manager_cash_tenant_created (tenant_id, created_at),
       INDEX idx_manager_cash_reference (tenant_id, movement_type, reference_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS cash_custody_transfers (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      status ENUM('pending_confirmation','confirmed','cancelled') NOT NULL DEFAULT 'pending_confirmation',
+      from_type ENUM('register','staff','manager_float','safe','petty_cash') NOT NULL,
+      from_id VARCHAR(64),
+      from_name VARCHAR(255),
+      to_type ENUM('register','staff','manager_float','safe','petty_cash') NOT NULL,
+      to_id VARCHAR(64),
+      to_name VARCHAR(255),
+      cash_session_id VARCHAR(64),
+      expected_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      counted_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      variance DECIMAL(12,2) NOT NULL DEFAULT 0,
+      counted_breakdown JSON DEFAULT JSON_OBJECT(),
+      note TEXT,
+      requested_by VARCHAR(64),
+      requested_by_name VARCHAR(255),
+      confirmed_by VARCHAR(64),
+      confirmed_by_name VARCHAR(255),
+      cancelled_by VARCHAR(64),
+      cancelled_by_name VARCHAR(255),
+      cancel_reason TEXT,
+      requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      confirmed_at DATETIME,
+      cancelled_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_cash_custody_tenant_status (tenant_id, status, created_at),
+      INDEX idx_cash_custody_session (tenant_id, cash_session_id),
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
       FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
     )

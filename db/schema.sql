@@ -287,6 +287,40 @@ CREATE TABLE IF NOT EXISTS manager_cash_movements (
   FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS cash_custody_transfers (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  status ENUM('pending_confirmation','confirmed','cancelled') NOT NULL DEFAULT 'pending_confirmation',
+  from_type ENUM('register','staff','manager_float','safe','petty_cash') NOT NULL,
+  from_id VARCHAR(64),
+  from_name VARCHAR(255),
+  to_type ENUM('register','staff','manager_float','safe','petty_cash') NOT NULL,
+  to_id VARCHAR(64),
+  to_name VARCHAR(255),
+  cash_session_id VARCHAR(64),
+  expected_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  counted_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  variance DECIMAL(12,2) NOT NULL DEFAULT 0,
+  counted_breakdown JSON DEFAULT JSON_OBJECT(),
+  note TEXT,
+  requested_by VARCHAR(64),
+  requested_by_name VARCHAR(255),
+  confirmed_by VARCHAR(64),
+  confirmed_by_name VARCHAR(255),
+  cancelled_by VARCHAR(64),
+  cancelled_by_name VARCHAR(255),
+  cancel_reason TEXT,
+  requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  confirmed_at DATETIME,
+  cancelled_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_cash_custody_tenant_status (tenant_id, status, created_at),
+  INDEX idx_cash_custody_session (tenant_id, cash_session_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,

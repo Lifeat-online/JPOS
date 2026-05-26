@@ -122,6 +122,10 @@ import {
 import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistory } from "./actionCenter.js";
 import { applyStockAdjustment, createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue } from "./managerTasks.js";
 import {
+  cancelCashCustodyTransfer,
+  confirmCashCustodyTransfer,
+  createCashCustodyTransfer,
+  getCashCustodyTransfers,
   getManagerCashMovements,
   getManagerCashSummary,
   recordManagerCashMovement,
@@ -2430,6 +2434,69 @@ export async function createApp(io: any = null) {
         role: req.user?.role,
       });
       res.status(201).json(movement);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/manager-cash/transfers", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can view cash custody transfers." });
+      }
+      res.json(await getCashCustodyTransfers(
+        req.params.tenantId,
+        typeof req.query.status === "string" ? req.query.status : null,
+        Number(req.query.limit || 25)
+      ));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/manager-cash/transfers", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can request cash custody transfers." });
+      }
+      const transfer = await createCashCustodyTransfer(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId,
+        staffName: req.user?.name,
+        role: req.user?.role,
+      });
+      res.status(201).json(transfer);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/manager-cash/transfers/:transferId/confirm", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can confirm cash custody transfers." });
+      }
+      const transfer = await confirmCashCustodyTransfer(req.params.tenantId, req.params.transferId, req.body || {}, {
+        staffId: req.user?.staffId,
+        staffName: req.user?.name,
+        role: req.user?.role,
+      });
+      res.json(transfer);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/manager-cash/transfers/:transferId/cancel", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can cancel cash custody transfers." });
+      }
+      const result = await cancelCashCustodyTransfer(req.params.tenantId, req.params.transferId, req.body || {}, {
+        staffId: req.user?.staffId,
+        staffName: req.user?.name,
+        role: req.user?.role,
+      });
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

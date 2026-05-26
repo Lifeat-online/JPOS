@@ -4,7 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
-import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary } from './types';
+import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
@@ -566,6 +566,42 @@ export function recordManagerCashMovement(tenantId: string, data: {
   countedBreakdown?: Record<string, number>;
 }) {
   return apiPost<ManagerCashMovement>(`/api/mariadb/tenants/${tenantId}/manager-cash/movements`, data);
+}
+
+export function getCashCustodyTransfers(tenantId: string, filters: { status?: string; limit?: number } = {}) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.limit) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<CashCustodyTransfer[]>(`/api/mariadb/tenants/${tenantId}/manager-cash/transfers${query ? `?${query}` : ''}`);
+}
+
+export function createCashCustodyTransfer(tenantId: string, data: {
+  fromType: CashCustodyTransferPartyType;
+  fromId?: string | null;
+  fromName?: string | null;
+  toType: CashCustodyTransferPartyType;
+  toId?: string | null;
+  toName?: string | null;
+  cashSessionId?: string | null;
+  expectedAmount: number;
+  countedAmount?: number;
+  countedBreakdown?: Record<string, number>;
+  note?: string | null;
+}) {
+  return apiPost<CashCustodyTransfer>(`/api/mariadb/tenants/${tenantId}/manager-cash/transfers`, data);
+}
+
+export function confirmCashCustodyTransfer(tenantId: string, transferId: string, data: {
+  countedAmount?: number;
+  countedBreakdown?: Record<string, number>;
+  note?: string | null;
+} = {}) {
+  return apiPut<CashCustodyTransfer>(`/api/mariadb/tenants/${tenantId}/manager-cash/transfers/${encodeURIComponent(transferId)}/confirm`, data);
+}
+
+export function cancelCashCustodyTransfer(tenantId: string, transferId: string, data: { note?: string | null } = {}) {
+  return apiPut<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/manager-cash/transfers/${encodeURIComponent(transferId)}/cancel`, data);
 }
 
 export function recordWalletCashMovement(tenantId: string, data: {

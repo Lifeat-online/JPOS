@@ -36,4 +36,13 @@ describe('cash management schema', () => {
     expect(schema).toContain('register_close');
     expect(schema).toContain('idx_manager_cash_tenant_created');
   });
+
+  it('defines cash custody handovers with dual confirmation fields', () => {
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS cash_custody_transfers');
+    expect(schema).toContain('pending_confirmation');
+    expect(schema).toContain('expected_amount');
+    expect(schema).toContain('counted_amount');
+    expect(schema).toContain('confirmed_by');
+    expect(schema).toContain('idx_cash_custody_tenant_status');
+  });
 });
