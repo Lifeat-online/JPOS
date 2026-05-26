@@ -251,6 +251,128 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS audit_events (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  related_sale_id TEXT,
+  staff_id TEXT,
+  staff_name TEXT,
+  customer_id TEXT,
+  source TEXT DEFAULT 'server',
+  details TEXT DEFAULT '{}'::TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_created ON audit_events (tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events (tenant_id, entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_events_staff ON audit_events (tenant_id, staff_id);
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  item_type TEXT NOT NULL DEFAULT 'product' CHECK (item_type IN ('product','bulk')),
+  product_id TEXT,
+  bulk_item_id TEXT,
+  item_name TEXT,
+  quantity_delta NUMERIC(12,3) NOT NULL DEFAULT 0,
+  previous_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+  new_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL,
+  reference_type TEXT,
+  reference_id TEXT,
+  sale_id TEXT,
+  sale_item_id TEXT,
+  staff_id TEXT,
+  staff_name TEXT,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_movements_tenant_created ON stock_movements (tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements (tenant_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_sale ON stock_movements (tenant_id, sale_id);
+
+CREATE TABLE IF NOT EXISTS manager_tasks (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  task_type TEXT NOT NULL CHECK (task_type IN ('cash_variance','sale_exception','refund_request','void_request','stock_adjustment_request','low_stock','ai_recommendation','stock_variance','offline_sync')),
+  title TEXT NOT NULL,
+  summary TEXT,
+  priority TEXT DEFAULT 'normal' CHECK (priority IN ('low','normal','high','critical')),
+  status TEXT DEFAULT 'open' CHECK (status IN ('open','in_review','approved','declined','done','dismissed')),
+  source_type TEXT,
+  source_id TEXT,
+  related_sale_id TEXT,
+  related_product_id TEXT,
+  assigned_to TEXT,
+  requested_by TEXT,
+  decided_by TEXT,
+  decision_note TEXT,
+  details TEXT DEFAULT '{}'::TEXT,
+  due_at TIMESTAMPTZ,
+  resolved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (tenant_id, task_type, source_type, source_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_manager_tasks_tenant_status ON manager_tasks (tenant_id, status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_manager_tasks_source ON manager_tasks (tenant_id, source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_manager_tasks_assigned ON manager_tasks (tenant_id, assigned_to);
+
+CREATE TABLE IF NOT EXISTS stock_take_sessions (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'cycle' CHECK (type IN ('full','cycle','spot_check')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft','active','submitted','approved','cancelled')),
+  assigned_by TEXT,
+  assigned_by_name TEXT,
+  due_at TIMESTAMPTZ,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  submitted_at TIMESTAMPTZ,
+  approved_at TIMESTAMPTZ,
+  approved_by TEXT,
+  approved_by_name TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_take_sessions_tenant_status ON stock_take_sessions (tenant_id, status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_stock_take_sessions_type_due ON stock_take_sessions (tenant_id, type, due_at);
+
+CREATE TABLE IF NOT EXISTS stock_take_items (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES stock_take_sessions(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  barcode TEXT,
+  expected_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+  counted_quantity NUMERIC(12,3),
+  variance_quantity NUMERIC(12,3),
+  assigned_to TEXT,
+  assigned_to_name TEXT,
+  counted_by TEXT,
+  counted_by_name TEXT,
+  status TEXT NOT NULL DEFAULT 'assigned' CHECK (status IN ('assigned','counted','confirmed','recount')),
+  counted_at TIMESTAMPTZ,
+  confirmed_at TIMESTAMPTZ,
+  confirmed_by TEXT,
+  confirmed_by_name TEXT,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (session_id, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_take_items_tenant_status ON stock_take_items (tenant_id, status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_stock_take_items_assigned ON stock_take_items (tenant_id, assigned_to, status);
+CREATE INDEX IF NOT EXISTS idx_stock_take_items_product ON stock_take_items (tenant_id, product_id);
+
 CREATE TABLE IF NOT EXISTS customer_payout_requests (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

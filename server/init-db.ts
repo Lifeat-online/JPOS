@@ -387,6 +387,9 @@ export async function initDb() {
   await ensurePersonDiscountSchema();
   await ensureCashManagementSchema();
   await ensureRefundSchema();
+  await ensureAuditAndStockLedgerSchema();
+  await ensureManagerTaskSchema();
+  await ensureStockTakeSchema();
   await ensureBulkInventorySchema();
   await ensurePushNotificationSchema();
   await ensureAiSchema();
@@ -612,6 +615,301 @@ export async function ensureRefundSchema() {
   await addColumn(`void_reason TEXT AFTER refunded_by`);
   await addColumn(`voided_by VARCHAR(64) AFTER void_reason`);
   await query(`UPDATE sales SET transaction_type = COALESCE(transaction_type, 'sale'), refund_status = COALESCE(refund_status, 'none'), refunded_amount = COALESCE(refunded_amount, 0)`);
+}
+
+export async function ensureAuditAndStockLedgerSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        action TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT,
+        related_sale_id TEXT,
+        staff_id TEXT,
+        staff_name TEXT,
+        customer_id TEXT,
+        source TEXT DEFAULT 'server',
+        details TEXT DEFAULT '{}'::TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_created ON audit_events (tenant_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events (tenant_id, entity_type, entity_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_audit_events_staff ON audit_events (tenant_id, staff_id)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS stock_movements (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        item_type TEXT NOT NULL DEFAULT 'product' CHECK (item_type IN ('product','bulk')),
+        product_id TEXT,
+        bulk_item_id TEXT,
+        item_name TEXT,
+        quantity_delta NUMERIC(12,3) NOT NULL DEFAULT 0,
+        previous_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+        new_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+        reason TEXT NOT NULL,
+        reference_type TEXT,
+        reference_id TEXT,
+        sale_id TEXT,
+        sale_item_id TEXT,
+        staff_id TEXT,
+        staff_name TEXT,
+        note TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_tenant_created ON stock_movements (tenant_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements (tenant_id, product_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_sale ON stock_movements (tenant_id, sale_id)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      action VARCHAR(96) NOT NULL,
+      entity_type VARCHAR(64) NOT NULL,
+      entity_id VARCHAR(64),
+      related_sale_id VARCHAR(64),
+      staff_id VARCHAR(64),
+      staff_name VARCHAR(255),
+      customer_id VARCHAR(64),
+      source VARCHAR(32) DEFAULT 'server',
+      details JSON DEFAULT JSON_OBJECT(),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_audit_events_tenant_created (tenant_id, created_at),
+      INDEX idx_audit_events_entity (tenant_id, entity_type, entity_id),
+      INDEX idx_audit_events_staff (tenant_id, staff_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS stock_movements (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      item_type ENUM('product','bulk') NOT NULL DEFAULT 'product',
+      product_id VARCHAR(64),
+      bulk_item_id VARCHAR(64),
+      item_name VARCHAR(255),
+      quantity_delta DECIMAL(12,3) NOT NULL DEFAULT 0,
+      previous_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+      new_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+      reason VARCHAR(64) NOT NULL,
+      reference_type VARCHAR(64),
+      reference_id VARCHAR(64),
+      sale_id VARCHAR(64),
+      sale_item_id VARCHAR(64),
+      staff_id VARCHAR(64),
+      staff_name VARCHAR(255),
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_stock_movements_tenant_created (tenant_id, created_at),
+      INDEX idx_stock_movements_product (tenant_id, product_id),
+      INDEX idx_stock_movements_sale (tenant_id, sale_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+export async function ensureManagerTaskSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS manager_tasks (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        task_type TEXT NOT NULL CHECK (task_type IN ('cash_variance','sale_exception','refund_request','void_request','stock_adjustment_request','low_stock','ai_recommendation','stock_variance','offline_sync')),
+        title TEXT NOT NULL,
+        summary TEXT,
+        priority TEXT DEFAULT 'normal' CHECK (priority IN ('low','normal','high','critical')),
+        status TEXT DEFAULT 'open' CHECK (status IN ('open','in_review','approved','declined','done','dismissed')),
+        source_type TEXT,
+        source_id TEXT,
+        related_sale_id TEXT,
+        related_product_id TEXT,
+        assigned_to TEXT,
+        requested_by TEXT,
+        decided_by TEXT,
+        decision_note TEXT,
+        details TEXT DEFAULT '{}'::TEXT,
+        due_at TIMESTAMPTZ,
+        resolved_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (tenant_id, task_type, source_type, source_id)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_manager_tasks_tenant_status ON manager_tasks (tenant_id, status, updated_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_manager_tasks_source ON manager_tasks (tenant_id, source_type, source_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_manager_tasks_assigned ON manager_tasks (tenant_id, assigned_to)`);
+    await query(`
+      DO $$
+      DECLARE
+        constraint_name text;
+      BEGIN
+        SELECT con.conname INTO constraint_name
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = ANY(con.conkey)
+        WHERE rel.relname = 'manager_tasks'
+          AND att.attname = 'task_type'
+          AND con.contype = 'c'
+        LIMIT 1;
+
+        IF constraint_name IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE manager_tasks DROP CONSTRAINT %I', constraint_name);
+        END IF;
+
+        ALTER TABLE manager_tasks
+          ADD CONSTRAINT manager_tasks_task_type_check
+          CHECK (task_type IN ('cash_variance','sale_exception','refund_request','void_request','stock_adjustment_request','low_stock','ai_recommendation','stock_variance','offline_sync'));
+      END $$;
+    `);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS manager_tasks (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      task_type ENUM('cash_variance','sale_exception','refund_request','void_request','stock_adjustment_request','low_stock','ai_recommendation','stock_variance','offline_sync') NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      summary TEXT,
+      priority ENUM('low','normal','high','critical') DEFAULT 'normal',
+      status ENUM('open','in_review','approved','declined','done','dismissed') DEFAULT 'open',
+      source_type VARCHAR(64),
+      source_id VARCHAR(64),
+      related_sale_id VARCHAR(64),
+      related_product_id VARCHAR(64),
+      assigned_to VARCHAR(64),
+      requested_by VARCHAR(64),
+      decided_by VARCHAR(64),
+      decision_note TEXT,
+      details JSON DEFAULT JSON_OBJECT(),
+      due_at DATETIME,
+      resolved_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_manager_task_source (tenant_id, task_type, source_type, source_id),
+      INDEX idx_manager_tasks_tenant_status (tenant_id, status, updated_at),
+      INDEX idx_manager_tasks_source (tenant_id, source_type, source_id),
+      INDEX idx_manager_tasks_assigned (tenant_id, assigned_to),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`ALTER TABLE manager_tasks MODIFY task_type ENUM('cash_variance','sale_exception','refund_request','void_request','stock_adjustment_request','low_stock','ai_recommendation','stock_variance','offline_sync') NOT NULL`);
+}
+
+export async function ensureStockTakeSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS stock_take_sessions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'cycle' CHECK (type IN ('full','cycle','spot_check')),
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft','active','submitted','approved','cancelled')),
+        assigned_by TEXT,
+        assigned_by_name TEXT,
+        due_at TIMESTAMPTZ,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        submitted_at TIMESTAMPTZ,
+        approved_at TIMESTAMPTZ,
+        approved_by TEXT,
+        approved_by_name TEXT
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_sessions_tenant_status ON stock_take_sessions (tenant_id, status, updated_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_sessions_type_due ON stock_take_sessions (tenant_id, type, due_at)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS stock_take_items (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES stock_take_sessions(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        barcode TEXT,
+        expected_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+        counted_quantity NUMERIC(12,3),
+        variance_quantity NUMERIC(12,3),
+        assigned_to TEXT,
+        assigned_to_name TEXT,
+        counted_by TEXT,
+        counted_by_name TEXT,
+        status TEXT NOT NULL DEFAULT 'assigned' CHECK (status IN ('assigned','counted','confirmed','recount')),
+        counted_at TIMESTAMPTZ,
+        confirmed_at TIMESTAMPTZ,
+        confirmed_by TEXT,
+        confirmed_by_name TEXT,
+        note TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (session_id, product_id)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_tenant_status ON stock_take_items (tenant_id, status, updated_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_assigned ON stock_take_items (tenant_id, assigned_to, status)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_product ON stock_take_items (tenant_id, product_id)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS stock_take_sessions (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      type ENUM('full','cycle','spot_check') NOT NULL DEFAULT 'cycle',
+      status ENUM('draft','active','submitted','approved','cancelled') NOT NULL DEFAULT 'active',
+      assigned_by VARCHAR(64),
+      assigned_by_name VARCHAR(255),
+      due_at DATETIME,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      submitted_at DATETIME,
+      approved_at DATETIME,
+      approved_by VARCHAR(64),
+      approved_by_name VARCHAR(255),
+      INDEX idx_stock_take_sessions_tenant_status (tenant_id, status, updated_at),
+      INDEX idx_stock_take_sessions_type_due (tenant_id, type, due_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS stock_take_items (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      session_id VARCHAR(64) NOT NULL,
+      product_id VARCHAR(64) NOT NULL,
+      product_name VARCHAR(255) NOT NULL,
+      barcode VARCHAR(128),
+      expected_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+      counted_quantity DECIMAL(12,3),
+      variance_quantity DECIMAL(12,3),
+      assigned_to VARCHAR(64),
+      assigned_to_name VARCHAR(255),
+      counted_by VARCHAR(64),
+      counted_by_name VARCHAR(255),
+      status ENUM('assigned','counted','confirmed','recount') NOT NULL DEFAULT 'assigned',
+      counted_at DATETIME,
+      confirmed_at DATETIME,
+      confirmed_by VARCHAR(64),
+      confirmed_by_name VARCHAR(255),
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_stock_take_item_product (session_id, product_id),
+      INDEX idx_stock_take_items_tenant_status (tenant_id, status, updated_at),
+      INDEX idx_stock_take_items_assigned (tenant_id, assigned_to, status),
+      INDEX idx_stock_take_items_product (tenant_id, product_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES stock_take_sessions(id) ON DELETE CASCADE
+    )
+  `);
 }
 
 export async function ensureBulkInventorySchema() {

@@ -47,6 +47,26 @@ describe('role permissions', () => {
     expect(canLoadDataset('chef', 'workstations', retailOptions)).toBe(false);
   });
 
+  it('exposes the action center only to management roles', () => {
+    const options = { isRestaurant: true, hasOpenTerminal: true };
+
+    expect(canAccessView('admin', 'actions', options)).toBe(true);
+    expect(canAccessView('manager', 'actions', options)).toBe(true);
+    expect(canAccessView('dev', 'actions', options)).toBe(true);
+    expect(canAccessView('cashier', 'actions', options)).toBe(false);
+    expect(buildNavigation('manager', options).secondaryNav.map(item => item.id)).toContain('actions');
+    expect(buildNavigation('cashier', options).secondaryNav.map(item => item.id)).not.toContain('actions');
+  });
+
+  it('keeps stocktake available to assigned staff without exposing full inventory', () => {
+    const options = { isRestaurant: false, hasOpenTerminal: false };
+
+    expect(canAccessView('cashier', 'stocktake', options)).toBe(true);
+    expect(canAccessView('chef', 'stocktake', options)).toBe(true);
+    expect(canAccessView('cashier', 'inventory', options)).toBe(false);
+    expect(buildNavigation('cashier', options).secondaryNav.map(item => item.id)).toContain('stocktake');
+  });
+
   it('applies explicit personnel permission overrides on top of role defaults', () => {
     const options = {
       isRestaurant: true,

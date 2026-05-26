@@ -119,6 +119,17 @@ import {
   savePushSubscription,
   sendPushNotification,
 } from "./pushNotifications.js";
+import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistory } from "./actionCenter.js";
+import { applyStockAdjustment, createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue } from "./managerTasks.js";
+import {
+  approveStockTakeSession,
+  createStockTakeSession,
+  getMyStockTakeAssignments,
+  getStockTakeSession,
+  getStockTakeSessions,
+  requestStockTakeRecount,
+  submitStockTakeCount,
+} from "./stockTake.js";
 
 dotenv.config();
 
@@ -140,6 +151,16 @@ function canManageCompanionDevices(role: unknown) {
 }
 
 function canManagePush(role: unknown) {
+  const r = normalizeRole(role);
+  return r === "admin" || r === "manager" || r === "dev";
+}
+
+function canUseActionCenter(role: unknown) {
+  const r = normalizeRole(role);
+  return r === "admin" || r === "manager" || r === "dev";
+}
+
+function canManageInventory(role: unknown) {
   const r = normalizeRole(role);
   return r === "admin" || r === "manager" || r === "dev";
 }
@@ -1008,6 +1029,179 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/action-center", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required for the action center." });
+        return;
+      }
+      res.json(await getManagerActionCenter(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/action-center/tasks", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required for action center tasks." });
+        return;
+      }
+      res.json(await getManagerTaskQueue(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/action-center/activity", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required for action center activity." });
+        return;
+      }
+      res.json(await getManagerActivityHistory(req.params.tenantId, req.query));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/action-center/activity/export", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required for action center activity export." });
+        return;
+      }
+      res.json(await getManagerActivityCsv(req.params.tenantId, req.query));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/action-center/tasks/:taskId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required for action center tasks." });
+        return;
+      }
+      res.json(await decideManagerTask(req.params.tenantId, req.params.taskId, {
+        action: req.body?.action,
+        note: req.body?.note,
+        assignedTo: req.body?.assignedTo,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/stocktakes", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required for stocktake sessions." });
+        return;
+      }
+      res.json(await getStockTakeSessions(req.params.tenantId, {
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        type: typeof req.query.type === "string" ? req.query.type : undefined,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/stocktakes", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required to start a stocktake." });
+        return;
+      }
+      const session = await createStockTakeSession(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
+        staffName: req.user?.name || req.body?.staffName || null,
+        role: req.user?.role || null,
+      });
+      res.status(201).json(session);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/stocktakes/my-assignments", requireAuth, async (req, res) => {
+    try {
+      const staffId = String(req.query.staffId || req.user?.staffId || req.user?.uid || "").trim();
+      res.json(await getMyStockTakeAssignments(req.params.tenantId, staffId));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/stocktakes/:sessionId", requireAuth, async (req, res) => {
+    try {
+      const session = await getStockTakeSession(req.params.tenantId, req.params.sessionId);
+      if (!session) {
+        res.status(404).json({ error: "Stocktake session not found" });
+        return;
+      }
+      if (!canUseActionCenter(req.user?.role)) {
+        const staffId = req.user?.staffId || req.user?.uid || null;
+        session.items = (session.items || []).filter((item: any) => item.assignedTo === staffId);
+      }
+      res.json(session);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/stocktakes/items/:itemId/count", requireAuth, async (req, res) => {
+    try {
+      res.json(await submitStockTakeCount(req.params.tenantId, req.params.itemId, {
+        countedQuantity: Number(req.body?.countedQuantity),
+        note: req.body?.note || null,
+      }, {
+        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
+        staffName: req.user?.name || req.body?.staffName || null,
+        role: req.user?.role || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/stocktakes/items/:itemId/recount", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required to request a recount." });
+        return;
+      }
+      res.json(await requestStockTakeRecount(req.params.tenantId, req.params.itemId, {
+        note: req.body?.note || null,
+      }, {
+        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
+        staffName: req.user?.name || req.body?.staffName || null,
+        role: req.user?.role || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/stocktakes/:sessionId/approve", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required to approve a stocktake." });
+        return;
+      }
+      res.json(await approveStockTakeSession(req.params.tenantId, req.params.sessionId, {
+        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
+        staffName: req.user?.name || req.body?.staffName || null,
+        role: req.user?.role || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.get("/api/mariadb/tenants/:tenantId/customers", requireAuth, async (req, res) => {
     try {
       const customers = await getCustomersByTenant(req.params.tenantId);
@@ -1100,7 +1294,22 @@ export async function createApp(io: any = null) {
     try {
       const role = String(req.user?.role || "").toLowerCase();
       if (!["admin", "manager", "dev"].includes(role)) {
-        res.status(403).json({ error: "Ask a manager to approve this refund before continuing." });
+        const task = await createManagerSaleApprovalRequest(req.params.tenantId, {
+          kind: "refund",
+          saleId: req.params.saleId,
+          payload: {
+            ...req.body,
+            staffId: req.body.staffId || req.user?.staffId || null,
+            staffName: req.body.staffName || req.user?.name || null,
+          },
+          requestedBy: req.user?.staffId || req.user?.uid || req.body.staffId || null,
+          requestedByName: req.user?.name || req.body.staffName || null,
+        });
+        res.status(202).json({
+          approvalRequired: true,
+          message: "Refund request sent to the manager Action Center.",
+          task,
+        });
         return;
       }
 
@@ -1121,7 +1330,22 @@ export async function createApp(io: any = null) {
     try {
       const role = String(req.user?.role || "").toLowerCase();
       if (!["admin", "manager", "dev"].includes(role)) {
-        res.status(403).json({ error: "Ask a manager to approve this void before continuing." });
+        const task = await createManagerSaleApprovalRequest(req.params.tenantId, {
+          kind: "void",
+          saleId: req.params.saleId,
+          payload: {
+            ...req.body,
+            staffId: req.body.staffId || req.user?.staffId || null,
+            staffName: req.body.staffName || req.user?.name || null,
+          },
+          requestedBy: req.user?.staffId || req.user?.uid || req.body.staffId || null,
+          requestedByName: req.user?.name || req.body.staffName || null,
+        });
+        res.status(202).json({
+          approvalRequired: true,
+          message: "Void request sent to the manager Action Center.",
+          task,
+        });
         return;
       }
 
@@ -1683,6 +1907,54 @@ export async function createApp(io: any = null) {
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/products/:id/stock-adjustments", requireAuth, async (req, res) => {
+    try {
+      const delta = Number(req.body?.delta);
+      const reason = String(req.body?.reason || "").trim();
+      if (!Number.isFinite(delta) || delta === 0) {
+        res.status(400).json({ error: "Stock adjustment quantity must be a non-zero number" });
+        return;
+      }
+      if (reason.length < 3) {
+        res.status(400).json({ error: "A stock adjustment reason is required" });
+        return;
+      }
+
+      const actor = {
+        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
+        staffName: req.user?.name || req.body?.staffName || null,
+      };
+      const payload = {
+        productId: req.params.id,
+        productName: req.body?.productName || null,
+        delta,
+        reason,
+        note: req.body?.note || null,
+        requestedBy: actor.staffId,
+        requestedByName: actor.staffName,
+      };
+
+      if (!canManageInventory(req.user?.role)) {
+        const task = await createManagerStockAdjustmentRequest(req.params.tenantId, payload);
+        res.status(202).json({
+          approvalRequired: true,
+          message: "Stock adjustment request sent to the manager Action Center.",
+          task,
+        });
+        return;
+      }
+
+      const result = await applyStockAdjustment(req.params.tenantId, payload, actor);
+      res.json({
+        approvalRequired: false,
+        message: "Stock adjusted and logged.",
+        result,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Ban, Clock, CreditCard, Hash, Loader2, Package, Printer, ReceiptText, RotateCcw, Search, User, Users, X } from 'lucide-react';
+import { AlertCircle, Ban, CheckCircle2, Clock, CreditCard, Hash, Loader2, Package, Printer, ReceiptText, RotateCcw, Search, User, Users, X } from 'lucide-react';
 import { AppConfig, Sale, Customer } from '../types';
 import { getDate } from '../utils/date';
 import { Receipt } from '../components/Receipt';
@@ -33,9 +33,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [restockVoid, setRestockVoid] = useState(true);
   const [isVoiding, setIsVoiding] = useState(false);
   const [voidError, setVoidError] = useState('');
+  const [approvalMessage, setApprovalMessage] = useState('');
   const tenantId = usePosStore(s => s.tenantId);
   const currentUserStaff = usePosStore(s => s.currentUserStaff);
   const activeSession = usePosStore(s => s.activeSession);
+  const isManagerRole = ['admin', 'manager', 'dev'].includes(String(currentUserStaff?.role || '').toLowerCase());
 
   const filteredSales = useMemo(() => {
     return sales.filter(s => {
@@ -98,6 +100,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     setRefundMethod('cash');
     setRestockRefund(true);
     setRefundError('');
+    setApprovalMessage('');
     setRefundOpen(true);
   };
 
@@ -119,7 +122,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
     setIsRefunding(true);
     try {
-      await refundSale(tenantId, selectedSale.id, {
+      const result = await refundSale(tenantId, selectedSale.id, {
         items: selectedRefundLines.map(line => ({ saleItemId: line.id, quantity: line.quantity })),
         reason: refundReason.trim(),
         method: refundMethod,
@@ -128,6 +131,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         staffName: currentUserStaff?.name || null,
         cashSessionId: refundMethod === 'cash' ? activeSession?.id || null : null,
       });
+      if (result?.approvalRequired) {
+        setApprovalMessage(result.message || 'Refund request sent to the manager Action Center.');
+        setRefundOpen(false);
+        return;
+      }
       await onSalesUpdated?.();
       setRefundOpen(false);
       setSelectedSale(null);
@@ -142,6 +150,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     setVoidReason('');
     setRestockVoid(true);
     setVoidError('');
+    setApprovalMessage('');
     setVoidOpen(true);
   };
 
@@ -155,12 +164,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
     setIsVoiding(true);
     try {
-      await voidSale(tenantId, selectedSale.id, {
+      const result = await voidSale(tenantId, selectedSale.id, {
         reason: voidReason.trim(),
         restock: restockVoid,
         staffId: currentUserStaff?.id || null,
         staffName: currentUserStaff?.name || null,
       });
+      if (result?.approvalRequired) {
+        setApprovalMessage(result.message || 'Void request sent to the manager Action Center.');
+        setVoidOpen(false);
+        return;
+      }
       await onSalesUpdated?.();
       setVoidOpen(false);
       setSelectedSale(null);
@@ -210,6 +224,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             />
           </div>
         </div>
+
+        {approvalMessage && (
+          <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+            <CheckCircle2 className="h-5 w-5 shrink-0" />
+            {approvalMessage}
+          </div>
+        )}
 
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700/60 overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
@@ -460,7 +481,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       What should be returned?
                     </h3>
                     <p className="mt-1 text-xs font-semibold text-slate-500">
-                      Pick items, choose the refund method, then review before confirming.
+                      Pick items, choose the refund method, then {isManagerRole ? 'review before confirming.' : 'send it to a manager for approval.'}
                     </p>
                   </div>
                   <button
@@ -596,7 +617,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       onClick={submitRefund}
                       className="h-12 flex-1 rounded-xl bg-rose-600 text-sm font-black text-white shadow-lg shadow-rose-600/20 disabled:opacity-50"
                     >
-                      {isRefunding ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Confirm refund'}
+                      {isRefunding ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : isManagerRole ? 'Confirm refund' : 'Request approval'}
                     </button>
                   </div>
                 </div>
@@ -621,7 +642,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       Cancel this order?
                     </h3>
                     <p className="mt-1 text-xs font-semibold text-slate-500">
-                      Use this for open orders, kitchen tickets, or mistakes before payment is completed.
+                      Use this for open orders, kitchen tickets, or mistakes before payment is completed. {!isManagerRole && 'A manager will approve it before it is applied.'}
                     </p>
                   </div>
                   <button
@@ -679,7 +700,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       onClick={submitVoid}
                       className="h-12 flex-1 rounded-xl bg-slate-800 text-sm font-black text-white shadow-lg shadow-slate-800/20 disabled:opacity-50"
                     >
-                      {isVoiding ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Void order'}
+                      {isVoiding ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : isManagerRole ? 'Void order' : 'Request approval'}
                     </button>
                   </div>
                 </div>

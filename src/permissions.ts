@@ -4,6 +4,7 @@ import {
   BarChart3,
   BrainCircuit,
   ChefHat,
+  ClipboardCheck,
   Code2,
   History as HistoryIcon,
   LayoutGrid,
@@ -29,6 +30,8 @@ export type AppView =
   | 'workstation'
   | 'history'
   | 'messages'
+  | 'actions'
+  | 'stocktake'
   | 'cash'
   | 'live'
   | 'inventory'
@@ -61,21 +64,24 @@ type AccessOptions = {
 const ROLE_VIEWS: Record<StaffRole, AppView[]> = {
   admin: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
+    'actions', 'stocktake',
     'inventory', 'customers', 'accounts', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile',
     'ai', 'packages',
   ],
   dev: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
+    'actions', 'stocktake',
     'inventory', 'customers', 'accounts', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile', 'dev',
     'ai', 'packages',
   ],
   manager: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
+    'actions', 'stocktake',
     'inventory', 'customers', 'accounts', 'leaderboard', 'reports', 'ai', 'profile',
     'packages',
   ],
-  cashier: ['pos', 'history', 'messages', 'cash', 'profile'],
-  chef: ['workstation', 'profile'],
+  cashier: ['pos', 'history', 'messages', 'stocktake', 'cash', 'profile'],
+  chef: ['workstation', 'stocktake', 'profile'],
 };
 
 const VIEW_META: Record<AppView, NavItem> = {
@@ -85,6 +91,8 @@ const VIEW_META: Record<AppView, NavItem> = {
   workstation: { id: 'workstation', icon: ChefHat, label: 'Kitchen' },
   history: { id: 'history', icon: HistoryIcon, label: 'History' },
   messages: { id: 'messages', icon: MessageSquare, label: 'Messages' },
+  actions: { id: 'actions', icon: ClipboardCheck, label: 'Actions', group: 'Operations' },
+  stocktake: { id: 'stocktake', icon: ClipboardCheck, label: 'Stocktake', group: 'Operations' },
   cash: { id: 'cash', icon: Banknote, label: 'Cash Mgmt', group: 'Operations' },
   live: { id: 'live', icon: Activity, label: 'Live', group: 'Operations' },
   inventory: { id: 'inventory', icon: Package, label: 'Inventory', group: 'Operations' },
@@ -184,7 +192,7 @@ export function getDefaultView(role: StaffRole | null, options: AccessOptions = 
 
 export function buildNavigation(role: StaffRole | null, options: AccessOptions = {}) {
   const allowed = getAllowedViews(role, options);
-  const visible = [...PRIMARY_VIEWS, 'cash', 'live', 'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'ai', 'packages', 'settings']
+  const visible = [...PRIMARY_VIEWS, 'actions', 'stocktake', 'cash', 'live', 'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'ai', 'packages', 'settings']
     .filter(view => allowed.has(view as AppView)) as AppView[];
 
   return {

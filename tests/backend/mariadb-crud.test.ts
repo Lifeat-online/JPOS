@@ -138,7 +138,7 @@ describe('mariadb-crud', () => {
 
     expect(conn.beginTransaction).toHaveBeenCalled();
     expect(conn.commit).toHaveBeenCalled();
-    expect(conn.query).toHaveBeenNthCalledWith(1, expect.stringContaining('SELECT status, transaction_type FROM sales'), ['tenant_1', 'sale_1']);
+    expect(conn.query).toHaveBeenNthCalledWith(1, expect.stringContaining('SELECT status, transaction_type, staff_id, customer_id FROM sales'), ['tenant_1', 'sale_1']);
     expect(conn.query).toHaveBeenNthCalledWith(2, expect.stringContaining('UPDATE sales SET'), [25, 'kitchen', 'tenant_1', 'sale_1']);
     expect(conn.query).toHaveBeenNthCalledWith(3, expect.stringContaining('SELECT * FROM sale_items WHERE sale_id = ?'), ['sale_1']);
     expect(conn.query).toHaveBeenNthCalledWith(4, expect.stringContaining('DELETE FROM sale_items WHERE sale_id = ?'), ['sale_1']);
@@ -148,5 +148,43 @@ describe('mariadb-crud', () => {
       expect.arrayContaining(['sale_1', 'prod_1', 'Burger', 25, 1, 'pending'])
     );
     expect(result).toMatchObject({ id: 'sale_1', status: 'kitchen' });
+  });
+
+  it('records stock movements and audit events when a sale completes', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('SELECT bulk_item_id')) return Promise.resolve([[]]);
+        if (sql.includes('SELECT id, name, stock')) return Promise.resolve([[{ id: 'prod_1', name: 'Bread', stock: 10 }]]);
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await createSale('tenant_1', {
+      customerId: 'cust_1',
+      staffId: 'staff_1',
+      status: 'completed',
+      total: 16,
+      subtotal: 16,
+      paymentMethod: 'cash',
+      items: [{ id: 'prod_1', name: 'Bread', price: 16, quantity: 2 } as any],
+    });
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE products SET stock = ?'),
+      [8, 'tenant_1', 'prod_1']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO stock_movements'),
+      expect.arrayContaining(['tenant_1', 'product', 'prod_1', null, 'Bread', -2, 10, 8, 'sale'])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'sale.created', 'sale'])
+    );
   });
 });

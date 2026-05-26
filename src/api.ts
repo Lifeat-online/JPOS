@@ -223,6 +223,40 @@ export function getTenantLiveStats(tenantId: string) {
   return apiGet<any>(`/api/mariadb/tenants/${tenantId}/live`);
 }
 
+export function getManagerActionCenter(tenantId: string) {
+  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/action-center`);
+}
+
+export function getManagerTasks(tenantId: string) {
+  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/action-center/tasks`);
+}
+
+export function getManagerActivityHistory(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/action-center/activity${query ? `?${query}` : ''}`);
+}
+
+export function exportManagerActivityHistoryCsv(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<{ filename: string; mimeType: string; count: number; csv: string; generatedAt: string }>(
+    `/api/mariadb/tenants/${tenantId}/action-center/activity/export${query ? `?${query}` : ''}`
+  );
+}
+
+export function decideManagerTask(tenantId: string, taskId: string, data: { action: string; note?: string; assignedTo?: string | null }) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/action-center/tasks/${encodeURIComponent(taskId)}`, data);
+}
+
 export function getTenantTableSections(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/table-sections`);
 }
@@ -261,6 +295,72 @@ export function createProduct(tenantId: string, product: any) {
 
 export function updateProduct(tenantId: string, productId: string, updates: any) {
   return apiPut<any>(`/api/mariadb/tenants/${tenantId}/products/${productId}`, updates);
+}
+
+export function requestStockAdjustment(tenantId: string, productId: string, data: {
+  delta: number;
+  reason: string;
+  note?: string | null;
+  productName?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+}) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/products/${productId}/stock-adjustments`, data);
+}
+
+export function getStockTakeSessions(tenantId: string, filters: Record<string, string | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (!value) return;
+    params.set(key, value);
+  });
+  const query = params.toString();
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/stocktakes${query ? `?${query}` : ''}`);
+}
+
+export function createStockTakeSession(tenantId: string, data: {
+  name?: string | null;
+  type: 'full' | 'cycle' | 'spot_check';
+  dueAt?: string | null;
+  notes?: string | null;
+  assignments: Array<{ productId: string; assignedTo?: string | null; assignedToName?: string | null }>;
+  staffId?: string | null;
+  staffName?: string | null;
+}) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/stocktakes`, data);
+}
+
+export function getStockTakeSession(tenantId: string, sessionId: string) {
+  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}`);
+}
+
+export function getMyStockTakeAssignments(tenantId: string, staffId?: string | null) {
+  const query = staffId ? `?staffId=${encodeURIComponent(staffId)}` : '';
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/stocktakes/my-assignments${query}`);
+}
+
+export function submitStockTakeCount(tenantId: string, itemId: string, data: {
+  countedQuantity: number;
+  note?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+}) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/items/${encodeURIComponent(itemId)}/count`, data);
+}
+
+export function requestStockTakeRecount(tenantId: string, itemId: string, data: {
+  note?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+}) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/items/${encodeURIComponent(itemId)}/recount`, data);
+}
+
+export function approveStockTakeSession(tenantId: string, sessionId: string, data: {
+  staffId?: string | null;
+  staffName?: string | null;
+} = {}) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}/approve`, data);
 }
 
 export function deleteProduct(tenantId: string, productId: string) {

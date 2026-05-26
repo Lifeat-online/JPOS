@@ -8,12 +8,15 @@ const {
   ensureCashManagementSchema,
   ensureCompanionDeviceAssignmentsSchema,
   ensureCustomerAccountSchema,
+  ensureAuditAndStockLedgerSchema,
+  ensureManagerTaskSchema,
   ensurePersonDiscountSchema,
   ensurePushNotificationSchema,
   ensureRefundSchema,
   ensureSalePaymentsTable,
   ensureStaffRoleSupportsChef,
   ensureStaffPermissionsSchema,
+  ensureStockTakeSchema,
 } = await import("./server/init-db.js");
 const { ensureLicenceSchema } = await import("./server/licenceSchema.js");
 await ensureSalePaymentsTable().catch((err: unknown) => {
@@ -36,6 +39,15 @@ await ensureCashManagementSchema().catch((err: unknown) => {
 });
 await ensureRefundSchema().catch((err: unknown) => {
   console.warn("Failed to ensure refund schema:", err);
+});
+await ensureAuditAndStockLedgerSchema().catch((err: unknown) => {
+  console.warn("Failed to ensure audit and stock ledger schema:", err);
+});
+await ensureManagerTaskSchema().catch((err: unknown) => {
+  console.warn("Failed to ensure manager task schema:", err);
+});
+await ensureStockTakeSchema().catch((err: unknown) => {
+  console.warn("Failed to ensure stocktake schema:", err);
 });
 await ensureCompanionDeviceAssignmentsSchema().catch((err: unknown) => {
   console.warn("Failed to ensure companion device assignment schema:", err);

@@ -28,11 +28,13 @@ import { SetupWizard } from './components/SetupWizard';
 import { PointOfSaleView } from './views/PointOfSaleView';
 import { HistoryView } from './views/HistoryView';
 import { InventoryView } from './views/InventoryView';
+import { StockTakeView } from './views/StockTakeView';
 import { CustomersView } from './views/CustomersView';
 import { AccountsView } from './views/AccountsView';
 import { StaffView } from './views/StaffView';
 import { ReportsView } from './views/ReportsView';
 import { LiveView } from './views/LiveView';
+import { ManagerActionCenterView } from './views/ManagerActionCenterView';
 import { SettingsView } from './components/SettingsView';
 import { CashManagementView } from './components/CashManagementView';
 import { StaffProfileView } from './components/StaffProfileView';
@@ -577,7 +579,7 @@ export default function App() {
     products, customers, staff, sales, config, setConfig,
     workstations, activeSession, currentUserStaff, currentUserRole,
     tableSections, restaurantTables,
-    refreshSales,
+    refreshSales, refreshProducts,
     tenantLoading, configLoading, isStaffLoading,
   } = useAppData(authLoading ? null : user);
 
@@ -1242,8 +1244,10 @@ export default function App() {
             config={config}
             onEditProduct={(p) => setProductModal({ isOpen: true, product: p })}
             onAddProduct={() => setProductModal({ isOpen: true, product: { stock: 0, price: 0, costPrice: 0 } })}
+            onProductsUpdated={refreshProducts}
           />
         )}
+        {view === 'stocktake' && <StockTakeView products={products} onProductsUpdated={refreshProducts} />}
         {view === 'customers' && (
           <CustomersView
             customers={customers}
@@ -1267,6 +1271,7 @@ export default function App() {
             onViewOrders={(id) => { setFilterCustomerId(id); navigate('/history'); }}
           />
         )}
+        {view === 'actions' && <ManagerActionCenterView tenantId={tenantId} />}
         {view === 'live' && <LiveView tenantId={tenantId} />}
         {view === 'reports' && <ReportsView sales={sales} customers={customers} tenantId={tenantId} />}
         {view === 'ai' && <AiCopilotView tenantId={tenantId} />}

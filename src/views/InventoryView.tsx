@@ -1,29 +1,40 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Plus, Minus, Package, ShieldCheck, Banknote, ChevronRight, ChevronDown, Edit } from 'lucide-react';
+import { Search, Plus, Minus, Package, ShieldCheck, Banknote, ChevronRight, ChevronDown, Edit, ClipboardCheck, X } from 'lucide-react';
 import { Product, AppConfig } from '../types';
 import { VendorManagementView } from '../components/VendorManagementView';
 import { PurchaseOrdersView } from '../components/PurchaseOrdersView';
-import { apiPut } from '../api';
+import { requestStockAdjustment } from '../api';
 import { usePosStore } from '../store/usePosStore';
 import { BulkInventoryView } from '../components/BulkInventoryView';
 import { InventoryAgentView } from '../components/InventoryAgentView';
+import { StockTakeView } from './StockTakeView';
 
 interface InventoryViewProps {
   products: Product[];
   config: AppConfig;
   onEditProduct: (product: Partial<Product>) => void;
   onAddProduct: () => void;
+  onProductsUpdated?: () => void;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
-  products, config, onEditProduct, onAddProduct,
+  products, config, onEditProduct, onAddProduct, onProductsUpdated,
 }) => {
   const tenantId = usePosStore(state => state.tenantId);
-  const [tab, setTab] = useState<'products' | 'vendors' | 'purchaseOrders' | 'bulk' | 'copilot'>('products');
+  const currentUserStaff = usePosStore(state => state.currentUserStaff);
+  const [tab, setTab] = useState<'products' | 'vendors' | 'purchaseOrders' | 'bulk' | 'copilot' | 'stocktake'>(() => {
+    const queryTab = new URLSearchParams(window.location.search).get('tab');
+    return queryTab === 'stocktake' ? 'stocktake' : 'products';
+  });
   const [search, setSearch] = useState('');
   const [section, setSection] = useState('All');
   const [category, setCategory] = useState('All');
   const [subCategory, setSubCategory] = useState('All');
+  const [adjustModal, setAdjustModal] = useState<{ product: Product; delta: number } | null>(null);
+  const [adjustReason, setAdjustReason] = useState('Stock count correction');
+  const [adjustNote, setAdjustNote] = useState('');
+  const [adjustMessage, setAdjustMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [isAdjusting, setIsAdjusting] = useState(false);
 
   const categoryTree = config?.categories || {};
   const SECTIONS = Object.keys(categoryTree);
@@ -56,14 +67,61 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     lowStockItems: products.filter(p => p.stock <= (p.minStock || 10)).length,
   }), [products]);
 
-  const adjustStock = async (product: Product, delta: number) => {
-    if (!tenantId) return;
+  const canApplyStockDirectly = ['admin', 'manager', 'dev'].includes(currentUserStaff?.role || '');
+  const stockAdjustmentReasons = [
+    'Stock count correction',
+    'Damaged or expired stock',
+    'Supplier delivery correction',
+    'Theft or shrinkage',
+    'Returned to shelf',
+    'Other',
+  ];
+
+  const openStockAdjustment = (product: Product, delta: number) => {
+    if (delta < 0 && Number(product.stock || 0) <= 0) {
+      setAdjustMessage({ tone: 'error', text: `${product.name} is already at zero stock.` });
+      return;
+    }
+    setAdjustModal({ product, delta });
+    setAdjustReason(delta > 0 ? 'Stock count correction' : 'Damaged or expired stock');
+    setAdjustNote('');
+    setAdjustMessage(null);
+  };
+
+  const submitStockAdjustment = async () => {
+    if (!tenantId || !adjustModal) return;
+    const reason = adjustReason.trim();
+    if (reason.length < 3) {
+      setAdjustMessage({ tone: 'error', text: 'Choose or enter a reason before sending this stock change.' });
+      return;
+    }
+
+    setIsAdjusting(true);
     try {
-      await apiPut(`/api/mariadb/tenants/${tenantId}/products/${product.id}`, { 
-        stock: Math.max(0, (product.stock || 0) + delta) 
+      const response = await requestStockAdjustment(tenantId, adjustModal.product.id, {
+        delta: adjustModal.delta,
+        reason,
+        note: adjustNote.trim() || null,
+        productName: adjustModal.product.name,
+        staffId: currentUserStaff?.id || null,
+        staffName: currentUserStaff?.name || null,
       });
+      setAdjustModal(null);
+      setAdjustMessage({
+        tone: 'success',
+        text: response?.approvalRequired
+          ? 'Stock adjustment request sent to the manager Action Center.'
+          : 'Stock adjusted and logged.',
+      });
+      onProductsUpdated?.();
     } catch (err) {
       console.error('Failed to adjust stock:', err);
+      setAdjustMessage({
+        tone: 'error',
+        text: err instanceof Error ? err.message : 'Stock adjustment failed.',
+      });
+    } finally {
+      setIsAdjusting(false);
     }
   };
 
@@ -72,21 +130,49 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return `https://placehold.co/600x600/1e293b/f8fafc?text=${encodeURIComponent(product.name || 'Product')}%0A${encodeURIComponent(product.category || 'Category')}`;
   };
 
+  const adjustmentPreview = adjustModal
+    ? {
+        current: Number(adjustModal.product.stock || 0),
+        next: Math.max(0, Number(adjustModal.product.stock || 0) + adjustModal.delta),
+        absoluteDelta: Math.abs(adjustModal.delta),
+        direction: adjustModal.delta > 0 ? 'increase' : 'decrease',
+      }
+    : null;
+
   return (
     <div className="flex-1 p-4 lg:p-10 overflow-y-auto bg-slate-50 dark:bg-[#0B1120]">
       <div className="max-w-[1600px] mx-auto flex flex-col gap-8">
         {/* Sub-Tabs */}
         <div className="flex border-b border-slate-200 dark:border-slate-800 gap-6">
-          {(['products', 'bulk', 'vendors', 'purchaseOrders', 'copilot'] as const).map(t => (
+          {(['products', 'stocktake', 'bulk', 'vendors', 'purchaseOrders', 'copilot'] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`pb-4 px-2 text-sm font-bold transition-all capitalize ${tab === t ? 'border-b-2 border-primary text-primary' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
-              {t === 'purchaseOrders' ? 'Purchase Orders' : t === 'bulk' ? 'Bulk Inventory' : t === 'copilot' ? 'Copilot Agent' : t.charAt(0).toUpperCase() + t.slice(1)}
+              {t === 'purchaseOrders' ? 'Purchase Orders' : t === 'bulk' ? 'Bulk Inventory' : t === 'copilot' ? 'Copilot Agent' : t === 'stocktake' ? 'Stocktake' : t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
         </div>
+
+        {adjustMessage && (
+          <div
+            className={`flex items-start justify-between gap-4 rounded-2xl border px-5 py-4 text-sm font-bold shadow-sm ${
+              adjustMessage.tone === 'success'
+                ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+                : 'border-red-100 bg-red-50 text-red-700'
+            }`}
+          >
+            <span>{adjustMessage.text}</span>
+            <button
+              type="button"
+              onClick={() => setAdjustMessage(null)}
+              className="rounded-lg p-1 transition hover:bg-white/70"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         {tab === 'vendors' ? (
           <VendorManagementView />
@@ -96,6 +182,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           <BulkInventoryView />
         ) : tab === 'copilot' ? (
           <InventoryAgentView />
+        ) : tab === 'stocktake' ? (
+          <StockTakeView products={products} onProductsUpdated={onProductsUpdated} />
         ) : (
           <div className="flex flex-col lg:flex-row gap-10">
             {/* Filter Sidebar */}
@@ -287,13 +375,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                         <div className="flex gap-2">
                           <button
-                            onClick={() => adjustStock(product, -1)}
+                            onClick={() => openStockAdjustment(product, -1)}
                             className="flex-1 py-4 bg-slate-50 dark:bg-[#0B1120] text-slate-400 dark:text-slate-500 rounded-2xl flex items-center justify-center hover:bg-red-50 hover:text-red-500 transition-all border border-transparent hover:border-red-100"
                           >
                             <Minus className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => adjustStock(product, 1)}
+                            onClick={() => openStockAdjustment(product, 1)}
                             className="flex-1 py-4 bg-slate-50 dark:bg-[#0B1120] text-slate-400 dark:text-slate-500 rounded-2xl flex items-center justify-center hover:bg-emerald-50 hover:text-emerald-500 transition-all border border-transparent hover:border-emerald-100"
                           >
                             <Plus className="w-4 h-4" />
@@ -322,6 +410,98 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
         )}
       </div>
+      {adjustModal && adjustmentPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className={`mt-1 flex h-11 w-11 items-center justify-center rounded-2xl ${adjustModal.delta > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                  <ClipboardCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    {canApplyStockDirectly ? 'Logged immediately' : 'Manager approval required'}
+                  </p>
+                  <h3 className="mt-1 text-2xl font-black text-slate-900 dark:text-white">
+                    {adjustmentPreview.direction === 'increase' ? 'Increase' : 'Decrease'} stock
+                  </h3>
+                  <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">
+                    {adjustModal.product.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdjustModal(null)}
+                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-6 grid grid-cols-3 gap-3">
+              <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Current</p>
+                <p className="mt-1 text-2xl font-black text-slate-900 dark:text-white">{adjustmentPreview.current}</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Change</p>
+                <p className={`mt-1 text-2xl font-black ${adjustModal.delta > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {adjustModal.delta > 0 ? '+' : '-'}{adjustmentPreview.absoluteDelta}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-slate-900 p-4 dark:bg-white">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Result</p>
+                <p className="mt-1 text-2xl font-black text-white dark:text-slate-900">{adjustmentPreview.next}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              <label className="block">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Reason</span>
+                <select
+                  value={adjustReason}
+                  onChange={e => setAdjustReason(e.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none ring-primary/10 transition focus:ring-4 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                >
+                  {stockAdjustmentReasons.map(reason => (
+                    <option key={reason} value={reason}>{reason}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Note</span>
+                <textarea
+                  value={adjustNote}
+                  onChange={e => setAdjustNote(e.target.value)}
+                  rows={3}
+                  placeholder="Add invoice number, count note, or damage detail..."
+                  className="mt-2 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none ring-primary/10 transition focus:ring-4 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setAdjustModal(null)}
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-500 transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitStockAdjustment}
+                disabled={isAdjusting}
+                className="rounded-2xl bg-slate-900 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-slate-900"
+              >
+                {isAdjusting ? 'Working...' : canApplyStockDirectly ? 'Apply Adjustment' : 'Request Approval'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

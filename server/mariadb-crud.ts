@@ -1,4 +1,5 @@
 import { getConnection, isPostgres, query } from "./db.js";
+import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
 import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem, BulkItem, RecipeItem, ModifierGroup, ModifierOption, Vendor, PurchaseOrder } from "./types.js";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
@@ -28,22 +29,38 @@ function normalizeJsonField(value: any, fallback: any) {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-async function deductCompletedSaleProductStock(conn: any, tenantId: string, items: any[] = []) {
-  const totals = new Map<string, number>();
+async function deductCompletedSaleProductStock(
+  conn: any,
+  tenantId: string,
+  items: any[] = [],
+  context: { saleId?: string | null; staffId?: string | null; staffName?: string | null; note?: string | null } = {}
+) {
+  const totals = new Map<string, { quantity: number; name?: string | null }>();
   for (const item of items) {
     const productId = item.productId || item.product_id || item.id || null;
     const quantity = Number(item.quantity || 0);
     if (!productId || quantity <= 0) continue;
-    totals.set(productId, (totals.get(productId) || 0) + quantity);
+    const existing = totals.get(productId) || { quantity: 0, name: item.name || item.product_name || null };
+    totals.set(productId, {
+      quantity: existing.quantity + quantity,
+      name: existing.name || item.name || item.product_name || null,
+    });
   }
 
-  for (const [productId, quantity] of totals.entries()) {
-    await conn.query(
-      `UPDATE products
-          SET stock = GREATEST(0, COALESCE(stock, 0) - ?), updated_at = NOW()
-        WHERE tenant_id = ? AND id = ?`,
-      [quantity, tenantId, productId]
-    );
+  for (const [productId, movement] of totals.entries()) {
+    await applyProductStockDelta(conn, {
+      tenantId,
+      productId,
+      itemName: movement.name || null,
+      quantityDelta: -movement.quantity,
+      reason: "sale",
+      referenceType: "sale",
+      referenceId: context.saleId || null,
+      saleId: context.saleId || null,
+      staffId: context.staffId || null,
+      staffName: context.staffName || null,
+      note: context.note || null,
+    });
   }
 }
 
@@ -926,7 +943,11 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
     }
 
     if ((sale.status || "pending") === "completed" && ((sale as any).transactionType || "sale") === "sale") {
-      await deductCompletedSaleProductStock(conn, tenantId, sale.items || []);
+      await deductCompletedSaleProductStock(conn, tenantId, sale.items || [], {
+        saleId: id,
+        staffId: sale.staffId || null,
+        note: "Completed sale stock deduction",
+      });
     }
 
     // Insert payments
@@ -950,6 +971,23 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         );
       }
     }
+
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: "sale.created",
+      entityType: "sale",
+      entityId: id,
+      relatedSaleId: id,
+      staffId: sale.staffId || null,
+      customerId: sale.customerId || null,
+      details: {
+        status: sale.status || "pending",
+        transactionType: (sale as any).transactionType || "sale",
+        paymentMethod: sale.paymentMethod || "pending",
+        total: Number(sale.total || 0),
+        itemCount: Array.isArray(sale.items) ? sale.items.length : 0,
+      },
+    });
 
     await conn.commit();
     return { id, ...sale } as Sale;
@@ -975,7 +1013,7 @@ export async function updateSale(
     await conn.beginTransaction();
 
     const [existingSaleResult] = await conn.query<any>(
-      `SELECT status, transaction_type FROM sales WHERE tenant_id = ? AND id = ? LIMIT 1`,
+      `SELECT status, transaction_type, staff_id, customer_id FROM sales WHERE tenant_id = ? AND id = ? LIMIT 1`,
       [tenantId, saleId]
     );
     const existingSale = (existingSaleResult as any[])[0] || null;
@@ -1185,13 +1223,34 @@ export async function updateSale(
       let itemsForStock = updates.items as any[] | undefined;
       if (!itemsForStock) {
         const [saleItemsResult] = await conn.query<any>(
-          `SELECT product_id, quantity FROM sale_items WHERE sale_id = ?`,
+          `SELECT product_id, product_name, quantity FROM sale_items WHERE sale_id = ?`,
           [saleId]
         );
         itemsForStock = saleItemsResult as any[];
       }
-      await deductCompletedSaleProductStock(conn, tenantId, itemsForStock || []);
+      await deductCompletedSaleProductStock(conn, tenantId, itemsForStock || [], {
+        saleId,
+        staffId: updates.staffId || existingSale?.staff_id || null,
+        note: "Sale status changed to completed",
+      });
     }
+
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: shouldDeductStock ? "sale.completed" : "sale.updated",
+      entityType: "sale",
+      entityId: saleId,
+      relatedSaleId: saleId,
+      staffId: updates.staffId || existingSale?.staff_id || null,
+      customerId: updates.customerId || existingSale?.customer_id || null,
+      details: {
+        previousStatus: existingSale?.status || null,
+        nextStatus,
+        previousTransactionType: existingSale?.transaction_type || null,
+        nextTransactionType,
+        changedFields: Object.keys(updates || {}),
+      },
+    });
 
     await conn.commit();
     const sale = await getSaleById(tenantId, saleId);
@@ -1390,10 +1449,20 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
       );
 
       if (input.restock && item.productId) {
-        await conn.query(
-          `UPDATE products SET stock = COALESCE(stock, 0) + ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
-          [Math.abs(Number(item.quantity || 0)), tenantId, item.productId]
-        );
+        await applyProductStockDelta(conn, {
+          tenantId,
+          productId: item.productId,
+          itemName: item.name,
+          quantityDelta: Math.abs(Number(item.quantity || 0)),
+          reason: "refund_restock",
+          referenceType: "refund",
+          referenceId: refundId,
+          saleId: refundId,
+          saleItemId: item.id,
+          staffId: input.staffId || null,
+          staffName: input.staffName || null,
+          note: reason,
+        });
       }
     }
 
@@ -1453,6 +1522,25 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
       );
     }
 
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: "sale.refunded",
+      entityType: "sale",
+      entityId: refundId,
+      relatedSaleId: saleId,
+      staffId: input.staffId || null,
+      staffName: input.staffName || null,
+      customerId: original.customer_id || null,
+      details: {
+        originalSaleId: saleId,
+        refundTotal,
+        method: input.method,
+        restock: Boolean(input.restock),
+        reason,
+        itemCount: refundItems.length,
+      },
+    });
+
     await conn.commit();
     const refundSale = await getSaleById(tenantId, refundId);
     if (!refundSale) throw new Error("Refund was recorded but could not be loaded.");
@@ -1481,7 +1569,7 @@ export async function processSaleVoid(tenantId: string, saleId: string, input: S
     await conn.beginTransaction();
 
     const [saleResult] = await conn.query<any>(
-      `SELECT id, status, transaction_type
+      `SELECT id, status, transaction_type, customer_id, staff_id
          FROM sales
         WHERE tenant_id = ? AND id = ?
         LIMIT 1`,
@@ -1508,10 +1596,18 @@ export async function processSaleVoid(tenantId: string, saleId: string, input: S
     if (input.restock) {
       for (const item of items) {
         if (!item.productId) continue;
-        await conn.query(
-          `UPDATE products SET stock = COALESCE(stock, 0) + ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
-          [Math.max(0, Number(item.quantity || 0)), tenantId, item.productId]
-        );
+        await applyProductStockDelta(conn, {
+          tenantId,
+          productId: item.productId,
+          quantityDelta: Math.max(0, Number(item.quantity || 0)),
+          reason: "void_restock",
+          referenceType: "void",
+          referenceId: saleId,
+          saleId,
+          staffId: input.staffId || sale.staff_id || null,
+          staffName: input.staffName || null,
+          note: reason,
+        });
       }
     }
 
@@ -1525,6 +1621,23 @@ export async function processSaleVoid(tenantId: string, saleId: string, input: S
         WHERE tenant_id = ? AND id = ?`,
       [reason, input.staffId || null, tenantId, saleId]
     );
+
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: "sale.voided",
+      entityType: "sale",
+      entityId: saleId,
+      relatedSaleId: saleId,
+      staffId: input.staffId || sale.staff_id || null,
+      staffName: input.staffName || null,
+      customerId: sale.customer_id || null,
+      details: {
+        previousStatus: sale.status,
+        previousTransactionType: sale.transaction_type,
+        restock: Boolean(input.restock),
+        reason,
+      },
+    });
 
     await conn.commit();
     const voidedSale = await getSaleById(tenantId, saleId);

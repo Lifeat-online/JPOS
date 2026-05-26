@@ -55,6 +55,7 @@ export function useAppData(user: User | null) {
   const [tenantLoading, setTenantLoading] = useState(true);
   const [configLoading, setConfigLoading] = useState(true);
   const [isStaffLoading, setIsStaffLoading] = useState(true);
+  const [productRefreshTick, setProductRefreshTick] = useState(0);
 
   const [prevTenantId, setPrevTenantId] = useState<string | null>(tenantId);
   if (tenantId !== prevTenantId) {
@@ -70,6 +71,9 @@ export function useAppData(user: User | null) {
 
   const [currentUserStaff, setCurrentUserStaff] = useState<Staff | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<StaffRole | null>(null);
+  const refreshProducts = useCallback(() => {
+    setProductRefreshTick(tick => tick + 1);
+  }, []);
   const tableAccessOptions = useMemo(() => ({
     isRestaurant: Boolean(config.business?.isRestaurantMode),
     hasOpenTerminal: Boolean(activeSession || storeActiveSession),
@@ -237,7 +241,7 @@ export function useAppData(user: User | null) {
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
+  }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions, productRefreshTick]);
 
     useEffect(() => {
     if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'customers', tableAccessOptions)) {
@@ -503,6 +507,7 @@ export function useAppData(user: User | null) {
     workstations, activeSession, currentUserStaff, currentUserRole,
     tableSections, restaurantTables,
     refreshSales: loadSales,
+    refreshProducts,
     tenantLoading, configLoading, isStaffLoading,
   };
 }
