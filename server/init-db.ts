@@ -216,6 +216,27 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS manager_cash_movements (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  movement_type TEXT NOT NULL CHECK (movement_type IN ('safe_drop','cash_added','petty_cash','payout','wallet_cash_in','wallet_cash_out','register_close','manager_adjustment','transfer')),
+  direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
+  amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  cash_session_id TEXT REFERENCES cash_sessions(id) ON DELETE SET NULL,
+  staff_id TEXT,
+  staff_name TEXT,
+  customer_id TEXT,
+  customer_name TEXT,
+  source_type TEXT DEFAULT 'manager_float',
+  reference_id TEXT,
+  category TEXT,
+  note TEXT,
+  counted_breakdown TEXT DEFAULT '{}'::TEXT,
+  created_by TEXT,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS customer_payout_requests (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -536,6 +557,30 @@ export async function ensureCashManagementSchema() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS manager_cash_movements (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        movement_type TEXT NOT NULL CHECK (movement_type IN ('safe_drop','cash_added','petty_cash','payout','wallet_cash_in','wallet_cash_out','register_close','manager_adjustment','transfer')),
+        direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
+        amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        cash_session_id TEXT REFERENCES cash_sessions(id) ON DELETE SET NULL,
+        staff_id TEXT,
+        staff_name TEXT,
+        customer_id TEXT,
+        customer_name TEXT,
+        source_type TEXT DEFAULT 'manager_float',
+        reference_id TEXT,
+        category TEXT,
+        note TEXT,
+        counted_breakdown TEXT DEFAULT '{}'::TEXT,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_manager_cash_tenant_created ON manager_cash_movements (tenant_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_manager_cash_reference ON manager_cash_movements (tenant_id, movement_type, reference_id)`);
     await query(`UPDATE cash_sessions SET review_status = CASE WHEN status = 'open' THEN 'in_progress' ELSE COALESCE(review_status, 'submitted') END WHERE review_status IS NULL`);
     return;
   }
@@ -580,6 +625,32 @@ export async function ensureCashManagementSchema() {
     )
   `);
   await query(`ALTER TABLE cash_movements MODIFY type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale') NOT NULL`);
+  await query(`
+    CREATE TABLE IF NOT EXISTS manager_cash_movements (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      movement_type ENUM('safe_drop','cash_added','petty_cash','payout','wallet_cash_in','wallet_cash_out','register_close','manager_adjustment','transfer') NOT NULL,
+      direction ENUM('in','out','neutral') NOT NULL DEFAULT 'neutral',
+      amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      cash_session_id VARCHAR(64),
+      staff_id VARCHAR(64),
+      staff_name VARCHAR(255),
+      customer_id VARCHAR(64),
+      customer_name VARCHAR(255),
+      source_type VARCHAR(64) DEFAULT 'manager_float',
+      reference_id VARCHAR(128),
+      category VARCHAR(96),
+      note TEXT,
+      counted_breakdown JSON DEFAULT JSON_OBJECT(),
+      created_by VARCHAR(64),
+      created_by_name VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_manager_cash_tenant_created (tenant_id, created_at),
+      INDEX idx_manager_cash_reference (tenant_id, movement_type, reference_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
+    )
+  `);
   await query(`UPDATE cash_sessions SET review_status = IF(status = 'open', 'in_progress', COALESCE(review_status, 'submitted')) WHERE review_status IS NULL`);
 }
 

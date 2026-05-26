@@ -10,10 +10,9 @@ import {
   getCustomerPayoutRequests, 
   updatePayoutRequest, 
   updateCustomerPayoutRequest, 
-  createPayoutRequest,
-  createCustomerPayoutRequest,
   updateStaff,
   updateCustomer,
+  recordWalletCashMovement,
 } from '../api';
 import { getDate } from '../utils/date';
 
@@ -34,6 +33,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
   const [adjustAmount, setAdjustAmount] = useState<string>('');
   const [adjustNote, setAdjustNote] = useState('');
   const [adjustType, setAdjustType] = useState<'add' | 'deduct'>('add');
+  const [adjustAffectsCash, setAdjustAffectsCash] = useState(true);
   const [adjustProcessing, setAdjustProcessing] = useState(false);
 
   // Data fetching
@@ -120,8 +120,18 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
 
   const handleMarkPaid = async (req: PayoutRequest) => {
     if (!tenantId) return;
+    if (!req.staffId) return;
     setProcessing(req.id);
     try {
+      await recordWalletCashMovement(tenantId, {
+        ownerType: 'staff',
+        ownerId: req.staffId,
+        direction: 'out',
+        amount: Number(req.amount || 0),
+        applyWalletDelta: false,
+        referenceId: req.id,
+        note: `Staff wallet payout paid: ${req.note || req.staffName || req.staffId}`,
+      });
       await updatePayoutRequest(tenantId, req.id, {
         status: 'paid',
         processedAt: new Date().toISOString(),
@@ -142,39 +152,26 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
       const delta = adjustType === 'add' ? amount : -amount;
       const newBalance = Math.max(0, adjustModal.current + delta);
       const auditNote = `Manual ${adjustType === 'add' ? 'credit' : 'debit'}: ${adjustNote || 'Admin adjustment'}`;
-      if (adjustModal.type === 'staff') {
-        await updateStaff(tenantId, adjustModal.id, { walletBalance: newBalance });
-
-        await createPayoutRequest(tenantId, {
-          staffId: adjustModal.id,
-          staffName: adjustModal.name,
-          amount: Math.abs(delta),
-          status: 'paid',
+      if (adjustAffectsCash) {
+        await recordWalletCashMovement(tenantId, {
+          ownerType: adjustModal.type,
+          ownerId: adjustModal.id,
+          direction: adjustType === 'add' ? 'in' : 'out',
+          amount,
+          applyWalletDelta: true,
           note: auditNote,
-          createdAt: new Date().toISOString(),
-          processedAt: new Date().toISOString(),
-          processedBy: currentUserStaff?.id || 'admin',
         });
+      } else if (adjustModal.type === 'staff') {
+        await updateStaff(tenantId, adjustModal.id, { walletBalance: newBalance });
       } else {
         await updateCustomer(tenantId, adjustModal.id, { walletBalance: newBalance });
-
-        await createCustomerPayoutRequest(tenantId, {
-          customerId: adjustModal.id,
-          customerName: adjustModal.name,
-          customerEmail: adjustModal.email || '',
-          amount: Math.abs(delta),
-          status: 'paid',
-          note: auditNote,
-          createdAt: new Date().toISOString(),
-          processedAt: new Date().toISOString(),
-          processedBy: currentUserStaff?.id || 'admin',
-        });
       }
       
       await fetchData();
       setAdjustModal(null);
       setAdjustAmount('');
       setAdjustNote('');
+      setAdjustAffectsCash(true);
     } catch (err) { console.error(err); }
     setAdjustProcessing(false);
   };
@@ -438,8 +435,18 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                           <button
                             onClick={async () => {
                               if (!tenantId) return;
+                              if (!req.customerId) return;
                               setProcessing(req.id);
                               try {
+                                await recordWalletCashMovement(tenantId, {
+                                  ownerType: 'customer',
+                                  ownerId: req.customerId,
+                                  direction: 'out',
+                                  amount: Number(req.amount || 0),
+                                  applyWalletDelta: false,
+                                  referenceId: req.id,
+                                  note: `Client wallet payout paid: ${req.note || req.customerName || req.customerId}`,
+                                });
                                 await updateCustomerPayoutRequest(tenantId, req.id, {
                                   status: 'paid', 
                                   processedAt: new Date().toISOString(), 
@@ -514,6 +521,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                       setAdjustAmount('');
                       setAdjustNote('');
                       setAdjustType('add');
+                      setAdjustAffectsCash(true);
                     }}
                     className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all"
                   >
@@ -561,6 +569,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                       setAdjustAmount('');
                       setAdjustNote('');
                       setAdjustType('add');
+                      setAdjustAffectsCash(true);
                     }}
                     className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all"
                   >
@@ -606,6 +615,37 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                 </button>
               </div>
 
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAdjustAffectsCash(true)}
+                  className={`rounded-xl border p-3 text-left transition-all ${
+                    adjustAffectsCash
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-slate-500'
+                  }`}
+                >
+                  <span className="block text-[10px] font-black uppercase tracking-widest">Cash movement</span>
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    Updates wallet and manager float.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdjustAffectsCash(false)}
+                  className={`rounded-xl border p-3 text-left transition-all ${
+                    !adjustAffectsCash
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-slate-500'
+                  }`}
+                >
+                  <span className="block text-[10px] font-black uppercase tracking-widest">Balance only</span>
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    Correction with no cash change.
+                  </span>
+                </button>
+              </div>
+
               <div>
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">Amount (R)</label>
                 <input
@@ -632,6 +672,11 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
               {adjustAmount && (
                 <div className={`p-3 rounded-xl text-sm font-bold text-center ${adjustType === 'add' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'}`}>
                   New balance: R{Math.max(0, Number(adjustModal.current) + (adjustType === 'add' ? 1 : -1) * (parseFloat(adjustAmount) || 0)).toFixed(2)}
+                  {adjustAffectsCash && (
+                    <span className="block mt-1 text-xs font-semibold">
+                      Manager float {adjustType === 'add' ? 'increases' : 'decreases'} by R{(parseFloat(adjustAmount) || 0).toFixed(2)}
+                    </span>
+                  )}
                 </div>
               )}
 

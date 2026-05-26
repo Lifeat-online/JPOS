@@ -311,6 +311,58 @@ export interface CashTransaction {
   note?: string;
 }
 
+export type ManagerCashMovementType =
+  | 'safe_drop'
+  | 'cash_added'
+  | 'petty_cash'
+  | 'payout'
+  | 'wallet_cash_in'
+  | 'wallet_cash_out'
+  | 'register_close'
+  | 'manager_adjustment'
+  | 'transfer';
+
+export interface ManagerCashMovement {
+  id: string;
+  tenantId: string;
+  movementType: ManagerCashMovementType;
+  direction: 'in' | 'out' | 'neutral';
+  amount: number;
+  cashSessionId?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+  customerId?: string | null;
+  customerName?: string | null;
+  sourceType?: string | null;
+  referenceId?: string | null;
+  category?: string | null;
+  note?: string | null;
+  countedBreakdown?: Record<string, number>;
+  createdBy?: string | null;
+  createdByName?: string | null;
+  createdAt?: any;
+}
+
+export interface ManagerCashSummary {
+  managerFloat: number;
+  openRegisterCash: number;
+  openRegisterCount: number;
+  pendingCashUpCash: number;
+  pendingCashUpCount: number;
+  totalPhysicalCash: number;
+  walletLiability: number;
+  staffWalletLiability: number;
+  customerWalletLiability: number;
+  pendingPayouts: number;
+  availableAfterWalletLiability: number;
+  safeDropsToday: number;
+  cashUpsToManagerToday: number;
+  pettyCashToday: number;
+  walletCashToday: number;
+  recentMovements: ManagerCashMovement[];
+  generatedAt: string;
+}
+
 // ── Restaurant Tables ──────────────────────────────────────────────────────────
 
 export interface RestaurantTable {

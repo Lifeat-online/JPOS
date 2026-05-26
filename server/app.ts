@@ -122,6 +122,13 @@ import {
 import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistory } from "./actionCenter.js";
 import { applyStockAdjustment, createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue } from "./managerTasks.js";
 import {
+  getManagerCashMovements,
+  getManagerCashSummary,
+  recordManagerCashMovement,
+  recordWalletCashMovement,
+  transferCashSessionToManagerFloat,
+} from "./managerCash.js";
+import {
   approveStockTakeSession,
   createStockTakeRule,
   createStockTakeSession,
@@ -264,6 +271,51 @@ async function recordCashMovement(tenantId: string, data: any) {
     ]
   );
   return { id, ...data };
+}
+
+async function mirrorDrawerMovementToManagerCash(tenantId: string, movement: any, actor: any) {
+  if (movement.type === "cash_drop") {
+    await recordManagerCashMovement(tenantId, {
+      movementType: "safe_drop",
+      direction: "in",
+      amount: movement.amount,
+      cashSessionId: movement.cashSessionId,
+      staffId: movement.staffId,
+      staffName: movement.staffName,
+      sourceType: "register",
+      referenceId: movement.id,
+      category: "safe_drop",
+      note: movement.note || "Safe drop from register",
+    }, actor);
+  }
+  if (movement.type === "cash_added") {
+    await recordManagerCashMovement(tenantId, {
+      movementType: "cash_added",
+      direction: "out",
+      amount: movement.amount,
+      cashSessionId: movement.cashSessionId,
+      staffId: movement.staffId,
+      staffName: movement.staffName,
+      sourceType: "manager_float",
+      referenceId: movement.id,
+      category: "register_float",
+      note: movement.note || "Cash added to register",
+    }, actor);
+  }
+  if (movement.type === "cash_removed") {
+    await recordManagerCashMovement(tenantId, {
+      movementType: "petty_cash",
+      direction: "neutral",
+      amount: movement.amount,
+      cashSessionId: movement.cashSessionId,
+      staffId: movement.staffId,
+      staffName: movement.staffName,
+      sourceType: "register",
+      referenceId: movement.id,
+      category: "petty_cash",
+      note: movement.note || "Petty cash or payout from register",
+    }, actor);
+  }
 }
 
 function expectedCashDeltaForMovement(type: string, direction: string, amount: number) {
@@ -2345,6 +2397,60 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/manager-cash/summary", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can view the manager float." });
+      }
+      res.json(await getManagerCashSummary(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/manager-cash/movements", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can view manager cash movements." });
+      }
+      res.json(await getManagerCashMovements(req.params.tenantId, Number(req.query.limit || 40)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/manager-cash/movements", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can record manager cash movements." });
+      }
+      const movement = await recordManagerCashMovement(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId,
+        staffName: req.user?.name,
+        role: req.user?.role,
+      });
+      res.status(201).json(movement);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/manager-cash/wallet-cash", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can reconcile wallet cash." });
+      }
+      const result = await recordWalletCashMovement(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId,
+        staffName: req.user?.name,
+        role: req.user?.role,
+      });
+      res.status(201).json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/mariadb/tenants/:tenantId/cash-sessions", requireAuth, async (req, res) => {
     try {
       const activeRegisterRows = await query<any>(
@@ -2421,6 +2527,11 @@ export async function createApp(io: any = null) {
         staffName: req.body.staffName,
         createdBy: req.user?.staffId,
         note: req.body.note,
+      });
+      await mirrorDrawerMovementToManagerCash(req.params.tenantId, movement, {
+        staffId: req.user?.staffId,
+        staffName: req.user?.name,
+        role: req.user?.role,
       });
       const delta = expectedCashDeltaForMovement(movementType, req.body.direction, amount);
       if (delta !== 0) {
@@ -2551,6 +2662,13 @@ export async function createApp(io: any = null) {
 
       values.push(req.params.id, req.params.tenantId);
       await query(`UPDATE cash_sessions SET ${fields.join(", ")} WHERE id = ? AND tenant_id = ?`, values);
+      if (reviewStatus === "reconciled") {
+        await transferCashSessionToManagerFloat(req.params.tenantId, req.params.id, {
+          staffId: req.user?.staffId,
+          staffName: req.user?.name,
+          role: req.user?.role,
+        });
+      }
       res.json({ success: true, reviewStatus });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

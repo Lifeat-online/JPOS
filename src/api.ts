@@ -4,7 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
-import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep } from './types';
+import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
@@ -544,6 +544,47 @@ export function recordCashMovement(tenantId: string, cashSessionId: string, data
   note?: string | null;
 }) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/cash-sessions/${cashSessionId}/movements`, data);
+}
+
+export function getManagerCashSummary(tenantId: string) {
+  return apiGet<ManagerCashSummary>(`/api/mariadb/tenants/${tenantId}/manager-cash/summary`);
+}
+
+export function recordManagerCashMovement(tenantId: string, data: {
+  movementType: ManagerCashMovementType;
+  direction?: 'in' | 'out' | 'neutral';
+  amount: number;
+  cashSessionId?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+  customerId?: string | null;
+  customerName?: string | null;
+  sourceType?: string | null;
+  referenceId?: string | null;
+  category?: string | null;
+  note?: string | null;
+  countedBreakdown?: Record<string, number>;
+}) {
+  return apiPost<ManagerCashMovement>(`/api/mariadb/tenants/${tenantId}/manager-cash/movements`, data);
+}
+
+export function recordWalletCashMovement(tenantId: string, data: {
+  ownerType: 'staff' | 'customer';
+  ownerId: string;
+  direction: 'in' | 'out';
+  amount: number;
+  note?: string | null;
+  referenceId?: string | null;
+  applyWalletDelta?: boolean;
+}) {
+  return apiPost<{
+    movement: ManagerCashMovement;
+    ownerType: 'staff' | 'customer';
+    ownerId: string;
+    previousBalance: number;
+    nextBalance: number;
+    appliedWalletDelta: boolean;
+  }>(`/api/mariadb/tenants/${tenantId}/manager-cash/wallet-cash`, data);
 }
 
 export function setupTenant(data: any) {

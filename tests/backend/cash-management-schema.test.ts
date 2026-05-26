@@ -28,4 +28,12 @@ describe('cash management schema', () => {
     expect(schema).toContain('manager_adjustment');
     expect(schema).toContain("direction ENUM('in','out','neutral')");
   });
+
+  it('defines the manager float and cash-in-system ledger', () => {
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS manager_cash_movements');
+    expect(schema).toContain('safe_drop');
+    expect(schema).toContain('wallet_cash_in');
+    expect(schema).toContain('register_close');
+    expect(schema).toContain('idx_manager_cash_tenant_created');
+  });
 });

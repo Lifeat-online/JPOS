@@ -251,6 +251,30 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS manager_cash_movements (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  movement_type TEXT NOT NULL CHECK (movement_type IN ('safe_drop','cash_added','petty_cash','payout','wallet_cash_in','wallet_cash_out','register_close','manager_adjustment','transfer')),
+  direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
+  amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  cash_session_id TEXT REFERENCES cash_sessions(id) ON DELETE SET NULL,
+  staff_id TEXT,
+  staff_name TEXT,
+  customer_id TEXT,
+  customer_name TEXT,
+  source_type TEXT DEFAULT 'manager_float',
+  reference_id TEXT,
+  category TEXT,
+  note TEXT,
+  counted_breakdown TEXT DEFAULT '{}'::TEXT,
+  created_by TEXT,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_manager_cash_tenant_created ON manager_cash_movements (tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_manager_cash_reference ON manager_cash_movements (tenant_id, movement_type, reference_id);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

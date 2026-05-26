@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CashSession, CashTransaction, Sale, Staff } from '../types';
-import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer } from 'lucide-react';
+import { CashSession, CashTransaction, ManagerCashMovementType, ManagerCashSummary, Sale, Staff } from '../types';
+import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
-import { apiGet, apiPost, apiPut, recordCashMovement } from '../api';
+import { apiGet, apiPost, apiPut, getManagerCashSummary, recordCashMovement, recordManagerCashMovement } from '../api';
 import { PrinterReadinessPanel } from './PrinterReadinessPanel';
 import { usePrinterReadiness } from '../hooks/usePrinterReadiness';
 
@@ -44,6 +44,20 @@ const MOVEMENT_TYPES = [
     helper: 'Cash paid out for a small expense or supplier.',
     direction: 'out' as const,
   },
+];
+
+const MANAGER_MOVEMENT_TYPES: Array<{
+  id: ManagerCashMovementType;
+  label: string;
+  helper: string;
+  direction?: 'in' | 'out' | 'neutral';
+}> = [
+  { id: 'manager_adjustment', label: 'Float correction', helper: 'Correct the counted manager float after a safe count.' },
+  { id: 'petty_cash', label: 'Petty cash', helper: 'Pay a small expense directly from the manager float.', direction: 'out' },
+  { id: 'payout', label: 'Payout', helper: 'Pay staff, customer, or supplier cash from the manager float.', direction: 'out' },
+  { id: 'wallet_cash_in', label: 'Wallet cash in', helper: 'Cash received for a wallet top-up.', direction: 'in' },
+  { id: 'wallet_cash_out', label: 'Wallet cash out', helper: 'Cash paid out against wallet balance.', direction: 'out' },
+  { id: 'transfer', label: 'Transfer', helper: 'Move cash in or out with a clear handover note.' },
 ];
 
 function DenominationCounter({ breakdown, setBreakdown, total }: { breakdown: Record<string, number>, setBreakdown: (b: Record<string, number>) => void, total: number }) {
@@ -102,6 +116,12 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
   const [movementAmount, setMovementAmount] = useState('');
   const [movementNote, setMovementNote] = useState('');
   const [movementError, setMovementError] = useState('');
+  const [managerCash, setManagerCash] = useState<ManagerCashSummary | null>(null);
+  const [managerMovementType, setManagerMovementType] = useState<ManagerCashMovementType>('manager_adjustment');
+  const [managerMovementDirection, setManagerMovementDirection] = useState<'in' | 'out'>('in');
+  const [managerMovementAmount, setManagerMovementAmount] = useState('');
+  const [managerMovementNote, setManagerMovementNote] = useState('');
+  const [managerMovementMessage, setManagerMovementMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
 
   const toNumber = (value: unknown): number => {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -219,6 +239,11 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
         return [session.id, movements] as const;
       }));
       setCashMovements(Object.fromEntries(movementPairs));
+      if (canManageCash) {
+        setManagerCash(await getManagerCashSummary(tenantId).catch(() => null));
+      } else {
+        setManagerCash(null);
+      }
       usePosStore.getState().setActiveSession(normalized.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id) || null);
     } catch (err) {
       console.error('CashSessions fetch error:', err);
@@ -341,6 +366,47 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
     }
   };
 
+  const recordManagerMovement = async () => {
+    if (!tenantId || !currentUserStaff || !canManageCash) return;
+    const selected = MANAGER_MOVEMENT_TYPES.find(type => type.id === managerMovementType) || MANAGER_MOVEMENT_TYPES[0];
+    const amount = toNumber(managerMovementAmount);
+    const direction = selected.direction && selected.direction !== 'neutral' ? selected.direction : managerMovementDirection;
+    setManagerMovementMessage(null);
+
+    if (amount <= 0) {
+      setManagerMovementMessage({ tone: 'error', text: 'Enter the cash amount first.' });
+      return;
+    }
+    if (managerMovementNote.trim().length < 3) {
+      setManagerMovementMessage({ tone: 'error', text: 'Add a short note so the manager float audit trail is clear.' });
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      await recordManagerCashMovement(tenantId, {
+        movementType: selected.id,
+        direction,
+        amount,
+        sourceType: 'manager_float',
+        category: selected.id,
+        staffId: currentUserStaff.id,
+        staffName: currentUserStaff.name,
+        note: managerMovementNote.trim(),
+      });
+      setManagerMovementAmount('');
+      setManagerMovementNote('');
+      setManagerMovementType('manager_adjustment');
+      setManagerMovementDirection('in');
+      setManagerMovementMessage({ tone: 'success', text: 'Manager float movement recorded.' });
+      await fetchSessions();
+    } catch (err: any) {
+      setManagerMovementMessage({ tone: 'error', text: err?.message || 'Could not record manager float movement.' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const reviewBadge = (session: CashSession) => {
     const status = session.reviewStatus || (session.status === 'open' ? 'in_progress' : 'submitted');
     if (status === 'reconciled') return 'bg-emerald-100 text-emerald-700';
@@ -383,6 +449,160 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
             <p className={`text-2xl font-black ${eodTotals.variance === 0 ? 'text-emerald-600' : eodTotals.variance > 0 ? 'text-blue-600' : 'text-orange-600'}`}>R{eodTotals.variance.toFixed(2)}</p>
           </div>
         </div>
+
+        {canManageCash && managerCash && (
+          <div className="bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm space-y-6">
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+              <div>
+                <h3 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                  <Landmark className="w-6 h-6 text-primary" />
+                  Manager float
+                </h3>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  Live cash position across registers, pending cash-ups, safe cash, petty cash, payouts, and wallet liability.
+                </p>
+              </div>
+              <div className="rounded-2xl bg-slate-950 text-white px-5 py-4 min-w-[220px]">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total physical cash</p>
+                <p className="mt-1 text-3xl font-black">R{managerCash.totalPhysicalCash.toFixed(2)}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {[
+                { label: 'Manager float', value: managerCash.managerFloat, icon: Landmark, tone: 'text-primary' },
+                { label: 'Open registers', value: managerCash.openRegisterCash, icon: DollarSign, tone: 'text-emerald-600' },
+                { label: 'Pending cash-ups', value: managerCash.pendingCashUpCash, icon: ClipboardCheck, tone: 'text-amber-600' },
+                { label: 'Wallet liability', value: managerCash.walletLiability, icon: Wallet, tone: 'text-blue-600' },
+                { label: 'Pending payouts', value: managerCash.pendingPayouts, icon: PiggyBank, tone: 'text-rose-600' },
+              ].map(card => {
+                const Icon = card.icon;
+                return (
+                  <div key={card.label} className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-4">
+                    <div className="flex items-center gap-2">
+                      <Icon className={`w-4 h-4 ${card.tone}`} />
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{card.label}</p>
+                    </div>
+                    <p className={`mt-2 text-xl font-black ${card.tone}`}>R{card.value.toFixed(2)}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4 space-y-4">
+                <div>
+                  <h4 className="font-black text-slate-900 dark:text-white">Record manager float movement</h4>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Use this for safe count corrections, petty cash from the safe, payouts, and wallet cash handovers.</p>
+                </div>
+
+                {managerMovementMessage && (
+                  <div className={`rounded-xl border p-3 text-sm font-bold ${
+                    managerMovementMessage.tone === 'success'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-rose-200 bg-rose-50 text-rose-700'
+                  }`}>
+                    {managerMovementMessage.text}
+                  </div>
+                )}
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {MANAGER_MOVEMENT_TYPES.map(type => (
+                    <button
+                      key={type.id}
+                      type="button"
+                      onClick={() => setManagerMovementType(type.id)}
+                      className={`rounded-xl border p-3 text-left transition-all ${
+                        managerMovementType === type.id
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/50 text-slate-700 dark:text-slate-200'
+                      }`}
+                    >
+                      <span className="block text-xs font-black uppercase tracking-widest">{type.label}</span>
+                      <span className="mt-1 block text-xs font-semibold text-slate-500">{type.helper}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {!MANAGER_MOVEMENT_TYPES.find(type => type.id === managerMovementType)?.direction && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['in', 'out'] as const).map(direction => (
+                      <button
+                        key={direction}
+                        type="button"
+                        onClick={() => setManagerMovementDirection(direction)}
+                        className={`h-11 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
+                          managerMovementDirection === direction
+                            ? 'border-primary bg-primary text-white'
+                            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/50 text-slate-500'
+                        }`}
+                      >
+                        Cash {direction}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid gap-3 sm:grid-cols-[130px_1fr]">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Amount</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={managerMovementAmount}
+                      onChange={e => setManagerMovementAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full h-12 px-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-black"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Reason</label>
+                    <input
+                      value={managerMovementNote}
+                      onChange={e => setManagerMovementNote(e.target.value)}
+                      placeholder="e.g. Counted safe, paid supplier, wallet cash received"
+                      className="w-full h-12 px-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-bold"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={recordManagerMovement}
+                  className="w-full h-12 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-all"
+                >
+                  {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  Record manager movement
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
+                <div className="px-4 py-3 bg-slate-50 dark:bg-slate-950/50 text-[10px] font-black uppercase tracking-widest text-slate-500">Recent manager cash movements</div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[390px] overflow-y-auto custom-scrollbar">
+                  {managerCash.recentMovements.length === 0 ? (
+                    <div className="p-6 text-sm font-bold text-slate-500">No manager float movements yet.</div>
+                  ) : managerCash.recentMovements.map(movement => (
+                    <div key={movement.id} className="p-4 flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-black text-slate-900 dark:text-white">{movement.movementType.replace(/_/g, ' ')}</p>
+                        <p className="mt-1 text-xs font-semibold text-slate-500">{movement.note || movement.sourceType || 'Manager float'}</p>
+                        {movement.staffName && <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{movement.staffName}</p>}
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-sm font-black ${movement.direction === 'in' ? 'text-emerald-600' : movement.direction === 'out' ? 'text-rose-600' : 'text-slate-500'}`}>
+                          {movement.direction === 'in' ? '+' : movement.direction === 'out' ? '-' : ''}R{movement.amount.toFixed(2)}
+                        </p>
+                        <p className="mt-1 text-[10px] font-bold text-slate-400">{movement.createdAt ? new Date(movement.createdAt).toLocaleTimeString() : ''}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="z-report-screen bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm space-y-6">
           <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">

@@ -262,6 +262,31 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS manager_cash_movements (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  movement_type ENUM('safe_drop','cash_added','petty_cash','payout','wallet_cash_in','wallet_cash_out','register_close','manager_adjustment','transfer') NOT NULL,
+  direction ENUM('in','out','neutral') NOT NULL DEFAULT 'neutral',
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  cash_session_id VARCHAR(64),
+  staff_id VARCHAR(64),
+  staff_name VARCHAR(255),
+  customer_id VARCHAR(64),
+  customer_name VARCHAR(255),
+  source_type VARCHAR(64) DEFAULT 'manager_float',
+  reference_id VARCHAR(128),
+  category VARCHAR(96),
+  note TEXT,
+  counted_breakdown JSON DEFAULT JSON_OBJECT(),
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_manager_cash_tenant_created (tenant_id, created_at),
+  INDEX idx_manager_cash_reference (tenant_id, movement_type, reference_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,

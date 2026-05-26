@@ -43,6 +43,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [x] Add stocktake/spot-check workflow with mobile staff assignments, dedicated staff stocktake route, count entry, manager recount, manager approval, and Action Center spot-check launch.
 - [x] Add repeatable stocktake smoke test that proves assign, mobile count, approve, stock ledger posting, final stock, and cleanup against a real MariaDB connection.
 - [x] Add manager-scheduled daily spot-check rules with assigned staff, product scope controls, one-run-per-day protection, and Action Center/manual run support.
+- [x] Add manager cash float view that shows all register floats, petty cash/payouts, wallet cash movements, manager-safe cash, and total cash in the system at any moment.
 - [ ] Extend the manager action center into remaining pre-action approval requests: AI recommendation tasks, failed/offline sync items, and scheduled stocktake exceptions.
 - [ ] Expand operator-friendly audit/stock visibility with deeper device attribution, richer customer/register labels, drill-through context, and PDF/accounting export packs.
 - [ ] Add guided stock receiving and deeper stock-count flows that explain valuation, variance reason taxonomy, count sheets, exports, and batch/location impact.
@@ -59,6 +60,13 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [ ] Make audit logs searchable by staff member, customer, sale, register, device, action type, and date range.
 - [ ] Add exportable audit reports for owners, accountants, and compliance review.
 - [ ] Add transaction-safe checkout boundaries across sale rows, sale items, payments, stock deduction, cash-session movements, loyalty/customer-account updates, wallet changes, and staff metrics.
+- [x] Add manager float/safe ledger that aggregates till floats, cash drops, cash added, petty cash, payouts, wallet cash movements, reconciled cash-ups, and manager-held cash into a real-time cash position.
+- [x] Add first cash-in-system dashboard: open register expected cash + pending cash-ups + manager float/safe = total physical cash, with wallet liability and pending payouts shown separately.
+- [ ] Expand cash custody transfers between registers, staff, and the manager float/safe with counted denominations, expected-vs-counted variance, dual confirmation, manager approval, and audit trail.
+- [ ] Expand petty cash and payout tracking with receipt/photo attachment, cash-source selection, approver, and searchable/exportable reports.
+- [x] Add manager/admin wallet cash reconciliation path so wallet cash top-ups and wallet cash payouts update wallet balance, manager float, and audit ledger atomically.
+- [ ] Extend wallet cash reconciliation into cashier/customer self-service flows so customer wallet top-ups, withdrawals, refunds, and liabilities automatically update the relevant register/session, manager float, and audit ledger consistently.
+- [ ] Expand end-of-day cash reconciliation so register cash + manager float/safe + petty cash + pending drops/pickups + wallet cash movements produces a total expected physical cash checkpoint, with variances surfaced in Action Center.
 - [ ] Add stock movement ledger with reason codes for receiving, sale, refund, void, adjustment, count correction, transfer, wastage, and shrinkage.
 - [ ] Add offline transaction queue with local sale capture, local receipt, sync/retry status, conflict handling, stock reconciliation, and clear cashier warnings.
 - [ ] Add offline sync/reconciliation UI for failed, pending, duplicated, and conflicted transactions.
@@ -110,6 +118,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [ ] Add SARS-ready VAT exports, tax-period locking, and audit-friendly tax invoice summaries.
 - [ ] Add margin reports by product, category, staff member, payment method, and period.
 - [ ] Add category performance, average basket segmentation, table turnover, open-tab aging, refund/void reports, and cash variance trends.
+- [ ] Add cash position reports for current manager float, per-register expected cash, petty cash spend, wallet cash activity, cash-in-system history, and unresolved variances.
 - [ ] Add accounting journal export foundation for future Sage, Xero, and QuickBooks integrations.
 - [ ] Add dashboard KPIs for real-time sales, average basket size, table turnover, open tabs, cash variance, low stock, and active staff.
 
@@ -230,6 +239,8 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - 2026-05-26: Passed stocktake verification: `npx.cmd vitest run tests/backend/stock-take.test.ts tests/backend/audit-stock-ledger-schema.test.ts`, `npx.cmd vitest run tests/backend/stock-take.test.ts tests/backend/action-center.test.ts tests/backend/manager-tasks.test.ts tests/backend/audit-stock-ledger-schema.test.ts tests/frontend/permissions.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-26: Fixed local MariaDB app-user connectivity for ignored `.env`, verified `stock_take_sessions`, `stock_take_items`, `stock_movements`, and `audit_events` exist in the running MariaDB container, and added/passed `npm.cmd run smoke:stocktake`; smoke test creates temporary tenant/staff/products, assigns a spot check, submits staff counts, approves it, verifies stock/ledger, and cleans up.
 - 2026-05-26: Added `stock_take_rules` schema/startup healing, daily spot-check rule APIs, Stocktake manager scheduling UI, rule run auditing, one-run-per-day protection, and rule-generated staff assignments; passed `npx.cmd vitest run tests/backend/stock-take.test.ts tests/backend/audit-stock-ledger-schema.test.ts tests/frontend/permissions.test.ts`, `npm.cmd run lint`, `npm.cmd run smoke:stocktake`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-05-26: Added `manager_cash_movements` schema/startup healing, manager cash summary/movement APIs, automatic safe-drop/cash-added/petty-cash mirroring, reconciled cash-up transfer into manager float, Cash Management cash-in-system dashboard, and manager float movement form; passed `npx.cmd vitest run tests/backend/manager-cash.test.ts tests/backend/cash-management-schema.test.ts tests/frontend/permissions.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-05-26: Added atomic wallet cash reconciliation for manager/admin wallet top-ups and paid wallet payouts, including wallet balance update, manager float movement, audit event, and Wallet Admin cash-vs-balance correction control; passed `npx.cmd vitest run tests/backend/manager-cash.test.ts tests/backend/cash-management-schema.test.ts tests/frontend/permissions.test.ts tests/backend/validation.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-26: Passed `npm.cmd run lint` and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-26: Broader `npx.cmd vitest run tests/backend` ran 12 backend files successfully but failed `tests/backend/db-tables.test.ts` because the local test database login was denied for `root`.
 - 2026-05-26: Consolidated active roadmap/todo items from the former implementation roadmap, AI Inventory Copilot plan, AI Manager Copilot todo, MariaDB/Nginx migration plan, migration status notes, security checklist, security implementation summary, and POS feature blueprint audit into this master todo.
