@@ -45,12 +45,15 @@ describe('audit and stock ledger schema', () => {
     for (const schema of [mariaSchema, pgSchema]) {
       expect(schema).toContain('CREATE TABLE IF NOT EXISTS stock_take_sessions');
       expect(schema).toContain('CREATE TABLE IF NOT EXISTS stock_take_items');
+      expect(schema).toContain('CREATE TABLE IF NOT EXISTS stock_take_rules');
       expect(schema).toContain('spot_check');
       expect(schema).toContain('expected_quantity');
       expect(schema).toContain('counted_quantity');
       expect(schema).toContain('variance_quantity');
       expect(schema).toContain('assigned_to');
       expect(schema).toContain('confirmed_by');
+      expect(schema).toContain('product_scope');
+      expect(schema).toContain('last_run_for_date');
     }
   });
 });

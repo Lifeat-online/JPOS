@@ -385,6 +385,30 @@ CREATE TABLE IF NOT EXISTS stock_take_items (
   FOREIGN KEY (session_id) REFERENCES stock_take_sessions(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS stock_take_rules (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  status ENUM('active','paused') NOT NULL DEFAULT 'active',
+  schedule_type ENUM('daily') NOT NULL DEFAULT 'daily',
+  run_time VARCHAR(5) NOT NULL DEFAULT '08:00',
+  product_scope ENUM('random','low_stock','category','manual') NOT NULL DEFAULT 'random',
+  product_count INT NOT NULL DEFAULT 5,
+  category VARCHAR(255),
+  product_ids JSON DEFAULT JSON_ARRAY(),
+  assigned_to VARCHAR(64),
+  assigned_to_name VARCHAR(255),
+  last_run_for_date DATE,
+  last_run_at DATETIME,
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_stock_take_rules_tenant_status (tenant_id, status, run_time),
+  INDEX idx_stock_take_rules_assigned (tenant_id, assigned_to),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS customer_payout_requests (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,

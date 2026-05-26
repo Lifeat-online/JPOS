@@ -373,6 +373,30 @@ CREATE INDEX IF NOT EXISTS idx_stock_take_items_tenant_status ON stock_take_item
 CREATE INDEX IF NOT EXISTS idx_stock_take_items_assigned ON stock_take_items (tenant_id, assigned_to, status);
 CREATE INDEX IF NOT EXISTS idx_stock_take_items_product ON stock_take_items (tenant_id, product_id);
 
+CREATE TABLE IF NOT EXISTS stock_take_rules (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused')),
+  schedule_type TEXT NOT NULL DEFAULT 'daily' CHECK (schedule_type IN ('daily')),
+  run_time TEXT NOT NULL DEFAULT '08:00',
+  product_scope TEXT NOT NULL DEFAULT 'random' CHECK (product_scope IN ('random','low_stock','category','manual')),
+  product_count INT NOT NULL DEFAULT 5,
+  category TEXT,
+  product_ids TEXT DEFAULT '[]'::TEXT,
+  assigned_to TEXT,
+  assigned_to_name TEXT,
+  last_run_for_date DATE,
+  last_run_at TIMESTAMPTZ,
+  created_by TEXT,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_take_rules_tenant_status ON stock_take_rules (tenant_id, status, run_time);
+CREATE INDEX IF NOT EXISTS idx_stock_take_rules_assigned ON stock_take_rules (tenant_id, assigned_to);
+
 CREATE TABLE IF NOT EXISTS customer_payout_requests (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

@@ -1,8 +1,10 @@
-import { getConnection, query } from "./db.js";
+import { getConnection, isPostgres, query } from "./db.js";
 import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
 
 type StockTakeType = "full" | "cycle" | "spot_check";
 type StockTakeStatus = "draft" | "active" | "submitted" | "approved" | "cancelled";
+type StockTakeRuleStatus = "active" | "paused";
+type StockTakeProductScope = "random" | "low_stock" | "category" | "manual";
 
 type Actor = {
   staffId?: string | null;
@@ -33,6 +35,24 @@ type RecountInput = {
   note?: string | null;
 };
 
+type StockTakeRuleInput = {
+  name?: string | null;
+  status?: StockTakeRuleStatus | string | null;
+  runTime?: string | null;
+  productScope?: StockTakeProductScope | string | null;
+  productCount?: number | string | null;
+  category?: string | null;
+  productIds?: string[] | null;
+  assignedTo?: string | null;
+  assignedToName?: string | null;
+};
+
+type RunDueRulesOptions = {
+  ruleId?: string | null;
+  force?: boolean;
+  now?: Date;
+};
+
 function makeId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -51,6 +71,22 @@ function nullableNumber(...values: unknown[]) {
   return value === null || value === undefined ? null : toNumber(value);
 }
 
+function json(value: unknown, fallback: unknown = []) {
+  if (value === undefined || value === null) return JSON.stringify(fallback);
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function parseJson(value: unknown, fallback: any) {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
 function cleanString(value: unknown, max = 255) {
   const text = String(value || "").trim();
   return text ? text.slice(0, max) : null;
@@ -64,6 +100,56 @@ function normalizeType(value: unknown): StockTakeType {
 function canOverrideStockTake(actor: Actor) {
   const role = String(actor.role || "").toLowerCase();
   return role === "admin" || role === "manager" || role === "dev";
+}
+
+function normalizeRunTime(value: unknown) {
+  const time = String(value || "08:00").trim();
+  if (!/^\d{2}:\d{2}$/.test(time)) return "08:00";
+  const [hours, minutes] = time.split(":").map(Number);
+  if (hours > 23 || minutes > 59) return "08:00";
+  return time;
+}
+
+function normalizeProductScope(value: unknown): StockTakeProductScope {
+  const scope = String(value || "random").trim();
+  if (scope === "low_stock" || scope === "category" || scope === "manual") return scope;
+  return "random";
+}
+
+function normalizeRuleStatus(value: unknown): StockTakeRuleStatus {
+  return String(value || "active").trim() === "paused" ? "paused" : "active";
+}
+
+function normalizeProductCount(value: unknown) {
+  const count = Math.round(toNumber(value));
+  return Math.max(1, Math.min(100, count || 5));
+}
+
+function localDateParts(now = new Date()) {
+  const timeZone = process.env.APP_TIMEZONE || "Africa/Johannesburg";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now).reduce<Record<string, string>>((acc, part) => {
+    if (part.type !== "literal") acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
+function dateOnly(value: unknown) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const text = String(value);
+  return text.match(/\d{4}-\d{2}-\d{2}/)?.[0] || text.slice(0, 10);
 }
 
 function rowToItem(row: any) {
@@ -115,6 +201,29 @@ function rowToSession(row: any) {
   };
 }
 
+function rowToRule(row: any) {
+  return {
+    id: row.id,
+    tenantId: row.tenantId ?? row.tenant_id,
+    name: row.name,
+    status: row.status || "active",
+    scheduleType: row.scheduleType ?? row.schedule_type ?? "daily",
+    runTime: row.runTime ?? row.run_time ?? "08:00",
+    productScope: row.productScope ?? row.product_scope ?? "random",
+    productCount: toNumber((row.productCount ?? row.product_count) || 5),
+    category: row.category,
+    productIds: parseJson(row.productIds ?? row.product_ids, []),
+    assignedTo: row.assignedTo ?? row.assigned_to,
+    assignedToName: row.assignedToName ?? row.assigned_to_name,
+    lastRunForDate: dateOnly(row.lastRunForDate ?? row.last_run_for_date),
+    lastRunAt: row.lastRunAt ?? row.last_run_at,
+    createdBy: row.createdBy ?? row.created_by,
+    createdByName: row.createdByName ?? row.created_by_name,
+    createdAt: row.createdAt ?? row.created_at,
+    updatedAt: row.updatedAt ?? row.updated_at,
+  };
+}
+
 async function getStaffNameMap(tenantId: string, staffIds: string[]) {
   const ids = [...new Set(staffIds.filter(Boolean))];
   if (!ids.length) return new Map<string, string>();
@@ -124,6 +233,331 @@ async function getStaffNameMap(tenantId: string, staffIds: string[]) {
     [tenantId, ...ids]
   );
   return new Map(rows.map((row: any) => [String(row.id), String(row.name || row.id)]));
+}
+
+function normalizeRuleInput(input: StockTakeRuleInput) {
+  const productScope = normalizeProductScope(input.productScope);
+  const productIds = Array.isArray(input.productIds)
+    ? [...new Set(input.productIds.map((id) => cleanString(id, 64)).filter(Boolean) as string[])]
+    : [];
+  return {
+    name: cleanString(input.name, 255) || "Daily spot check",
+    status: normalizeRuleStatus(input.status),
+    runTime: normalizeRunTime(input.runTime),
+    productScope,
+    productCount: normalizeProductCount(input.productCount),
+    category: productScope === "category" ? cleanString(input.category, 255) : null,
+    productIds: productScope === "manual" ? productIds : [],
+    assignedTo: cleanString(input.assignedTo, 64),
+    assignedToName: cleanString(input.assignedToName, 255),
+  };
+}
+
+async function selectRuleProducts(tenantId: string, rule: any) {
+  const scope = rule.productScope ?? rule.product_scope ?? "random";
+  const count = normalizeProductCount(rule.productCount ?? rule.product_count);
+  const category = cleanString(rule.category, 255);
+  const productIds = parseJson(rule.productIds ?? rule.product_ids, [])
+    .map((id: unknown) => cleanString(id, 64))
+    .filter(Boolean) as string[];
+
+  if (scope === "manual") {
+    if (!productIds.length) return [];
+    const placeholders = productIds.map(() => "?").join(",");
+    return query<any>(
+      `SELECT id, name, stock, min_stock AS minStock, barcode
+         FROM products
+        WHERE tenant_id = ? AND id IN (${placeholders})
+        ORDER BY name ASC
+        LIMIT ?`,
+      [tenantId, ...productIds, count]
+    );
+  }
+
+  if (scope === "category" && category) {
+    return query<any>(
+      `SELECT id, name, stock, min_stock AS minStock, barcode
+         FROM products
+        WHERE tenant_id = ? AND category = ?
+        ORDER BY name ASC
+        LIMIT ?`,
+      [tenantId, category, count]
+    );
+  }
+
+  if (scope === "low_stock") {
+    return query<any>(
+      `SELECT id, name, stock, min_stock AS minStock, barcode
+         FROM products
+        WHERE tenant_id = ?
+          AND stock <= CASE WHEN COALESCE(min_stock, 0) > 0 THEN min_stock ELSE 10 END
+        ORDER BY stock ASC, name ASC
+        LIMIT ?`,
+      [tenantId, count]
+    );
+  }
+
+  return query<any>(
+    `SELECT id, name, stock, min_stock AS minStock, barcode
+       FROM products
+      WHERE tenant_id = ?
+      ORDER BY ${isPostgres() ? "RANDOM()" : "RAND()"}
+      LIMIT ?`,
+    [tenantId, count]
+  );
+}
+
+export async function getStockTakeRules(tenantId: string) {
+  const rows = await query<any>(
+    `SELECT id,
+            tenant_id AS tenantId,
+            name,
+            status,
+            schedule_type AS scheduleType,
+            run_time AS runTime,
+            product_scope AS productScope,
+            product_count AS productCount,
+            category,
+            product_ids AS productIds,
+            assigned_to AS assignedTo,
+            assigned_to_name AS assignedToName,
+            last_run_for_date AS lastRunForDate,
+            last_run_at AS lastRunAt,
+            created_by AS createdBy,
+            created_by_name AS createdByName,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+       FROM stock_take_rules
+      WHERE tenant_id = ?
+      ORDER BY status ASC, run_time ASC, name ASC`,
+    [tenantId]
+  );
+  return rows.map(rowToRule);
+}
+
+export async function createStockTakeRule(tenantId: string, input: StockTakeRuleInput, actor: Actor) {
+  const rule = normalizeRuleInput(input);
+  if (rule.productScope === "category" && !rule.category) {
+    throw new Error("Choose a category for this spot-check rule.");
+  }
+  if (rule.productScope === "manual" && !rule.productIds.length) {
+    throw new Error("Choose at least one product for a manual spot-check rule.");
+  }
+
+  const staffNameMap = await getStaffNameMap(tenantId, rule.assignedTo ? [rule.assignedTo] : []);
+  const assignedToName = rule.assignedToName || (rule.assignedTo ? staffNameMap.get(rule.assignedTo) : null) || null;
+  const ruleId = makeId("stkr");
+  await query(
+    `INSERT INTO stock_take_rules (
+       id, tenant_id, name, status, schedule_type, run_time, product_scope, product_count,
+       category, product_ids, assigned_to, assigned_to_name, created_by, created_by_name,
+       created_at, updated_at
+     ) VALUES (?, ?, ?, ?, 'daily', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [
+      ruleId,
+      tenantId,
+      rule.name,
+      rule.status,
+      rule.runTime,
+      rule.productScope,
+      rule.productCount,
+      rule.category,
+      json(rule.productIds, []),
+      rule.assignedTo,
+      assignedToName,
+      actor.staffId || null,
+      actor.staffName || null,
+    ]
+  );
+  await recordAuditEvent({ query } as any, {
+    tenantId,
+    action: "stocktake.rule_created",
+    entityType: "stock_take_rule",
+    entityId: ruleId,
+    staffId: actor.staffId || null,
+    staffName: actor.staffName || null,
+    source: "stocktake_rules",
+    details: { ...rule, assignedToName },
+  });
+  const rules = await getStockTakeRules(tenantId);
+  return rules.find((item) => item.id === ruleId) || rowToRule({
+    id: ruleId,
+    tenantId,
+    ...rule,
+    assignedToName,
+    scheduleType: "daily",
+  });
+}
+
+export async function updateStockTakeRule(tenantId: string, ruleId: string, input: StockTakeRuleInput, actor: Actor) {
+  const existingRows = await query<any>(
+    `SELECT * FROM stock_take_rules WHERE tenant_id = ? AND id = ? LIMIT 1`,
+    [tenantId, ruleId]
+  );
+  const existing = existingRows[0];
+  if (!existing) throw new Error("Stocktake rule not found.");
+
+  const current = rowToRule(existing);
+  const next = normalizeRuleInput({
+    name: input.name ?? current.name,
+    status: input.status ?? current.status,
+    runTime: input.runTime ?? current.runTime,
+    productScope: input.productScope ?? current.productScope,
+    productCount: input.productCount ?? current.productCount,
+    category: input.category ?? current.category,
+    productIds: input.productIds ?? current.productIds,
+    assignedTo: input.assignedTo ?? current.assignedTo,
+    assignedToName: input.assignedToName ?? current.assignedToName,
+  });
+
+  if (next.productScope === "category" && !next.category) {
+    throw new Error("Choose a category for this spot-check rule.");
+  }
+  if (next.productScope === "manual" && !next.productIds.length) {
+    throw new Error("Choose at least one product for a manual spot-check rule.");
+  }
+
+  const staffNameMap = await getStaffNameMap(tenantId, next.assignedTo ? [next.assignedTo] : []);
+  const assignedToName = next.assignedToName || (next.assignedTo ? staffNameMap.get(next.assignedTo) : null) || null;
+  await query(
+    `UPDATE stock_take_rules
+        SET name = ?,
+            status = ?,
+            run_time = ?,
+            product_scope = ?,
+            product_count = ?,
+            category = ?,
+            product_ids = ?,
+            assigned_to = ?,
+            assigned_to_name = ?,
+            updated_at = NOW()
+      WHERE tenant_id = ? AND id = ?`,
+    [
+      next.name,
+      next.status,
+      next.runTime,
+      next.productScope,
+      next.productCount,
+      next.category,
+      json(next.productIds, []),
+      next.assignedTo,
+      assignedToName,
+      tenantId,
+      ruleId,
+    ]
+  );
+  await recordAuditEvent({ query } as any, {
+    tenantId,
+    action: "stocktake.rule_updated",
+    entityType: "stock_take_rule",
+    entityId: ruleId,
+    staffId: actor.staffId || null,
+    staffName: actor.staffName || null,
+    source: "stocktake_rules",
+    details: { ...next, assignedToName },
+  });
+  const rules = await getStockTakeRules(tenantId);
+  return rules.find((item) => item.id === ruleId) || null;
+}
+
+export async function deleteStockTakeRule(tenantId: string, ruleId: string, actor: Actor) {
+  const existingRows = await query<any>(
+    `SELECT id, name FROM stock_take_rules WHERE tenant_id = ? AND id = ? LIMIT 1`,
+    [tenantId, ruleId]
+  );
+  if (!existingRows[0]) throw new Error("Stocktake rule not found.");
+  await query(`DELETE FROM stock_take_rules WHERE tenant_id = ? AND id = ?`, [tenantId, ruleId]);
+  await recordAuditEvent({ query } as any, {
+    tenantId,
+    action: "stocktake.rule_deleted",
+    entityType: "stock_take_rule",
+    entityId: ruleId,
+    staffId: actor.staffId || null,
+    staffName: actor.staffName || null,
+    source: "stocktake_rules",
+    details: { name: existingRows[0].name },
+  });
+  return { success: true };
+}
+
+export async function runDueStockTakeRules(tenantId: string, actor: Actor, options: RunDueRulesOptions = {}) {
+  const { date: today, time } = localDateParts(options.now);
+  const where = ["tenant_id = ?", "status = 'active'"];
+  const params: any[] = [tenantId];
+  if (options.ruleId) {
+    where.push("id = ?");
+    params.push(options.ruleId);
+  }
+
+  const rules = await query<any>(
+    `SELECT * FROM stock_take_rules WHERE ${where.join(" AND ")} ORDER BY run_time ASC, name ASC`,
+    params
+  );
+  const generated: any[] = [];
+  const skipped: any[] = [];
+
+  for (const rawRule of rules) {
+    const rule = rowToRule(rawRule);
+    const alreadyRan = dateOnly(rule.lastRunForDate) === today;
+    const dueByTime = String(rule.runTime || "08:00") <= time;
+    if (!options.force && (alreadyRan || !dueByTime)) {
+      skipped.push({
+        ruleId: rule.id,
+        name: rule.name,
+        reason: alreadyRan ? "already_generated_today" : "not_due_yet",
+      });
+      continue;
+    }
+
+    const products = await selectRuleProducts(tenantId, rule);
+    if (!products.length) {
+      skipped.push({ ruleId: rule.id, name: rule.name, reason: "no_matching_products" });
+      continue;
+    }
+
+    const session = await createStockTakeSession(tenantId, {
+      name: `${rule.name} - ${today}`,
+      type: "spot_check",
+      dueAt: `${today}T${rule.runTime || "08:00"}`,
+      notes: `Generated by daily spot-check rule: ${rule.name}`,
+      assignments: products.map((product: any) => ({
+        productId: product.id,
+        assignedTo: rule.assignedTo || null,
+        assignedToName: rule.assignedToName || null,
+      })),
+    }, actor);
+
+    await query(
+      `UPDATE stock_take_rules
+          SET last_run_for_date = ?,
+              last_run_at = NOW(),
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [today, tenantId, rule.id]
+    );
+    await recordAuditEvent({ query } as any, {
+      tenantId,
+      action: "stocktake.rule_run",
+      entityType: "stock_take_rule",
+      entityId: rule.id,
+      staffId: actor.staffId || null,
+      staffName: actor.staffName || null,
+      source: "stocktake_rules",
+      details: {
+        sessionId: session?.id || null,
+        date: today,
+        productCount: products.length,
+        productScope: rule.productScope,
+      },
+    });
+    generated.push({ rule, session, productCount: products.length });
+  }
+
+  return {
+    generated,
+    skipped,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 export async function createStockTakeSession(tenantId: string, input: CreateStockTakeInput, actor: Actor) {

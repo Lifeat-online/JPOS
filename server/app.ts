@@ -123,12 +123,17 @@ import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistor
 import { applyStockAdjustment, createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue } from "./managerTasks.js";
 import {
   approveStockTakeSession,
+  createStockTakeRule,
   createStockTakeSession,
+  deleteStockTakeRule,
   getMyStockTakeAssignments,
+  getStockTakeRules,
   getStockTakeSession,
   getStockTakeSessions,
   requestStockTakeRecount,
+  runDueStockTakeRules,
   submitStockTakeCount,
+  updateStockTakeRule,
 } from "./stockTake.js";
 
 dotenv.config();
@@ -1122,6 +1127,85 @@ export async function createApp(io: any = null) {
         role: req.user?.role || null,
       });
       res.status(201).json(session);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/stocktakes/rules", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required for stocktake rules." });
+        return;
+      }
+      res.json(await getStockTakeRules(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/stocktakes/rules", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required to create stocktake rules." });
+        return;
+      }
+      res.status(201).json(await createStockTakeRule(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
+        staffName: req.user?.name || req.body?.staffName || null,
+        role: req.user?.role || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/stocktakes/rules/run-due", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required to run stocktake rules." });
+        return;
+      }
+      res.json(await runDueStockTakeRules(req.params.tenantId, {
+        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
+        staffName: req.user?.name || req.body?.staffName || null,
+        role: req.user?.role || null,
+      }, {
+        ruleId: req.body?.ruleId || null,
+        force: Boolean(req.body?.force),
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/stocktakes/rules/:ruleId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required to update stocktake rules." });
+        return;
+      }
+      res.json(await updateStockTakeRule(req.params.tenantId, req.params.ruleId, req.body || {}, {
+        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
+        staffName: req.user?.name || req.body?.staffName || null,
+        role: req.user?.role || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/stocktakes/rules/:ruleId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        res.status(403).json({ error: "Manager access is required to delete stocktake rules." });
+        return;
+      }
+      res.json(await deleteStockTakeRule(req.params.tenantId, req.params.ruleId, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+        role: req.user?.role || null,
+      }));
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

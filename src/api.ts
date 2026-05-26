@@ -330,6 +330,43 @@ export function createStockTakeSession(tenantId: string, data: {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/stocktakes`, data);
 }
 
+export function getStockTakeRules(tenantId: string) {
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules`);
+}
+
+export function createStockTakeRule(tenantId: string, data: {
+  name?: string | null;
+  status?: 'active' | 'paused';
+  runTime?: string | null;
+  productScope?: 'random' | 'low_stock' | 'category' | 'manual';
+  productCount?: number;
+  category?: string | null;
+  productIds?: string[];
+  assignedTo?: string | null;
+  assignedToName?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+}) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules`, data);
+}
+
+export function updateStockTakeRule(tenantId: string, ruleId: string, data: Record<string, any>) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules/${encodeURIComponent(ruleId)}`, data);
+}
+
+export function deleteStockTakeRule(tenantId: string, ruleId: string) {
+  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules/${encodeURIComponent(ruleId)}`);
+}
+
+export function runDueStockTakeRules(tenantId: string, data: {
+  ruleId?: string | null;
+  force?: boolean;
+  staffId?: string | null;
+  staffName?: string | null;
+} = {}) {
+  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules/run-due`, data);
+}
+
 export function getStockTakeSession(tenantId: string, sessionId: string) {
   return apiGet<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}`);
 }

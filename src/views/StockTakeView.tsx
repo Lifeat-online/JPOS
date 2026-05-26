@@ -3,18 +3,24 @@ import { AlertTriangle, CalendarDays, CheckCircle2, ClipboardCheck, Package, Plu
 import { Product, Staff } from '../types';
 import {
   approveStockTakeSession,
+  createStockTakeRule,
   createStockTakeSession,
+  deleteStockTakeRule,
   getMyStockTakeAssignments,
+  getStockTakeRules,
   getStockTakeSession,
   getStockTakeSessions,
   getTenantStaff,
   requestStockTakeRecount,
+  runDueStockTakeRules,
   submitStockTakeCount,
+  updateStockTakeRule,
 } from '../api';
 import { usePosStore } from '../store/usePosStore';
 import { getDate } from '../utils/date';
 
 type StockTakeMode = 'cycle' | 'full' | 'spot_check';
+type RuleScope = 'random' | 'low_stock' | 'category' | 'manual';
 
 type StockTakeViewProps = {
   products: Product[];
@@ -49,12 +55,20 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
 
   const [staff, setStaff] = useState<Staff[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
+  const [rules, setRules] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [reviewSession, setReviewSession] = useState<any | null>(null);
   const [mode, setMode] = useState<StockTakeMode>(initialMode);
   const [sessionName, setSessionName] = useState('');
   const [dueAt, setDueAt] = useState('');
   const [notes, setNotes] = useState('');
+  const [ruleName, setRuleName] = useState('Daily spot check');
+  const [ruleRunTime, setRuleRunTime] = useState('08:00');
+  const [ruleScope, setRuleScope] = useState<RuleScope>('low_stock');
+  const [ruleProductCount, setRuleProductCount] = useState('5');
+  const [ruleCategory, setRuleCategory] = useState('');
+  const [ruleAssignee, setRuleAssignee] = useState('');
+  const [ruleProductIds, setRuleProductIds] = useState<Record<string, boolean>>({});
   const [productSearch, setProductSearch] = useState('');
   const [selectedAssignees, setSelectedAssignees] = useState<Record<string, string>>({});
   const [countInputs, setCountInputs] = useState<Record<string, string>>({});
@@ -74,6 +88,9 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
     [activeStaff]
   );
   const selectedProductIds = Object.keys(selectedAssignees);
+  const selectedRuleProductIds = Object.entries(ruleProductIds)
+    .filter(([, selected]) => selected)
+    .map(([productId]) => productId);
   const selectedProducts = useMemo(
     () => selectedProductIds
       .map(productId => products.find(product => product.id === productId))
@@ -89,6 +106,10 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
       })
       .slice(0, 40);
   }, [products, productSearch]);
+  const productCategories = useMemo(
+    () => Array.from(new Set(products.map(product => product.category).filter(Boolean))).sort(),
+    [products]
+  );
 
   const load = useCallback(async () => {
     if (!tenantId) return;
@@ -101,12 +122,14 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
       if (isManager) {
         requests.push(getStockTakeSessions(tenantId));
         requests.push(getTenantStaff(tenantId));
+        requests.push(getStockTakeRules(tenantId));
       }
       const results = await Promise.all(requests);
       setAssignments(results[0] || []);
       if (isManager) {
         setSessions(results[1] || []);
         setStaff(results[2] || []);
+        setRules(results[3] || []);
       }
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not load stocktake work.' });
@@ -129,6 +152,10 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
       const defaultAssignee = activeStaff.find(member => member.role === 'cashier')?.id || currentUserStaff?.id || '';
       return { ...current, [productId]: defaultAssignee };
     });
+  };
+
+  const toggleRuleProduct = (productId: string) => {
+    setRuleProductIds(current => ({ ...current, [productId]: !current[productId] }));
   };
 
   const createSession = async () => {
@@ -165,6 +192,99 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
       await load();
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not start stocktake.' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const createRule = async () => {
+    if (!tenantId) return;
+    if (ruleScope === 'category' && !ruleCategory) {
+      setMessage({ tone: 'error', text: 'Choose a category for the daily rule.' });
+      return;
+    }
+    if (ruleScope === 'manual' && selectedRuleProductIds.length === 0) {
+      setMessage({ tone: 'error', text: 'Choose products for the manual daily rule.' });
+      return;
+    }
+    setBusyKey('create-rule');
+    try {
+      const assignee = ruleAssignee ? staffById.get(ruleAssignee) : null;
+      await createStockTakeRule(tenantId, {
+        name: ruleName.trim() || 'Daily spot check',
+        runTime: ruleRunTime,
+        productScope: ruleScope,
+        productCount: Number(ruleProductCount) || 5,
+        category: ruleScope === 'category' ? ruleCategory : null,
+        productIds: ruleScope === 'manual' ? selectedRuleProductIds : [],
+        assignedTo: ruleAssignee || null,
+        assignedToName: assignee?.name || null,
+        staffId: currentUserStaff?.id || null,
+        staffName: currentUserStaff?.name || null,
+      });
+      setRuleName('Daily spot check');
+      setRuleProductIds({});
+      setMessage({ tone: 'success', text: 'Daily spot-check rule saved.' });
+      await load();
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not save rule.' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const runRules = async (ruleId?: string, force = false) => {
+    if (!tenantId) return;
+    setBusyKey(ruleId ? `run-rule:${ruleId}` : 'run-rules');
+    try {
+      const result = await runDueStockTakeRules(tenantId, {
+        ruleId: ruleId || null,
+        force,
+        staffId: currentUserStaff?.id || null,
+        staffName: currentUserStaff?.name || null,
+      });
+      const created = result.generated?.length || 0;
+      setMessage({
+        tone: 'success',
+        text: created
+          ? `${created} spot-check assignment${created === 1 ? '' : 's'} generated.`
+          : 'No spot-check rules were due.',
+      });
+      await load();
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not run rules.' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const toggleRuleStatus = async (rule: any) => {
+    if (!tenantId) return;
+    setBusyKey(`toggle-rule:${rule.id}`);
+    try {
+      await updateStockTakeRule(tenantId, rule.id, {
+        ...rule,
+        status: rule.status === 'active' ? 'paused' : 'active',
+        staffId: currentUserStaff?.id || null,
+        staffName: currentUserStaff?.name || null,
+      });
+      await load();
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not update rule.' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const removeRule = async (rule: any) => {
+    if (!tenantId) return;
+    setBusyKey(`delete-rule:${rule.id}`);
+    try {
+      await deleteStockTakeRule(tenantId, rule.id);
+      setMessage({ tone: 'success', text: 'Daily spot-check rule removed.' });
+      await load();
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not delete rule.' });
     } finally {
       setBusyKey(null);
     }
@@ -556,6 +676,200 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
             </div>
           </section>
         </div>
+      )}
+
+      {isManager && (
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+                <CalendarDays className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-black text-slate-900 dark:text-white">Daily spot-check rules</h3>
+                <p className="text-xs font-bold text-slate-400">{rules.length} rule{rules.length === 1 ? '' : 's'}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => runRules()}
+              disabled={busyKey === 'run-rules'}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-black text-white transition hover:bg-indigo-700 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${busyKey === 'run-rules' ? 'animate-spin' : ''}`} />
+              Run Due Rules
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <input
+                  value={ruleName}
+                  onChange={event => setRuleName(event.target.value)}
+                  placeholder="Rule name"
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white sm:col-span-2"
+                />
+                <label>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Daily time</span>
+                  <input
+                    type="time"
+                    value={ruleRunTime}
+                    onChange={event => setRuleRunTime(event.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                  />
+                </label>
+                <label>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Assign to</span>
+                  <select
+                    value={ruleAssignee}
+                    onChange={event => setRuleAssignee(event.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                  >
+                    <option value="">Unassigned</option>
+                    {activeStaff.map(member => (
+                      <option key={member.id} value={member.id}>{member.name} - {member.role}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Scope</span>
+                  <select
+                    value={ruleScope}
+                    onChange={event => setRuleScope(event.target.value as RuleScope)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                  >
+                    <option value="low_stock">Low stock</option>
+                    <option value="random">Random products</option>
+                    <option value="category">Category</option>
+                    <option value="manual">Manual list</option>
+                  </select>
+                </label>
+                <label>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Product count</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={ruleProductCount}
+                    onChange={event => setRuleProductCount(event.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                  />
+                </label>
+                {ruleScope === 'category' && (
+                  <label className="sm:col-span-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Category</span>
+                    <select
+                      value={ruleCategory}
+                      onChange={event => setRuleCategory(event.target.value)}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                    >
+                      <option value="">Choose category</option>
+                      {productCategories.map(categoryName => (
+                        <option key={categoryName} value={categoryName}>{categoryName}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+
+              {ruleScope === 'manual' && (
+                <div className="mt-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+                  <div className="border-b border-slate-100 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-400 dark:border-slate-800">
+                    Manual products - {selectedRuleProductIds.length} selected
+                  </div>
+                  <div className="max-h-56 overflow-y-auto">
+                    {filteredProducts.map(product => (
+                      <button
+                        type="button"
+                        key={product.id}
+                        onClick={() => toggleRuleProduct(product.id)}
+                        className={`flex w-full items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 dark:border-slate-800 ${
+                          ruleProductIds[product.id] ? 'bg-indigo-50 dark:bg-indigo-950/20' : 'hover:bg-slate-50 dark:hover:bg-slate-950'
+                        }`}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-black text-slate-900 dark:text-white">{product.name}</span>
+                          <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Stock {formatNumber(product.stock)}</span>
+                        </span>
+                        <span className={`grid h-7 w-7 place-items-center rounded-full border ${
+                          ruleProductIds[product.id] ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 text-slate-300'
+                        }`}>
+                          {ruleProductIds[product.id] ? <CheckCircle2 className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={createRule}
+                disabled={busyKey === 'create-rule'}
+                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-black text-white transition hover:bg-primary disabled:opacity-60 dark:bg-white dark:text-slate-950"
+              >
+                <CalendarDays className="h-4 w-4" />
+                Save Daily Rule
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {rules.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm font-bold text-slate-400 dark:border-slate-700">
+                  No daily rules yet.
+                </div>
+              ) : rules.map(rule => (
+                <div key={rule.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-black text-slate-900 dark:text-white">{rule.name}</p>
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${
+                          rule.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {rule.status}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs font-bold text-slate-500">
+                        Daily {rule.runTime} - {String(rule.productScope || '').replace('_', ' ')} - {rule.productCount} item{rule.productCount === 1 ? '' : 's'}
+                      </p>
+                      <p className="mt-1 text-xs font-bold text-slate-400">
+                        Assigned to {rule.assignedToName || 'manager review'} - Last run {rule.lastRunForDate || 'never'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => runRules(rule.id, true)}
+                        disabled={busyKey === `run-rule:${rule.id}`}
+                        className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-black text-white hover:bg-indigo-700 disabled:opacity-60"
+                      >
+                        Run Now
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleRuleStatus(rule)}
+                        disabled={busyKey === `toggle-rule:${rule.id}`}
+                        className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-200 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-200"
+                      >
+                        {rule.status === 'active' ? 'Pause' : 'Activate'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeRule(rule)}
+                        disabled={busyKey === `delete-rule:${rule.id}`}
+                        className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
       )}
 
       {isManager && reviewSession && (

@@ -15,7 +15,8 @@ async function main() {
   } = await import("../server/init-db.js");
   const {
     approveStockTakeSession,
-    createStockTakeSession,
+    createStockTakeRule,
+    runDueStockTakeRules,
     submitStockTakeCount,
   } = await import("../server/stockTake.js");
 
@@ -57,19 +58,38 @@ async function main() {
       [milkId, tenantId, `milk-${suffix}`, breadId, tenantId, `bread-${suffix}`]
     );
 
-    const created = await createStockTakeSession(
+    const actor = { staffId: managerId, staffName: "Smoke Manager", role: "manager" };
+    const rule = await createStockTakeRule(
       tenantId,
       {
-        name: "Smoke spot check",
-        type: "spot_check",
-        notes: "Automated stocktake smoke test",
-        assignments: [
-          { productId: milkId, assignedTo: counterId, assignedToName: "Smoke Counter" },
-          { productId: breadId, assignedTo: counterId, assignedToName: "Smoke Counter" },
-        ],
+        name: "Smoke daily category spot check",
+        runTime: "00:00",
+        productScope: "category",
+        productCount: 2,
+        category: "Smoke",
+        assignedTo: counterId,
       },
-      { staffId: managerId, staffName: "Smoke Manager", role: "manager" }
+      actor
     );
+    assert(rule?.id, "Daily stocktake rule was not created.");
+
+    const ruleRun = await runDueStockTakeRules(tenantId, actor, {
+      ruleId: rule.id,
+      force: true,
+      now: new Date(),
+    });
+    assert(ruleRun.generated.length === 1, "Expected daily rule to generate one stocktake session.");
+
+    const duplicateRun = await runDueStockTakeRules(tenantId, actor, {
+      ruleId: rule.id,
+      now: new Date(),
+    });
+    assert(
+      duplicateRun.skipped.some((item: any) => item.reason === "already_generated_today"),
+      "Daily rule should not generate twice for the same trading day."
+    );
+
+    const created = ruleRun.generated[0].session;
 
     assert(created?.items?.length === 2, "Expected two assigned stocktake items.");
     const milkItem = created.items.find((item: any) => item.productId === milkId);

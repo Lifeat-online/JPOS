@@ -42,6 +42,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [x] Add CSV export for filtered Action Center activity search.
 - [x] Add stocktake/spot-check workflow with mobile staff assignments, dedicated staff stocktake route, count entry, manager recount, manager approval, and Action Center spot-check launch.
 - [x] Add repeatable stocktake smoke test that proves assign, mobile count, approve, stock ledger posting, final stock, and cleanup against a real MariaDB connection.
+- [x] Add manager-scheduled daily spot-check rules with assigned staff, product scope controls, one-run-per-day protection, and Action Center/manual run support.
 - [ ] Extend the manager action center into remaining pre-action approval requests: AI recommendation tasks, failed/offline sync items, and scheduled stocktake exceptions.
 - [ ] Expand operator-friendly audit/stock visibility with deeper device attribution, richer customer/register labels, drill-through context, and PDF/accounting export packs.
 - [ ] Add guided stock receiving and deeper stock-count flows that explain valuation, variance reason taxonomy, count sheets, exports, and batch/location impact.
@@ -79,7 +80,8 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [x] Add audited manual stock adjustment request/apply flow with Action Center approval and stock movement recording.
 - [x] Add `stock_take_sessions` and `stock_take_items` tables so counted stock variances can be assigned, audited, reconciled, and approved.
 - [x] Add formal stocktake, cycle-count, and spot-check workflow with staff product assignments, dedicated staff/mobile stocktake route, count entry, variance capture, manager recount, manager sign-off, and stock movement posting on approval.
-- [ ] Add recurring daily spot-check rules, random/product-category spot-check suggestions, and manager scheduling controls.
+- [x] Add recurring daily spot-check rules with random, low-stock, category, and manual product scopes plus manager scheduling controls.
+- [ ] Add smarter spot-check suggestions based on shrinkage, low stock, wastage, expiry risk, sales velocity, and recent variances.
 - [ ] Add formal shrinkage/wastage/damage/expiry reason taxonomy per variance, count sheets, count export packs, and supervisor second-count thresholds.
 - [ ] Add `stock_batches` with expiry dates, supplier/invoice references, received quantities, remaining quantities, FIFO/FEFO guidance, and expiry warnings.
 - [ ] Finish audited receiving/stock booking from purchase orders and invoice intake.
@@ -227,6 +229,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - 2026-05-26: Added stocktake mode with `stock_take_sessions`/`stock_take_items` schema, staff product assignments, dedicated staff/mobile stocktake route, mobile count entry, spot-check/cycle/full modes, manager recount, manager approval, stock ledger posting, and Action Center spot-check launch.
 - 2026-05-26: Passed stocktake verification: `npx.cmd vitest run tests/backend/stock-take.test.ts tests/backend/audit-stock-ledger-schema.test.ts`, `npx.cmd vitest run tests/backend/stock-take.test.ts tests/backend/action-center.test.ts tests/backend/manager-tasks.test.ts tests/backend/audit-stock-ledger-schema.test.ts tests/frontend/permissions.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-26: Fixed local MariaDB app-user connectivity for ignored `.env`, verified `stock_take_sessions`, `stock_take_items`, `stock_movements`, and `audit_events` exist in the running MariaDB container, and added/passed `npm.cmd run smoke:stocktake`; smoke test creates temporary tenant/staff/products, assigns a spot check, submits staff counts, approves it, verifies stock/ledger, and cleans up.
+- 2026-05-26: Added `stock_take_rules` schema/startup healing, daily spot-check rule APIs, Stocktake manager scheduling UI, rule run auditing, one-run-per-day protection, and rule-generated staff assignments; passed `npx.cmd vitest run tests/backend/stock-take.test.ts tests/backend/audit-stock-ledger-schema.test.ts tests/frontend/permissions.test.ts`, `npm.cmd run lint`, `npm.cmd run smoke:stocktake`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-26: Passed `npm.cmd run lint` and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-26: Broader `npx.cmd vitest run tests/backend` ran 12 backend files successfully but failed `tests/backend/db-tables.test.ts` because the local test database login was denied for `root`.
 - 2026-05-26: Consolidated active roadmap/todo items from the former implementation roadmap, AI Inventory Copilot plan, AI Manager Copilot todo, MariaDB/Nginx migration plan, migration status notes, security checklist, security implementation summary, and POS feature blueprint audit into this master todo.

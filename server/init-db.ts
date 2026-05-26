@@ -854,6 +854,30 @@ export async function ensureStockTakeSchema() {
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_tenant_status ON stock_take_items (tenant_id, status, updated_at)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_assigned ON stock_take_items (tenant_id, assigned_to, status)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_product ON stock_take_items (tenant_id, product_id)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS stock_take_rules (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused')),
+        schedule_type TEXT NOT NULL DEFAULT 'daily' CHECK (schedule_type IN ('daily')),
+        run_time TEXT NOT NULL DEFAULT '08:00',
+        product_scope TEXT NOT NULL DEFAULT 'random' CHECK (product_scope IN ('random','low_stock','category','manual')),
+        product_count INT NOT NULL DEFAULT 5,
+        category TEXT,
+        product_ids TEXT DEFAULT '[]'::TEXT,
+        assigned_to TEXT,
+        assigned_to_name TEXT,
+        last_run_for_date DATE,
+        last_run_at TIMESTAMPTZ,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_rules_tenant_status ON stock_take_rules (tenant_id, status, run_time)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_rules_assigned ON stock_take_rules (tenant_id, assigned_to)`);
     return;
   }
 
@@ -908,6 +932,31 @@ export async function ensureStockTakeSchema() {
       INDEX idx_stock_take_items_product (tenant_id, product_id),
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
       FOREIGN KEY (session_id) REFERENCES stock_take_sessions(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS stock_take_rules (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      status ENUM('active','paused') NOT NULL DEFAULT 'active',
+      schedule_type ENUM('daily') NOT NULL DEFAULT 'daily',
+      run_time VARCHAR(5) NOT NULL DEFAULT '08:00',
+      product_scope ENUM('random','low_stock','category','manual') NOT NULL DEFAULT 'random',
+      product_count INT NOT NULL DEFAULT 5,
+      category VARCHAR(255),
+      product_ids JSON DEFAULT JSON_ARRAY(),
+      assigned_to VARCHAR(64),
+      assigned_to_name VARCHAR(255),
+      last_run_for_date DATE,
+      last_run_at DATETIME,
+      created_by VARCHAR(64),
+      created_by_name VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_stock_take_rules_tenant_status (tenant_id, status, run_time),
+      INDEX idx_stock_take_rules_assigned (tenant_id, assigned_to),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     )
   `);
 }
