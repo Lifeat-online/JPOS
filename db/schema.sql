@@ -1,4 +1,4 @@
--- MariaDB schema for Jimmy's POS
+-- MariaDB schema for MasePOS
 -- Use MariaDB 10.2+ for JSON support
 
 CREATE TABLE IF NOT EXISTS tenants (
@@ -248,7 +248,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
   cash_session_id VARCHAR(64) NOT NULL,
-  type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale') NOT NULL,
+  type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale','wallet_cash_in','wallet_cash_out') NOT NULL,
   direction ENUM('in','out','neutral') NOT NULL DEFAULT 'neutral',
   amount DECIMAL(12,2) NOT NULL DEFAULT 0,
   sale_id VARCHAR(64),
@@ -319,6 +319,37 @@ CREATE TABLE IF NOT EXISTS cash_custody_transfers (
   INDEX idx_cash_custody_session (tenant_id, cash_session_id),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS cash_close_checkpoints (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  business_date DATE NOT NULL,
+  status ENUM('balanced','review_needed') NOT NULL DEFAULT 'review_needed',
+  expected_physical_cash DECIMAL(12,2) NOT NULL DEFAULT 0,
+  counted_physical_cash DECIMAL(12,2) NOT NULL DEFAULT 0,
+  variance DECIMAL(12,2) NOT NULL DEFAULT 0,
+  manager_float DECIMAL(12,2) NOT NULL DEFAULT 0,
+  open_register_cash DECIMAL(12,2) NOT NULL DEFAULT 0,
+  pending_cash_up_cash DECIMAL(12,2) NOT NULL DEFAULT 0,
+  wallet_liability DECIMAL(12,2) NOT NULL DEFAULT 0,
+  pending_payouts DECIMAL(12,2) NOT NULL DEFAULT 0,
+  petty_cash_today DECIMAL(12,2) NOT NULL DEFAULT 0,
+  wallet_cash_in_today DECIMAL(12,2) NOT NULL DEFAULT 0,
+  wallet_cash_out_today DECIMAL(12,2) NOT NULL DEFAULT 0,
+  custody_pending_count INT NOT NULL DEFAULT 0,
+  custody_variance_today DECIMAL(12,2) NOT NULL DEFAULT 0,
+  unresolved_items JSON DEFAULT JSON_ARRAY(),
+  counted_breakdown JSON DEFAULT JSON_OBJECT(),
+  note TEXT,
+  closed_by VARCHAR(64),
+  closed_by_name VARCHAR(255),
+  closed_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_cash_close_business_date (tenant_id, business_date),
+  INDEX idx_cash_close_tenant_status (tenant_id, status, business_date),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -503,7 +534,7 @@ CREATE TABLE IF NOT EXISTS push_notification_settings (
   tenant_id VARCHAR(64) PRIMARY KEY,
   vapid_public_key TEXT,
   vapid_private_key TEXT,
-  subject VARCHAR(255) NOT NULL DEFAULT 'mailto:dev@jimmyspos.local',
+  subject VARCHAR(255) NOT NULL DEFAULT 'mailto:dev@masepos.local',
   enabled BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

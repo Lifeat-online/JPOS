@@ -1,4 +1,4 @@
-import { getConnection, query } from "./db.js";
+import { getConnection, isPostgres, query } from "./db.js";
 import { recordAuditEvent } from "./audit.js";
 
 type Actor = {
@@ -33,6 +33,14 @@ type WalletCashMovementInput = {
   applyWalletDelta?: boolean;
 };
 
+type RegisterWalletCashMovementInput = {
+  customerId?: string | null;
+  cashSessionId?: string | null;
+  direction?: "in" | "out" | string | null;
+  amount?: number | string | null;
+  note?: string | null;
+};
+
 type CashCustodyTransferInput = {
   fromType?: string | null;
   fromId?: string | null;
@@ -48,6 +56,13 @@ type CashCustodyTransferInput = {
 };
 
 type CashCustodyTransferDecisionInput = {
+  countedAmount?: number | string | null;
+  countedBreakdown?: Record<string, number> | null;
+  note?: string | null;
+};
+
+type CashCloseCheckpointInput = {
+  businessDate?: string | null;
   countedAmount?: number | string | null;
   countedBreakdown?: Record<string, number> | null;
   note?: string | null;
@@ -97,6 +112,16 @@ function json(value: unknown, fallback: unknown = {}) {
   return JSON.stringify(value);
 }
 
+function parseJson(value: unknown, fallback: any) {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
 function normalizeMovementType(value: unknown) {
   const type = String(value || "manager_adjustment").trim();
   return MOVEMENT_TYPES.has(type) ? type : "manager_adjustment";
@@ -135,6 +160,23 @@ function breakdownTotal(value: Record<string, number>) {
   return Number(Object.entries(value).reduce((sum, [denomination, qty]) => {
     return sum + Number.parseFloat(denomination) * toNumber(qty);
   }, 0).toFixed(2));
+}
+
+function todayBusinessDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeBusinessDate(value: unknown) {
+  const raw = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  return todayBusinessDate();
+}
+
+function businessDateBounds(businessDate: string) {
+  const start = new Date(`${businessDate}T00:00:00.000`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start, end };
 }
 
 function isManagerHeldCash(type: string) {
@@ -213,6 +255,37 @@ function rowToTransfer(row: any) {
     requestedAt: row.requestedAt ?? row.requested_at,
     confirmedAt: row.confirmedAt ?? row.confirmed_at,
     cancelledAt: row.cancelledAt ?? row.cancelled_at,
+    createdAt: row.createdAt ?? row.created_at,
+    updatedAt: row.updatedAt ?? row.updated_at,
+  };
+}
+
+function rowToCashClose(row: any) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    tenantId: row.tenantId ?? row.tenant_id,
+    businessDate: row.businessDate ?? row.business_date,
+    status: row.status,
+    expectedPhysicalCash: toNumber(row.expectedPhysicalCash ?? row.expected_physical_cash),
+    countedPhysicalCash: toNumber(row.countedPhysicalCash ?? row.counted_physical_cash),
+    variance: toNumber(row.variance),
+    managerFloat: toNumber(row.managerFloat ?? row.manager_float),
+    openRegisterCash: toNumber(row.openRegisterCash ?? row.open_register_cash),
+    pendingCashUpCash: toNumber(row.pendingCashUpCash ?? row.pending_cash_up_cash),
+    walletLiability: toNumber(row.walletLiability ?? row.wallet_liability),
+    pendingPayouts: toNumber(row.pendingPayouts ?? row.pending_payouts),
+    pettyCashToday: toNumber(row.pettyCashToday ?? row.petty_cash_today),
+    walletCashInToday: toNumber(row.walletCashInToday ?? row.wallet_cash_in_today),
+    walletCashOutToday: toNumber(row.walletCashOutToday ?? row.wallet_cash_out_today),
+    custodyPendingCount: toNumber(row.custodyPendingCount ?? row.custody_pending_count),
+    custodyVarianceToday: toNumber(row.custodyVarianceToday ?? row.custody_variance_today),
+    unresolvedItems: parseJson(row.unresolvedItems ?? row.unresolved_items, []),
+    countedBreakdown: parseJson(row.countedBreakdown ?? row.counted_breakdown, {}),
+    note: row.note,
+    closedBy: row.closedBy ?? row.closed_by,
+    closedByName: row.closedByName ?? row.closed_by_name,
+    closedAt: row.closedAt ?? row.closed_at,
     createdAt: row.createdAt ?? row.created_at,
     updatedAt: row.updatedAt ?? row.updated_at,
   };
@@ -682,6 +755,163 @@ export async function recordWalletCashMovement(tenantId: string, input: WalletCa
   }
 }
 
+export async function recordRegisterWalletCashMovement(tenantId: string, input: RegisterWalletCashMovementInput, actor: Actor = {}) {
+  const customerId = cleanString(input.customerId, 64);
+  if (!customerId) throw new Error("Choose the customer wallet first.");
+  const cashSessionId = cleanString(input.cashSessionId, 64);
+  if (!cashSessionId) throw new Error("Open the register before recording wallet cash.");
+  const direction = input.direction === "out" ? "out" : "in";
+  const amount = Number(toNumber(input.amount).toFixed(2));
+  if (amount <= 0) throw new Error("Enter a wallet cash amount greater than zero.");
+
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [sessionRows] = await conn.query<any>(
+      `SELECT id,
+              staff_id AS staffId,
+              staff_name AS staffName,
+              status,
+              expected_cash AS expectedCash
+         FROM cash_sessions
+        WHERE tenant_id = ? AND id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, cashSessionId]
+    );
+    const session = sessionRows[0];
+    if (!session) throw new Error("Cash session not found.");
+    if (session.status !== "open") throw new Error("Wallet cash can only be recorded against an open register.");
+    if (
+      actor.staffId &&
+      session.staffId &&
+      actor.staffId !== session.staffId &&
+      !["admin", "manager", "dev"].includes(String(actor.role || "").toLowerCase())
+    ) {
+      throw new Error("Only a manager can record wallet cash on another staff member's register.");
+    }
+
+    const [customerRows] = await conn.query<any>(
+      `SELECT id, name, wallet_balance AS walletBalance
+         FROM customers
+        WHERE tenant_id = ? AND id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, customerId]
+    );
+    const customer = customerRows[0];
+    if (!customer) throw new Error("Customer wallet not found.");
+
+    const previousBalance = toNumber(customer.walletBalance ?? customer.wallet_balance);
+    if (direction === "out" && previousBalance < amount) {
+      throw new Error("Customer wallet balance is not enough for this payout.");
+    }
+
+    const walletDelta = direction === "in" ? amount : -amount;
+    const nextBalance = Number((previousBalance + walletDelta).toFixed(2));
+    const cashMovementId = makeId("cm");
+    const cashMovementType = direction === "in" ? "wallet_cash_in" : "wallet_cash_out";
+    const note = cleanString(input.note, 500) || (direction === "in" ? "Customer wallet cash top-up" : "Customer wallet cash payout");
+
+    await conn.query(
+      `UPDATE customers
+          SET wallet_balance = ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [nextBalance, tenantId, customer.id]
+    );
+
+    await conn.query(
+      `UPDATE cash_sessions
+          SET expected_cash = COALESCE(expected_cash, 0) + ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [walletDelta, tenantId, cashSessionId]
+    );
+
+    await conn.query(
+      `INSERT INTO cash_movements (
+        id, tenant_id, cash_session_id, type, direction, amount, sale_id, payment_id,
+        staff_id, staff_name, created_by, note, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        cashMovementId,
+        tenantId,
+        cashSessionId,
+        cashMovementType,
+        direction,
+        amount,
+        null,
+        null,
+        session.staffId || actor.staffId || null,
+        session.staffName || actor.staffName || null,
+        actor.staffId || null,
+        note,
+      ]
+    );
+
+    const movement = {
+      id: makeId("mcm"),
+      tenantId,
+      movementType: cashMovementType,
+      direction: "neutral",
+      amount,
+      cashSessionId,
+      staffId: session.staffId || actor.staffId || null,
+      staffName: session.staffName || actor.staffName || null,
+      customerId: customer.id,
+      customerName: customer.name,
+      sourceType: "cash_session",
+      referenceId: cashMovementId,
+      category: direction === "in" ? "wallet_top_up" : "wallet_payout",
+      note,
+      countedBreakdown: {},
+      createdBy: actor.staffId || null,
+      createdByName: actor.staffName || null,
+    };
+
+    await insertManagerCashMovement(conn, movement);
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: direction === "in" ? "customer_wallet.cash_top_up" : "customer_wallet.cash_payout",
+      entityType: "customer_wallet",
+      entityId: customer.id,
+      staffId: actor.staffId || null,
+      staffName: actor.staffName || null,
+      customerId: customer.id,
+      source: "cashier_wallet_cash",
+      details: {
+        cashSessionId,
+        cashMovementId,
+        managerCashMovementId: movement.id,
+        direction,
+        amount,
+        previousBalance,
+        nextBalance,
+        cashSessionDelta: walletDelta,
+      },
+    });
+
+    await conn.commit();
+    return {
+      cashMovementId,
+      movement,
+      customerId: customer.id,
+      customerName: customer.name,
+      previousBalance,
+      nextBalance,
+      cashSessionId,
+      cashSessionDelta: walletDelta,
+    };
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
 export async function getManagerCashMovements(tenantId: string, limit = 40) {
   const rows = await query<any>(
     `SELECT id,
@@ -805,6 +1035,470 @@ export async function getManagerCashSummary(tenantId: string) {
     custodyTransfersToday: toNumber(custodyRows[0]?.custodyTransfersToday),
     custodyVarianceToday: toNumber(custodyRows[0]?.custodyVarianceToday),
     recentMovements,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export async function getCashClosePreview(tenantId: string, businessDateInput?: string | null) {
+  const businessDate = normalizeBusinessDate(businessDateInput);
+  const { start, end } = businessDateBounds(businessDate);
+  const [summary, movementRows, openRegisters, pendingCashUps, pendingTransfers, latestCloseRows] = await Promise.all([
+    getManagerCashSummary(tenantId),
+    query<any>(
+      `SELECT
+          COALESCE(SUM(CASE WHEN movement_type = 'safe_drop' THEN amount ELSE 0 END), 0) AS safeDropsToday,
+          COALESCE(SUM(CASE WHEN movement_type = 'register_close' THEN amount ELSE 0 END), 0) AS cashUpsToManagerToday,
+          COALESCE(SUM(CASE WHEN movement_type IN ('petty_cash','payout') THEN amount ELSE 0 END), 0) AS pettyCashToday,
+          COALESCE(SUM(CASE WHEN movement_type = 'wallet_cash_in' THEN amount ELSE 0 END), 0) AS walletCashInToday,
+          COALESCE(SUM(CASE WHEN movement_type = 'wallet_cash_out' THEN amount ELSE 0 END), 0) AS walletCashOutToday,
+          COALESCE(SUM(CASE WHEN movement_type = 'transfer' AND direction = 'in' THEN amount ELSE 0 END), 0) AS transferInToday,
+          COALESCE(SUM(CASE WHEN movement_type = 'transfer' AND direction = 'out' THEN amount ELSE 0 END), 0) AS transferOutToday
+         FROM manager_cash_movements
+        WHERE tenant_id = ? AND created_at >= ? AND created_at < ?`,
+      [tenantId, start, end]
+    ),
+    query<any>(
+      `SELECT id,
+              staff_name AS staffName,
+              expected_cash AS expectedCash,
+              opened_at AS openedAt
+         FROM cash_sessions
+        WHERE tenant_id = ? AND status = 'open'
+        ORDER BY opened_at ASC`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT id,
+              staff_name AS staffName,
+              actual_cash AS actualCash,
+              difference,
+              review_status AS reviewStatus,
+              closed_at AS closedAt
+         FROM cash_sessions
+        WHERE tenant_id = ?
+          AND status = 'closed'
+          AND COALESCE(review_status, 'submitted') <> 'reconciled'
+        ORDER BY updated_at DESC`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT id,
+              from_name AS fromName,
+              to_name AS toName,
+              expected_amount AS expectedAmount,
+              counted_amount AS countedAmount,
+              variance,
+              requested_at AS requestedAt
+         FROM cash_custody_transfers
+        WHERE tenant_id = ? AND status = 'pending_confirmation'
+        ORDER BY requested_at ASC`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT id,
+              tenant_id AS tenantId,
+              business_date AS businessDate,
+              status,
+              expected_physical_cash AS expectedPhysicalCash,
+              counted_physical_cash AS countedPhysicalCash,
+              variance,
+              manager_float AS managerFloat,
+              open_register_cash AS openRegisterCash,
+              pending_cash_up_cash AS pendingCashUpCash,
+              wallet_liability AS walletLiability,
+              pending_payouts AS pendingPayouts,
+              petty_cash_today AS pettyCashToday,
+              wallet_cash_in_today AS walletCashInToday,
+              wallet_cash_out_today AS walletCashOutToday,
+              custody_pending_count AS custodyPendingCount,
+              custody_variance_today AS custodyVarianceToday,
+              unresolved_items AS unresolvedItems,
+              counted_breakdown AS countedBreakdown,
+              note,
+              closed_by AS closedBy,
+              closed_by_name AS closedByName,
+              closed_at AS closedAt,
+              created_at AS createdAt,
+              updated_at AS updatedAt
+         FROM cash_close_checkpoints
+        WHERE tenant_id = ? AND business_date = ?
+        LIMIT 1`,
+      [tenantId, businessDate]
+    ),
+  ]);
+
+  const movement = movementRows[0] || {};
+  const unresolvedItems = [
+    ...openRegisters.map((row: any) => ({
+      type: "open_register",
+      id: row.id,
+      label: `${row.staffName || "Register"} still open`,
+      amount: toNumber(row.expectedCash),
+    })),
+    ...pendingCashUps.map((row: any) => ({
+      type: "pending_cash_up",
+      id: row.id,
+      label: `${row.staffName || "Register"} cash-up not reconciled`,
+      amount: toNumber(row.actualCash),
+      variance: toNumber(row.difference),
+    })),
+    ...pendingTransfers.map((row: any) => ({
+      type: "pending_handover",
+      id: row.id,
+      label: `${row.fromName || "Cash"} to ${row.toName || "cash"}`,
+      amount: toNumber(row.countedAmount || row.expectedAmount),
+      variance: toNumber(row.variance),
+    })),
+  ];
+
+  const expectedPhysicalCash = Number(toNumber(summary.totalPhysicalCash).toFixed(2));
+  return {
+    businessDate,
+    expectedPhysicalCash,
+    managerFloat: summary.managerFloat,
+    openRegisterCash: summary.openRegisterCash,
+    openRegisterCount: summary.openRegisterCount,
+    pendingCashUpCash: summary.pendingCashUpCash,
+    pendingCashUpCount: summary.pendingCashUpCount,
+    walletLiability: summary.walletLiability,
+    pendingPayouts: summary.pendingPayouts,
+    availableAfterWalletLiability: summary.availableAfterWalletLiability,
+    safeDropsToday: toNumber(movement.safeDropsToday),
+    cashUpsToManagerToday: toNumber(movement.cashUpsToManagerToday),
+    pettyCashToday: toNumber(movement.pettyCashToday),
+    walletCashInToday: toNumber(movement.walletCashInToday),
+    walletCashOutToday: toNumber(movement.walletCashOutToday),
+    walletCashNetToday: toNumber(movement.walletCashInToday) - toNumber(movement.walletCashOutToday),
+    transferInToday: toNumber(movement.transferInToday),
+    transferOutToday: toNumber(movement.transferOutToday),
+    custodyPendingCount: pendingTransfers.length,
+    custodyVarianceToday: summary.custodyVarianceToday,
+    unresolvedItems,
+    latestClose: rowToCashClose(latestCloseRows[0]),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+async function syncCashCloseTask(conn: Pick<Awaited<ReturnType<typeof getConnection>>, "query">, checkpoint: any, actor: Actor) {
+  const needsReview = checkpoint.status === "review_needed";
+  if (!needsReview) {
+    await conn.query(
+      `UPDATE manager_tasks
+          SET status = 'done',
+              decided_by = ?,
+              decision_note = ?,
+              resolved_at = NOW(),
+              updated_at = NOW()
+        WHERE tenant_id = ?
+          AND task_type = 'cash_variance'
+          AND source_type = 'cash_close'
+          AND source_id = ?
+          AND status IN ('open','in_review')`,
+      [actor.staffId || null, "EOD cash close balanced.", checkpoint.tenantId, checkpoint.id]
+    );
+    return;
+  }
+
+  const variance = toNumber(checkpoint.variance);
+  const unresolvedCount = Array.isArray(checkpoint.unresolvedItems) ? checkpoint.unresolvedItems.length : 0;
+  const values = [
+    makeId("task"),
+    checkpoint.tenantId,
+    "cash_variance",
+    `Review EOD cash close for ${checkpoint.businessDate}`,
+    `${Math.abs(variance) > 0.009 ? `R${Math.abs(variance).toFixed(2)} cash variance` : "No cash variance"} with ${unresolvedCount} unresolved cash item${unresolvedCount === 1 ? "" : "s"}.`,
+    Math.abs(variance) >= 100 || unresolvedCount > 2 ? "critical" : "high",
+    "open",
+    "cash_close",
+    checkpoint.id,
+    actor.staffId || null,
+    json({
+      businessDate: checkpoint.businessDate,
+      expectedPhysicalCash: checkpoint.expectedPhysicalCash,
+      countedPhysicalCash: checkpoint.countedPhysicalCash,
+      variance,
+      unresolvedItems: checkpoint.unresolvedItems,
+    }),
+  ];
+
+  if (isPostgres()) {
+    await conn.query(
+      `INSERT INTO manager_tasks (
+         id, tenant_id, task_type, title, summary, priority, status,
+         source_type, source_id, requested_by, details, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+       ON CONFLICT (tenant_id, task_type, source_type, source_id)
+       DO UPDATE SET
+         title = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.title ELSE manager_tasks.title END,
+         summary = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.summary ELSE manager_tasks.summary END,
+         priority = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.priority ELSE manager_tasks.priority END,
+         details = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.details ELSE manager_tasks.details END,
+         updated_at = CASE WHEN manager_tasks.status IN ('open','in_review') THEN NOW() ELSE manager_tasks.updated_at END`,
+      values
+    );
+    return;
+  }
+
+  await conn.query(
+    `INSERT INTO manager_tasks (
+       id, tenant_id, task_type, title, summary, priority, status,
+       source_type, source_id, requested_by, details, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+     ON DUPLICATE KEY UPDATE
+       title = IF(status IN ('open','in_review'), VALUES(title), title),
+       summary = IF(status IN ('open','in_review'), VALUES(summary), summary),
+       priority = IF(status IN ('open','in_review'), VALUES(priority), priority),
+       details = IF(status IN ('open','in_review'), VALUES(details), details),
+       updated_at = IF(status IN ('open','in_review'), NOW(), updated_at)`,
+    values
+  );
+}
+
+export async function createCashCloseCheckpoint(tenantId: string, input: CashCloseCheckpointInput, actor: Actor = {}) {
+  const businessDate = normalizeBusinessDate(input.businessDate);
+  const preview = await getCashClosePreview(tenantId, businessDate);
+  const countedBreakdown = normalizeBreakdown(input.countedBreakdown);
+  const countedFromBreakdown = breakdownTotal(countedBreakdown);
+  const countedPhysicalCash = Number((toNumber(input.countedAmount) || countedFromBreakdown || 0).toFixed(2));
+  if (countedPhysicalCash < 0) throw new Error("Counted cash cannot be negative.");
+
+  const variance = Number((countedPhysicalCash - preview.expectedPhysicalCash).toFixed(2));
+  const unresolvedItems = preview.unresolvedItems || [];
+  const status = Math.abs(variance) > 0.009 || unresolvedItems.length > 0 ? "review_needed" : "balanced";
+  const existingRows = await query<any>(
+    `SELECT id FROM cash_close_checkpoints WHERE tenant_id = ? AND business_date = ? LIMIT 1`,
+    [tenantId, businessDate]
+  );
+  const id = existingRows[0]?.id || makeId("ccc");
+  const checkpoint = {
+    id,
+    tenantId,
+    businessDate,
+    status,
+    expectedPhysicalCash: preview.expectedPhysicalCash,
+    countedPhysicalCash,
+    variance,
+    managerFloat: preview.managerFloat,
+    openRegisterCash: preview.openRegisterCash,
+    pendingCashUpCash: preview.pendingCashUpCash,
+    walletLiability: preview.walletLiability,
+    pendingPayouts: preview.pendingPayouts,
+    pettyCashToday: preview.pettyCashToday,
+    walletCashInToday: preview.walletCashInToday,
+    walletCashOutToday: preview.walletCashOutToday,
+    custodyPendingCount: preview.custodyPendingCount,
+    custodyVarianceToday: preview.custodyVarianceToday,
+    unresolvedItems,
+    countedBreakdown,
+    note: cleanString(input.note, 500),
+    closedBy: actor.staffId || null,
+    closedByName: actor.staffName || null,
+  };
+
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    if (existingRows[0]) {
+      await conn.query(
+        `UPDATE cash_close_checkpoints
+            SET status = ?,
+                expected_physical_cash = ?,
+                counted_physical_cash = ?,
+                variance = ?,
+                manager_float = ?,
+                open_register_cash = ?,
+                pending_cash_up_cash = ?,
+                wallet_liability = ?,
+                pending_payouts = ?,
+                petty_cash_today = ?,
+                wallet_cash_in_today = ?,
+                wallet_cash_out_today = ?,
+                custody_pending_count = ?,
+                custody_variance_today = ?,
+                unresolved_items = ?,
+                counted_breakdown = ?,
+                note = ?,
+                closed_by = ?,
+                closed_by_name = ?,
+                closed_at = NOW(),
+                updated_at = NOW()
+          WHERE tenant_id = ? AND id = ?`,
+        [
+          checkpoint.status,
+          checkpoint.expectedPhysicalCash,
+          checkpoint.countedPhysicalCash,
+          checkpoint.variance,
+          checkpoint.managerFloat,
+          checkpoint.openRegisterCash,
+          checkpoint.pendingCashUpCash,
+          checkpoint.walletLiability,
+          checkpoint.pendingPayouts,
+          checkpoint.pettyCashToday,
+          checkpoint.walletCashInToday,
+          checkpoint.walletCashOutToday,
+          checkpoint.custodyPendingCount,
+          checkpoint.custodyVarianceToday,
+          json(checkpoint.unresolvedItems, []),
+          json(checkpoint.countedBreakdown, {}),
+          checkpoint.note,
+          checkpoint.closedBy,
+          checkpoint.closedByName,
+          tenantId,
+          id,
+        ]
+      );
+    } else {
+      await conn.query(
+        `INSERT INTO cash_close_checkpoints (
+           id, tenant_id, business_date, status, expected_physical_cash, counted_physical_cash,
+           variance, manager_float, open_register_cash, pending_cash_up_cash, wallet_liability,
+           pending_payouts, petty_cash_today, wallet_cash_in_today, wallet_cash_out_today,
+           custody_pending_count, custody_variance_today, unresolved_items, counted_breakdown,
+           note, closed_by, closed_by_name, closed_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())`,
+        [
+          checkpoint.id,
+          checkpoint.tenantId,
+          checkpoint.businessDate,
+          checkpoint.status,
+          checkpoint.expectedPhysicalCash,
+          checkpoint.countedPhysicalCash,
+          checkpoint.variance,
+          checkpoint.managerFloat,
+          checkpoint.openRegisterCash,
+          checkpoint.pendingCashUpCash,
+          checkpoint.walletLiability,
+          checkpoint.pendingPayouts,
+          checkpoint.pettyCashToday,
+          checkpoint.walletCashInToday,
+          checkpoint.walletCashOutToday,
+          checkpoint.custodyPendingCount,
+          checkpoint.custodyVarianceToday,
+          json(checkpoint.unresolvedItems, []),
+          json(checkpoint.countedBreakdown, {}),
+          checkpoint.note,
+          checkpoint.closedBy,
+          checkpoint.closedByName,
+        ]
+      );
+    }
+
+    await syncCashCloseTask(conn, checkpoint, actor);
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: "cash_close.checkpoint",
+      entityType: "cash_close_checkpoint",
+      entityId: id,
+      staffId: actor.staffId || null,
+      staffName: actor.staffName || null,
+      source: "cash_management",
+      details: checkpoint,
+    });
+    await conn.commit();
+    return checkpoint;
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function getCashCloseCheckpoints(tenantId: string, limit = 20) {
+  const rows = await query<any>(
+    `SELECT id,
+            tenant_id AS tenantId,
+            business_date AS businessDate,
+            status,
+            expected_physical_cash AS expectedPhysicalCash,
+            counted_physical_cash AS countedPhysicalCash,
+            variance,
+            manager_float AS managerFloat,
+            open_register_cash AS openRegisterCash,
+            pending_cash_up_cash AS pendingCashUpCash,
+            wallet_liability AS walletLiability,
+            pending_payouts AS pendingPayouts,
+            petty_cash_today AS pettyCashToday,
+            wallet_cash_in_today AS walletCashInToday,
+            wallet_cash_out_today AS walletCashOutToday,
+            custody_pending_count AS custodyPendingCount,
+            custody_variance_today AS custodyVarianceToday,
+            unresolved_items AS unresolvedItems,
+            counted_breakdown AS countedBreakdown,
+            note,
+            closed_by AS closedBy,
+            closed_by_name AS closedByName,
+            closed_at AS closedAt,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+       FROM cash_close_checkpoints
+      WHERE tenant_id = ?
+      ORDER BY business_date DESC, updated_at DESC
+      LIMIT ?`,
+    [tenantId, Math.max(1, Math.min(100, Math.round(toNumber(limit) || 20)))]
+  );
+  return rows.map(rowToCashClose);
+}
+
+export async function exportCashCloseCheckpointCsv(tenantId: string, checkpointId: string) {
+  const rows = await query<any>(
+    `SELECT id,
+            tenant_id AS tenantId,
+            business_date AS businessDate,
+            status,
+            expected_physical_cash AS expectedPhysicalCash,
+            counted_physical_cash AS countedPhysicalCash,
+            variance,
+            manager_float AS managerFloat,
+            open_register_cash AS openRegisterCash,
+            pending_cash_up_cash AS pendingCashUpCash,
+            wallet_liability AS walletLiability,
+            pending_payouts AS pendingPayouts,
+            petty_cash_today AS pettyCashToday,
+            wallet_cash_in_today AS walletCashInToday,
+            wallet_cash_out_today AS walletCashOutToday,
+            custody_pending_count AS custodyPendingCount,
+            custody_variance_today AS custodyVarianceToday,
+            unresolved_items AS unresolvedItems,
+            counted_breakdown AS countedBreakdown,
+            note,
+            closed_by AS closedBy,
+            closed_by_name AS closedByName,
+            closed_at AS closedAt
+       FROM cash_close_checkpoints
+      WHERE tenant_id = ? AND id = ?
+      LIMIT 1`,
+    [tenantId, checkpointId]
+  );
+  const checkpoint = rowToCashClose(rows[0]);
+  if (!checkpoint) throw new Error("Cash close checkpoint not found.");
+  const header = ["field", "value"];
+  const body = Object.entries({
+    businessDate: checkpoint.businessDate,
+    status: checkpoint.status,
+    expectedPhysicalCash: checkpoint.expectedPhysicalCash,
+    countedPhysicalCash: checkpoint.countedPhysicalCash,
+    variance: checkpoint.variance,
+    managerFloat: checkpoint.managerFloat,
+    openRegisterCash: checkpoint.openRegisterCash,
+    pendingCashUpCash: checkpoint.pendingCashUpCash,
+    walletLiability: checkpoint.walletLiability,
+    pendingPayouts: checkpoint.pendingPayouts,
+    pettyCashToday: checkpoint.pettyCashToday,
+    walletCashInToday: checkpoint.walletCashInToday,
+    walletCashOutToday: checkpoint.walletCashOutToday,
+    custodyPendingCount: checkpoint.custodyPendingCount,
+    custodyVarianceToday: checkpoint.custodyVarianceToday,
+    unresolvedItems: JSON.stringify(checkpoint.unresolvedItems),
+    note: checkpoint.note || "",
+    closedByName: checkpoint.closedByName || "",
+    closedAt: checkpoint.closedAt || "",
+  });
+  const csv = [header, ...body].map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  return {
+    filename: `masepos-cash-close-${checkpoint.businessDate}.csv`,
+    mimeType: "text/csv",
+    csv,
     generatedAt: new Date().toISOString(),
   };
 }

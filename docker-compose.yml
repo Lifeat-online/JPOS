@@ -1,10 +1,10 @@
-name: jims-pos
+name: mase-pos
 
 services:
   # MariaDB Database
   mariadb:
     image: mariadb:11
-    container_name: jimmy-pos-db
+    container_name: masepos-db
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
       MYSQL_DATABASE: ${DB_DATABASE:-jimmy_pos}
@@ -26,7 +26,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
-    container_name: jimmy-pos-app
+    container_name: masepos-app
     depends_on:
       - mariadb
     environment:
@@ -64,7 +64,7 @@ services:
   # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
-    container_name: jimmy-pos-nginx
+    container_name: masepos-nginx
     ports:
       - "80:80"
       - "443:443"

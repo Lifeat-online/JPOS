@@ -11,6 +11,7 @@ interface CheckoutSuccessModalProps {
 
 export const CheckoutSuccessModal: React.FC<CheckoutSuccessModalProps> = ({ sale, config, onNewSale }) => {
   const currency = config?.business?.currency || 'R';
+  const isOfflineReceipt = Boolean((sale as any)?.offlineEventId);
 
   return (
     <motion.div
@@ -24,8 +25,12 @@ export const CheckoutSuccessModal: React.FC<CheckoutSuccessModalProps> = ({ sale
         <div className="w-20 h-20 bg-[#eff6ff] rounded-full flex items-center justify-center mb-6">
           <CheckCircle2 className="w-12 h-12 text-primary" />
         </div>
-        <h3 className="text-2xl font-black tracking-tight mb-2 text-slate-900 dark:text-white">Checkout Success</h3>
-        <p className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-2">Transaction has been recorded.</p>
+        <h3 className="text-2xl font-black tracking-tight mb-2 text-slate-900 dark:text-white">
+          {isOfflineReceipt ? 'Sale Saved Offline' : 'Checkout Success'}
+        </h3>
+        <p className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-2">
+          {isOfflineReceipt ? 'Transaction is saved on this device and will sync when online.' : 'Transaction has been recorded.'}
+        </p>
 
         {/* Sale summary */}
         {sale && (

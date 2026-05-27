@@ -103,6 +103,8 @@ export async function getManagerActionCenter(tenantId: string) {
     cashExceptions,
     saleExceptions,
     aiInsights,
+    stockTakeExceptions,
+    offlineSyncIssues,
   ] = await Promise.all([
     query<any>(
       `SELECT
@@ -233,6 +235,60 @@ export async function getManagerActionCenter(tenantId: string) {
        LIMIT 20`,
       [tenantId]
     ),
+    query<any>(
+      `SELECT
+         s.id,
+         s.name,
+         s.type,
+         s.status,
+         s.due_at AS dueAt,
+         s.updated_at AS updatedAt,
+         COUNT(i.id) AS itemCount,
+         SUM(CASE WHEN i.counted_quantity IS NOT NULL THEN 1 ELSE 0 END) AS countedCount,
+         SUM(CASE WHEN i.variance_quantity IS NOT NULL AND ABS(i.variance_quantity) > 0.0001 THEN 1 ELSE 0 END) AS varianceCount,
+         SUM(CASE WHEN i.variance_quantity IS NOT NULL THEN i.variance_quantity ELSE 0 END) AS netVariance
+       FROM stock_take_sessions s
+       LEFT JOIN stock_take_items i ON i.session_id = s.id AND i.tenant_id = s.tenant_id
+       WHERE s.tenant_id = ?
+         AND s.status IN ('active','submitted')
+         AND (
+           s.status = 'submitted'
+           OR (s.status = 'active' AND s.due_at IS NOT NULL AND s.due_at < NOW())
+         )
+       GROUP BY s.id, s.name, s.type, s.status, s.due_at, s.updated_at
+       HAVING
+         (s.status = 'active' AND s.due_at IS NOT NULL AND s.due_at < NOW())
+         OR SUM(CASE WHEN i.variance_quantity IS NOT NULL AND ABS(i.variance_quantity) > 0.0001 THEN 1 ELSE 0 END) > 0
+       ORDER BY
+         CASE WHEN s.status = 'submitted' THEN 0 ELSE 1 END,
+         s.updated_at DESC
+       LIMIT 20`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT
+         id,
+         action,
+         entity_type AS entityType,
+         entity_id AS entityId,
+         staff_id AS staffId,
+         staff_name AS staffName,
+         source,
+         details,
+         created_at AS createdAt
+       FROM audit_events
+       WHERE tenant_id = ?
+         AND action NOT LIKE 'manager_task.%'
+         AND (
+           action LIKE 'offline.%'
+           OR action LIKE 'sync.%'
+           OR action LIKE '%sync_failed%'
+           OR action LIKE '%sync.conflict%'
+         )
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [tenantId]
+    ),
   ]);
 
   const parsedAuditEvents = auditEvents.map(normalizeAuditEvent);
@@ -264,6 +320,19 @@ export async function getManagerActionCenter(tenantId: string) {
     confidence: toNumber(insight.confidence),
   }));
 
+  const parsedStockTakeExceptions = stockTakeExceptions.map((session) => ({
+    ...session,
+    itemCount: toNumber(session.itemCount),
+    countedCount: toNumber(session.countedCount),
+    varianceCount: toNumber(session.varianceCount),
+    netVariance: toNumber(session.netVariance),
+  }));
+
+  const parsedOfflineSyncIssues = offlineSyncIssues.map((event) => ({
+    ...event,
+    details: safeParse(event.details, {}),
+  }));
+
   const counts = {
     auditEvents: parsedAuditEvents.length,
     stockMovements: parsedStockMovements.length,
@@ -271,6 +340,8 @@ export async function getManagerActionCenter(tenantId: string) {
     cashExceptions: parsedCashExceptions.length,
     saleExceptions: parsedSaleExceptions.length,
     aiWarnings: parsedAiInsights.length,
+    stockTakeExceptions: parsedStockTakeExceptions.length,
+    offlineSyncIssues: parsedOfflineSyncIssues.length,
   };
 
   return {
@@ -279,13 +350,17 @@ export async function getManagerActionCenter(tenantId: string) {
       counts.lowStock +
       counts.cashExceptions +
       counts.saleExceptions +
-      counts.aiWarnings,
+      counts.aiWarnings +
+      counts.stockTakeExceptions +
+      counts.offlineSyncIssues,
     auditEvents: parsedAuditEvents,
     stockMovements: parsedStockMovements,
     lowStock: parsedLowStock,
     cashExceptions: parsedCashExceptions,
     saleExceptions: parsedSaleExceptions,
     aiInsights: parsedAiInsights,
+    stockTakeExceptions: parsedStockTakeExceptions,
+    offlineSyncIssues: parsedOfflineSyncIssues,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -584,7 +659,7 @@ export async function getManagerActivityCsv(tenantId: string, filters: ActivityF
     .join("\n");
 
   return {
-    filename: `jimmy-pos-activity-${new Date().toISOString().slice(0, 10)}.csv`,
+    filename: `masepos-activity-${new Date().toISOString().slice(0, 10)}.csv`,
     mimeType: "text/csv",
     count: history.items.length,
     csv,

@@ -1,6 +1,6 @@
 # Jimmy POS Master Todo
 
-Last updated: 2026-05-26
+Last updated: 2026-05-27
 
 This is the single source of truth for Jimmy POS implementation work. Add new roadmap items, blueprint gaps, security todo items, migration todo items, AI todo items, and restaurant-mode todo items here first. Older specialist planning documents are retained only as historical context or verification notes.
 
@@ -44,7 +44,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [x] Add repeatable stocktake smoke test that proves assign, mobile count, approve, stock ledger posting, final stock, and cleanup against a real MariaDB connection.
 - [x] Add manager-scheduled daily spot-check rules with assigned staff, product scope controls, one-run-per-day protection, and Action Center/manual run support.
 - [x] Add manager cash float view that shows all register floats, petty cash/payouts, wallet cash movements, manager-safe cash, and total cash in the system at any moment.
-- [ ] Extend the manager action center into remaining pre-action approval requests: AI recommendation tasks, failed/offline sync items, and scheduled stocktake exceptions.
+- [x] Extend the manager action center into remaining pre-action approval requests: AI recommendation tasks, failed/offline sync items, and scheduled stocktake exceptions.
 - [ ] Expand operator-friendly audit/stock visibility with deeper device attribution, richer customer/register labels, drill-through context, and PDF/accounting export packs.
 - [ ] Add guided stock receiving and deeper stock-count flows that explain valuation, variance reason taxonomy, count sheets, exports, and batch/location impact.
 - [ ] Add quick-access daily actions in the POS shell: reprint last receipt, cash drawer/no-sale, active register status, parked sales, open tabs/tables, and pending workstation items.
@@ -65,11 +65,15 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [x] Expand cash custody transfers between registers, staff, and the manager float/safe with counted denominations, expected-vs-counted variance, dual confirmation, manager approval, and audit trail.
 - [ ] Expand petty cash and payout tracking with receipt/photo attachment, cash-source selection, approver, and searchable/exportable reports.
 - [x] Add manager/admin wallet cash reconciliation path so wallet cash top-ups and wallet cash payouts update wallet balance, manager float, and audit ledger atomically.
-- [ ] Extend wallet cash reconciliation into cashier/customer self-service flows so customer wallet top-ups, withdrawals, refunds, and liabilities automatically update the relevant register/session, manager float, and audit ledger consistently.
-- [ ] Expand end-of-day cash reconciliation so register cash + manager float/safe + petty cash + pending drops/pickups + wallet cash movements produces a total expected physical cash checkpoint, with variances surfaced in Action Center.
+- [x] Extend wallet cash reconciliation into cashier/customer self-service flows so customer wallet top-ups, withdrawals, refunds, and liabilities automatically update the relevant register/session, manager float, and audit ledger consistently.
+- [x] Expand end-of-day cash reconciliation so register cash + manager float/safe + petty cash + pending drops/pickups + wallet cash movements produces a total expected physical cash checkpoint, with variances surfaced in Action Center.
 - [ ] Add stock movement ledger with reason codes for receiving, sale, refund, void, adjustment, count correction, transfer, wastage, and shrinkage.
+- [x] Add first Offline Solo frontend foundation: browser-local cash/card sale queue, local offline receipt number, cashier offline banner, wallet/account/PayFast offline blocking, and background replay when the browser returns online.
 - [ ] Add offline transaction queue with local sale capture, local receipt, sync/retry status, conflict handling, stock reconciliation, and clear cashier warnings.
 - [ ] Add offline sync/reconciliation UI for failed, pending, duplicated, and conflicted transactions.
+- [ ] Add offline sync event model that replays durable business facts only, with idempotency keys, register-prefixed local receipt numbers, batch upload, priority ordering, retry/backpressure, and summary notifications instead of stale live alert replay.
+- [ ] Block all wallet usage while offline, including customer/staff wallet spend, top-up, payout, refund-to-wallet, transfer, and adjustment flows; show an online-required warning and do not queue wallet balance mutations for later replay.
+- [ ] Add offline conflict policies for multi-device solo mode: allow sale capture, then surface negative stock, duplicate table/tab, receipt sequence, and duplicate customer/order issues as manager review tasks after sync.
 
 ## P1 - Payments and Checkout
 
@@ -77,6 +81,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [ ] Add QR/mobile-wallet rails: SnapScan, Yoco payment links/terminal flows, and generic QR payment capture.
 - [ ] Add BNPL providers: PayJustNow, Mobicred, PayFlex, provider reconciliation, settlement status, and return/refund handling.
 - [ ] Add card-terminal pairing so card payment is confirmed by an acquiring provider instead of only recorded manually.
+- [ ] Keep offline card tender capture available as an external-hardware payment record because authorization happens on the card terminal/provider side; store only tender type, amount, provider/device reference, optional authorization/reference code, and reconciliation status.
 - [ ] Extend split bills from tender splitting into restaurant split-by-seat, split-by-person, and split-by-table workflows.
 - [ ] Add payment provider reconciliation reports without exposing card PAN/CVV data.
 - [ ] Store provider tokens/payment references only for PayFast and future Yoco, SnapScan, and BNPL integrations.
@@ -242,7 +247,13 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - 2026-05-26: Added `manager_cash_movements` schema/startup healing, manager cash summary/movement APIs, automatic safe-drop/cash-added/petty-cash mirroring, reconciled cash-up transfer into manager float, Cash Management cash-in-system dashboard, and manager float movement form; passed `npx.cmd vitest run tests/backend/manager-cash.test.ts tests/backend/cash-management-schema.test.ts tests/frontend/permissions.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-26: Added atomic wallet cash reconciliation for manager/admin wallet top-ups and paid wallet payouts, including wallet balance update, manager float movement, audit event, and Wallet Admin cash-vs-balance correction control; passed `npx.cmd vitest run tests/backend/manager-cash.test.ts tests/backend/cash-management-schema.test.ts tests/frontend/permissions.test.ts tests/backend/validation.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-26: Added cash custody handover workflow with pending transfer records, counted denominations, expected-vs-counted variance, second-person confirmation, manager cash ledger posting, register expected-cash updates, audit events, and Cash Management pending-handover/EOD visibility; passed `npx.cmd vitest run tests/backend/manager-cash.test.ts tests/backend/cash-management-schema.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-05-26: Added end-of-day cash close checkpoints with physical cash counting, expected-vs-counted variance, wallet/petty-cash/handover snapshot totals, unresolved cash item warnings, Action Center `cash_variance` task sync, CSV export, and Cash Management close history; passed `npx.cmd vitest run tests/backend/manager-cash.test.ts tests/backend/cash-management-schema.test.ts`, `npx.cmd vitest run tests/backend/manager-cash.test.ts tests/backend/cash-management-schema.test.ts tests/frontend/permissions.test.ts tests/backend/validation.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-05-26: Extended wallet cash reconciliation into cashier/customer flows: POS customer wallet cash top-up/payout modal records register expected-cash movement plus neutral manager-cash activity/audit, wallet checkout deductions moved into sale transactions, customer/staff payout requests now reserve wallet balance atomically, and portal/profile balances refresh immediately.
+- 2026-05-26: Passed wallet reconciliation verification with `npx.cmd vitest run tests/backend/manager-cash.test.ts tests/backend/mariadb-crud.test.ts tests/backend/cash-management-schema.test.ts tests/backend/validation.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; browser smoke confirmed app/demo/register flow, while the customer wallet modal visual path was limited by demo customer selection.
+- 2026-05-26: Extended Action Center pre-action work so AI warnings remain manager tasks, submitted/overdue stocktakes create `stock_variance` tasks, stocktake approvals execute through the stocktake ledger, and future offline/sync failure audit events create `offline_sync` tasks; Action Center now shows stocktake and sync issue counts/panels.
+- 2026-05-26: Passed Action Center pre-action verification with `npx.cmd vitest run tests/backend/manager-tasks.test.ts tests/backend/action-center.test.ts tests/backend/stock-take.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; local server returned HTTP 200 on port 8087, but in-app browser automation timed out before visual interaction.
 - 2026-05-26: Passed `npm.cmd run lint` and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-26: Broader `npx.cmd vitest run tests/backend` ran 12 backend files successfully but failed `tests/backend/db-tables.test.ts` because the local test database login was denied for `root`.
 - 2026-05-26: Consolidated active roadmap/todo items from the former implementation roadmap, AI Inventory Copilot plan, AI Manager Copilot todo, MariaDB/Nginx migration plan, migration status notes, security checklist, security implementation summary, and POS feature blueprint audit into this master todo.
 - 2026-05-26: Confirmed current code references JWT-based `useAuth`, bearer-token API helpers, `/api/auth/login`, password-hash schema columns, and refresh-token handlers, so old migration docs about frontend auth migration are historical rather than active.
+- 2026-05-27: Added first Offline Solo frontend foundation with local sale queue storage, offline cashier banner, wallet/account/PayFast offline blocking, external card/cash queueing, offline receipt messaging, split-payment offline guardrails, and automatic replay when the browser reports online again; passed `npx.cmd vitest run tests/frontend/offline-sales.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.

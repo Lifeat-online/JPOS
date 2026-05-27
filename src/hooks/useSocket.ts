@@ -38,7 +38,8 @@ export function useSocket({ user, tenantId, enabled = true, workstationId, table
 
   // Get access token
   const getAccessToken = useCallback(() => {
-    return localStorage.getItem('jpos_access_token');
+    // Migration: try new key first, fall back to old key
+    return localStorage.getItem('masepos_access_token') || localStorage.getItem('jpos_access_token');
   }, []);
 
   // Connect to Socket.IO when user is authenticated

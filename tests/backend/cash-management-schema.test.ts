@@ -45,4 +45,13 @@ describe('cash management schema', () => {
     expect(schema).toContain('confirmed_by');
     expect(schema).toContain('idx_cash_custody_tenant_status');
   });
+
+  it('defines end-of-day cash close checkpoints', () => {
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS cash_close_checkpoints');
+    expect(schema).toContain('business_date');
+    expect(schema).toContain('expected_physical_cash');
+    expect(schema).toContain('counted_physical_cash');
+    expect(schema).toContain('wallet_cash_in_today');
+    expect(schema).toContain('uniq_cash_close_business_date');
+  });
 });

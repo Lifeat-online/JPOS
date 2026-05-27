@@ -83,7 +83,7 @@ export function LoginModal({ isOpen, onClose, onSubmit, error, isLoading }: Logi
                   <Store className="w-6 h-6 text-white" />
                 </div>
                 <h2 className="text-2xl font-black tracking-tight">Admin Login</h2>
-                <p className="text-blue-100 text-sm mt-1">Sign in to your Jimmy's POS account</p>
+                <p className="text-blue-100 text-sm mt-1">Sign in to your MasePOS account</p>
               </div>
 
               {/* Form */}

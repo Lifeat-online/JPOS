@@ -1,4 +1,4 @@
-# Multi-stage build for Jimmy's POS
+# Multi-stage build for MasePOS
 # Stage 1: Build frontend and backend
 FROM node:23-alpine AS builder
 

@@ -22,7 +22,7 @@ type PushSettings = {
   enabled: boolean;
 };
 
-const DEFAULT_SUBJECT = process.env.WEB_PUSH_SUBJECT || process.env.VAPID_SUBJECT || "mailto:dev@jimmyspos.local";
+const DEFAULT_SUBJECT = process.env.WEB_PUSH_SUBJECT || process.env.VAPID_SUBJECT || "mailto:dev@masepos.local";
 
 function bool(value: unknown) {
   return value === true || value === 1 || value === "1";

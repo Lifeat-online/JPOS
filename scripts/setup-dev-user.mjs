@@ -14,7 +14,7 @@ const FIREBASE_UID = 'Rkfh8ZhwKMXQJurorDSeqf86qOS2';
 const EMAIL = 'jameskoen78@gmail.com';
 const NAME = 'James Koen';
 const TENANT_ID = 'dev-tenant-001';
-const TENANT_NAME = 'Jimmy\'s POS Dev';
+const TENANT_NAME = 'MasePOS Dev';
 
 async function setup() {
   try {

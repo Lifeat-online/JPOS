@@ -147,12 +147,19 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
       const detail = (event as CustomEvent<Partial<CompanionMenuState>>).detail || {};
       setCompanionState(prev => ({ ...prev, ...detail }));
     };
+    window.addEventListener('masepos:companion-state', handler);
     window.addEventListener('jpos:companion-state', handler);
-    return () => window.removeEventListener('jpos:companion-state', handler);
+    return () => {
+      window.removeEventListener('masepos:companion-state', handler);
+      window.removeEventListener('jpos:companion-state', handler);
+    };
   }, []);
 
   useEffect(() => {
-    if (open) window.dispatchEvent(new CustomEvent('jpos:companion-state-request'));
+    if (open) {
+      window.dispatchEvent(new CustomEvent('masepos:companion-state-request'));
+      window.dispatchEvent(new CustomEvent('jpos:companion-state-request'));
+    }
   }, [open]);
 
   const changeCompanionMode = (mode: CompanionMenuMode) => {
@@ -161,6 +168,7 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
       companionMode: mode,
       assignedCompanionMode: mode === 'terminal' ? null : prev.assignedCompanionMode,
     }));
+    window.dispatchEvent(new CustomEvent('masepos:companion-mode-change', { detail: { mode } }));
     window.dispatchEvent(new CustomEvent('jpos:companion-mode-change', { detail: { mode } }));
   };
   const markThisDeviceAsTerminal = () => {
@@ -170,6 +178,7 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
       assignedCompanionMode: null,
       activeTerminalDeviceId: prev.companionDeviceId,
     }));
+    window.dispatchEvent(new CustomEvent('masepos:companion-mark-terminal'));
     window.dispatchEvent(new CustomEvent('jpos:companion-mark-terminal'));
   };
   const isThisActiveTerminal = Boolean(
@@ -304,7 +313,10 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
             {companionState.assignedCompanionMode === 'wireless_scanner' && (
               <button
                 type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('jpos:companion-open-scanner'))}
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('masepos:companion-open-scanner'));
+                  window.dispatchEvent(new CustomEvent('jpos:companion-open-scanner'));
+                }}
                 className="mt-3 w-full h-11 rounded-xl bg-primary text-white text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95"
               >
                 <ScanLine className="w-4 h-4" />
@@ -579,7 +591,7 @@ export default function App() {
     products, customers, staff, sales, config, setConfig,
     workstations, activeSession, currentUserStaff, currentUserRole,
     tableSections, restaurantTables,
-    refreshSales, refreshProducts,
+    refreshSales, refreshProducts, refreshCustomers, refreshStaff,
     tenantLoading, configLoading, isStaffLoading,
   } = useAppData(authLoading ? null : user);
 
@@ -616,6 +628,9 @@ export default function App() {
   const showCompanionTools = activeAccountDeviceCount > 1;
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('masepos:account-terminal-presence', {
+      detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
+    }));
     window.dispatchEvent(new CustomEvent('jpos:account-terminal-presence', {
       detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
     }));
@@ -623,12 +638,19 @@ export default function App() {
 
   useEffect(() => {
     const resendPresence = () => {
+      window.dispatchEvent(new CustomEvent('masepos:companion-state', {
+        detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
+      }));
       window.dispatchEvent(new CustomEvent('jpos:companion-state', {
         detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
       }));
     };
+    window.addEventListener('masepos:account-terminal-presence-request', resendPresence);
     window.addEventListener('jpos:account-terminal-presence-request', resendPresence);
-    return () => window.removeEventListener('jpos:account-terminal-presence-request', resendPresence);
+    return () => {
+      window.removeEventListener('masepos:account-terminal-presence-request', resendPresence);
+      window.removeEventListener('jpos:account-terminal-presence-request', resendPresence);
+    };
   }, [activeAccountTerminalDeviceId]);
 
   useEffect(() => {
@@ -638,6 +660,9 @@ export default function App() {
     const onPresence = (payload: any) => {
       setActiveAccountDeviceCount(Number(payload?.activeDeviceCount || 1));
       setActiveAccountTerminalDeviceId(payload?.activeTerminalDeviceId || null);
+      window.dispatchEvent(new CustomEvent('masepos:companion-state', {
+        detail: { activeTerminalDeviceId: payload?.activeTerminalDeviceId || null },
+      }));
       window.dispatchEvent(new CustomEvent('jpos:companion-state', {
         detail: { activeTerminalDeviceId: payload?.activeTerminalDeviceId || null },
       }));
@@ -693,10 +718,10 @@ export default function App() {
 
     const onServiceWorkerMessage = (event: MessageEvent) => {
       const message = event.data || {};
-      if (message.type === 'jpos-push-notification') {
+      if (message.type === 'masepos-push-notification' || message.type === 'jpos-push-notification') {
         playRealtimeAttention([90, 45, 90]);
       }
-      if (message.type === 'jpos-notification-open' && message.url) {
+      if ((message.type === 'masepos-notification-open' || message.type === 'jpos-notification-open') && message.url) {
         const target = String(message.url || '/');
         navigate(target.startsWith('/') ? target : `/${target}`);
       }
@@ -723,7 +748,7 @@ export default function App() {
     usePosStore.getState().setWorkstations(workstations);
   }, [workstations]);
 
-  const checkout = useCheckout({ user, tenantId, currentUserStaff, customers: posCustomerProfiles, activeSession: effectiveActiveSession, config, refreshSales });
+  const checkout = useCheckout({ user, tenantId, currentUserStaff, customers: posCustomerProfiles, activeSession: effectiveActiveSession, config, refreshSales, refreshCustomers });
 
   // Messaging
   const messaging = useMessaging({ user, tenantId, currentUserStaff, staff });
@@ -1029,6 +1054,7 @@ export default function App() {
           tenantId={clientPortal.tenantId}
           sales={clientPortal.sales}
           payoutRequests={clientPortal.payoutRequests}
+          onRefresh={clientPortal.refresh}
           isDarkMode={isDarkMode}
           toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           onLogout={handleLogout}
@@ -1106,7 +1132,7 @@ export default function App() {
       {/* Header */}
       <header className="h-14 lg:h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700/60 px-4 lg:px-6 flex items-center justify-between flex-shrink-0 z-40 sticky top-0">
         <div className="flex items-center gap-4 lg:gap-8">
-          <div className="font-extrabold text-lg lg:text-xl tracking-tighter text-primary shrink-0">Jimmy's POS</div>
+          <div className="font-extrabold text-lg lg:text-xl tracking-tighter text-primary shrink-0">MasePOS</div>
           <DesktopNav
             primaryNav={primaryNav}
             secondaryNav={secondaryNav}
@@ -1217,9 +1243,11 @@ export default function App() {
             onClearPointsDiscount={checkout.clearPointsDiscount}
             restaurantTables={restaurantTables}
             onSalesUpdated={refreshSales}
+            onCustomersUpdated={refreshCustomers}
             lastReceiptSale={lastReceiptSale}
             onPrintLastReceipt={() => printReceipt(lastReceiptSale)}
             suppressBillPrint={Boolean(receiptToPrint)}
+            offlineStatus={checkout.offlineStatus}
           />
         )}
         {view === 'history' && (
@@ -1235,6 +1263,7 @@ export default function App() {
             filterCustomerId={filterCustomerId}
             setFilterCustomerId={setFilterCustomerId}
             onSalesUpdated={refreshSales}
+            onCustomersUpdated={refreshCustomers}
           />
         )}
         {view === 'cash' && <CashManagementView currentUserStaff={currentUserStaff} sales={sales} />}
@@ -1287,7 +1316,7 @@ export default function App() {
         {view === 'wallets' && (
           <WalletAdminView staff={staff} customers={customers} currentUserStaff={currentUserStaff} />
         )}
-        {view === 'profile' && <StaffProfileView currentUserStaff={currentUserStaff} />}
+        {view === 'profile' && <StaffProfileView currentUserStaff={currentUserStaff} onStaffUpdated={refreshStaff} />}
         {view === 'settings' && <SettingsView config={config} setConfig={setConfig} />}
         {view === 'packages' && <PackagesView />}
         {view === 'tables' && (
@@ -1411,7 +1440,7 @@ export default function App() {
               <div className="space-y-4 mb-6">
                 <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800">
                   <p className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-1">Chrome / Edge (Desktop)</p>
-                  <p className="text-xs text-blue-600 dark:text-blue-400">Click the install icon (⊕) in the address bar, or go to Menu → Install Jimmy's POS</p>
+                  <p className="text-xs text-blue-600 dark:text-blue-400">Click the install icon (⊕) in the address bar, or go to Menu → Install MasePOS</p>
                 </div>
                 <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700">
                   <p className="text-sm font-bold text-slate-800 dark:text-white mb-1">Safari (iPhone / iPad)</p>
@@ -1454,6 +1483,7 @@ export default function App() {
             customerWalletBalance={customers.find(c => c.id === selectedCustomerId)?.walletBalance || 0}
             customerAccountEnabled={Boolean(customers.find(c => c.id === selectedCustomerId)?.accountEnabled)}
             customerAccountRemaining={Math.max(0, Number(customers.find(c => c.id === selectedCustomerId)?.accountLimit || 0) - Number(customers.find(c => c.id === selectedCustomerId)?.accountBalance || 0))}
+            offlineMode={checkout.offlineStatus.isOffline}
             onConfirm={(payments) => checkout.handleCheckout('split', payments)}
             onClose={() => checkout.setSplitPaymentModal(false)}
           />

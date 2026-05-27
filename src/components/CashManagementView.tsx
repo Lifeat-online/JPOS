@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CashCustodyTransfer, CashCustodyTransferPartyType, CashSession, CashTransaction, ManagerCashMovementType, ManagerCashSummary, Sale, Staff } from '../types';
-import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank, ArrowLeftRight } from 'lucide-react';
+import { CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, CashSession, CashTransaction, ManagerCashMovementType, ManagerCashSummary, Sale, Staff } from '../types';
+import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank, ArrowLeftRight, Download } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
-import { apiGet, apiPost, apiPut, cancelCashCustodyTransfer, confirmCashCustodyTransfer, createCashCustodyTransfer, getCashCustodyTransfers, getManagerCashSummary, recordCashMovement, recordManagerCashMovement } from '../api';
+import { apiGet, apiPost, apiPut, cancelCashCustodyTransfer, confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, exportCashCloseCheckpointCsv, getCashCloseCheckpoints, getCashClosePreview, getCashCustodyTransfers, getManagerCashSummary, recordCashMovement, recordManagerCashMovement } from '../api';
 import { PrinterReadinessPanel } from './PrinterReadinessPanel';
 import { usePrinterReadiness } from '../hooks/usePrinterReadiness';
 
@@ -139,6 +139,11 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
   const [transferCountedBreakdown, setTransferCountedBreakdown] = useState<Record<string, number>>({});
   const [transferNote, setTransferNote] = useState('');
   const [transferMessage, setTransferMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [cashClosePreview, setCashClosePreview] = useState<CashClosePreview | null>(null);
+  const [cashCloseHistory, setCashCloseHistory] = useState<CashCloseCheckpoint[]>([]);
+  const [cashCloseBreakdown, setCashCloseBreakdown] = useState<Record<string, number>>({});
+  const [cashCloseNote, setCashCloseNote] = useState('');
+  const [cashCloseMessage, setCashCloseMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
 
   const toNumber = (value: unknown): number => {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -157,6 +162,9 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
   const transferCountedAmount = Object.entries(transferCountedBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
   const transferExpectedNumber = toNumber(transferExpectedAmount);
   const transferVariancePreview = Number((transferCountedAmount - transferExpectedNumber).toFixed(2));
+  const cashCloseCountedAmount = Object.entries(cashCloseBreakdown).reduce((acc, [val, qty]) => acc + (parseFloat(val) * Number(qty)), 0);
+  const cashCloseExpectedAmount = toNumber(cashClosePreview?.expectedPhysicalCash);
+  const cashCloseVariancePreview = Number((cashCloseCountedAmount - cashCloseExpectedAmount).toFixed(2));
   const today = new Date().toDateString();
   const isToday = (date: any) => {
     if (!date) return false;
@@ -273,9 +281,17 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
         ]);
         setManagerCash(cashSummary);
         setCustodyTransfers(transfers);
+        const [closePreview, closeHistory] = await Promise.all([
+          getCashClosePreview(tenantId).catch(() => null),
+          getCashCloseCheckpoints(tenantId, 5).catch(() => []),
+        ]);
+        setCashClosePreview(closePreview);
+        setCashCloseHistory(closeHistory);
       } else {
         setManagerCash(null);
         setCustodyTransfers([]);
+        setCashClosePreview(null);
+        setCashCloseHistory([]);
       }
       usePosStore.getState().setActiveSession(normalized.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id) || null);
     } catch (err) {
@@ -530,6 +546,60 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
       setTransferMessage({ tone: 'error', text: err?.message || 'Could not update this cash handover.' });
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const createEndOfDayCheckpoint = async () => {
+    if (!tenantId || !canManageCash || !cashClosePreview) return;
+    setCashCloseMessage(null);
+    if (cashCloseExpectedAmount > 0 && cashCloseCountedAmount <= 0) {
+      setCashCloseMessage({ tone: 'error', text: 'Count the total physical cash before creating the EOD checkpoint.' });
+      return;
+    }
+    if (cashClosePreview.unresolvedItems.length > 0 && cashCloseNote.trim().length < 3) {
+      setCashCloseMessage({ tone: 'error', text: 'Add a short note for unresolved registers, cash-ups, or handovers.' });
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const checkpoint = await createCashCloseCheckpoint(tenantId, {
+        businessDate: cashClosePreview.businessDate,
+        countedAmount: Number(cashCloseCountedAmount.toFixed(2)),
+        countedBreakdown: cashCloseBreakdown,
+        note: cashCloseNote.trim() || null,
+      });
+      setCashCloseMessage({
+        tone: checkpoint.status === 'balanced' ? 'success' : 'error',
+        text: checkpoint.status === 'balanced'
+          ? 'EOD cash checkpoint saved and balanced.'
+          : 'EOD checkpoint saved. Variance or unresolved cash items were sent to Action Center.',
+      });
+      setCashCloseBreakdown({});
+      setCashCloseNote('');
+      await fetchSessions();
+    } catch (err: any) {
+      setCashCloseMessage({ tone: 'error', text: err?.message || 'Could not save the EOD cash checkpoint.' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const downloadCashCloseCsv = async (checkpoint: CashCloseCheckpoint) => {
+    if (!tenantId) return;
+    try {
+      const result = await exportCashCloseCheckpointCsv(tenantId, checkpoint.id);
+      const blob = new Blob([result.csv], { type: result.mimeType || 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.filename || `cash-close-${checkpoint.businessDate}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setCashCloseMessage({ tone: 'error', text: err?.message || 'Could not export the cash close checkpoint.' });
     }
   };
 
@@ -944,6 +1014,136 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
           </div>
 
           <PrinterReadinessPanel tenantId={tenantId} readiness={printerReadiness} />
+
+          {canManageCash && cashClosePreview && (
+            <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4 lg:p-5 space-y-5">
+              <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
+                <div>
+                  <h4 className="font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-primary" />
+                    Cash close checkpoint
+                  </h4>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Count total physical cash and save the end-of-day cash position for owner/accountant review.</p>
+                </div>
+                <div className="rounded-xl bg-slate-950 text-white px-4 py-3 min-w-[210px]">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Expected physical cash</p>
+                  <p className="mt-1 text-2xl font-black">R{cashClosePreview.expectedPhysicalCash.toFixed(2)}</p>
+                </div>
+              </div>
+
+              {cashCloseMessage && (
+                <div className={`rounded-xl border p-3 text-sm font-bold ${
+                  cashCloseMessage.tone === 'success'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-rose-200 bg-rose-50 text-rose-700'
+                }`}>{cashCloseMessage.text}</div>
+              )}
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ['Manager float', cashClosePreview.managerFloat],
+                  ['Open registers', cashClosePreview.openRegisterCash],
+                  ['Pending cash-ups', cashClosePreview.pendingCashUpCash],
+                  ['Wallet liability', cashClosePreview.walletLiability],
+                  ['Petty cash today', cashClosePreview.pettyCashToday],
+                  ['Wallet cash in', cashClosePreview.walletCashInToday],
+                  ['Wallet cash out', cashClosePreview.walletCashOutToday],
+                  ['Handover variance', cashClosePreview.custodyVarianceToday],
+                ].map(([label, value]) => (
+                  <div key={label as string} className="rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                    <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">R{Number(value || 0).toFixed(2)}</p>
+                  </div>
+                ))}
+              </div>
+
+              {cashClosePreview.unresolvedItems.length > 0 && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10 p-4">
+                  <p className="text-sm font-black text-amber-800 dark:text-amber-300">Unresolved before close</p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {cashClosePreview.unresolvedItems.slice(0, 6).map(item => (
+                      <div key={`${item.type}-${item.id}`} className="rounded-xl bg-white/70 dark:bg-slate-950/40 border border-amber-100 dark:border-amber-900/30 p-3">
+                        <p className="text-xs font-black text-amber-900 dark:text-amber-200">{item.label}</p>
+                        <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-700/70 dark:text-amber-300/70">
+                          {item.amount !== undefined ? `Amount R${Number(item.amount).toFixed(2)}` : item.type.replace(/_/g, ' ')}
+                          {item.variance !== undefined ? ` - Variance R${Number(item.variance).toFixed(2)}` : ''}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+                <div className="space-y-4">
+                  <DenominationCounter breakdown={cashCloseBreakdown} setBreakdown={setCashCloseBreakdown} total={cashCloseCountedAmount} />
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      ['Expected', cashCloseExpectedAmount],
+                      ['Counted', cashCloseCountedAmount],
+                      ['Variance', cashCloseVariancePreview],
+                    ].map(([label, value]) => (
+                      <div key={label as string} className="rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                        <p className={`mt-1 text-sm font-black ${label === 'Variance' && Number(value) !== 0 ? 'text-orange-600' : 'text-slate-900 dark:text-white'}`}>R{Number(value || 0).toFixed(2)}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <textarea
+                    value={cashCloseNote}
+                    onChange={e => setCashCloseNote(e.target.value)}
+                    rows={3}
+                    placeholder="Manager note for variance, unresolved handovers, or final close."
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-semibold"
+                  />
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={createEndOfDayCheckpoint}
+                    className="w-full h-12 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-all"
+                  >
+                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                    Save EOD checkpoint
+                  </button>
+                </div>
+
+                <div className="rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
+                  <div className="px-4 py-3 bg-slate-50 dark:bg-slate-950/50 text-[10px] font-black uppercase tracking-widest text-slate-500">Recent cash close records</div>
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[520px] overflow-y-auto custom-scrollbar">
+                    {cashCloseHistory.length === 0 ? (
+                      <div className="p-6 text-sm font-bold text-slate-500">No EOD cash checkpoints saved yet.</div>
+                    ) : cashCloseHistory.map(close => (
+                      <div key={close.id} className="p-4 flex items-start justify-between gap-4">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-black text-slate-900 dark:text-white">{close.businessDate}</p>
+                            <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-widest ${close.status === 'balanced' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {close.status === 'balanced' ? 'Balanced' : 'Review needed'}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">
+                            Expected R{close.expectedPhysicalCash.toFixed(2)} - Counted R{close.countedPhysicalCash.toFixed(2)}
+                          </p>
+                          {close.closedByName && <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">Closed by {close.closedByName}</p>}
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-black ${close.variance === 0 ? 'text-emerald-600' : 'text-orange-600'}`}>R{close.variance.toFixed(2)}</p>
+                          <button
+                            type="button"
+                            onClick={() => downloadCashCloseCsv(close)}
+                            className="mt-2 h-9 px-3 rounded-lg border border-slate-200 dark:border-slate-700 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 flex items-center gap-1"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            CSV
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-5">

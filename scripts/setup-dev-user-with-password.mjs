@@ -30,7 +30,7 @@ const EMAIL       = 'jameskoen78@gmail.com';
 const NAME        = 'James Koen';
 const DEV_PASSWORD = 'admin123';        // ← change this after first login
 const TENANT_ID   = 'dev-tenant-001';
-const TENANT_NAME = "Jimmy's POS Dev";
+const TENANT_NAME = "MasePOS Dev";
 const STAFF_ID    = 'dev-staff-001';
 
 async function run() {

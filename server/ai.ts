@@ -158,8 +158,8 @@ function openRouterAuthGuidance(message: string, hasKey: boolean) {
   return [
     message,
     hasKey
-      ? "JPOS had an OpenRouter key for this request, but OpenRouter still rejected the Authorization header. Re-save the key as the raw sk-or-... token only, without the word Bearer, quotes, or extra spaces."
-      : "JPOS did not have an OpenRouter key for this request. Paste an OpenRouter sk-or-... key in AI Settings, then Save or keep it in the API key box while pressing Send test.",
+      ? "MasePOS had an OpenRouter key for this request, but OpenRouter still rejected the Authorization header. Re-save the key as the raw sk-or-... token only, without the word Bearer, quotes, or extra spaces."
+      : "MasePOS did not have an OpenRouter key for this request. Paste an OpenRouter sk-or-... key in AI Settings, then Save or keep it in the API key box while pressing Send test.",
     "Also make sure the selected provider is OpenRouter and the model is the full OpenRouter model id, for example openai/gpt-oss-120b rather than a short alias like oss120b.",
   ].join(" ");
 }
@@ -884,7 +884,7 @@ async function getVertexBearerToken(settings: Partial<AiSettings>) {
 
 function buildInvoiceExtractionPayload(input: AiInvoiceExtractionInput) {
   return {
-    task: "Extract supplier invoice data for JPOS inventory automation. Return compact valid JSON only.",
+    task: "Extract supplier invoice data for MasePOS inventory automation. Return compact valid JSON only.",
     requiredShape: {
       vendorName: "string",
       invoiceNumber: "string",
@@ -974,7 +974,7 @@ async function callOpenAiWithFiles(settings: AiSettings, payload: any, images: s
     body: JSON.stringify({
       model: settings.model,
       input: [
-        { role: "system", content: "You are an invoice extraction engine for JPOS. Return strict JSON only." },
+        { role: "system", content: "You are an invoice extraction engine for MasePOS. Return strict JSON only." },
         { role: "user", content },
       ],
       text: { format: { type: "json_object" } },
@@ -1060,12 +1060,12 @@ async function callOpenRouterWithImages(settings: AiSettings, payload: any, imag
       "Content-Type": "application/json",
       Authorization: `Bearer ${key}`,
       "HTTP-Referer": process.env.APP_URL || "http://localhost",
-      "X-Title": "JPOS AI Manager Copilot",
+      "X-Title": "MasePOS AI Manager Copilot",
     },
     body: JSON.stringify({
       model: normalizeOpenRouterModel(settings.model),
       messages: [
-        { role: "system", content: "You are an invoice extraction engine for JPOS. Return strict JSON only." },
+        { role: "system", content: "You are an invoice extraction engine for MasePOS. Return strict JSON only." },
         { role: "user", content },
       ],
       response_format: { type: "json_object" },
@@ -1247,7 +1247,7 @@ async function callOpenAiText(settings: AiSettings, message: string, images: str
     body: JSON.stringify({
       model: settings.model,
       input: [
-        { role: "system", content: "You are a provider connectivity tester for JPOS. Reply briefly in plain text." },
+        { role: "system", content: "You are a provider connectivity tester for MasePOS. Reply briefly in plain text." },
         { role: "user", content },
       ],
     }),
@@ -1271,7 +1271,7 @@ async function callOpenAi(settings: AiSettings, payload: any): Promise<string> {
       input: [
         {
           role: "system",
-          content: "You are JPOS Manager Copilot. You return compact valid JSON only. Never recommend punitive action. Never invent business metrics.",
+          content: "You are MasePOS Manager Copilot. You return compact valid JSON only. Never recommend punitive action. Never invent business metrics.",
         },
         {
           role: "user",
@@ -1295,7 +1295,7 @@ async function callOllamaText(settings: AiSettings, message: string, images: str
       model: settings.model || process.env.OLLAMA_MODEL || "llama3.1",
       stream: false,
       messages: [
-        { role: "system", content: "You are a provider connectivity tester for JPOS. Reply briefly in plain text." },
+        { role: "system", content: "You are a provider connectivity tester for MasePOS. Reply briefly in plain text." },
         { role: "user", content: message, ...(images.length ? { images: images.map((image) => dataUrlPayload(image).base64).filter(Boolean) } : {}) },
       ],
     }),
@@ -1315,7 +1315,7 @@ async function callOllama(settings: AiSettings, payload: any): Promise<string> {
       stream: false,
       format: "json",
       messages: [
-        { role: "system", content: "You are JPOS Manager Copilot. Return compact valid JSON only. Never invent business metrics." },
+        { role: "system", content: "You are MasePOS Manager Copilot. Return compact valid JSON only. Never invent business metrics." },
         { role: "user", content: providerPrompt(payload) },
       ],
     }),
@@ -1484,12 +1484,12 @@ async function callOpenRouterText(settings: AiSettings, message: string, images:
       "Content-Type": "application/json",
       Authorization: `Bearer ${key}`,
       "HTTP-Referer": process.env.APP_URL || "http://localhost",
-      "X-Title": "JPOS AI Manager Copilot",
+      "X-Title": "MasePOS AI Manager Copilot",
     },
     body: JSON.stringify({
       model: normalizeOpenRouterModel(settings.model),
       messages: [
-        { role: "system", content: "You are a provider connectivity tester for JPOS. Reply briefly in plain text." },
+        { role: "system", content: "You are a provider connectivity tester for MasePOS. Reply briefly in plain text." },
         { role: "user", content },
       ],
     }),
@@ -1511,12 +1511,12 @@ async function callOpenRouter(settings: AiSettings, payload: any): Promise<strin
       "Content-Type": "application/json",
       Authorization: `Bearer ${key}`,
       "HTTP-Referer": process.env.APP_URL || "http://localhost",
-      "X-Title": "JPOS AI Manager Copilot",
+      "X-Title": "MasePOS AI Manager Copilot",
     },
     body: JSON.stringify({
       model: normalizeOpenRouterModel(settings.model),
       messages: [
-        { role: "system", content: "You are JPOS Manager Copilot. Return compact valid JSON only. Never invent business metrics." },
+        { role: "system", content: "You are MasePOS Manager Copilot. Return compact valid JSON only. Never invent business metrics." },
         { role: "user", content: providerPrompt(payload) },
       ],
       response_format: { type: "json_object" },

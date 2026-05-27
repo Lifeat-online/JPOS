@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale } from '../../server/mariadb-crud.js';
+import { createCustomerPayoutRequest, createPayoutRequest, createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale } from '../../server/mariadb-crud.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
@@ -186,5 +186,109 @@ describe('mariadb-crud', () => {
       expect.stringContaining('INSERT INTO audit_events'),
       expect.arrayContaining(['tenant_1', 'sale.created', 'sale'])
     );
+  });
+
+  it('deducts customer wallet inside completed wallet checkout transactions', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('SELECT id, name, wallet_balance')) {
+          return Promise.resolve([[{ id: 'cust_1', name: 'Lebo', walletBalance: '100.00' }]]);
+        }
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await createSale('tenant_1', {
+      customerId: 'cust_1',
+      staffId: 'staff_1',
+      status: 'completed',
+      total: 40,
+      subtotal: 40,
+      paymentMethod: 'wallet',
+      items: [],
+      payments: [{ method: 'wallet', amount: 40 } as any],
+    });
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE customers'),
+      [60, 'tenant_1', 'cust_1']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'customer_wallet.sale_payment', 'customer_wallet', 'cust_1'])
+    );
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('reserves staff wallet balance when creating payout requests', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('FROM staff')) {
+          return Promise.resolve([[{ id: 'staff_1', name: 'Jess', walletBalance: '90.00' }]]);
+        }
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    const request = await createPayoutRequest('tenant_1', {
+      staffId: 'staff_1',
+      staffName: 'Jess',
+      amount: 35,
+      status: 'pending',
+    });
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE staff'),
+      [55, 'tenant_1', 'staff_1']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO payout_requests'),
+      expect.arrayContaining(['tenant_1', 'staff_1', 'Jess', 35, 'pending'])
+    );
+    expect(request).toMatchObject({ staffId: 'staff_1', amount: 35, status: 'pending' });
+  });
+
+  it('reserves customer wallet balance when creating customer payout requests', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('FROM customers')) {
+          return Promise.resolve([[{ id: 'cust_1', name: 'Lebo', email: 'lebo@example.test', walletBalance: '70.00' }]]);
+        }
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    const request = await createCustomerPayoutRequest('tenant_1', {
+      customerId: 'cust_1',
+      customerName: 'Lebo',
+      customerEmail: 'lebo@example.test',
+      amount: 30,
+      status: 'pending',
+    });
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE customers'),
+      [40, 'tenant_1', 'cust_1']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO customer_payout_requests'),
+      expect.arrayContaining(['tenant_1', 'cust_1', 'Lebo', 'lebo@example.test', 30, 'pending'])
+    );
+    expect(request).toMatchObject({ customerId: 'cust_1', amount: 30, status: 'pending' });
   });
 });

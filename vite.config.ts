@@ -22,9 +22,9 @@ export default defineConfig(({mode}) => {
       'icons/maskable-icon-512.png',
     ],
     manifest: {
-      name: "Jimmy's POS",
-      short_name: "Jimmy's POS",
-      description: 'Cloud-Native Point of Sale for Modern Business',
+      name: "MasePOS",
+      short_name: "MasePOS",
+      description: 'MasePOS — Cloud-Native Point of Sale for Modern Business',
       theme_color: '#2563EB',
       background_color: '#0f172a',
       display: 'standalone',

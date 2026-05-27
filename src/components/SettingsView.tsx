@@ -532,13 +532,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     { label: 'Wide roll', paperSize: '112mm' as const, marginMm: 5, fontSizePx: 13, logoMode: 'large' as const },
     { label: 'Office page', paperSize: 'a4' as const, marginMm: 8, fontSizePx: 12, logoMode: 'standard' as const },
   ];
-  const logoInitials = (formData.business?.name || 'JPOS')
+  const logoInitials = (formData.business?.name || 'MASEPOS')
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map(part => part[0]?.toUpperCase())
-    .join('') || 'JP';
-  const jimmyPosLogoUrl = '/icons/icon-512.png';
+    .join('') || 'MP';
+  const masePosLogoUrl = '/icons/icon-512.png';
   const receiptPreviewLogoPx =
     receiptPrint.logoMode === 'large' ? 76 :
     receiptPrint.logoMode === 'compact' ? 32 :
@@ -742,10 +742,10 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                       <label className="text-xs font-black uppercase tracking-widest text-slate-500">Logo URL</label>
                       <button
                         type="button"
-                        onClick={() => setFormData({...formData, business: {...formData.business, logoUrl: jimmyPosLogoUrl}} as AppConfig)}
+                        onClick={() => setFormData({...formData, business: {...formData.business, logoUrl: masePosLogoUrl}} as AppConfig)}
                         className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-primary/80"
                       >
-                        Use Jimmy's POS
+                        Use MasePOS
                       </button>
                     </div>
                     <input
@@ -1548,7 +1548,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                             </div>
                           )
                         )}
-                        <div className="text-[1.25em] font-black uppercase leading-tight">{formData.business?.name || "JIMMY'S POS"}</div>
+                        <div className="text-[1.25em] font-black uppercase leading-tight">{formData.business?.name || "MASEPOS"}</div>
                         {formData.business?.address && <div className="text-[0.9em]">{formData.business.address}</div>}
                         {formData.business?.phone && <div className="text-[0.9em]">{formData.business.phone}</div>}
                         <div className="my-2 border-b border-dashed border-black" />
@@ -1599,7 +1599,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                         <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full border-2 border-black text-sm font-black">{logoInitials}</div>
                       )
                     )}
-                    <h1 className="font-bold text-[1.35em] uppercase mb-1">{formData.business?.name || "JIMMY'S POS"}</h1>
+                    <h1 className="font-bold text-[1.35em] uppercase mb-1">{formData.business?.name || "MASEPOS"}</h1>
                     <div className="border-b border-black border-dashed my-2" />
                     <p className="font-bold">PRINTER TEST RECEIPT</p>
                     <p>{new Date().toLocaleString()}</p>

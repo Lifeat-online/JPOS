@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { confirmCashCustodyTransfer, createCashCustodyTransfer, getManagerCashSummary, recordManagerCashMovement, recordWalletCashMovement, transferCashSessionToManagerFloat } from '../../server/managerCash.js';
+import { confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, getCashClosePreview, getManagerCashSummary, recordManagerCashMovement, recordRegisterWalletCashMovement, recordWalletCashMovement, transferCashSessionToManagerFloat } from '../../server/managerCash.js';
 
 vi.mock('../../server/db.js', () => ({
   getConnection: vi.fn(),
+  isPostgres: vi.fn(() => false),
   query: vi.fn(),
 }));
 
@@ -63,6 +64,109 @@ describe('manager cash float', () => {
       custodyVarianceToday: 7.5,
     });
     expect(summary.recentMovements[0]).toMatchObject({ movementType: 'safe_drop', amount: 100 });
+  });
+
+  it('builds an end-of-day cash close preview with unresolved cash items', async () => {
+    (dbModule.query as any).mockImplementation((sql: string) => {
+      if (sql.includes('SUM(CASE') && sql.includes('manager_cash_movements') && sql.includes('managerFloat')) {
+        return Promise.resolve([{ managerFloat: '300.00' }]);
+      }
+      if (sql.includes('openRegisterCount')) {
+        return Promise.resolve([{ openRegisterCount: '1', openRegisterCash: '150.00' }]);
+      }
+      if (sql.includes('pendingCashUpCount')) {
+        return Promise.resolve([{ pendingCashUpCount: '1', pendingCashUpCash: '200.00' }]);
+      }
+      if (sql.includes('staffWalletLiability')) {
+        return Promise.resolve([{ staffWalletLiability: '50.00', customerWalletLiability: '25.00' }]);
+      }
+      if (sql.includes('staffPendingPayouts')) {
+        return Promise.resolve([{ staffPendingPayouts: '10.00', customerPendingPayouts: '5.00' }]);
+      }
+      if (sql.includes('safeDropsToday') && sql.includes('walletCashInToday')) {
+        return Promise.resolve([{ safeDropsToday: '60.00', cashUpsToManagerToday: '120.00', pettyCashToday: '15.00', walletCashInToday: '80.00', walletCashOutToday: '20.00', transferInToday: '40.00', transferOutToday: '10.00' }]);
+      }
+      if (sql.includes('safeDropsToday')) {
+        return Promise.resolve([{ safeDropsToday: '60.00', cashUpsToManagerToday: '120.00', pettyCashToday: '15.00', walletCashToday: '100.00' }]);
+      }
+      if (sql.includes('pendingCustodyTransfers')) {
+        return Promise.resolve([{ pendingCustodyTransfers: '1', custodyTransfersToday: '2', custodyVarianceToday: '4.00' }]);
+      }
+      if (sql.includes('FROM cash_sessions') && sql.includes("status = 'open'") && sql.includes('opened_at')) {
+        return Promise.resolve([{ id: 'cs_open', staffName: 'Jess', expectedCash: '150.00' }]);
+      }
+      if (sql.includes('FROM cash_sessions') && sql.includes("status = 'closed'")) {
+        return Promise.resolve([{ id: 'cs_pending', staffName: 'Lebo', actualCash: '200.00', difference: '-5.00' }]);
+      }
+      if (sql.includes('FROM cash_custody_transfers')) {
+        return Promise.resolve([{ id: 'cct_1', fromName: 'Register', toName: 'Manager float', expectedAmount: '100.00', countedAmount: '95.00', variance: '-5.00' }]);
+      }
+      if (sql.includes('FROM cash_close_checkpoints')) return Promise.resolve([]);
+      if (sql.includes('SELECT id,') && sql.includes('manager_cash_movements')) return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+
+    const preview = await getCashClosePreview('tenant_1', '2026-05-26');
+
+    expect(preview).toMatchObject({
+      businessDate: '2026-05-26',
+      expectedPhysicalCash: 650,
+      walletCashInToday: 80,
+      walletCashOutToday: 20,
+      custodyPendingCount: 1,
+    });
+    expect(preview.unresolvedItems.map(item => item.type)).toEqual(['open_register', 'pending_cash_up', 'pending_handover']);
+  });
+
+  it('creates EOD cash close checkpoints and action center review tasks for variances', async () => {
+    (dbModule.query as any).mockImplementation((sql: string) => {
+      if (sql.includes('SUM(CASE') && sql.includes('manager_cash_movements') && sql.includes('managerFloat')) {
+        return Promise.resolve([{ managerFloat: '300.00' }]);
+      }
+      if (sql.includes('openRegisterCount')) return Promise.resolve([{ openRegisterCount: '0', openRegisterCash: '0.00' }]);
+      if (sql.includes('pendingCashUpCount')) return Promise.resolve([{ pendingCashUpCount: '0', pendingCashUpCash: '0.00' }]);
+      if (sql.includes('staffWalletLiability')) return Promise.resolve([{ staffWalletLiability: '0.00', customerWalletLiability: '0.00' }]);
+      if (sql.includes('staffPendingPayouts')) return Promise.resolve([{ staffPendingPayouts: '0.00', customerPendingPayouts: '0.00' }]);
+      if (sql.includes('safeDropsToday') && sql.includes('walletCashInToday')) return Promise.resolve([{ safeDropsToday: '0.00', cashUpsToManagerToday: '0.00', pettyCashToday: '0.00', walletCashInToday: '0.00', walletCashOutToday: '0.00', transferInToday: '0.00', transferOutToday: '0.00' }]);
+      if (sql.includes('safeDropsToday')) return Promise.resolve([{ safeDropsToday: '0.00', cashUpsToManagerToday: '0.00', pettyCashToday: '0.00', walletCashToday: '0.00' }]);
+      if (sql.includes('pendingCustodyTransfers')) return Promise.resolve([{ pendingCustodyTransfers: '0', custodyTransfersToday: '0', custodyVarianceToday: '0.00' }]);
+      if (sql.includes('FROM cash_close_checkpoints') && sql.includes('LIMIT 1')) return Promise.resolve([]);
+      if (sql.includes('SELECT id FROM cash_close_checkpoints')) return Promise.resolve([]);
+      if (sql.includes('SELECT id,') && sql.includes('manager_cash_movements')) return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      query: vi.fn().mockResolvedValue([[]]),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    const checkpoint = await createCashCloseCheckpoint('tenant_1', {
+      businessDate: '2026-05-26',
+      countedAmount: 280,
+      note: 'R20 short after final safe count',
+    }, {
+      staffId: 'mgr_1',
+      staffName: 'Manager',
+      role: 'manager',
+    });
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO cash_close_checkpoints'),
+      expect.arrayContaining(['tenant_1', '2026-05-26', 'review_needed', 300, 280, -20])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO manager_tasks'),
+      expect.arrayContaining(['tenant_1', 'cash_variance', 'Review EOD cash close for 2026-05-26'])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'cash_close.checkpoint', 'cash_close_checkpoint'])
+    );
+    expect(checkpoint).toMatchObject({ status: 'review_needed', expectedPhysicalCash: 300, countedPhysicalCash: 280, variance: -20 });
   });
 
   it('records manager float movements with an audit event', async () => {
@@ -274,5 +378,59 @@ describe('manager cash float', () => {
       expect.arrayContaining(['tenant_1', 'wallet_cash_out', 'out', 50, null, 'staff_1', 'Jess'])
     );
     expect(result).toMatchObject({ previousBalance: 0, nextBalance: 0, appliedWalletDelta: false });
+  });
+
+  it('records cashier wallet cash top-ups against the register without inflating manager float', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      query: vi.fn((sql: string) => {
+        if (sql.includes('FROM cash_sessions')) {
+          return Promise.resolve([[{ id: 'cs_1', staffId: 'cashier_1', staffName: 'Jess', status: 'open', expectedCash: '120.00' }]]);
+        }
+        if (sql.includes('FROM customers')) {
+          return Promise.resolve([[{ id: 'cust_1', name: 'Lebo', walletBalance: '20.00' }]]);
+        }
+        return Promise.resolve([[]]);
+      }),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    const result = await recordRegisterWalletCashMovement('tenant_1', {
+      customerId: 'cust_1',
+      cashSessionId: 'cs_1',
+      direction: 'in',
+      amount: 80,
+      note: 'Counter top-up',
+    }, {
+      staffId: 'cashier_1',
+      staffName: 'Jess',
+      role: 'cashier',
+    });
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE customers'),
+      [100, 'tenant_1', 'cust_1']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE cash_sessions'),
+      [80, 'tenant_1', 'cs_1']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO cash_movements'),
+      expect.arrayContaining(['tenant_1', 'cs_1', 'wallet_cash_in', 'in', 80])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO manager_cash_movements'),
+      expect.arrayContaining(['tenant_1', 'wallet_cash_in', 'neutral', 80, 'cs_1', 'cashier_1', 'Jess', 'cust_1', 'Lebo'])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'customer_wallet.cash_top_up', 'customer_wallet', 'cust_1'])
+    );
+    expect(conn.commit).toHaveBeenCalled();
+    expect(result).toMatchObject({ previousBalance: 20, nextBalance: 100, cashSessionDelta: 80 });
   });
 });

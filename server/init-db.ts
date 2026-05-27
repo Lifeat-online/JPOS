@@ -204,7 +204,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   cash_session_id TEXT NOT NULL REFERENCES cash_sessions(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale')),
+  type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale','wallet_cash_in','wallet_cash_out')),
   direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
   amount NUMERIC(12,2) NOT NULL DEFAULT 0,
   sale_id TEXT,
@@ -265,6 +265,35 @@ CREATE TABLE IF NOT EXISTS cash_custody_transfers (
   cancelled_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS cash_close_checkpoints (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  business_date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'review_needed' CHECK (status IN ('balanced','review_needed')),
+  expected_physical_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+  counted_physical_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+  variance NUMERIC(12,2) NOT NULL DEFAULT 0,
+  manager_float NUMERIC(12,2) NOT NULL DEFAULT 0,
+  open_register_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+  pending_cash_up_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+  wallet_liability NUMERIC(12,2) NOT NULL DEFAULT 0,
+  pending_payouts NUMERIC(12,2) NOT NULL DEFAULT 0,
+  petty_cash_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+  wallet_cash_in_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+  wallet_cash_out_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+  custody_pending_count INTEGER NOT NULL DEFAULT 0,
+  custody_variance_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+  unresolved_items TEXT DEFAULT '[]'::TEXT,
+  counted_breakdown TEXT DEFAULT '{}'::TEXT,
+  note TEXT,
+  closed_by TEXT,
+  closed_by_name TEXT,
+  closed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (tenant_id, business_date)
 );
 
 CREATE TABLE IF NOT EXISTS customer_payout_requests (
@@ -575,7 +604,7 @@ export async function ensureCashManagementSchema() {
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         cash_session_id TEXT NOT NULL REFERENCES cash_sessions(id) ON DELETE CASCADE,
-        type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale')),
+        type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale','wallet_cash_in','wallet_cash_out')),
         direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
         amount NUMERIC(12,2) NOT NULL DEFAULT 0,
         sale_id TEXT,
@@ -644,6 +673,37 @@ export async function ensureCashManagementSchema() {
     `);
     await query(`CREATE INDEX IF NOT EXISTS idx_cash_custody_tenant_status ON cash_custody_transfers (tenant_id, status, created_at)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_cash_custody_session ON cash_custody_transfers (tenant_id, cash_session_id)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS cash_close_checkpoints (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        business_date DATE NOT NULL,
+        status TEXT NOT NULL DEFAULT 'review_needed' CHECK (status IN ('balanced','review_needed')),
+        expected_physical_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+        counted_physical_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+        variance NUMERIC(12,2) NOT NULL DEFAULT 0,
+        manager_float NUMERIC(12,2) NOT NULL DEFAULT 0,
+        open_register_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+        pending_cash_up_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+        wallet_liability NUMERIC(12,2) NOT NULL DEFAULT 0,
+        pending_payouts NUMERIC(12,2) NOT NULL DEFAULT 0,
+        petty_cash_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+        wallet_cash_in_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+        wallet_cash_out_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+        custody_pending_count INTEGER NOT NULL DEFAULT 0,
+        custody_variance_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+        unresolved_items TEXT DEFAULT '[]'::TEXT,
+        counted_breakdown TEXT DEFAULT '{}'::TEXT,
+        note TEXT,
+        closed_by TEXT,
+        closed_by_name TEXT,
+        closed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (tenant_id, business_date)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_cash_close_tenant_status ON cash_close_checkpoints (tenant_id, status, business_date)`);
     await query(`UPDATE cash_sessions SET review_status = CASE WHEN status = 'open' THEN 'in_progress' ELSE COALESCE(review_status, 'submitted') END WHERE review_status IS NULL`);
     return;
   }
@@ -673,7 +733,7 @@ export async function ensureCashManagementSchema() {
       id VARCHAR(64) PRIMARY KEY,
       tenant_id VARCHAR(64) NOT NULL,
       cash_session_id VARCHAR(64) NOT NULL,
-      type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale') NOT NULL,
+      type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale','wallet_cash_in','wallet_cash_out') NOT NULL,
       direction ENUM('in','out','neutral') NOT NULL DEFAULT 'neutral',
       amount DECIMAL(12,2) NOT NULL DEFAULT 0,
       sale_id VARCHAR(64),
@@ -687,7 +747,7 @@ export async function ensureCashManagementSchema() {
       FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE CASCADE
     )
   `);
-  await query(`ALTER TABLE cash_movements MODIFY type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale') NOT NULL`);
+  await query(`ALTER TABLE cash_movements MODIFY type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale','wallet_cash_in','wallet_cash_out') NOT NULL`);
   await query(`
     CREATE TABLE IF NOT EXISTS manager_cash_movements (
       id VARCHAR(64) PRIMARY KEY,
@@ -747,6 +807,38 @@ export async function ensureCashManagementSchema() {
       INDEX idx_cash_custody_session (tenant_id, cash_session_id),
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
       FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS cash_close_checkpoints (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      business_date DATE NOT NULL,
+      status ENUM('balanced','review_needed') NOT NULL DEFAULT 'review_needed',
+      expected_physical_cash DECIMAL(12,2) NOT NULL DEFAULT 0,
+      counted_physical_cash DECIMAL(12,2) NOT NULL DEFAULT 0,
+      variance DECIMAL(12,2) NOT NULL DEFAULT 0,
+      manager_float DECIMAL(12,2) NOT NULL DEFAULT 0,
+      open_register_cash DECIMAL(12,2) NOT NULL DEFAULT 0,
+      pending_cash_up_cash DECIMAL(12,2) NOT NULL DEFAULT 0,
+      wallet_liability DECIMAL(12,2) NOT NULL DEFAULT 0,
+      pending_payouts DECIMAL(12,2) NOT NULL DEFAULT 0,
+      petty_cash_today DECIMAL(12,2) NOT NULL DEFAULT 0,
+      wallet_cash_in_today DECIMAL(12,2) NOT NULL DEFAULT 0,
+      wallet_cash_out_today DECIMAL(12,2) NOT NULL DEFAULT 0,
+      custody_pending_count INT NOT NULL DEFAULT 0,
+      custody_variance_today DECIMAL(12,2) NOT NULL DEFAULT 0,
+      unresolved_items JSON DEFAULT JSON_ARRAY(),
+      counted_breakdown JSON DEFAULT JSON_OBJECT(),
+      note TEXT,
+      closed_by VARCHAR(64),
+      closed_by_name VARCHAR(255),
+      closed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_cash_close_business_date (tenant_id, business_date),
+      INDEX idx_cash_close_tenant_status (tenant_id, status, business_date),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     )
   `);
   await query(`UPDATE cash_sessions SET review_status = IF(status = 'open', 'in_progress', COALESCE(review_status, 'submitted')) WHERE review_status IS NULL`);

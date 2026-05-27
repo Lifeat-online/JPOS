@@ -62,11 +62,33 @@ describe('manager action center', () => {
           evidence: '["Bread dropped quickly"]',
           confidence: '88',
         },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'session_1',
+          name: 'Daily spot',
+          type: 'spot_check',
+          status: 'submitted',
+          itemCount: '2',
+          countedCount: '2',
+          varianceCount: '1',
+          netVariance: '-2',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'audit_sync_1',
+          action: 'offline.sync_failed',
+          entityType: 'sale',
+          entityId: 'sale_1',
+          details: '{"attempts":2}',
+          createdAt: '2026-05-26T08:05:00.000Z',
+        },
       ]);
 
     const result = await getManagerActionCenter('tenant_1');
 
-    expect(dbModule.query).toHaveBeenCalledTimes(6);
+    expect(dbModule.query).toHaveBeenCalledTimes(8);
     expect(result.counts).toMatchObject({
       auditEvents: 1,
       stockMovements: 1,
@@ -74,14 +96,18 @@ describe('manager action center', () => {
       cashExceptions: 1,
       saleExceptions: 1,
       aiWarnings: 1,
+      stockTakeExceptions: 1,
+      offlineSyncIssues: 1,
     });
-    expect(result.urgentCount).toBe(4);
+    expect(result.urgentCount).toBe(6);
     expect(result.auditEvents[0].details).toEqual({ total: 25, reason: 'wrong item' });
     expect(result.stockMovements[0]).toMatchObject({ quantityDelta: -2, previousQuantity: 5, newQuantity: 3 });
     expect(result.lowStock[0]).toMatchObject({ stock: 1, minStock: 5 });
     expect(result.cashExceptions[0]).toMatchObject({ expectedCash: 100, actualCash: 90, difference: -10 });
     expect(result.saleExceptions[0]).toMatchObject({ total: -25, refundedAmount: 25 });
     expect(result.aiInsights[0]).toMatchObject({ evidence: ['Bread dropped quickly'], confidence: 88 });
+    expect(result.stockTakeExceptions[0]).toMatchObject({ itemCount: 2, countedCount: 2, varianceCount: 1, netVariance: -2 });
+    expect(result.offlineSyncIssues[0]).toMatchObject({ action: 'offline.sync_failed', details: { attempts: 2 } });
     expect(result.generatedAt).toEqual(expect.any(String));
   });
 
@@ -190,7 +216,7 @@ describe('manager action center', () => {
 
     const result = await getManagerActivityCsv('tenant_1', { limit: 10 });
 
-    expect(result.filename).toMatch(/jimmy-pos-activity-\d{4}-\d{2}-\d{2}\.csv/);
+    expect(result.filename).toMatch(/masepos-activity-\d{4}-\d{2}-\d{2}\.csv/);
     expect(result.count).toBe(1);
     expect(result.csv).toContain('"kind","createdAt","title"');
     expect(result.csv).toContain('"audit","2026-05-26T10:05:00.000Z","sale.refunded"');

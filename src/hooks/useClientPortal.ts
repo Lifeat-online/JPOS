@@ -15,6 +15,7 @@ interface ClientPortalData {
   payoutRequests: PayoutRequest[];
   loading: boolean;
   notFound: boolean;
+  refresh: () => Promise<void>;
 }
 
 const POLL_MS = 30_000;
@@ -104,5 +105,5 @@ export function useClientPortal(user: JwtUser | null): ClientPortalData {
     return () => clearInterval(interval);
   }, [fetchPortalData]);
 
-  return { customer, tenantId, sales, payoutRequests, loading, notFound };
+  return { customer, tenantId, sales, payoutRequests, loading, notFound, refresh: fetchPortalData };
 }

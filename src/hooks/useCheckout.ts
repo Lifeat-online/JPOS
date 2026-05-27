@@ -2,7 +2,7 @@
  * useCheckout — MariaDB REST edition.
  * Replaces all Firestore addDoc/updateDoc calls with REST API calls.
  */
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { JwtUser } from './useAuth';
 import { Customer, Staff, AppConfig } from '../types';
 import { usePosStore } from '../store/usePosStore';
@@ -10,6 +10,16 @@ import { apiPost, apiPut, createSale, updateCustomer, updateStaff, getSaleById }
 import { useSocket } from './useSocket';
 import { isStaffCustomerProfile } from '../utils/customerProfiles';
 import { getApplicablePricingDiscount } from '../utils/discounts';
+import {
+  CheckoutMethod,
+  countPendingOfflineSales,
+  enqueueOfflineSale,
+  getOfflineCheckoutBlock,
+  isOfflineLikeError,
+  offlineSaleToReceiptSale,
+  offlineSalesChangedEventName,
+  syncQueuedOfflineSales,
+} from '../utils/offlineSales';
 
 interface CheckoutDeps {
   user: JwtUser | null;
@@ -19,9 +29,10 @@ interface CheckoutDeps {
   activeSession: any | null;
   config: AppConfig;
   refreshSales: () => Promise<void>;
+  refreshCustomers?: () => Promise<void>;
 }
 
-export function useCheckout({ user, tenantId, currentUserStaff, customers, activeSession, config, refreshSales }: CheckoutDeps) {
+export function useCheckout({ user, tenantId, currentUserStaff, customers, activeSession, config, refreshSales, refreshCustomers }: CheckoutDeps) {
   const {
     cart, clearCart,
     selectedCustomerId, setSelectedCustomerId,
@@ -46,11 +57,71 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   });
   const [checkoutModal, setCheckoutModal] = useState<{
     isOpen: boolean;
-    paymentMethod: 'cash' | 'payfast' | 'card' | 'wallet' | 'account' | 'split' | null;
+    paymentMethod: CheckoutMethod | null;
     saleData?: any;
   }>({ isOpen: false, paymentMethod: null });
   const [splitPaymentModal, setSplitPaymentModal] = useState(false);
   const [payments, setPayments] = useState<any[]>([]);
+  const [isBrowserOffline, setIsBrowserOffline] = useState(() => (
+    typeof navigator !== 'undefined' ? navigator.onLine === false : false
+  ));
+  const [offlineQueueCount, setOfflineQueueCount] = useState(() => (
+    tenantId ? countPendingOfflineSales(tenantId) : 0
+  ));
+  const [offlineSyncStatus, setOfflineSyncStatus] = useState<'idle' | 'syncing' | 'error'>('idle');
+  const [offlineSyncError, setOfflineSyncError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const updateOnlineState = () => setIsBrowserOffline(typeof navigator !== 'undefined' ? navigator.onLine === false : false);
+    window.addEventListener('online', updateOnlineState);
+    window.addEventListener('offline', updateOnlineState);
+    updateOnlineState();
+    return () => {
+      window.removeEventListener('online', updateOnlineState);
+      window.removeEventListener('offline', updateOnlineState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!tenantId) {
+      setOfflineQueueCount(0);
+      return;
+    }
+
+    const refreshOfflineQueueCount = () => setOfflineQueueCount(countPendingOfflineSales(tenantId));
+    refreshOfflineQueueCount();
+    window.addEventListener(offlineSalesChangedEventName(), refreshOfflineQueueCount);
+    return () => window.removeEventListener(offlineSalesChangedEventName(), refreshOfflineQueueCount);
+  }, [tenantId]);
+
+  useEffect(() => {
+    if (!tenantId || isBrowserOffline || offlineQueueCount <= 0 || offlineSyncStatus === 'syncing') return;
+
+    let cancelled = false;
+    setOfflineSyncStatus('syncing');
+    setOfflineSyncError(null);
+
+    syncQueuedOfflineSales(tenantId)
+      .then(async (result) => {
+        if (cancelled) return;
+        setOfflineQueueCount(result.pending);
+        setOfflineSyncStatus(result.failed.length > 0 ? 'error' : 'idle');
+        setOfflineSyncError(result.failed[0]?.lastError || null);
+        if (result.synced.length > 0) {
+          await refreshSales().catch(e => console.warn('Failed to refresh sales after offline sync:', e));
+          await refreshCustomers?.().catch(e => console.warn('Failed to refresh customers after offline sync:', e));
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setOfflineSyncStatus('error');
+        setOfflineSyncError(error instanceof Error ? error.message : String(error || 'Offline sync failed'));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, isBrowserOffline, offlineQueueCount, offlineSyncStatus, refreshSales, refreshCustomers]);
 
   // ── Tax calculations ─────────────────────────────────────────────────────────
   const taxRate = config?.business?.taxRate || 0;
@@ -128,6 +199,25 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     setActiveOrderId(null);
     setActiveTableNumber(null);
     setPointsDiscount(0);
+  };
+
+  const queueOfflineCheckout = (saleData: any, method: CheckoutMethod) => {
+    if (!tenantId) return null;
+    const queued = enqueueOfflineSale({
+      tenantId,
+      saleData,
+      method,
+      targetSaleId: activeOrderId || null,
+      cashSessionId: activeSession?.id || null,
+      staffId: currentUserStaff?.id || null,
+      staffName: currentUserStaff?.name || null,
+    });
+    setOfflineQueueCount(countPendingOfflineSales(tenantId));
+    resetAfterCheckout();
+    setTenderModal({ isOpen: false, method: null });
+    setSplitPaymentModal(false);
+    setCheckoutModal({ isOpen: true, paymentMethod: method, saleData: offlineSaleToReceiptSale(queued) });
+    return queued;
   };
 
   // ── Save order (restaurant hold/send to workstations) ────────────────────────
@@ -330,7 +420,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     }
   };
 
-  const handleCheckout = async (method: 'cash' | 'payfast' | 'card' | 'wallet' | 'account' | 'split', splitPayments?: any[]) => {
+  const handleCheckout = async (method: CheckoutMethod, splitPayments?: any[]) => {
     if (cart.length === 0 || !tenantId) return;
     const walletAmount = method === 'wallet'
       ? cartTotalAfterDiscount
@@ -338,6 +428,12 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     const accountAmount = method === 'account'
       ? cartTotalAfterDiscount
       : (splitPayments || []).reduce((sum, p) => sum + (p.method === 'account' ? Number(p.amount || 0) : 0), 0);
+
+    const offlineCapability = getOfflineCheckoutBlock(method, splitPayments, isBrowserOffline);
+    if (!offlineCapability.allowed) {
+      alert(offlineCapability.reason || 'This payment needs an online connection.');
+      return;
+    }
 
     if (walletAmount > 0) {
       const walletBalance = Number(selectedCustomer?.walletBalance || 0);
@@ -406,13 +502,34 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         saleData.cashOutAmount = p.cashOutAmount;
       }
 
+      if (isBrowserOffline) {
+        queueOfflineCheckout(saleData, method);
+        setIsProcessing(false);
+        return;
+      }
+
       let saleId = '';
-      if (activeOrderId) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
-        saleId = activeOrderId;
-      } else {
-        const created = await createSale(tenantId, saleData);
-        saleId = created.id;
+      try {
+        if (activeOrderId) {
+          await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
+          saleId = activeOrderId;
+        } else {
+          const created = await createSale(tenantId, saleData);
+          saleId = created.id;
+        }
+      } catch (saleWriteError) {
+        const offlineAfterFailure = getOfflineCheckoutBlock(method, splitPayments, true);
+        if (isOfflineLikeError(saleWriteError) && offlineAfterFailure.allowed) {
+          queueOfflineCheckout(saleData, method);
+          setIsProcessing(false);
+          return;
+        }
+        if (isOfflineLikeError(saleWriteError) && !offlineAfterFailure.allowed) {
+          alert(offlineAfterFailure.reason || 'This payment needs an online connection.');
+          setIsProcessing(false);
+          return;
+        }
+        throw saleWriteError;
       }
 
       await refreshSales();
@@ -482,15 +599,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
             .catch(e => console.warn('Failed to update staff metrics:', e));
         }
         
-        // Handle client wallet deduction if split contains wallet or wallet checkout is used
-        if (method === 'split' || method === 'wallet') {
-          const walletPayment = saleData.payments.find((p: any) => p.method === 'wallet');
-          if (walletPayment && selectedCustomer) {
-            await updateCustomer(tenantId, selectedCustomer.id, {
-              walletBalance: Number(selectedCustomer.walletBalance || 0) - Number(walletPayment.amount || 0)
-            }).catch(e => console.warn('Failed to update wallet balance:', e));
-          }
-        }
+        const walletPayment = (method === 'split' || method === 'wallet')
+          ? saleData.payments.find((p: any) => p.method === 'wallet')
+          : null;
         if (method === 'split' || method === 'account') {
           const accountPayment = saleData.payments.find((p: any) => p.method === 'account');
           if (accountPayment && selectedCustomer) {
@@ -498,6 +609,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
               accountBalanceDelta: Number(accountPayment.amount || 0)
             }).catch(e => console.warn('Failed to update account balance:', e));
           }
+        }
+        if (walletPayment || method === 'account' || method === 'split') {
+          await refreshCustomers?.().catch(e => console.warn('Failed to refresh customer balances:', e));
         }
 
         resetAfterCheckout();
@@ -534,6 +648,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       }
     } catch (err) {
       console.error('Checkout failed:', err);
+      alert(err instanceof Error ? err.message : 'Checkout failed. Please try again.');
       setIsProcessing(false);
     }
   };
@@ -559,6 +674,12 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     cartSubtotal, taxAmount,
     cartTotal: cartTotalAfterDiscount,
     cartTotalBeforeDiscount: cartTotal,
+    offlineStatus: {
+      isOffline: isBrowserOffline,
+      pendingCount: offlineQueueCount,
+      syncStatus: offlineSyncStatus,
+      lastError: offlineSyncError,
+    },
     activeOrderId,
     handleParkSale,
     handleSaveOrder,

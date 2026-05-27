@@ -49,7 +49,7 @@ async function ensureTenantExists(tenantId: string, tenantName: string) {
 }
 
 async function normalizeDevStaff(staff: StaffAuthRow): Promise<StaffAuthRow> {
-  const tenantName = await ensureTenantExists(DEV_TENANT_ID, staff.tenant_name || "Jimmy's POS");
+  const tenantName = await ensureTenantExists(DEV_TENANT_ID, staff.tenant_name || "MasePOS");
   const nextStaff: StaffAuthRow = {
     ...staff,
     tenant_id: DEV_TENANT_ID,
@@ -113,9 +113,9 @@ function parseDemoMode(value: unknown): DemoSeedMode {
 async function ensureDemoTenant(mode: DemoSeedMode) {
   const tenantId = 'demo-tenant-001';
   const staffId = 'demo-admin-001';
-  const email = 'demo@jimmyspos.test';
+  const email = 'demo@masepos.test';
   const name = 'Demo Admin';
-  const tenantName = "Jimmy's POS Demo";
+  const tenantName = "MasePOS Demo";
   const passwordHash = await hashPassword('DemoPass123');
 
   const conn = await getConnection();

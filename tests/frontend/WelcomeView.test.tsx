@@ -33,7 +33,7 @@ describe('WelcomeView', () => {
     expect(restaurantModeButtons[0]).toBeInTheDocument();
     expect(startSetupButtons[0]).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^Client Login$/i })[0]).toBeInTheDocument();
-    expect(screen.getByText(/See what Jimmy's POS actually does/i)).toBeInTheDocument();
+    expect(screen.getByText(/See what MasePOS actually does/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Toggle dark mode/i })).toBeInTheDocument();
 
     fireEvent.click(retailModeButtons[0]);

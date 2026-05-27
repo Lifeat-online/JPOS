@@ -6,7 +6,7 @@ self.addEventListener('push', (event) => {
     payload = { body: event.data ? event.data.text() : '' };
   }
 
-  const title = payload.title || "Jimmy's POS";
+  const title = payload.title || "MasePOS";
   const data = {
     ...(payload.data || {}),
     url: payload.url || payload.data?.url || '/',
@@ -16,7 +16,7 @@ self.addEventListener('push', (event) => {
     body: payload.body || 'New POS notification',
     icon: payload.icon || '/icons/icon-192.png',
     badge: payload.badge || '/icons/icon-192.png',
-    tag: payload.tag || 'jpos-notification',
+    tag: payload.tag || 'masepos-notification',
     data,
     actions: Array.isArray(payload.actions) ? payload.actions : [],
     requireInteraction: Boolean(payload.requireInteraction),
@@ -28,7 +28,7 @@ self.addEventListener('push', (event) => {
       self.registration.showNotification(title, options),
       self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
         clients.forEach((client) => {
-          client.postMessage({ type: 'jpos-push-notification', payload: { title, ...payload } });
+          client.postMessage({ type: 'masepos-push-notification', payload: { title, ...payload } });
         });
       }),
     ])
@@ -44,7 +44,7 @@ self.addEventListener('notificationclick', (event) => {
       const normalized = new URL(url, self.location.origin).href;
       for (const client of clients) {
         if ('focus' in client) {
-          client.postMessage({ type: 'jpos-notification-open', url });
+          client.postMessage({ type: 'masepos-notification-open', url });
           return client.focus();
         }
       }

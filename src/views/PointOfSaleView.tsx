@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
   ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Printer,
-  AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronLeft, LayoutGrid, PanelLeft
+  AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronLeft, LayoutGrid, PanelLeft, CheckCircle2
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -12,10 +12,11 @@ import { usePosStore } from '../store/usePosStore';
 import { WorkstationQueuePanel } from '../components/WorkstationQueuePanel';
 import { BillPrint } from '../components/BillPrint';
 import { BarcodeScanner } from '../components/BarcodeScanner';
-import { getCompanionDeviceAssignment, recordCashMovement } from '../api';
+import { getCompanionDeviceAssignment, recordCashMovement, recordRegisterWalletCashMovement } from '../api';
 import { useSocket } from '../hooks/useSocket';
 import { JwtUser } from '../hooks/useAuth';
 import type { AppliedDiscount } from '../utils/discounts';
+import type { CheckoutMethod } from '../utils/offlineSales';
 
 interface PointOfSaleViewProps {
   products: Product[];
@@ -27,7 +28,7 @@ interface PointOfSaleViewProps {
   setIsProcessing: (val: boolean) => void;
   handleSaveOrder: (sendToKitchen: boolean) => Promise<void>;
   handleParkSale: (label?: string) => Promise<string | null>;
-  handleCheckout: (method: 'cash' | 'payfast' | 'card' | 'account') => Promise<void>;
+  handleCheckout: (method: CheckoutMethod) => Promise<void>;
   handleWalletCheckout: () => Promise<void>;
   handleAccountCheckout: () => Promise<void>;
   handleOpenTab: (tabName?: string) => Promise<void>;
@@ -47,17 +48,25 @@ interface PointOfSaleViewProps {
   onClearPointsDiscount: () => void;
   restaurantTables: RestaurantTable[];
   onSalesUpdated?: () => Promise<void>;
+  onCustomersUpdated?: () => Promise<void>;
   lastReceiptSale?: Sale | null;
   onPrintLastReceipt?: () => void;
   suppressBillPrint?: boolean;
+  offlineStatus?: {
+    isOffline: boolean;
+    pendingCount: number;
+    syncStatus: 'idle' | 'syncing' | 'error';
+    lastError?: string | null;
+  };
 }
 
 export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   products, user, customers, sales, workstations, isProcessing, setIsProcessing, handleSaveOrder,
   handleParkSale, handleCheckout, handleWalletCheckout, handleAccountCheckout, handleOpenTab, handleOpenTable, setTenderModal, setTenderedAmount, setSplitPaymentModal,
   categoryTree, CATEGORIES, getCategoryIcon, getProductImage, openCashDrawer,
-  pointsDiscount, pricingDiscount, totalDiscount, onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated,
+  pointsDiscount, pricingDiscount, totalDiscount, onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated, onCustomersUpdated,
   lastReceiptSale, onPrintLastReceipt, suppressBillPrint = false,
+  offlineStatus = { isOffline: false, pendingCount: 0, syncStatus: 'idle', lastError: null },
 }) => {
   const { 
     cart, addToCart, updateQuantity, clearCart, 
@@ -82,6 +91,13 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [drawerCustomReason, setDrawerCustomReason] = useState('');
   const [drawerError, setDrawerError] = useState('');
   const [isRecordingDrawerOpen, setIsRecordingDrawerOpen] = useState(false);
+  const [walletCashModalOpen, setWalletCashModalOpen] = useState(false);
+  const [walletCashDirection, setWalletCashDirection] = useState<'in' | 'out'>('in');
+  const [walletCashAmount, setWalletCashAmount] = useState('');
+  const [walletCashNote, setWalletCashNote] = useState('');
+  const [walletCashError, setWalletCashError] = useState('');
+  const [walletCashSuccess, setWalletCashSuccess] = useState('');
+  const [isRecordingWalletCash, setIsRecordingWalletCash] = useState(false);
   const [terminalCategoryLayout, setTerminalCategoryLayout] = useState<'sidebar' | 'grid'>(() => {
     if (typeof window === 'undefined') return 'sidebar';
     return window.localStorage.getItem('jpos-terminal-category-layout') === 'grid' ? 'grid' : 'sidebar';
@@ -166,6 +182,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   );
   const selectedCustomerWalletBalance = Number(selectedCustomer?.walletBalance || 0);
   const canPayWithCustomerWallet = Boolean(selectedCustomer && selectedCustomerWalletBalance > 0);
+  const walletOnlineRequired = offlineStatus.isOffline;
+  const walletCashAmountValue = Number(walletCashAmount || 0);
+  const walletCashDrawerDelta = walletCashDirection === 'in' ? walletCashAmountValue : -walletCashAmountValue;
+  const walletCashNextBalance = selectedCustomer
+    ? Math.max(0, selectedCustomerWalletBalance + (walletCashDirection === 'in' ? walletCashAmountValue : -walletCashAmountValue))
+    : 0;
   const selectedCustomerAccountLimit = Number(selectedCustomer?.accountLimit || 0);
   const selectedCustomerAccountBalance = Number(selectedCustomer?.accountBalance || 0);
   const selectedCustomerAccountRemaining = Math.max(0, selectedCustomerAccountLimit - selectedCustomerAccountBalance);
@@ -351,13 +373,13 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       });
     };
 
-    window.addEventListener('jpos:companion-mode-change', changeMode);
-    window.addEventListener('jpos:companion-open-scanner', openScanner);
-    window.addEventListener('jpos:companion-mark-terminal', markTerminal);
+    window.addEventListener('masepos:companion-mode-change', changeMode);
+    window.addEventListener('masepos:companion-open-scanner', openScanner);
+    window.addEventListener('masepos:companion-mark-terminal', markTerminal);
     return () => {
-      window.removeEventListener('jpos:companion-mode-change', changeMode);
-      window.removeEventListener('jpos:companion-open-scanner', openScanner);
-      window.removeEventListener('jpos:companion-mark-terminal', markTerminal);
+      window.removeEventListener('masepos:companion-mode-change', changeMode);
+      window.removeEventListener('masepos:companion-open-scanner', openScanner);
+      window.removeEventListener('masepos:companion-mark-terminal', markTerminal);
     };
   }, [terminalId, tenantId, currentUserStaff?.id, companionDeviceId, companionSocket.emit]);
 
@@ -372,15 +394,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       longTermAssignment,
       displaySnapshot,
     };
-    window.dispatchEvent(new CustomEvent('jpos:companion-state', { detail }));
-    window.dispatchEvent(new CustomEvent('jpos:account-terminal-presence-request'));
+    window.dispatchEvent(new CustomEvent('masepos:companion-state', { detail }));
+    window.dispatchEvent(new CustomEvent('masepos:account-terminal-presence-request'));
 
     const resendState = () => {
-      window.dispatchEvent(new CustomEvent('jpos:companion-state', { detail }));
-      window.dispatchEvent(new CustomEvent('jpos:account-terminal-presence-request'));
+      window.dispatchEvent(new CustomEvent('masepos:companion-state', { detail }));
+      window.dispatchEvent(new CustomEvent('masepos:account-terminal-presence-request'));
     };
-    window.addEventListener('jpos:companion-state-request', resendState);
-    return () => window.removeEventListener('jpos:companion-state-request', resendState);
+    window.addEventListener('masepos:companion-state-request', resendState);
+    return () => window.removeEventListener('masepos:companion-state-request', resendState);
   }, [
     companionMode,
     assignedCompanionMode,
@@ -419,7 +441,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       if (activeDeviceId === companionDeviceId) {
         updateCompanionMode('terminal');
       }
-      window.dispatchEvent(new CustomEvent('jpos:companion-state', {
+      window.dispatchEvent(new CustomEvent('masepos:companion-state', {
         detail: { activeTerminalDeviceId: activeDeviceId },
       }));
     };
@@ -577,6 +599,62 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     }
   };
 
+  const openWalletCashModal = (direction: 'in' | 'out' = 'in') => {
+    setWalletCashDirection(direction);
+    setWalletCashAmount('');
+    setWalletCashNote('');
+    setWalletCashError(offlineStatus.isOffline ? 'Wallet cash requires an online connection and cannot be recorded offline.' : '');
+    setWalletCashSuccess('');
+    setWalletCashModalOpen(true);
+  };
+
+  const submitWalletCashMovement = async () => {
+    if (offlineStatus.isOffline) {
+      setWalletCashError('Wallet cash requires an online connection and cannot be recorded offline.');
+      return;
+    }
+    if (!tenantId || !activeSession?.id) {
+      setWalletCashError('Open the register before recording wallet cash.');
+      return;
+    }
+    if (!selectedCustomer) {
+      setWalletCashError('Select a customer first.');
+      return;
+    }
+    const amount = Number(walletCashAmount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setWalletCashError('Enter an amount greater than zero.');
+      return;
+    }
+    if (walletCashDirection === 'out' && selectedCustomerWalletBalance < amount) {
+      setWalletCashError(`Wallet balance is R${selectedCustomerWalletBalance.toFixed(2)}, which is not enough for this payout.`);
+      return;
+    }
+
+    setIsRecordingWalletCash(true);
+    setWalletCashError('');
+    try {
+      const result = await recordRegisterWalletCashMovement(tenantId, activeSession.id, {
+        customerId: selectedCustomer.id,
+        direction: walletCashDirection,
+        amount,
+        note: walletCashNote || null,
+      });
+      await onCustomersUpdated?.();
+      setWalletCashSuccess(`${walletCashDirection === 'in' ? 'Top-up' : 'Payout'} recorded. New wallet balance: R${Number(result.nextBalance || 0).toFixed(2)}.`);
+      setWalletCashAmount('');
+      setWalletCashNote('');
+      setTimeout(() => {
+        setWalletCashModalOpen(false);
+        setWalletCashSuccess('');
+      }, 1200);
+    } catch (error: any) {
+      setWalletCashError(error?.message || 'Could not record wallet cash.');
+    } finally {
+      setIsRecordingWalletCash(false);
+    }
+  };
+
   const categorySections = useMemo(() => Object.keys(categoryTree || {}), [categoryTree]);
 
   const allowedSections = useMemo(() => {
@@ -641,7 +719,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
   useEffect(() => {
     try {
-      window.localStorage.setItem('jpos-terminal-category-layout', terminalCategoryLayout);
+      window.localStorage.setItem('masepos-terminal-category-layout', terminalCategoryLayout);
     } catch {
       // Layout preference is nice to keep, but should not block selling.
     }
@@ -1176,6 +1254,18 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                       <div className="text-[9px] font-bold text-slate-500">
                         {selectedCustomer?.loyaltyPoints || selectedCustomer?.points || 0} Points Available
                       </div>
+                      <div className="flex flex-wrap items-center gap-2 text-[9px] font-black text-violet-600 dark:text-violet-400">
+                        <span>Wallet: R{selectedCustomerWalletBalance.toFixed(2)}</span>
+                        <button
+                          type="button"
+                          onClick={() => openWalletCashModal('in')}
+                          disabled={!activeSession?.id || walletOnlineRequired}
+                          title={walletOnlineRequired ? 'Wallet cash requires online mode' : 'Record customer wallet cash'}
+                          className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[8px] uppercase tracking-widest text-violet-700 disabled:opacity-50 dark:border-violet-900/50 dark:bg-violet-900/20 dark:text-violet-300"
+                        >
+                          Cash wallet
+                        </button>
+                      </div>
                       {(selectedCustomer?.accountEnabled || selectedCustomerAccountBalance > 0) && (
                         <div className="text-[9px] font-black text-amber-600 dark:text-amber-400">
                           Account: R{selectedCustomerAccountBalance.toFixed(2)} owing / R{selectedCustomerAccountLimit.toFixed(2)} limit
@@ -1194,6 +1284,33 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
               <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50/50 dark:bg-slate-950/50">
               <div className="px-5 py-4 space-y-4 min-h-[160px]">
+                {(offlineStatus.isOffline || offlineStatus.pendingCount > 0 || offlineStatus.syncStatus !== 'idle') && (
+                  <div className={`rounded-2xl border p-3 text-xs font-bold ${
+                    offlineStatus.isOffline
+                      ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200'
+                      : offlineStatus.syncStatus === 'error'
+                        ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-900/20 dark:text-rose-200'
+                        : 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-900/20 dark:text-sky-200'
+                  }`}>
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest">
+                          {offlineStatus.isOffline ? 'Offline selling' : offlineStatus.syncStatus === 'syncing' ? 'Syncing offline sales' : offlineStatus.syncStatus === 'error' ? 'Offline sync needs review' : 'Offline queue'}
+                        </p>
+                        <p className="mt-1 leading-snug">
+                          {offlineStatus.isOffline
+                            ? `Cash and external-card sales are saved on this device. Wallets, accounts, and PayFast stay online-only. ${offlineStatus.pendingCount > 0 ? `${offlineStatus.pendingCount} sale${offlineStatus.pendingCount === 1 ? '' : 's'} waiting to sync.` : ''}`
+                            : offlineStatus.syncStatus === 'syncing'
+                              ? `${offlineStatus.pendingCount} queued sale${offlineStatus.pendingCount === 1 ? '' : 's'} syncing in the background.`
+                              : offlineStatus.syncStatus === 'error'
+                                ? (offlineStatus.lastError || 'One or more offline sales could not sync.')
+                                : `${offlineStatus.pendingCount} offline sale${offlineStatus.pendingCount === 1 ? '' : 's'} waiting to sync.`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {cart.length === 0 ? (
                   <div className="min-h-[160px] flex flex-col items-center justify-center text-slate-300 dark:text-slate-600 opacity-50 space-y-2 text-center p-8 grayscale">
                     <ShoppingBag className="w-12 h-12" />
@@ -1364,8 +1481,9 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <span className="text-[9px] uppercase tracking-widest">CARD</span>
                   </button>
                   <button 
-                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || offlineStatus.isOffline}
                     onClick={() => handleCheckout('payfast')}
+                    title={offlineStatus.isOffline ? 'PayFast requires online mode' : 'Pay with PayFast'}
                     className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-[#E84E1B] text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-payfast/20"
                   >
                     {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <QrCode className="w-5 h-5" />}
@@ -1385,8 +1503,9 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 {/* Wallet payment: only shown for selected clients with wallet funds. */}
                 {canPayWithCustomerWallet && (
                   <button
-                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || selectedCustomerWalletBalance < amountDue}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || selectedCustomerWalletBalance < amountDue || walletOnlineRequired}
                     onClick={handleWalletCheckout}
+                    title={walletOnlineRequired ? 'Wallet payments require online mode' : 'Pay with wallet'}
                     className="w-full mb-4 h-14 rounded-2xl bg-violet-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 shadow-lg shadow-violet-600/30 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
                   >
                     <Wallet className="w-4 h-4" />
@@ -1399,8 +1518,9 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
                 {canPayWithCustomerAccount && (
                   <button
-                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || selectedCustomerAccountRemaining < amountDue}
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || selectedCustomerAccountRemaining < amountDue || offlineStatus.isOffline}
                     onClick={handleAccountCheckout}
+                    title={offlineStatus.isOffline ? 'Customer account payments require online mode' : 'Put on account'}
                     className="w-full mb-4 h-14 rounded-2xl bg-amber-500 text-white font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 shadow-lg shadow-amber-500/30 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
                   >
                     <CreditCard className="w-4 h-4" />
@@ -1728,6 +1848,143 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   >
                     {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <PauseCircle className="w-5 h-5" />}
                     Park sale
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {walletCashModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            onClick={() => setWalletCashModalOpen(false)}
+          >
+            <motion.div
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 24, opacity: 0 }}
+              className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-violet-600">
+                    <Wallet className="w-4 h-4" />
+                    Customer wallet cash
+                  </div>
+                  <h3 className="mt-1 font-black text-lg text-slate-900 dark:text-white">{selectedCustomer?.name || 'Selected customer'}</h3>
+                  <p className="text-xs font-medium text-slate-500 mt-0.5">Current balance R{selectedCustomerWalletBalance.toFixed(2)}</p>
+                </div>
+                <button
+                  onClick={() => setWalletCashModalOpen(false)}
+                  className="w-9 h-9 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-500 flex items-center justify-center shrink-0"
+                  aria-label="Close wallet cash"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {walletCashError && (
+                  <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3 text-sm font-bold text-rose-700">
+                    {walletCashError}
+                  </div>
+                )}
+                {walletCashSuccess && (
+                  <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 p-3 text-sm font-bold text-emerald-700">
+                    <CheckCircle2 className="w-4 h-4" />
+                    {walletCashSuccess}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWalletCashDirection('in')}
+                    className={`min-h-14 rounded-2xl border px-3 text-left transition-all ${
+                      walletCashDirection === 'in'
+                        ? 'border-emerald-500 bg-emerald-500 text-white'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-950'
+                    }`}
+                  >
+                    <span className="block text-[10px] font-black uppercase tracking-widest">Cash top-up</span>
+                    <span className="block text-xs font-semibold opacity-80">Drawer cash increases</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWalletCashDirection('out')}
+                    disabled={selectedCustomerWalletBalance <= 0}
+                    className={`min-h-14 rounded-2xl border px-3 text-left transition-all disabled:opacity-50 ${
+                      walletCashDirection === 'out'
+                        ? 'border-rose-500 bg-rose-500 text-white'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-950'
+                    }`}
+                  >
+                    <span className="block text-[10px] font-black uppercase tracking-widest">Cash payout</span>
+                    <span className="block text-xs font-semibold opacity-80">Drawer cash decreases</span>
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Amount</label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    max={walletCashDirection === 'out' ? selectedCustomerWalletBalance : undefined}
+                    step="0.01"
+                    value={walletCashAmount}
+                    onChange={(event) => setWalletCashAmount(event.target.value)}
+                    className="w-full h-14 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 text-center text-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-500/30"
+                    placeholder="0.00"
+                    autoFocus
+                  />
+                </div>
+
+                {walletCashAmountValue > 0 && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">New wallet</p>
+                      <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">R{walletCashNextBalance.toFixed(2)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Drawer impact</p>
+                      <p className={`mt-1 text-lg font-black ${walletCashDrawerDelta >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {walletCashDrawerDelta >= 0 ? '+' : '-'}R{Math.abs(walletCashDrawerDelta).toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Note</label>
+                  <input
+                    value={walletCashNote}
+                    onChange={(event) => setWalletCashNote(event.target.value)}
+                    placeholder={walletCashDirection === 'in' ? 'e.g. Customer cash top-up' : 'e.g. Customer cash payout'}
+                    className="w-full h-12 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/30"
+                  />
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setWalletCashModalOpen(false)}
+                    className="h-12 flex-1 rounded-2xl border border-slate-200 dark:border-slate-700 text-sm font-black text-slate-600 dark:text-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isRecordingWalletCash || !walletCashAmount || walletCashAmountValue <= 0}
+                    onClick={submitWalletCashMovement}
+                    className="h-12 flex-1 rounded-2xl bg-violet-600 text-sm font-black text-white shadow-lg shadow-violet-600/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isRecordingWalletCash ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wallet className="w-5 h-5" />}
+                    Save wallet cash
                   </button>
                 </div>
               </div>

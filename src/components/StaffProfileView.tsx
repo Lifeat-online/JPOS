@@ -1,19 +1,21 @@
 import React, { useState } from 'react';
 import { Staff } from '../types';
 import { Mail, Phone, Wallet, Loader2, DollarSign } from 'lucide-react';
-import { apiPost, apiPut } from '../api';
+import { apiPost } from '../api';
 import { usePosStore } from '../store/usePosStore';
 
 interface StaffProfileViewProps {
   currentUserStaff: Staff | null;
+  onStaffUpdated?: () => Promise<void>;
 }
 
-export function StaffProfileView({ currentUserStaff }: StaffProfileViewProps) {
+export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProfileViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
   const [isProcessing, setIsProcessing] = useState(false);
   const [payoutAmount, setPayoutAmount] = useState<number | string>('');
   const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
   if (!currentUserStaff) {
     return <div className="p-8 text-center bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl m-8">No staff profile found.</div>;
@@ -26,13 +28,8 @@ export function StaffProfileView({ currentUserStaff }: StaffProfileViewProps) {
     if (amount <= 0 || amount > (currentUserStaff.walletBalance || 0)) return;
 
     setIsProcessing(true);
+    setErrorMsg('');
     try {
-      // 1. Update staff wallet balance
-      await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${currentUserStaff.id}`, {
-        walletBalance: (currentUserStaff.walletBalance || 0) - amount,
-      });
-
-      // 2. Create payout request
       await apiPost(`/api/mariadb/tenants/${tenantId}/payout-requests`, {
         staffId: currentUserStaff.id,
         staffName: currentUserStaff.name,
@@ -44,9 +41,11 @@ export function StaffProfileView({ currentUserStaff }: StaffProfileViewProps) {
       setSuccessMsg(`Successfully requested payout of R${amount.toFixed(2)}`);
       setShowPayoutModal(false);
       setPayoutAmount('');
+      await onStaffUpdated?.();
       setTimeout(() => setSuccessMsg(''), 5000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Payout request failed:', err);
+      setErrorMsg(err?.message || 'Payout request failed. Please try again.');
     }
     setIsProcessing(false);
   };
@@ -57,6 +56,11 @@ export function StaffProfileView({ currentUserStaff }: StaffProfileViewProps) {
         {successMsg && (
           <div className="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 p-4 rounded-xl border border-emerald-200 dark:border-emerald-500/20 font-bold mb-4 flex items-center justify-center">
             {successMsg}
+          </div>
+        )}
+        {errorMsg && (
+          <div className="bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 p-4 rounded-xl border border-red-200 dark:border-red-500/20 font-bold mb-4 flex items-center justify-center">
+            {errorMsg}
           </div>
         )}
 

@@ -20,7 +20,7 @@ export function PublicPackagesPage({
   toggleDarkMode,
 }: PublicPackagesPageProps) {
   const handleContact = () => {
-    window.location.href = 'mailto:sales@jimmyspos.com?subject=JPOS%20White-label%20package';
+    window.location.href = 'mailto:sales@masepos.com?subject=MasePOS%20White-label%20package';
   };
 
   return (
@@ -32,7 +32,7 @@ export function PublicPackagesPage({
               <Store className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-lg font-black tracking-tight text-slate-950 dark:text-white">Jimmy&apos;s POS</p>
+              <p className="text-lg font-black tracking-tight text-slate-950 dark:text-white">MasePOS</p>
               <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-slate-400 dark:text-slate-500">Packages</p>
             </div>
           </a>

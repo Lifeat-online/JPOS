@@ -15,10 +15,11 @@ interface HistoryViewProps {
   filterCustomerId: string | null;
   setFilterCustomerId: (id: string | null) => void;
   onSalesUpdated?: () => Promise<void>;
+  onCustomersUpdated?: () => Promise<void>;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
-  sales, customers, config, searchQuery, setSearchQuery, filterCustomerId, setFilterCustomerId, onSalesUpdated
+  sales, customers, config, searchQuery, setSearchQuery, filterCustomerId, setFilterCustomerId, onSalesUpdated, onCustomersUpdated
 }) => {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [refundOpen, setRefundOpen] = useState(false);
@@ -137,6 +138,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         return;
       }
       await onSalesUpdated?.();
+      if (refundMethod === 'wallet') {
+        await onCustomersUpdated?.();
+      }
       setRefundOpen(false);
       setSelectedSale(null);
     } catch (error: any) {

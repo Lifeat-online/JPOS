@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, Ban, Banknote, Boxes, CalendarDays, CheckCircle2, ClipboardCheck, ClipboardList, Download, ExternalLink, Filter, History, Monitor, Package, PlayCircle, RefreshCw, Search, ShieldCheck, Sparkles, UserRound, Users, XCircle } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Ban, Banknote, Boxes, CalendarDays, CheckCircle2, ClipboardCheck, ClipboardList, Download, ExternalLink, Filter, History, Monitor, Package, PlayCircle, RefreshCw, Search, ShieldCheck, Sparkles, UserRound, Users, WifiOff, XCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { decideManagerTask, exportManagerActivityHistoryCsv, getManagerActionCenter, getManagerActivityHistory, getManagerTasks } from '../api';
 import { getDate } from '../utils/date';
@@ -13,6 +13,8 @@ type ActionCenterData = {
     cashExceptions: number;
     saleExceptions: number;
     aiWarnings: number;
+    stockTakeExceptions: number;
+    offlineSyncIssues: number;
   };
   auditEvents: any[];
   stockMovements: any[];
@@ -20,6 +22,8 @@ type ActionCenterData = {
   cashExceptions: any[];
   saleExceptions: any[];
   aiInsights: any[];
+  stockTakeExceptions: any[];
+  offlineSyncIssues: any[];
   generatedAt: string;
 };
 
@@ -76,6 +80,8 @@ const countCards = [
   { key: 'saleExceptions', label: 'Refunds / Voids', icon: History, path: '/history', tone: 'rose' },
   { key: 'lowStock', label: 'Low Stock', icon: Package, path: '/inventory', tone: 'blue' },
   { key: 'aiWarnings', label: 'AI Warnings', icon: Sparkles, path: '/ai', tone: 'indigo' },
+  { key: 'stockTakeExceptions', label: 'Stocktakes', icon: ClipboardList, path: '/stocktake', tone: 'emerald' },
+  { key: 'offlineSyncIssues', label: 'Sync Issues', icon: WifiOff, path: '/actions', tone: 'slate' },
 ] as const;
 
 const toneClass: Record<string, string> = {
@@ -83,6 +89,7 @@ const toneClass: Record<string, string> = {
   rose: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/30 dark:text-rose-300 dark:border-rose-900/50',
   blue: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:border-blue-900/50',
   indigo: 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/30 dark:text-indigo-300 dark:border-indigo-900/50',
+  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-900/50',
   slate: 'bg-white text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-800',
 };
 
@@ -137,6 +144,8 @@ function taskDestination(task: ManagerTask) {
   if (task.sourceType === 'sale') return '/history';
   if (task.sourceType === 'product') return '/inventory';
   if (task.sourceType === 'ai_insight') return '/ai';
+  if (task.sourceType === 'stock_take_session') return '/stocktake';
+  if (task.taskType === 'offline_sync' || task.sourceType === 'audit_event') return '/actions';
   return '/actions';
 }
 
@@ -220,7 +229,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = result.filename || 'jimmy-pos-activity.csv';
+      link.download = result.filename || 'masepos-activity.csv';
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -309,7 +318,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
           {countCards.map((card) => {
             const value = data?.counts?.[card.key] || 0;
             const Icon = card.icon;
@@ -641,6 +650,64 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
             ))}
           </div>
         </Panel>
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <Panel
+            title="Stocktake Exceptions"
+            action={<button onClick={() => navigate('/stocktake')} className="text-xs font-black text-indigo-600 dark:text-indigo-300">Open Stocktake</button>}
+          >
+            <div className="space-y-3">
+              {(data?.stockTakeExceptions || []).length === 0 && <EmptyLine label="No stocktake exceptions." />}
+              {(data?.stockTakeExceptions || []).slice(0, 5).map((session) => (
+                <div key={session.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-[#0B1120]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black text-slate-900 dark:text-white">{session.name}</div>
+                      <div className="mt-1 text-xs font-bold text-slate-400">
+                        {session.status === 'active' ? 'Overdue count' : 'Manager approval'} - {when(session.updatedAt)}
+                      </div>
+                    </div>
+                    <div className={`rounded-full px-2 py-1 text-xs font-black ${number(session.varianceCount) > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+                      {number(session.varianceCount)} variance
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <span>{session.type}</span>
+                    <span>{number(session.countedCount)} / {number(session.itemCount)} counted</span>
+                    <span>Net {number(session.netVariance) > 0 ? '+' : ''}{number(session.netVariance)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel
+            title="Offline Sync Issues"
+            action={<button onClick={load} className="text-xs font-black text-indigo-600 dark:text-indigo-300">Refresh</button>}
+          >
+            <div className="space-y-3">
+              {(data?.offlineSyncIssues || []).length === 0 && <EmptyLine label="No offline sync issues." />}
+              {(data?.offlineSyncIssues || []).slice(0, 5).map((event) => (
+                <div key={event.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-[#0B1120]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black text-slate-900 dark:text-white">{event.action}</div>
+                      <div className="mt-1 text-xs font-bold text-slate-400">
+                        {event.staffName || event.staffId || 'System'} - {when(event.createdAt)}
+                      </div>
+                    </div>
+                    <WifiOff className="h-4 w-4 shrink-0 text-amber-500" />
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    {event.entityType && <span>{event.entityType}</span>}
+                    {event.entityId && <span>{event.entityId}</span>}
+                    {event.source && <span>{event.source}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
           <Panel

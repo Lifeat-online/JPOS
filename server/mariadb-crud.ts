@@ -29,6 +29,74 @@ function normalizeJsonField(value: any, fallback: any) {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+function paymentTotal(payments: any[] | undefined, method: string) {
+  if (!Array.isArray(payments)) return 0;
+  return Number(payments.reduce((sum, payment) => (
+    String(payment?.method || "") === method ? sum + Math.max(0, Number(payment?.amount || 0)) : sum
+  ), 0).toFixed(2));
+}
+
+async function applyWalletSalePayment(
+  conn: any,
+  tenantId: string,
+  saleId: string,
+  context: {
+    customerId?: string | null;
+    staffId?: string | null;
+    staffName?: string | null;
+    payments?: any[];
+  }
+) {
+  const walletAmount = paymentTotal(context.payments, "wallet");
+  if (walletAmount <= 0) return null;
+  if (!context.customerId) throw new Error("Select a customer before using wallet payment.");
+
+  const [customerRows] = await conn.query(
+    `SELECT id, name, wallet_balance AS walletBalance
+       FROM customers
+      WHERE tenant_id = ? AND id = ?
+      LIMIT 1
+      FOR UPDATE`,
+    [tenantId, context.customerId]
+  );
+  const customer = (customerRows as any[])[0];
+  if (!customer) throw new Error("Customer wallet not found.");
+
+  const previousBalance = Number(customer.walletBalance || customer.wallet_balance || 0);
+  if (previousBalance < walletAmount) {
+    throw new Error(`Customer wallet balance is R${previousBalance.toFixed(2)}, which is not enough for this wallet payment.`);
+  }
+  const nextBalance = Number((previousBalance - walletAmount).toFixed(2));
+  await conn.query(
+    `UPDATE customers
+        SET wallet_balance = ?,
+            updated_at = NOW()
+      WHERE tenant_id = ? AND id = ?`,
+    [nextBalance, tenantId, customer.id]
+  );
+
+  await recordAuditEvent(conn, {
+    tenantId,
+    action: "customer_wallet.sale_payment",
+    entityType: "customer_wallet",
+    entityId: customer.id,
+    relatedSaleId: saleId,
+    staffId: context.staffId || null,
+    staffName: context.staffName || null,
+    customerId: customer.id,
+    source: "checkout",
+    details: {
+      saleId,
+      walletAmount,
+      previousBalance,
+      nextBalance,
+      customerName: customer.name || null,
+    },
+  });
+
+  return { previousBalance, nextBalance, walletAmount };
+}
+
 async function deductCompletedSaleProductStock(
   conn: any,
   tenantId: string,
@@ -972,6 +1040,14 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
       }
     }
 
+    const walletSalePayment = (sale.status || "pending") === "completed" && ((sale as any).transactionType || "sale") === "sale"
+      ? await applyWalletSalePayment(conn, tenantId, id, {
+        customerId: sale.customerId || null,
+        staffId: sale.staffId || null,
+        payments: sale.payments as any[] | undefined,
+      })
+      : null;
+
     await recordAuditEvent(conn, {
       tenantId,
       action: "sale.created",
@@ -986,6 +1062,7 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         paymentMethod: sale.paymentMethod || "pending",
         total: Number(sale.total || 0),
         itemCount: Array.isArray(sale.items) ? sale.items.length : 0,
+        walletPaymentAmount: walletSalePayment?.walletAmount || 0,
       },
     });
 
@@ -1219,6 +1296,7 @@ export async function updateSale(
     const nextStatus = updates.status !== undefined ? updates.status : existingSale?.status;
     const nextTransactionType = (updates as any).transactionType !== undefined ? ((updates as any).transactionType || "sale") : (existingSale?.transaction_type || "sale");
     const shouldDeductStock = existingSale?.status !== "completed" && nextStatus === "completed" && nextTransactionType === "sale";
+    let walletSalePayment: Awaited<ReturnType<typeof applyWalletSalePayment>> | null = null;
     if (shouldDeductStock) {
       let itemsForStock = updates.items as any[] | undefined;
       if (!itemsForStock) {
@@ -1232,6 +1310,22 @@ export async function updateSale(
         saleId,
         staffId: updates.staffId || existingSale?.staff_id || null,
         note: "Sale status changed to completed",
+      });
+
+      let paymentsForWallet = updates.payments as any[] | undefined;
+      if (!paymentsForWallet) {
+        const [paymentRows] = await conn.query<any>(
+          `SELECT method, amount
+             FROM sale_payments
+            WHERE sale_id = ?`,
+          [saleId]
+        );
+        paymentsForWallet = paymentRows as any[];
+      }
+      walletSalePayment = await applyWalletSalePayment(conn, tenantId, saleId, {
+        customerId: updates.customerId !== undefined ? updates.customerId || null : existingSale?.customer_id || null,
+        staffId: updates.staffId || existingSale?.staff_id || null,
+        payments: paymentsForWallet,
       });
     }
 
@@ -1249,6 +1343,7 @@ export async function updateSale(
         previousTransactionType: existingSale?.transaction_type || null,
         nextTransactionType,
         changedFields: Object.keys(updates || {}),
+        walletPaymentAmount: walletSalePayment?.walletAmount || 0,
       },
     });
 
@@ -1743,21 +1838,75 @@ export async function createPayoutRequest(
   data: any
 ): Promise<any> {
   const id = `payout_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-  await query(
-    `INSERT INTO payout_requests (
-      id, tenant_id, staff_id, staff_name, amount, status, note, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-    [
-      id,
+  const amount = Number(data.amount || 0);
+  if (!data.staffId) throw new Error("Choose the staff wallet first.");
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a payout amount greater than zero.");
+
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    const [staffRows] = await conn.query<any>(
+      `SELECT id, name, wallet_balance AS walletBalance
+         FROM staff
+        WHERE tenant_id = ? AND id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, data.staffId]
+    );
+    const staff = (staffRows as any[])[0];
+    if (!staff) throw new Error("Staff wallet not found.");
+    const previousBalance = Number(staff.walletBalance || staff.wallet_balance || 0);
+    if (previousBalance < amount) throw new Error("Staff wallet balance is not enough for this payout request.");
+    const nextBalance = Number((previousBalance - amount).toFixed(2));
+
+    await conn.query(
+      `UPDATE staff
+          SET wallet_balance = ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [nextBalance, tenantId, data.staffId]
+    );
+
+    await conn.query(
+      `INSERT INTO payout_requests (
+        id, tenant_id, staff_id, staff_name, amount, status, note, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        id,
+        tenantId,
+        data.staffId,
+        data.staffName || staff.name || null,
+        amount,
+        data.status || "pending",
+        data.note || null,
+      ]
+    );
+
+    await recordAuditEvent(conn, {
       tenantId,
-      data.staffId || null,
-      data.staffName || null,
-      data.amount,
-      data.status || "pending",
-      data.note || null,
-    ]
-  );
-  return { id, ...data };
+      action: "staff_wallet.payout_requested",
+      entityType: "staff_wallet",
+      entityId: data.staffId,
+      staffId: data.staffId,
+      staffName: data.staffName || staff.name || null,
+      source: "staff_portal",
+      details: {
+        payoutRequestId: id,
+        amount,
+        previousBalance,
+        nextBalance,
+        status: data.status || "pending",
+      },
+    });
+
+    await conn.commit();
+    return { id, ...data, amount, status: data.status || "pending" };
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
 export async function updatePayoutRequest(
@@ -1805,22 +1954,75 @@ export async function createCustomerPayoutRequest(
   data: any
 ): Promise<any> {
   const id = `cpout_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-  await query(
-    `INSERT INTO customer_payout_requests (
-      id, tenant_id, customer_id, customer_name, customer_email, amount, status, note, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-    [
-      id,
+  const amount = Number(data.amount || 0);
+  if (!data.customerId) throw new Error("Choose the customer wallet first.");
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a payout amount greater than zero.");
+
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    const [customerRows] = await conn.query<any>(
+      `SELECT id, name, email, wallet_balance AS walletBalance
+         FROM customers
+        WHERE tenant_id = ? AND id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, data.customerId]
+    );
+    const customer = (customerRows as any[])[0];
+    if (!customer) throw new Error("Customer wallet not found.");
+    const previousBalance = Number(customer.walletBalance || customer.wallet_balance || 0);
+    if (previousBalance < amount) throw new Error("Customer wallet balance is not enough for this payout request.");
+    const nextBalance = Number((previousBalance - amount).toFixed(2));
+
+    await conn.query(
+      `UPDATE customers
+          SET wallet_balance = ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [nextBalance, tenantId, data.customerId]
+    );
+
+    await conn.query(
+      `INSERT INTO customer_payout_requests (
+        id, tenant_id, customer_id, customer_name, customer_email, amount, status, note, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        id,
+        tenantId,
+        data.customerId,
+        data.customerName || customer.name || null,
+        data.customerEmail || customer.email || null,
+        amount,
+        data.status || "pending",
+        data.note || null,
+      ]
+    );
+
+    await recordAuditEvent(conn, {
       tenantId,
-      data.customerId,
-      data.customerName,
-      data.customerEmail,
-      data.amount,
-      data.status || "pending",
-      data.note || null,
-    ]
-  );
-  return { id, ...data };
+      action: "customer_wallet.payout_requested",
+      entityType: "customer_wallet",
+      entityId: data.customerId,
+      customerId: data.customerId,
+      source: "client_portal",
+      details: {
+        payoutRequestId: id,
+        amount,
+        previousBalance,
+        nextBalance,
+        status: data.status || "pending",
+      },
+    });
+
+    await conn.commit();
+    return { id, ...data, amount, status: data.status || "pending" };
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
 export async function updateCustomerPayoutRequest(

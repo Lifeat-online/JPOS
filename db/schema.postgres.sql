@@ -1,4 +1,4 @@
--- Postgres schema for Jimmy's POS (Supabase)
+-- Postgres schema for MasePOS (Supabase)
 -- Notes:
 -- - JSON columns are stored as TEXT containing JSON for maximum compatibility with existing code.
 -- - Boolean-like flags use SMALLINT (0/1) to match existing MariaDB behavior.
@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   cash_session_id TEXT NOT NULL REFERENCES cash_sessions(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale')),
+  type TEXT NOT NULL CHECK (type IN ('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale','wallet_cash_in','wallet_cash_out')),
   direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral')),
   amount NUMERIC(12,2) NOT NULL DEFAULT 0,
   sale_id TEXT,
@@ -307,6 +307,37 @@ CREATE TABLE IF NOT EXISTS cash_custody_transfers (
 
 CREATE INDEX IF NOT EXISTS idx_cash_custody_tenant_status ON cash_custody_transfers (tenant_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_cash_custody_session ON cash_custody_transfers (tenant_id, cash_session_id);
+
+CREATE TABLE IF NOT EXISTS cash_close_checkpoints (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  business_date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'review_needed' CHECK (status IN ('balanced','review_needed')),
+  expected_physical_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+  counted_physical_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+  variance NUMERIC(12,2) NOT NULL DEFAULT 0,
+  manager_float NUMERIC(12,2) NOT NULL DEFAULT 0,
+  open_register_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+  pending_cash_up_cash NUMERIC(12,2) NOT NULL DEFAULT 0,
+  wallet_liability NUMERIC(12,2) NOT NULL DEFAULT 0,
+  pending_payouts NUMERIC(12,2) NOT NULL DEFAULT 0,
+  petty_cash_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+  wallet_cash_in_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+  wallet_cash_out_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+  custody_pending_count INTEGER NOT NULL DEFAULT 0,
+  custody_variance_today NUMERIC(12,2) NOT NULL DEFAULT 0,
+  unresolved_items TEXT DEFAULT '[]'::TEXT,
+  counted_breakdown TEXT DEFAULT '{}'::TEXT,
+  note TEXT,
+  closed_by TEXT,
+  closed_by_name TEXT,
+  closed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (tenant_id, business_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_close_tenant_status ON cash_close_checkpoints (tenant_id, status, business_date);
 
 CREATE TABLE IF NOT EXISTS audit_events (
   id TEXT PRIMARY KEY,
@@ -487,7 +518,7 @@ CREATE TABLE IF NOT EXISTS push_notification_settings (
   tenant_id TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
   vapid_public_key TEXT,
   vapid_private_key TEXT,
-  subject TEXT NOT NULL DEFAULT 'mailto:dev@jimmyspos.local',
+  subject TEXT NOT NULL DEFAULT 'mailto:dev@masepos.local',
   enabled SMALLINT DEFAULT 1 CHECK (enabled IN (0, 1)),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

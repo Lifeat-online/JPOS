@@ -1,6 +1,6 @@
 {
-  "name": "Jimmy's POS",
-  "description": "A modern Point of Sale system with real-time inventory tracking and PayFast payment integration.",
+  "name": "MasePOS",
+  "description": "MasePOS — A modern Point of Sale system with real-time inventory tracking and PayFast payment integration.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": []
 }

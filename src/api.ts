@@ -4,16 +4,21 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
-import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary } from './types';
+import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
 
 function clearStoredSession() {
+  localStorage.removeItem('masepos_access_token');
+  localStorage.removeItem('masepos_refresh_token');
+  localStorage.removeItem('masepos_user');
+  // Migration: also clear old keys
   localStorage.removeItem('jpos_access_token');
   localStorage.removeItem('jpos_refresh_token');
   localStorage.removeItem('jpos_user');
   sessionCleared = true;
+  window.dispatchEvent(new Event('masepos:auth-cleared'));
   window.dispatchEvent(new Event('jpos:auth-cleared'));
 }
 
@@ -22,7 +27,8 @@ function clearStoredSession() {
 async function tryRefresh(): Promise<boolean> {
   if (refreshPromise) return refreshPromise;
 
-  const refreshToken = localStorage.getItem('jpos_refresh_token');
+  // Migration: try new key first, fall back to old key
+  const refreshToken = localStorage.getItem('masepos_refresh_token') || localStorage.getItem('jpos_refresh_token');
   if (!refreshToken) return false;
 
   refreshPromise = (async () => {
@@ -37,8 +43,11 @@ async function tryRefresh(): Promise<boolean> {
         return false;
       }
       const data = await res.json();
-      localStorage.setItem('jpos_access_token',  data.accessToken);
-      localStorage.setItem('jpos_refresh_token', data.refreshToken);
+      localStorage.setItem('masepos_access_token',  data.accessToken);
+      localStorage.setItem('masepos_refresh_token', data.refreshToken);
+      // Migration: clear old keys after successful write to new keys
+      localStorage.removeItem('jpos_access_token');
+      localStorage.removeItem('jpos_refresh_token');
       sessionCleared = false;
       return true;
     } catch {
@@ -604,6 +613,30 @@ export function cancelCashCustodyTransfer(tenantId: string, transferId: string, 
   return apiPut<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/manager-cash/transfers/${encodeURIComponent(transferId)}/cancel`, data);
 }
 
+export function getCashClosePreview(tenantId: string, businessDate?: string | null) {
+  const query = businessDate ? `?businessDate=${encodeURIComponent(businessDate)}` : '';
+  return apiGet<CashClosePreview>(`/api/mariadb/tenants/${tenantId}/manager-cash/close/preview${query}`);
+}
+
+export function getCashCloseCheckpoints(tenantId: string, limit = 20) {
+  return apiGet<CashCloseCheckpoint[]>(`/api/mariadb/tenants/${tenantId}/manager-cash/close?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function createCashCloseCheckpoint(tenantId: string, data: {
+  businessDate?: string | null;
+  countedAmount: number;
+  countedBreakdown?: Record<string, number>;
+  note?: string | null;
+}) {
+  return apiPost<CashCloseCheckpoint>(`/api/mariadb/tenants/${tenantId}/manager-cash/close`, data);
+}
+
+export function exportCashCloseCheckpointCsv(tenantId: string, checkpointId: string) {
+  return apiGet<{ filename: string; mimeType: string; csv: string; generatedAt: string }>(
+    `/api/mariadb/tenants/${tenantId}/manager-cash/close/${encodeURIComponent(checkpointId)}/export`
+  );
+}
+
 export function recordWalletCashMovement(tenantId: string, data: {
   ownerType: 'staff' | 'customer';
   ownerId: string;
@@ -621,6 +654,24 @@ export function recordWalletCashMovement(tenantId: string, data: {
     nextBalance: number;
     appliedWalletDelta: boolean;
   }>(`/api/mariadb/tenants/${tenantId}/manager-cash/wallet-cash`, data);
+}
+
+export function recordRegisterWalletCashMovement(tenantId: string, cashSessionId: string, data: {
+  customerId: string;
+  direction: 'in' | 'out';
+  amount: number;
+  note?: string | null;
+}) {
+  return apiPost<{
+    cashMovementId: string;
+    movement: ManagerCashMovement;
+    customerId: string;
+    customerName: string;
+    previousBalance: number;
+    nextBalance: number;
+    cashSessionId: string;
+    cashSessionDelta: number;
+  }>(`/api/mariadb/tenants/${tenantId}/cash-sessions/${encodeURIComponent(cashSessionId)}/wallet-cash`, data);
 }
 
 export function setupTenant(data: any) {

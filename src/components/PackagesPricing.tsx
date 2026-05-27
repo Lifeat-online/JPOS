@@ -24,7 +24,7 @@ export function PackagesPricing({ onStartSetup, onContact, compact = false }: Pa
             Packages And Pricing
           </div>
           <h2 className={`${compact ? 'text-3xl' : 'mt-6 text-4xl sm:text-5xl'} font-black tracking-tight text-slate-950 dark:text-white`}>
-            Pick the package that matches how you want to run JPOS.
+            Pick the package that matches how you want to run MasePOS.
           </h2>
           <p className={`${compact ? 'text-sm' : 'mt-5 text-lg'} max-w-3xl leading-8 text-slate-600 dark:text-slate-300 ${compact ? '' : 'mx-auto'}`}>
             Hosted plans are managed SaaS with register limits. White-label is delivered as a Docker image with a signed licence key, unlimited registers, and optional monthly Support+.

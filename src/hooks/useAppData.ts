@@ -110,6 +110,44 @@ export function useAppData(user: User | null) {
     }
   }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
 
+  const refreshCustomers = useCallback(async () => {
+    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'customers', tableAccessOptions)) {
+      setCustomers([]);
+      return;
+    }
+    const fetched = await getTenantCustomers(tenantId!);
+    const sanitized = (fetched || []).map((c: any) => ({
+      ...c,
+      loyaltyPoints: Number(c.loyaltyPoints || 0),
+      walletBalance: Number(c.walletBalance || 0),
+      accountEnabled: Boolean(c.accountEnabled),
+      accountLimit: Number(c.accountLimit || 0),
+      accountBalance: Number(c.accountBalance || 0),
+    }));
+    setCustomers(sanitized);
+  }, [tenantId, canLoadTenantData, currentUserRole, tableAccessOptions]);
+
+  const refreshStaff = useCallback(async () => {
+    if (!canLoadTenantData) {
+      setStaff([]);
+      setIsStaffLoading(false);
+      return;
+    }
+    const fetched = await getTenantStaff(tenantId!);
+    const sanitized = (fetched || []).map((s: any) => ({
+      ...s,
+      payRate: s.payRate ? Number(s.payRate) : undefined,
+      walletBalance: Number(s.walletBalance || 0),
+      permissions: typeof s.permissions === 'string' ? JSON.parse(s.permissions || '{}') : (s.permissions || {}),
+      assignedSections: typeof s.assignedSections === 'string' ? JSON.parse(s.assignedSections) : (s.assignedSections || []),
+      assignedCategories: typeof s.assignedCategories === 'string' ? JSON.parse(s.assignedCategories) : (s.assignedCategories || []),
+      metrics: typeof s.metrics === 'string' ? JSON.parse(s.metrics) : s.metrics,
+      badges: typeof s.badges === 'string' ? JSON.parse(s.badges) : s.badges,
+    }));
+    setStaff(sanitized);
+    setIsStaffLoading(false);
+  }, [tenantId, canLoadTenantData]);
+
   useEffect(() => {
     let active = true;
     async function resolveTenant() {
@@ -508,6 +546,8 @@ export function useAppData(user: User | null) {
     tableSections, restaurantTables,
     refreshSales: loadSales,
     refreshProducts,
+    refreshCustomers,
+    refreshStaff,
     tenantLoading, configLoading, isStaffLoading,
   };
 }

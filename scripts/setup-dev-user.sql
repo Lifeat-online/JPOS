@@ -2,7 +2,7 @@
 
 -- Create tenant if not exists
 INSERT INTO tenants (id, name) 
-SELECT 'dev-tenant-001', 'Jimmy\'s POS Dev' 
+SELECT 'dev-tenant-001', 'MasePOS Dev'
 FROM DUAL 
 WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE id = 'dev-tenant-001');
 

@@ -152,7 +152,7 @@ export function DevDashboard({
   const [revokeForm, setRevokeForm] = useState({ licenceId: '', reason: '' });
   const [pushStatus, setPushStatus] = useState<PushNotificationStatus | null>(null);
   const [pushLoading, setPushLoading] = useState(false);
-  const [pushSubject, setPushSubject] = useState('mailto:dev@jimmyspos.local');
+  const [pushSubject, setPushSubject] = useState('mailto:dev@masepos.local');
   const [pushActionStatus, setPushActionStatus] = useState<{ type: 'ok' | 'error'; message: string } | null>(null);
   const [pushLastSend, setPushLastSend] = useState<PushSendResult | null>(null);
 
@@ -233,7 +233,7 @@ export function DevDashboard({
     try {
       const status = await getPushNotificationStatus(tenantId);
       setPushStatus(status);
-      setPushSubject(status.subject || 'mailto:dev@jimmyspos.local');
+      setPushSubject(status.subject || 'mailto:dev@masepos.local');
     } catch (err: any) {
       setPushActionStatus({ type: 'error', message: err?.message || 'Failed to load push status' });
     } finally {
@@ -617,7 +617,7 @@ export function DevDashboard({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `jimmys-pos-export-${Date.now()}.json`;
+    a.download = `masepos-export-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };

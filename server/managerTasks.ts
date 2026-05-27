@@ -1,6 +1,7 @@
 import { getConnection, isPostgres, query } from "./db.js";
 import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
 import { processSaleRefund, processSaleVoid } from "./mariadb-crud.js";
+import { approveStockTakeSession } from "./stockTake.js";
 
 type TaskPriority = "low" | "normal" | "high" | "critical";
 type TaskStatus = "open" | "in_review" | "approved" | "declined" | "done" | "dismissed";
@@ -361,7 +362,7 @@ export async function createManagerStockAdjustmentRequest(tenantId: string, inpu
 }
 
 export async function syncManagerTasksFromSignals(tenantId: string) {
-  const [cashRows, saleRows, lowStockRows, aiRows] = await Promise.all([
+  const [cashRows, saleRows, lowStockRows, aiRows, stockTakeRows, offlineRows] = await Promise.all([
     query<any>(
       `SELECT
          id,
@@ -434,6 +435,59 @@ export async function syncManagerTasksFromSignals(tenantId: string) {
        WHERE tenant_id = ?
          AND status = 'open'
          AND severity IN ('critical', 'warning')
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT
+         s.id,
+         s.name,
+         s.type,
+         s.status,
+         s.due_at AS dueAt,
+         s.updated_at AS updatedAt,
+         COUNT(i.id) AS itemCount,
+         SUM(CASE WHEN i.counted_quantity IS NOT NULL THEN 1 ELSE 0 END) AS countedCount,
+         SUM(CASE WHEN i.variance_quantity IS NOT NULL AND ABS(i.variance_quantity) > 0.0001 THEN 1 ELSE 0 END) AS varianceCount,
+         SUM(CASE WHEN i.variance_quantity IS NOT NULL THEN i.variance_quantity ELSE 0 END) AS netVariance,
+         MAX(ABS(COALESCE(i.variance_quantity, 0))) AS largestVariance
+       FROM stock_take_sessions s
+       LEFT JOIN stock_take_items i ON i.session_id = s.id AND i.tenant_id = s.tenant_id
+       WHERE s.tenant_id = ?
+         AND s.status IN ('active','submitted')
+         AND (
+           s.status = 'submitted'
+           OR (s.status = 'active' AND s.due_at IS NOT NULL AND s.due_at < NOW())
+         )
+       GROUP BY s.id, s.name, s.type, s.status, s.due_at, s.updated_at
+       HAVING
+         (s.status = 'active' AND s.due_at IS NOT NULL AND s.due_at < NOW())
+         OR SUM(CASE WHEN i.variance_quantity IS NOT NULL AND ABS(i.variance_quantity) > 0.0001 THEN 1 ELSE 0 END) > 0
+       ORDER BY
+         CASE WHEN s.status = 'submitted' THEN 0 ELSE 1 END,
+         s.updated_at DESC
+       LIMIT 50`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT
+         id,
+         action,
+         entity_type AS entityType,
+         entity_id AS entityId,
+         source,
+         details,
+         created_at AS createdAt
+       FROM audit_events
+       WHERE tenant_id = ?
+         AND action NOT LIKE 'manager_task.%'
+         AND (
+           action LIKE 'offline.%'
+           OR action LIKE 'sync.%'
+           OR action LIKE '%sync_failed%'
+           OR action LIKE '%sync.conflict%'
+         )
        ORDER BY created_at DESC
        LIMIT 50`,
       [tenantId]
@@ -519,6 +573,59 @@ export async function syncManagerTasksFromSignals(tenantId: string) {
         summary: insight.summary,
         recommendation: insight.recommendation,
         confidence: toNumber(insight.confidence),
+      },
+    });
+  }
+
+  for (const session of stockTakeRows) {
+    const varianceCount = toNumber(session.varianceCount);
+    const netVariance = toNumber(session.netVariance);
+    const isOverdue = session.status === "active";
+    drafts.push({
+      tenantId,
+      taskType: "stock_variance",
+      title: isOverdue
+        ? `Finish overdue stocktake: ${session.name}`
+        : `Approve stocktake variance: ${session.name}`,
+      summary: isOverdue
+        ? `${session.type || "Stocktake"} was due before today and still needs counts submitted.`
+        : `${varianceCount} product${varianceCount === 1 ? "" : "s"} counted with variance. Net movement ${netVariance > 0 ? "+" : ""}${netVariance}.`,
+      priority: isOverdue || Math.abs(netVariance) >= 10 || varianceCount >= 5 ? "high" : "normal",
+      sourceType: "stock_take_session",
+      sourceId: session.id,
+      details: {
+        name: session.name,
+        type: session.type,
+        status: session.status,
+        dueAt: session.dueAt,
+        itemCount: toNumber(session.itemCount),
+        countedCount: toNumber(session.countedCount),
+        varianceCount,
+        netVariance,
+        largestVariance: toNumber(session.largestVariance),
+        requiredAction: isOverdue ? "complete_counts" : "manager_approval",
+      },
+    });
+  }
+
+  for (const event of offlineRows) {
+    const action = String(event.action || "");
+    const priority = action.includes("conflict") ? "critical" : "high";
+    drafts.push({
+      tenantId,
+      taskType: "offline_sync",
+      title: action.includes("conflict") ? "Resolve offline sync conflict" : "Review failed offline sync",
+      summary: `${action || "Sync issue"}${event.entityType || event.entityId ? ` on ${event.entityType || "record"} ${event.entityId || ""}` : ""}.`,
+      priority,
+      sourceType: "audit_event",
+      sourceId: event.id,
+      details: {
+        action,
+        entityType: event.entityType,
+        entityId: event.entityId,
+        source: event.source,
+        details: parseJson(event.details, {}),
+        createdAt: event.createdAt,
       },
     });
   }
@@ -686,6 +793,14 @@ async function applySourceDecision(tenantId: string, task: any, status: TaskStat
       `UPDATE ai_insights SET status = ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
       [insightStatus, tenantId, task.sourceId]
     );
+  }
+
+  if (task.sourceType === "stock_take_session" && task.taskType === "stock_variance" && (status === "approved" || status === "done")) {
+    return approveStockTakeSession(tenantId, task.sourceId, {
+      staffId: input.staffId || null,
+      staffName: input.staffName || null,
+      role: "manager",
+    });
   }
 
   return null;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Plus, Trash2, Loader2, Wallet, CreditCard, Banknote, ReceiptText } from 'lucide-react';
 
@@ -11,10 +11,11 @@ interface SplitPaymentModalProps {
   customerWalletBalance?: number;
   customerAccountRemaining?: number;
   customerAccountEnabled?: boolean;
+  offlineMode?: boolean;
 }
 
 export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
-  isOpen, cartTotal, isProcessing, onConfirm, onClose, customerWalletBalance = 0, customerAccountRemaining = 0, customerAccountEnabled = false
+  isOpen, cartTotal, isProcessing, onConfirm, onClose, customerWalletBalance = 0, customerAccountRemaining = 0, customerAccountEnabled = false, offlineMode = false
 }) => {
   const [payments, setPayments] = useState<any[]>([]);
   const [currentMethod, setCurrentMethod] = useState<'cash' | 'card' | 'wallet' | 'account'>('cash');
@@ -26,6 +27,12 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
   const remaining = Math.max(0, cartTotal - totalPaid);
   const accountPaid = payments.reduce((sum, p) => sum + (p.method === 'account' ? Number(p.amount || 0) : 0), 0);
   const accountRemainingAfterPayments = Math.max(0, Number(customerAccountRemaining || 0) - accountPaid);
+
+  useEffect(() => {
+    if (offlineMode && (currentMethod === 'wallet' || currentMethod === 'account')) {
+      setCurrentMethod('cash');
+    }
+  }, [currentMethod, offlineMode]);
 
   const addPayment = () => {
     const amount = Number(currentAmount);
@@ -117,15 +124,17 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
                 </button>
                 <button
                   onClick={() => setCurrentMethod('wallet')}
-                  disabled={customerWalletBalance <= 0}
-                  className={`flex-1 py-3 flex flex-col items-center gap-1 rounded-xl transition-all ${currentMethod === 'wallet' ? 'bg-white dark:bg-slate-800 shadow-sm text-primary' : 'text-slate-400'}`}
+                  disabled={offlineMode || customerWalletBalance <= 0}
+                  title={offlineMode ? 'Wallet payments require online mode' : 'Wallet'}
+                  className={`flex-1 py-3 flex flex-col items-center gap-1 rounded-xl transition-all ${currentMethod === 'wallet' ? 'bg-white dark:bg-slate-800 shadow-sm text-primary' : 'text-slate-400'} disabled:opacity-30`}
                 >
                   <Wallet className="w-5 h-5" />
                   <span className="text-[10px] font-black uppercase tracking-widest">Wallet</span>
                 </button>
                 <button
                   onClick={() => setCurrentMethod('account')}
-                  disabled={!customerAccountEnabled || accountRemainingAfterPayments <= 0}
+                  disabled={offlineMode || !customerAccountEnabled || accountRemainingAfterPayments <= 0}
+                  title={offlineMode ? 'Account payments require online mode' : 'Account'}
                   className={`flex-1 py-3 flex flex-col items-center gap-1 rounded-xl transition-all ${currentMethod === 'account' ? 'bg-white dark:bg-slate-800 shadow-sm text-primary' : 'text-slate-400'} disabled:opacity-30`}
                 >
                   <ReceiptText className="w-5 h-5" />
@@ -134,6 +143,11 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
               </div>
 
               <div className="space-y-4">
+                {offlineMode && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[10px] font-black uppercase tracking-widest text-amber-700">
+                    Offline split payments can use cash and external card only.
+                  </div>
+                )}
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 px-1 mb-1 block">
                     Amount to Pay

@@ -52,7 +52,7 @@ export const JPOS_PACKAGES: JposPackage[] = [
     maxStaff: 3,
     maxCustomers: 100,
     features: ['jpos_branding'],
-    limitsLabel: '2 registers, 100 products, 3 staff, JPOS branding',
+    limitsLabel: '2 registers, 100 products, 3 staff, MasePOS branding',
     description: 'Hosted starter workspace for testing, small counters, and proof-of-fit.',
     ctaLabel: 'Start Free',
   },

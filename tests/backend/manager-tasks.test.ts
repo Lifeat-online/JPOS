@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
 import * as crudModule from '../../server/mariadb-crud.js';
+import * as stockTakeModule from '../../server/stockTake.js';
 import { createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue } from '../../server/managerTasks.js';
 
 vi.mock('../../server/db.js', () => ({
@@ -12,6 +13,10 @@ vi.mock('../../server/db.js', () => ({
 vi.mock('../../server/mariadb-crud.js', () => ({
   processSaleRefund: vi.fn(),
   processSaleVoid: vi.fn(),
+}));
+
+vi.mock('../../server/stockTake.js', () => ({
+  approveStockTakeSession: vi.fn(),
 }));
 
 describe('manager task queue', () => {
@@ -76,6 +81,78 @@ describe('manager task queue', () => {
       taskType: 'cash_variance',
       details: { difference: -10 },
     });
+  });
+
+  it('syncs stocktake exceptions and offline sync issues into manager tasks', async () => {
+    (dbModule.query as any).mockImplementation((sql: string) => {
+      if (sql.includes('FROM stock_take_sessions s')) {
+        return Promise.resolve([
+          {
+            id: 'session_1',
+            name: 'Daily spot',
+            type: 'spot_check',
+            status: 'submitted',
+            itemCount: '2',
+            countedCount: '2',
+            varianceCount: '1',
+            netVariance: '-3',
+          },
+        ]);
+      }
+      if (sql.includes('FROM audit_events')) {
+        return Promise.resolve([
+          {
+            id: 'audit_sync_1',
+            action: 'offline.sync_failed',
+            entityType: 'sale',
+            entityId: 'sale_1',
+            source: 'offline_queue',
+            details: '{"attempts":3}',
+          },
+        ]);
+      }
+      if (sql.includes('INSERT INTO manager_tasks')) return Promise.resolve({});
+      if (sql.includes('FROM manager_tasks')) {
+        return Promise.resolve([
+          {
+            id: 'task_stocktake_1',
+            tenantId: 'tenant_1',
+            taskType: 'stock_variance',
+            title: 'Approve stocktake variance: Daily spot',
+            priority: 'normal',
+            status: 'open',
+            sourceType: 'stock_take_session',
+            sourceId: 'session_1',
+            details: '{"varianceCount":1,"netVariance":-3}',
+          },
+          {
+            id: 'task_sync_1',
+            tenantId: 'tenant_1',
+            taskType: 'offline_sync',
+            title: 'Review failed offline sync',
+            priority: 'high',
+            status: 'open',
+            sourceType: 'audit_event',
+            sourceId: 'audit_sync_1',
+            details: '{"action":"offline.sync_failed"}',
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const result = await getManagerTaskQueue('tenant_1');
+
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO manager_tasks'),
+      expect.arrayContaining(['tenant_1', 'stock_variance'])
+    );
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO manager_tasks'),
+      expect.arrayContaining(['tenant_1', 'offline_sync'])
+    );
+    expect(result.counts).toMatchObject({ open: 2, total: 2 });
+    expect(result.tasks.map((task) => task.taskType)).toEqual(['stock_variance', 'offline_sync']);
   });
 
   it('requires a manager note and audits task decisions', async () => {
@@ -321,6 +398,56 @@ describe('manager task queue', () => {
       id: 'task_stock_1',
       status: 'approved',
       sourceResult: { previousQuantity: 5, newQuantity: 7, quantityDelta: 2 },
+    });
+  });
+
+  it('approves stocktake variance tasks through the stocktake ledger', async () => {
+    (stockTakeModule.approveStockTakeSession as any).mockResolvedValue({
+      id: 'session_1',
+      status: 'approved',
+      applied: [{ productId: 'prod_1', quantityDelta: -2 }],
+    });
+    let taskSelects = 0;
+    (dbModule.query as any).mockImplementation((sql: string) => {
+      if (sql.includes('FROM manager_tasks')) {
+        taskSelects += 1;
+        return Promise.resolve([
+          {
+            id: 'task_stocktake_1',
+            tenantId: 'tenant_1',
+            taskType: 'stock_variance',
+            title: 'Approve stocktake variance',
+            priority: 'high',
+            status: taskSelects === 1 ? 'open' : 'approved',
+            sourceType: 'stock_take_session',
+            sourceId: 'session_1',
+            details: '{"varianceCount":1}',
+          },
+        ]);
+      }
+      return Promise.resolve({});
+    });
+
+    const result = await decideManagerTask('tenant_1', 'task_stocktake_1', {
+      action: 'approve',
+      note: 'Second count matches the variance.',
+      staffId: 'mgr_1',
+      staffName: 'Manager',
+    });
+
+    expect(stockTakeModule.approveStockTakeSession).toHaveBeenCalledWith(
+      'tenant_1',
+      'session_1',
+      { staffId: 'mgr_1', staffName: 'Manager', role: 'manager' }
+    );
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'manager_task.approved', 'manager_task', 'task_stocktake_1'])
+    );
+    expect(result).toMatchObject({
+      id: 'task_stocktake_1',
+      status: 'approved',
+      sourceResult: { status: 'approved', applied: [{ productId: 'prod_1', quantityDelta: -2 }] },
     });
   });
 });

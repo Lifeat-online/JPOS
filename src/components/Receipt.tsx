@@ -39,7 +39,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
             style={{ maxHeight: printProfile.logoMaxHeight, maxWidth: '80%' }}
           />
         )}
-        <h1 className="font-bold text-[1.35em] uppercase mb-1 receipt-text">{config?.business?.name || "JIMMY'S POS"}</h1>
+        <h1 className="font-bold text-[1.35em] uppercase mb-1 receipt-text">{config?.business?.name || "MASEPOS"}</h1>
         {config?.business?.address && <p>{config.business.address}</p>}
         {config?.business?.phone && <p>{config.business.phone}</p>}
         <div className="border-b border-black border-dashed my-2" />

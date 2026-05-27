@@ -299,7 +299,7 @@ export interface CashSession {
 export interface CashTransaction {
   id: string;
   sessionId: string;
-  type: 'opening_float' | 'cash_sale' | 'refund' | 'cash_drop' | 'cash_added' | 'cash_removed' | 'cash_out' | 'tip' | 'manager_adjustment' | 'no_sale';
+  type: 'opening_float' | 'cash_sale' | 'refund' | 'cash_drop' | 'cash_added' | 'cash_removed' | 'cash_out' | 'tip' | 'manager_adjustment' | 'no_sale' | 'wallet_cash_in' | 'wallet_cash_out';
   direction: 'in' | 'out' | 'neutral';
   amount: number;
   timestamp: any;
@@ -396,6 +396,70 @@ export interface ManagerCashSummary {
   custodyTransfersToday: number;
   custodyVarianceToday: number;
   recentMovements: ManagerCashMovement[];
+  generatedAt: string;
+}
+
+export type CashCloseStatus = 'balanced' | 'review_needed';
+
+export interface CashCloseUnresolvedItem {
+  type: 'open_register' | 'pending_cash_up' | 'pending_handover' | string;
+  id: string;
+  label: string;
+  amount?: number;
+  variance?: number;
+}
+
+export interface CashCloseCheckpoint {
+  id: string;
+  tenantId: string;
+  businessDate: string;
+  status: CashCloseStatus;
+  expectedPhysicalCash: number;
+  countedPhysicalCash: number;
+  variance: number;
+  managerFloat: number;
+  openRegisterCash: number;
+  pendingCashUpCash: number;
+  walletLiability: number;
+  pendingPayouts: number;
+  pettyCashToday: number;
+  walletCashInToday: number;
+  walletCashOutToday: number;
+  custodyPendingCount: number;
+  custodyVarianceToday: number;
+  unresolvedItems: CashCloseUnresolvedItem[];
+  countedBreakdown?: Record<string, number>;
+  note?: string | null;
+  closedBy?: string | null;
+  closedByName?: string | null;
+  closedAt?: any;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface CashClosePreview {
+  businessDate: string;
+  expectedPhysicalCash: number;
+  managerFloat: number;
+  openRegisterCash: number;
+  openRegisterCount: number;
+  pendingCashUpCash: number;
+  pendingCashUpCount: number;
+  walletLiability: number;
+  pendingPayouts: number;
+  availableAfterWalletLiability: number;
+  safeDropsToday: number;
+  cashUpsToManagerToday: number;
+  pettyCashToday: number;
+  walletCashInToday: number;
+  walletCashOutToday: number;
+  walletCashNetToday: number;
+  transferInToday: number;
+  transferOutToday: number;
+  custodyPendingCount: number;
+  custodyVarianceToday: number;
+  unresolvedItems: CashCloseUnresolvedItem[];
+  latestClose?: CashCloseCheckpoint | null;
   generatedAt: string;
 }
 

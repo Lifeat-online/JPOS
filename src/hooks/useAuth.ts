@@ -3,9 +3,9 @@
  * Replaces the previous Firebase Google auth.
  *
  * Stored in localStorage:
- *   jpos_access_token   — short-lived access token (8h)
- *   jpos_refresh_token  — long-lived refresh token (7d)
- *   jpos_user           — serialised user object
+ *   masepos_access_token   — short-lived access token (8h)
+ *   masepos_refresh_token  — long-lived refresh token (7d)
+ *   masepos_user           — serialised user object
  */
 import { useState, useEffect, useCallback } from 'react';
 
@@ -49,9 +49,9 @@ export type DemoMode = 'retail' | 'restaurant';
 // ── Token storage helpers ──────────────────────────────────────────────────
 
 const KEYS = {
-  ACCESS:  'jpos_access_token',
-  REFRESH: 'jpos_refresh_token',
-  USER:    'jpos_user',
+  ACCESS:  'masepos_access_token',
+  REFRESH: 'masepos_refresh_token',
+  USER:    'masepos_user',
 } as const;
 
 const DEV_EMAIL = 'jameskoen78@gmail.com';
@@ -72,7 +72,7 @@ function normalizeAuthUser(user: JwtUser | null): JwtUser | null {
     email: DEV_EMAIL,
     role: 'dev',
     tenantId: DEV_TENANT_ID,
-    tenantName: user.tenantName || "Jimmy's POS",
+    tenantName: user.tenantName || "MasePOS",
     displayName: user.displayName ?? user.name ?? 'Dev',
     photoURL: user.photoURL ?? null,
   };
@@ -126,6 +126,7 @@ async function refreshAccessToken(): Promise<boolean> {
 
       if (!res.ok) {
         clearSession();
+        window.dispatchEvent(new Event('masepos:auth-cleared'));
         window.dispatchEvent(new Event('jpos:auth-cleared'));
         return false;
       }
@@ -177,6 +178,7 @@ export function useAuth() {
       setState({ user: null, authLoading: false, error: null });
     };
 
+    window.addEventListener('masepos:auth-cleared', onAuthCleared);
     window.addEventListener('jpos:auth-cleared', onAuthCleared);
 
     const init = async () => {
@@ -205,7 +207,10 @@ export function useAuth() {
     };
 
     init();
-    return () => window.removeEventListener('jpos:auth-cleared', onAuthCleared);
+    return () => {
+      window.removeEventListener('masepos:auth-cleared', onAuthCleared);
+      window.removeEventListener('jpos:auth-cleared', onAuthCleared);
+    };
   }, []);
 
   // ── Login ────────────────────────────────────────────────────────────────

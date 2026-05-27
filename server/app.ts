@@ -124,11 +124,16 @@ import { applyStockAdjustment, createManagerSaleApprovalRequest, createManagerSt
 import {
   cancelCashCustodyTransfer,
   confirmCashCustodyTransfer,
+  createCashCloseCheckpoint,
   createCashCustodyTransfer,
+  exportCashCloseCheckpointCsv,
+  getCashCloseCheckpoints,
+  getCashClosePreview,
   getCashCustodyTransfers,
   getManagerCashMovements,
   getManagerCashSummary,
   recordManagerCashMovement,
+  recordRegisterWalletCashMovement,
   recordWalletCashMovement,
   transferCashSessionToManagerFloat,
 } from "./managerCash.js";
@@ -513,7 +518,7 @@ export async function createApp(io: any = null) {
       limitName: details.limitName,
       limit: details.limit,
       current: details.current,
-      upgrade: "Upgrade your JPOS package to unlock more capacity",
+      upgrade: "Upgrade your MasePOS package to unlock more capacity",
     });
   }
 
@@ -553,7 +558,7 @@ export async function createApp(io: any = null) {
             error: "Feature not available on your package",
             package: context.package.id,
             feature,
-            upgrade: "Upgrade your JPOS package to unlock this feature",
+            upgrade: "Upgrade your MasePOS package to unlock this feature",
           });
         }
         next();
@@ -816,7 +821,7 @@ export async function createApp(io: any = null) {
       }
       const staffIds = req.user?.staffId ? [String(req.user.staffId)] : undefined;
       const result = await sendPushNotification(req.params.tenantId, {
-        title: "JPOS push test",
+        title: "MasePOS push test",
         body: "Browser push is ready for workstation orders, ready messages, and staff alerts.",
         url: "/messages",
         tag: `dev-push-test-${Date.now()}`,
@@ -1033,7 +1038,7 @@ export async function createApp(io: any = null) {
             error: "Feature not available on your package",
             package: context.package.id,
             feature: "own_logo",
-            upgrade: "Upgrade your JPOS package to use your own logo",
+            upgrade: "Upgrade your MasePOS package to use your own logo",
           });
         }
       }
@@ -1052,7 +1057,7 @@ export async function createApp(io: any = null) {
           error: "Feature not available on your package",
           package: context.package.id,
           feature: "own_logo",
-          upgrade: "Upgrade your JPOS package to upload your own logo",
+          upgrade: "Upgrade your MasePOS package to upload your own logo",
         });
       }
 
@@ -2502,12 +2507,80 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/manager-cash/close/preview", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can preview end-of-day cash close." });
+      }
+      res.json(await getCashClosePreview(
+        req.params.tenantId,
+        typeof req.query.businessDate === "string" ? req.query.businessDate : null
+      ));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/manager-cash/close", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can view end-of-day cash close records." });
+      }
+      res.json(await getCashCloseCheckpoints(req.params.tenantId, Number(req.query.limit || 20)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/manager-cash/close", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can create end-of-day cash close checkpoints." });
+      }
+      const checkpoint = await createCashCloseCheckpoint(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId,
+        staffName: req.user?.name,
+        role: req.user?.role,
+      });
+      res.status(201).json(checkpoint);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/manager-cash/close/:checkpointId/export", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return res.status(403).json({ error: "Only managers and admins can export end-of-day cash close records." });
+      }
+      res.json(await exportCashCloseCheckpointCsv(req.params.tenantId, req.params.checkpointId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/mariadb/tenants/:tenantId/manager-cash/wallet-cash", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
         return res.status(403).json({ error: "Only managers and admins can reconcile wallet cash." });
       }
       const result = await recordWalletCashMovement(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId,
+        staffName: req.user?.name,
+        role: req.user?.role,
+      });
+      res.status(201).json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/cash-sessions/:id/wallet-cash", requireAuth, async (req, res) => {
+    try {
+      const result = await recordRegisterWalletCashMovement(req.params.tenantId, {
+        ...(req.body || {}),
+        cashSessionId: req.params.id,
+      }, {
         staffId: req.user?.staffId,
         staffName: req.user?.name,
         role: req.user?.role,

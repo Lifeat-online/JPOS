@@ -6,7 +6,7 @@ import {
   DollarSign, Loader2, LogOut, Moon, Sun, ChevronDown, ChevronUp,
   Receipt, Gift, User as UserIcon,
 } from 'lucide-react';
-import { apiPut, createCustomerPayoutRequest } from '../api';
+import { createCustomerPayoutRequest } from '../api';
 import { Customer, Sale, PayoutRequest } from '../types';
 import { getDate } from '../utils/date';
 
@@ -20,6 +20,7 @@ interface ClientPortalViewProps {
   toggleDarkMode: () => void;
   onLogout: () => void;
   businessName?: string;
+  onRefresh?: () => Promise<void>;
 }
 
 function formatDate(date: any): string {
@@ -47,13 +48,14 @@ const statusColors: Record<string, string> = {
 
 export function ClientPortalView({
   user, customer, tenantId, sales, payoutRequests,
-  isDarkMode, toggleDarkMode, onLogout, businessName,
+  isDarkMode, toggleDarkMode, onLogout, businessName, onRefresh,
 }: ClientPortalViewProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'wallet' | 'profile'>('overview');
   const [payoutAmount, setPayoutAmount] = useState('');
   const [payoutNote, setPayoutNote] = useState('');
   const [payoutProcessing, setPayoutProcessing] = useState(false);
   const [payoutSuccess, setPayoutSuccess] = useState('');
+  const [payoutError, setPayoutError] = useState('');
   const [expandedSale, setExpandedSale] = useState<string | null>(null);
 
   const walletBalance = customer.walletBalance || 0;
@@ -67,13 +69,8 @@ export function ClientPortalView({
     const amount = parseFloat(payoutAmount);
     if (!amount || amount <= 0 || amount > walletBalance) return;
     setPayoutProcessing(true);
+    setPayoutError('');
     try {
-      // 1. Deduct from wallet
-      await apiPut(`/api/mariadb/tenants/${tenantId}/customers/${customer.id}`, {
-        walletBalance: walletBalance - amount,
-      });
-
-      // 2. Create payout request
       await createCustomerPayoutRequest(tenantId, {
         customerId: customer.id,
         customerName: customer.name,
@@ -86,9 +83,11 @@ export function ClientPortalView({
       setPayoutSuccess(`Payout of ${formatCurrency(amount)} requested successfully.`);
       setPayoutAmount('');
       setPayoutNote('');
+      await onRefresh?.();
       setTimeout(() => setPayoutSuccess(''), 6000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Payout request failed:', err);
+      setPayoutError(err?.message || 'Payout request failed. Please try again.');
     }
     setPayoutProcessing(false);
   };
@@ -109,7 +108,7 @@ export function ClientPortalView({
             <ShoppingBag className="w-4 h-4 text-white" />
           </div>
           <div>
-            <p className="font-black text-slate-900 dark:text-white text-sm leading-none">{businessName || "Jimmy's POS"}</p>
+            <p className="font-black text-slate-900 dark:text-white text-sm leading-none">{businessName || "MasePOS"}</p>
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Customer Portal</p>
           </div>
         </div>
@@ -299,6 +298,12 @@ export function ClientPortalView({
                 <div className="flex items-center gap-3 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-emerald-700 dark:text-emerald-400 font-bold text-sm">
                   <CheckCircle2 className="w-5 h-5 shrink-0" />
                   {payoutSuccess}
+                </div>
+              )}
+              {payoutError && (
+                <div className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl text-red-700 dark:text-red-400 font-bold text-sm">
+                  <XCircle className="w-5 h-5 shrink-0" />
+                  {payoutError}
                 </div>
               )}
 
