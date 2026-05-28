@@ -95,7 +95,7 @@ const featureCards = [
   {
     icon: Download,
     title: 'Installable PWA',
-    desc: 'Install Jimmy\'s POS on desktop, Android, iPhone, or iPad, with fullscreen and kiosk controls for a cleaner app-like setup.',
+    desc: 'Install MasePOS on desktop, Android, iPhone, or iPad, with fullscreen and kiosk controls for a cleaner app-like setup.',
   },
   {
     icon: Globe2,
@@ -202,7 +202,7 @@ const mobileFeatures = [
   {
     icon: Globe2,
     title: 'Works in any browser',
-    desc: 'Use Jimmy\'s POS from desktop, laptop, tablet, Android, iPhone, or iPad browsers, with optional PWA installation for a cleaner app feel.',
+    desc: 'Use MasePOS from desktop, laptop, tablet, Android, iPhone, or iPad browsers, with optional PWA installation for a cleaner app feel.',
   },
   {
     icon: Utensils,
@@ -560,7 +560,7 @@ function MobileFeatureShowcase() {
               Staff can take the same POS/workstation workflow onto a phone or tablet.
             </h2>
             <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
-              Jimmy&apos;s POS works from any modern browser. A cashier or barman can log in on a mobile device, open the same POS or workstation view, and take orders away from the counter when the operation needs it.
+              MasePOS works from any modern browser. A cashier or barman can log in on a mobile device, open the same POS or workstation view, and take orders away from the counter when the operation needs it.
             </p>
           </motion.div>
 
@@ -686,7 +686,7 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
               <Store className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-lg font-black tracking-tight text-slate-950 dark:text-white">Jimmy&apos;s POS</p>
+              <p className="text-lg font-black tracking-tight text-slate-950 dark:text-white">MasePOS</p>
               <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Point of sale and operations system</p>
             </div>
           </div>
@@ -736,10 +736,10 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             <motion.div {...fadeUp(0)} className="max-w-4xl">
               <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Simple POS information, no fluff</p>
               <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl lg:text-6xl">
-                See what Jimmy&apos;s POS actually does before you book a demo.
+                See what MasePOS actually does before you book a demo.
               </h1>
               <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600 dark:text-slate-300">
-                Jimmy&apos;s POS is for businesses that need a browser-based sales screen, stock control, staff permissions, customer accounts, restaurant workflows, cash control, mobile order-taking, and useful reports in one place.
+                MasePOS is for businesses that need a browser-based sales screen, stock control, staff permissions, customer accounts, restaurant workflows, cash control, mobile order-taking, and useful reports in one place.
               </p>
               <div className="mt-5 inline-flex max-w-full items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left dark:border-slate-800 dark:bg-slate-900">
                 <SouthAfricanFlag />
@@ -791,7 +791,7 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
                 The practical tools a POS buyer usually checks first.
               </h2>
               <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
-                These are the everyday parts of the system, not vague promises. If your operation needs these workflows, Jimmy&apos;s POS is built for that.
+                These are the everyday parts of the system, not vague promises. If your operation needs these workflows, MasePOS is built for that.
               </p>
             </motion.div>
 
@@ -1025,7 +1025,7 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
                 <Store className="h-4 w-4" />
               </div>
               <div className="text-center sm:text-left">
-                <p className="font-black text-slate-900 dark:text-white">Jimmy&apos;s POS</p>
+                <p className="font-black text-slate-900 dark:text-white">MasePOS</p>
                 <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">South African-built, multi-currency POS for sales, stock, staff, customers, cash, and reports.</p>
               </div>
             </div>

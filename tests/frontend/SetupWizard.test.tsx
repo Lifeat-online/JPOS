@@ -75,7 +75,7 @@ describe('SetupWizard', () => {
 
     await waitFor(() => {
       expect(setupTenantMock).toHaveBeenCalled();
-      expect(screen.getByRole('alert')).toHaveTextContent(/Unable to save setup/i);
+      expect(screen.getByRole('alert')).toHaveTextContent(/Network error/i);
       expect(reloadMock).not.toHaveBeenCalled();
     });
   });
