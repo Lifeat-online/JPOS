@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { handleLogin, handleLogout, handleRefreshToken, handleGetMe, hashPassword } from '../../server/auth-handler.js';
 import * as dbModule from '../../server/db.js';
 
@@ -7,6 +7,10 @@ vi.mock('../../server/db.js', () => ({
 }));
 
 describe('auth-handler', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('returns invalid credentials when no user is found', async () => {
     (dbModule.query as any).mockResolvedValue([]);
     const req: any = { body: { email: 'noone@example.com', password: 'password' } };
@@ -35,6 +39,52 @@ describe('auth-handler', () => {
     expect(response).toHaveProperty('accessToken');
     expect(response).toHaveProperty('refreshToken');
     expect(response.user).toMatchObject({ email: 'test@example.com', name: 'Test User', role: 'admin', tenantId: 'tenant_1' });
+  });
+
+  it('accepts the matching DEV password when a stale tenant1 duplicate exists', async () => {
+    const staleHash = await hashPassword('old-password');
+    const matchingHash = await hashPassword('correct-password');
+    (dbModule.query as any)
+      .mockResolvedValueOnce([
+        {
+          id: 'dev_stale',
+          tenant_id: 'tenant1',
+          name: 'Stale Dev',
+          role: 'dev',
+          email: 'jameskoen78@gmail.com',
+          password_hash: staleHash,
+          status: 'active',
+          tenant_name: 'MasePOS',
+        },
+        {
+          id: 'dev_legacy',
+          tenant_id: 'default',
+          name: 'James Koen',
+          role: 'admin',
+          email: 'jameskoen78@gmail.com',
+          password_hash: matchingHash,
+          status: 'active',
+          tenant_name: 'Default Tenant',
+        },
+      ])
+      .mockResolvedValueOnce([{ name: 'MasePOS' }])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce({ affectedRows: 1 });
+
+    const req: any = { body: { email: 'jameskoen78@gmail.com', password: 'correct-password' } };
+    const json = vi.fn();
+    const res: any = { json };
+
+    await handleLogin(req, res);
+
+    expect(json).toHaveBeenCalled();
+    const response = json.mock.calls[0][0];
+    expect(response.user).toMatchObject({
+      id: 'dev_legacy',
+      email: 'jameskoen78@gmail.com',
+      role: 'dev',
+      tenantId: 'tenant1',
+    });
   });
 
   it('allows logout without error', async () => {

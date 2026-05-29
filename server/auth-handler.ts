@@ -337,7 +337,9 @@ export async function handleLogin(req: Request, res: Response) {
       params.push(DEV_TENANT_ID);
     }
 
-    sql += ` LIMIT 1`;
+    if (!isDev) {
+      sql += ` LIMIT 1`;
+    }
 
     const rows = await query<any>(sql, params);
 
@@ -345,16 +347,23 @@ export async function handleLogin(req: Request, res: Response) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const staff = rows[0] as StaffAuthRow;
+    const candidates = (isDev ? rows : rows.slice(0, 1)) as StaffAuthRow[];
+    const hasConfiguredPassword = candidates.some(staff => Boolean(staff.password_hash));
+    let staff: StaffAuthRow | null = null;
 
-    // If no password_hash is set, reject login
-    if (!staff.password_hash) {
+    for (const candidate of candidates) {
+      if (!candidate.password_hash) continue;
+      if (await verifyPassword(password, candidate.password_hash)) {
+        staff = candidate;
+        break;
+      }
+    }
+
+    if (!hasConfiguredPassword) {
       return res.status(401).json({ error: 'Account not configured for password login. Contact admin.' });
     }
 
-    // Verify password
-    const isValid = await verifyPassword(password, staff.password_hash);
-    if (!isValid) {
+    if (!staff) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
