@@ -47,6 +47,15 @@ describe('api routes', () => {
     );
   });
 
+  it('accepts POST requests on the auth login endpoint', async () => {
+    const response = await request(app)
+      .post('/api/auth/login')
+      .send({});
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: 'Invalid input' });
+  });
+
   it('returns unauthorized for protected endpoint without token', async () => {
     const response = await request(app).get('/api/mariadb/tenants/tenant_1/products');
     expect(response.status).toBe(401);
