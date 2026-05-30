@@ -171,9 +171,16 @@ CREATE TABLE IF NOT EXISTS sales (
   table_number TEXT,
   is_tab SMALLINT DEFAULT 0 CHECK (is_tab IN (0, 1)),
   tab_name TEXT,
+  offline_event_id TEXT DEFAULT NULL,
+  sync_source TEXT DEFAULT 'online',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_tenant_offline_event
+  ON sales (tenant_id, offline_event_id)
+  WHERE offline_event_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sales_tenant_sync_source
+  ON sales (tenant_id, sync_source, created_at);
 
 CREATE TABLE IF NOT EXISTS sale_items (
   id TEXT PRIMARY KEY,
@@ -205,6 +212,67 @@ CREATE TABLE IF NOT EXISTS sale_payments (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS layby_orders (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  customer_name TEXT NOT NULL,
+  staff_id TEXT,
+  staff_name TEXT,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active','completed','cancelled')),
+  subtotal NUMERIC(12,2) DEFAULT 0,
+  tax_amount NUMERIC(12,2) DEFAULT 0,
+  tax_rate NUMERIC(5,2) DEFAULT 0,
+  tax_inclusive SMALLINT DEFAULT 1 CHECK (tax_inclusive IN (0, 1)),
+  total_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  deposit_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  amount_paid NUMERIC(12,2) NOT NULL DEFAULT 0,
+  balance_due NUMERIC(12,2) NOT NULL DEFAULT 0,
+  refund_amount NUMERIC(12,2) DEFAULT 0,
+  forfeited_amount NUMERIC(12,2) DEFAULT 0,
+  due_date DATE NOT NULL,
+  cancel_reason TEXT,
+  cancelled_by TEXT,
+  cancelled_by_name TEXT,
+  cancelled_at TIMESTAMPTZ,
+  completed_sale_id TEXT REFERENCES sales(id) ON DELETE SET NULL,
+  completed_by TEXT,
+  completed_by_name TEXT,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_layby_orders_tenant_status ON layby_orders (tenant_id, status, due_date);
+CREATE INDEX IF NOT EXISTS idx_layby_orders_customer ON layby_orders (tenant_id, customer_id);
+
+CREATE TABLE IF NOT EXISTS layby_items (
+  id TEXT PRIMARY KEY,
+  layby_order_id TEXT NOT NULL REFERENCES layby_orders(id) ON DELETE CASCADE,
+  product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+  product_name TEXT NOT NULL,
+  price NUMERIC(12,2) DEFAULT 0,
+  quantity NUMERIC(12,3) NOT NULL DEFAULT 1,
+  reserved_quantity NUMERIC(12,3) NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_layby_items_order ON layby_items (layby_order_id);
+CREATE INDEX IF NOT EXISTS idx_layby_items_product ON layby_items (product_id);
+
+CREATE TABLE IF NOT EXISTS layby_payments (
+  id TEXT PRIMARY KEY,
+  layby_order_id TEXT NOT NULL REFERENCES layby_orders(id) ON DELETE CASCADE,
+  method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet','account')),
+  amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tendered_amount NUMERIC(12,2) DEFAULT 0,
+  change_amount NUMERIC(12,2) DEFAULT 0,
+  staff_id TEXT,
+  staff_name TEXT,
+  cash_session_id TEXT,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_layby_payments_order ON layby_payments (layby_order_id, created_at);
 
 CREATE TABLE IF NOT EXISTS cash_sessions (
   id TEXT PRIMARY KEY,
@@ -263,10 +331,16 @@ CREATE TABLE IF NOT EXISTS manager_cash_movements (
   customer_id TEXT,
   customer_name TEXT,
   source_type TEXT DEFAULT 'manager_float',
+  cash_source TEXT DEFAULT 'manager_float',
   reference_id TEXT,
   category TEXT,
   note TEXT,
+  receipt_attachment_url TEXT,
+  receipt_attachment_name TEXT,
   counted_breakdown TEXT DEFAULT '{}'::TEXT,
+  approved_by TEXT,
+  approved_by_name TEXT,
+  approved_at TIMESTAMPTZ,
   created_by TEXT,
   created_by_name TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -274,6 +348,7 @@ CREATE TABLE IF NOT EXISTS manager_cash_movements (
 
 CREATE INDEX IF NOT EXISTS idx_manager_cash_tenant_created ON manager_cash_movements (tenant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_manager_cash_reference ON manager_cash_movements (tenant_id, movement_type, reference_id);
+CREATE INDEX IF NOT EXISTS idx_manager_cash_source ON manager_cash_movements (tenant_id, cash_source, created_at);
 
 CREATE TABLE IF NOT EXISTS cash_custody_transfers (
   id TEXT PRIMARY KEY,
@@ -369,6 +444,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   previous_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
   new_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
   reason TEXT NOT NULL,
+  reason_code TEXT NOT NULL DEFAULT 'adjustment' CHECK (reason_code IN ('receiving','sale','refund','void','adjustment','count_correction','transfer','wastage','shrinkage')),
   reference_type TEXT,
   reference_id TEXT,
   sale_id TEXT,
@@ -382,6 +458,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 CREATE INDEX IF NOT EXISTS idx_stock_movements_tenant_created ON stock_movements (tenant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements (tenant_id, product_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_sale ON stock_movements (tenant_id, sale_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_reason_code ON stock_movements (tenant_id, reason_code, created_at);
 
 CREATE TABLE IF NOT EXISTS manager_tasks (
   id TEXT PRIMARY KEY,

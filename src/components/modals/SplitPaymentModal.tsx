@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Plus, Trash2, Loader2, Wallet, CreditCard, Banknote, ReceiptText } from 'lucide-react';
+import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../../utils/offlineGuards';
 
 interface SplitPaymentModalProps {
   isOpen: boolean;
@@ -35,6 +36,7 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
   }, [currentMethod, offlineMode]);
 
   const addPayment = () => {
+    if (offlineMode && (currentMethod === 'wallet' || currentMethod === 'account')) return;
     const amount = Number(currentAmount);
     if (isNaN(amount) || amount <= 0) return;
 
@@ -125,7 +127,7 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
                 <button
                   onClick={() => setCurrentMethod('wallet')}
                   disabled={offlineMode || customerWalletBalance <= 0}
-                  title={offlineMode ? 'Wallet payments require online mode' : 'Wallet'}
+                  title={offlineMode ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Wallet'}
                   className={`flex-1 py-3 flex flex-col items-center gap-1 rounded-xl transition-all ${currentMethod === 'wallet' ? 'bg-white dark:bg-slate-800 shadow-sm text-primary' : 'text-slate-400'} disabled:opacity-30`}
                 >
                   <Wallet className="w-5 h-5" />
@@ -207,7 +209,7 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
 
                 <button
                   onClick={addPayment}
-                  disabled={!currentAmount || Number(currentAmount) <= 0 || (currentMethod === 'wallet' && (customerWalletBalance <= 0 || Number(currentAmount) > customerWalletBalance)) || (currentMethod === 'account' && (!customerAccountEnabled || Number(currentAmount) > accountRemainingAfterPayments))}
+                  disabled={!currentAmount || Number(currentAmount) <= 0 || (offlineMode && (currentMethod === 'wallet' || currentMethod === 'account')) || (currentMethod === 'wallet' && (customerWalletBalance <= 0 || Number(currentAmount) > customerWalletBalance)) || (currentMethod === 'account' && (!customerAccountEnabled || Number(currentAmount) > accountRemainingAfterPayments))}
                   className="w-full py-5 bg-slate-900 dark:bg-primary text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 flex justify-center items-center gap-2 mt-4"
                 >
                   <Plus className="w-4 h-4" />

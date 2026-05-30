@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { renderWithRouter } from './test-utils.tsx';
 import { WelcomeView } from '../../src/components/WelcomeView.tsx';
 
@@ -53,5 +53,47 @@ describe('WelcomeView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Toggle dark mode/i }));
     expect(toggleDarkMode).toHaveBeenCalled();
+  });
+
+  it('opens the mobile menu drawer with login and theme actions', async () => {
+    const onLogin = vi.fn();
+    const onTryNow = vi.fn();
+    const onStartSetup = vi.fn();
+    const onClientLogin = vi.fn();
+    const toggleDarkMode = vi.fn();
+
+    renderWithRouter(
+      <WelcomeView
+        onLogin={onLogin}
+        onTryNow={onTryNow}
+        onStartSetup={onStartSetup}
+        onClientLogin={onClientLogin}
+        isDarkMode={false}
+        toggleDarkMode={toggleDarkMode}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Open menu/i }));
+
+    const drawer = document.querySelector('aside');
+    expect(drawer).toBeInTheDocument();
+
+    const drawerView = within(drawer as HTMLElement);
+    expect(drawerView.getByRole('button', { name: /^Client Login$/i })).toBeInTheDocument();
+    expect(drawerView.getByRole('button', { name: /^Admin Login$/i })).toBeInTheDocument();
+    expect(drawerView.getByRole('button', { name: /^Dark Mode$/i })).toBeInTheDocument();
+    expect(drawerView.getByRole('button', { name: /^Start Setup$/i })).toBeInTheDocument();
+    expect(drawerView.getByRole('link', { name: /Features/i })).toBeInTheDocument();
+    expect(drawerView.getByRole('link', { name: /Packages/i })).toBeInTheDocument();
+
+    fireEvent.click(drawerView.getByRole('button', { name: /^Dark Mode$/i }));
+    expect(toggleDarkMode).toHaveBeenCalled();
+
+    fireEvent.click(drawerView.getByRole('button', { name: /^Admin Login$/i }));
+    expect(onLogin).toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(document.querySelector('aside')).not.toBeInTheDocument();
+    });
   });
 });

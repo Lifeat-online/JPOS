@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Wallet, CheckCircle2, XCircle, Clock, DollarSign,
-  Loader2, Plus, Minus, Users,
+  Loader2, Plus, Minus, Users, WifiOff,
 } from 'lucide-react';
 import { Staff, Customer, PayoutRequest } from '../types';
 import { usePosStore } from '../store/usePosStore';
-import { 
+import {
   getPayoutRequests, 
   getCustomerPayoutRequests, 
   updatePayoutRequest, 
@@ -15,6 +15,8 @@ import {
   recordWalletCashMovement,
 } from '../api';
 import { getDate } from '../utils/date';
+import { useBrowserOnlineStatus } from '../hooks/useBrowserOnlineStatus';
+import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../utils/offlineGuards';
 
 interface WalletAdminViewProps {
   staff: Staff[];
@@ -24,6 +26,7 @@ interface WalletAdminViewProps {
 
 export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAdminViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
+  const { isOffline: isBrowserOffline } = useBrowserOnlineStatus();
   const [requests, setRequests] = useState<PayoutRequest[]>([]);
   const [clientRequests, setClientRequests] = useState<PayoutRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +38,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
   const [adjustType, setAdjustType] = useState<'add' | 'deduct'>('add');
   const [adjustAffectsCash, setAdjustAffectsCash] = useState(true);
   const [adjustProcessing, setAdjustProcessing] = useState(false);
+  const [walletOfflineNotice, setWalletOfflineNotice] = useState('');
 
   // Data fetching
   const fetchData = async () => {
@@ -82,8 +86,15 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
   );
   const totalWalletLiability = totalWalletBalance + totalClientWalletBalance;
 
+  const blockWalletOffline = () => {
+    if (!isBrowserOffline) return false;
+    setWalletOfflineNotice(WALLET_ONLINE_REQUIRED_MESSAGE);
+    return true;
+  };
+
   const handleApprove = async (req: PayoutRequest) => {
     if (!tenantId) return;
+    if (blockWalletOffline()) return;
     setProcessing(req.id);
     try {
       await updatePayoutRequest(tenantId, req.id, {
@@ -99,6 +110,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
   const handleReject = async (req: PayoutRequest) => {
     if (!tenantId) return;
     if (!req.staffId) return;
+    if (blockWalletOffline()) return;
     setProcessing(req.id);
     try {
       // Refund the amount back to the staff wallet
@@ -121,6 +133,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
   const handleMarkPaid = async (req: PayoutRequest) => {
     if (!tenantId) return;
     if (!req.staffId) return;
+    if (blockWalletOffline()) return;
     setProcessing(req.id);
     try {
       await recordWalletCashMovement(tenantId, {
@@ -130,6 +143,9 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
         amount: Number(req.amount || 0),
         applyWalletDelta: false,
         referenceId: req.id,
+        cashSource: 'manager_float',
+        approvedBy: currentUserStaff?.id || 'admin',
+        approvedByName: currentUserStaff?.name || 'Admin',
         note: `Staff wallet payout paid: ${req.note || req.staffName || req.staffId}`,
       });
       await updatePayoutRequest(tenantId, req.id, {
@@ -145,6 +161,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
   const handleAdjustBalance = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adjustModal || !tenantId) return;
+    if (blockWalletOffline()) return;
     const amount = parseFloat(adjustAmount);
     if (!amount || amount <= 0) return;
     setAdjustProcessing(true);
@@ -159,6 +176,9 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
           direction: adjustType === 'add' ? 'in' : 'out',
           amount,
           applyWalletDelta: true,
+          cashSource: 'manager_float',
+          approvedBy: currentUserStaff?.id || 'admin',
+          approvedByName: currentUserStaff?.name || 'Admin',
           note: auditNote,
         });
       } else if (adjustModal.type === 'staff') {
@@ -214,6 +234,16 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
             </div>
           )}
         </div>
+
+        {(isBrowserOffline || walletOfflineNotice) && (
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+            <WifiOff className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest">Wallets are online-only</p>
+              <p className="mt-1">{walletOfflineNotice || WALLET_ONLINE_REQUIRED_MESSAGE}</p>
+            </div>
+          </div>
+        )}
 
         {/* Summary cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -308,7 +338,8 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                         <div className="flex gap-3 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
                           <button
                             onClick={() => handleReject(req)}
-                            disabled={processing === req.id}
+                            disabled={processing === req.id || isBrowserOffline}
+                            title={isBrowserOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Reject and return the amount to the wallet'}
                             className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/40 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                           >
                             {processing === req.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
@@ -316,7 +347,8 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                           </button>
                           <button
                             onClick={() => handleApprove(req)}
-                            disabled={processing === req.id}
+                            disabled={processing === req.id || isBrowserOffline}
+                            title={isBrowserOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Approve payout'}
                             className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/40 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                           >
                             {processing === req.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
@@ -324,7 +356,8 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                           </button>
                           <button
                             onClick={() => handleMarkPaid(req)}
-                            disabled={processing === req.id}
+                            disabled={processing === req.id || isBrowserOffline}
+                            title={isBrowserOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Mark payout paid'}
                             className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95 transition-all disabled:opacity-50 shadow-sm flex items-center justify-center gap-2"
                           >
                             {processing === req.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
@@ -409,6 +442,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                           <button
                             onClick={async () => {
                               if (!tenantId) return;
+                              if (blockWalletOffline()) return;
                               setProcessing(req.id);
                               try {
                                 const customer = customers.find(c => c.id === req.customerId);
@@ -426,7 +460,8 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                               } catch (err) { console.error(err); }
                               setProcessing(null);
                             }}
-                            disabled={processing === req.id}
+                            disabled={processing === req.id || isBrowserOffline}
+                            title={isBrowserOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Reject and return the amount to the customer wallet'}
                             className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-100 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                           >
                             {processing === req.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
@@ -436,6 +471,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                             onClick={async () => {
                               if (!tenantId) return;
                               if (!req.customerId) return;
+                              if (blockWalletOffline()) return;
                               setProcessing(req.id);
                               try {
                                 await recordWalletCashMovement(tenantId, {
@@ -445,6 +481,9 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                                   amount: Number(req.amount || 0),
                                   applyWalletDelta: false,
                                   referenceId: req.id,
+                                  cashSource: 'manager_float',
+                                  approvedBy: currentUserStaff?.id || 'admin',
+                                  approvedByName: currentUserStaff?.name || 'Admin',
                                   note: `Client wallet payout paid: ${req.note || req.customerName || req.customerId}`,
                                 });
                                 await updateCustomerPayoutRequest(tenantId, req.id, {
@@ -456,7 +495,8 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                               } catch (err) { console.error(err); }
                               setProcessing(null);
                             }}
-                            disabled={processing === req.id}
+                            disabled={processing === req.id || isBrowserOffline}
+                            title={isBrowserOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Mark client payout paid'}
                             className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95 transition-all disabled:opacity-50 shadow-sm flex items-center justify-center gap-2"
                           >
                             {processing === req.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
@@ -517,13 +557,16 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                   </div>
                   <button
                     onClick={() => {
+                      if (blockWalletOffline()) return;
                       setAdjustModal({ type: 'staff', id: s.id, name: s.name, current: s.walletBalance || 0 });
                       setAdjustAmount('');
                       setAdjustNote('');
                       setAdjustType('add');
                       setAdjustAffectsCash(true);
                     }}
-                    className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all"
+                    disabled={isBrowserOffline}
+                    title={isBrowserOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Adjust wallet'}
+                    className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all disabled:opacity-50"
                   >
                     Adjust
                   </button>
@@ -559,6 +602,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                   </div>
                   <button
                     onClick={() => {
+                      if (blockWalletOffline()) return;
                       setAdjustModal({
                         type: 'customer',
                         id: customer.id,
@@ -571,7 +615,9 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                       setAdjustType('add');
                       setAdjustAffectsCash(true);
                     }}
-                    className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all"
+                    disabled={isBrowserOffline}
+                    title={isBrowserOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Adjust wallet'}
+                    className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all disabled:opacity-50"
                   >
                     Adjust
                   </button>
@@ -596,6 +642,11 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
             <p className="text-sm text-slate-500 mb-6">
               {adjustModal.name} · Current balance: <span className="font-bold text-slate-900 dark:text-white">R{Number(adjustModal.current).toFixed(2)}</span>
             </p>
+            {isBrowserOffline && (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+                {WALLET_ONLINE_REQUIRED_MESSAGE}
+              </div>
+            )}
             <form onSubmit={handleAdjustBalance} className="space-y-4">
               {/* Add / Deduct toggle */}
               <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
@@ -686,7 +737,7 @@ export function WalletAdminView({ staff, customers, currentUserStaff }: WalletAd
                 </button>
                 <button
                   type="submit"
-                  disabled={adjustProcessing || !adjustAmount}
+                  disabled={adjustProcessing || !adjustAmount || isBrowserOffline}
                   className={`flex-1 py-3.5 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50 ${adjustType === 'add' ? 'bg-emerald-500 hover:bg-emerald-600 shadow-sm' : 'bg-red-500 hover:bg-red-600 shadow-sm'}`}
                 >
                   {adjustProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : adjustType === 'add' ? <Plus className="w-4 h-4" /> : <Minus className="w-4 h-4" />}

@@ -24,6 +24,9 @@ describe('audit and stock ledger schema', () => {
       expect(schema).toContain('quantity_delta');
       expect(schema).toContain('previous_quantity');
       expect(schema).toContain('new_quantity');
+      expect(schema).toContain('reason_code');
+      expect(schema).toContain('count_correction');
+      expect(schema).toContain('shrinkage');
       expect(schema).toContain('reference_type');
       expect(schema).toContain('sale_item_id');
     }

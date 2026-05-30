@@ -2,21 +2,25 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
   ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Printer,
-  AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronLeft, LayoutGrid, PanelLeft, CheckCircle2
+  AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronLeft, LayoutGrid, PanelLeft, CheckCircle2, RefreshCw, ListChecks, PackageCheck
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Customer, Sale, Workstation, RestaurantTable } from '../types';
+import { Product, Customer, Sale, Workstation, RestaurantTable, LaybyOrder } from '../types';
 import { CustomerSelector } from '../components/CustomerSelector';
 import { usePosStore } from '../store/usePosStore';
 import { WorkstationQueuePanel } from '../components/WorkstationQueuePanel';
 import { BillPrint } from '../components/BillPrint';
 import { BarcodeScanner } from '../components/BarcodeScanner';
+import { LaybyCreateModal } from '../components/LaybyCreateModal';
+import { LaybyManagerModal } from '../components/LaybyManagerModal';
+import { LaybyReceipt } from '../components/LaybyReceipt';
 import { getCompanionDeviceAssignment, recordCashMovement, recordRegisterWalletCashMovement } from '../api';
 import { useSocket } from '../hooks/useSocket';
 import { JwtUser } from '../hooks/useAuth';
 import type { AppliedDiscount } from '../utils/discounts';
-import type { CheckoutMethod } from '../utils/offlineSales';
+import type { CheckoutMethod, OfflineSaleQueueItem, OfflineSyncBatchSummary } from '../utils/offlineSales';
+import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../utils/offlineGuards';
 
 interface PointOfSaleViewProps {
   products: Product[];
@@ -49,6 +53,7 @@ interface PointOfSaleViewProps {
   restaurantTables: RestaurantTable[];
   onSalesUpdated?: () => Promise<void>;
   onCustomersUpdated?: () => Promise<void>;
+  onProductsUpdated?: () => Promise<void> | void;
   lastReceiptSale?: Sale | null;
   onPrintLastReceipt?: () => void;
   suppressBillPrint?: boolean;
@@ -57,7 +62,30 @@ interface PointOfSaleViewProps {
     pendingCount: number;
     syncStatus: 'idle' | 'syncing' | 'error';
     lastError?: string | null;
+    lastSummary?: OfflineSyncBatchSummary | null;
+    queueItems?: OfflineSaleQueueItem[];
+    syncNow?: () => Promise<void>;
+    retryItem?: (itemId: string) => void;
+    dismissItem?: (itemId: string) => void;
   };
+}
+
+function offlineConflictLabel(type?: string | null) {
+  const labels: Record<string, string> = {
+    negative_stock_after_sync: 'Stock shortage',
+    duplicate_local_receipt: 'Duplicate receipt',
+    duplicate_table_or_tab: 'Table / tab conflict',
+    duplicate_customer_order: 'Customer order conflict',
+    sync_failure: 'Sync failure',
+  };
+  return type ? labels[type] || type.replace(/_/g, ' ') : null;
+}
+
+function formatOfflineRetryTime(value?: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
@@ -65,7 +93,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   handleParkSale, handleCheckout, handleWalletCheckout, handleAccountCheckout, handleOpenTab, handleOpenTable, setTenderModal, setTenderedAmount, setSplitPaymentModal,
   categoryTree, CATEGORIES, getCategoryIcon, getProductImage, openCashDrawer,
   pointsDiscount, pricingDiscount, totalDiscount, onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated, onCustomersUpdated,
-  lastReceiptSale, onPrintLastReceipt, suppressBillPrint = false,
+  onProductsUpdated, lastReceiptSale, onPrintLastReceipt, suppressBillPrint = false,
   offlineStatus = { isOffline: false, pendingCount: 0, syncStatus: 'idle', lastError: null },
 }) => {
   const { 
@@ -100,7 +128,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [isRecordingWalletCash, setIsRecordingWalletCash] = useState(false);
   const [terminalCategoryLayout, setTerminalCategoryLayout] = useState<'sidebar' | 'grid'>(() => {
     if (typeof window === 'undefined') return 'sidebar';
-    return window.localStorage.getItem('jpos-terminal-category-layout') === 'grid' ? 'grid' : 'sidebar';
+    const layout = window.localStorage.getItem('masepos-terminal-category-layout') || window.localStorage.getItem('jpos-terminal-category-layout');
+    return layout === 'grid' ? 'grid' : 'sidebar';
   });
   const [gridShowingProducts, setGridShowingProducts] = useState(false);
   const [stockNotice, setStockNotice] = useState<{ type: 'warning' | 'error'; message: string } | null>(null);
@@ -109,6 +138,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [parkError, setParkError] = useState('');
   const [priceCheckProduct, setPriceCheckProduct] = useState<Product | null>(null);
   const [priceCheckError, setPriceCheckError] = useState('');
+  const [offlineReviewOpen, setOfflineReviewOpen] = useState(false);
   const [companionMode, setCompanionMode] = useState<'terminal' | 'wireless_scanner' | 'pole_display'>(() => {
     try {
       const saved = window.localStorage.getItem('companion-mode');
@@ -121,6 +151,9 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [poleDisplayDeviceId, setPoleDisplayDeviceId] = useState<string | null>(null);
   const [displaySnapshot, setDisplaySnapshot] = useState<any>(null);
   const [longTermAssignment, setLongTermAssignment] = useState<any>(null);
+  const [laybyCreateOpen, setLaybyCreateOpen] = useState(false);
+  const [laybyManagerOpen, setLaybyManagerOpen] = useState(false);
+  const [laybyReceiptOrder, setLaybyReceiptOrder] = useState<LaybyOrder | null>(null);
 
   const drawerReasons = [
     'Make change',
@@ -176,6 +209,14 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
   const cartTotal = useMemo(() => cart.reduce((total, item) => total + (item.price * item.quantity), 0), [cart]);
   const amountDue = Math.max(0, cartTotal - totalDiscount);
+  const laybyTaxRate = config?.business?.taxRate || 0;
+  const laybyTaxInclusive = config?.business?.taxInclusive !== false;
+  const laybyTaxAmount = useMemo(() => {
+    if (!laybyTaxRate) return 0;
+    return laybyTaxInclusive
+      ? cartTotal - cartTotal / (1 + laybyTaxRate / 100)
+      : cartTotal * (laybyTaxRate / 100);
+  }, [cartTotal, laybyTaxRate, laybyTaxInclusive]);
   const selectedCustomer = useMemo(
     () => selectedCustomerId ? customers.find(c => c.id === selectedCustomerId) || null : null,
     [customers, selectedCustomerId]
@@ -183,6 +224,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const selectedCustomerWalletBalance = Number(selectedCustomer?.walletBalance || 0);
   const canPayWithCustomerWallet = Boolean(selectedCustomer && selectedCustomerWalletBalance > 0);
   const walletOnlineRequired = offlineStatus.isOffline;
+  const offlineQueueItems = offlineStatus.queueItems || [];
+  const visibleOfflineItems = offlineQueueItems.filter(item => item.status !== 'synced').slice(0, 5);
   const walletCashAmountValue = Number(walletCashAmount || 0);
   const walletCashDrawerDelta = walletCashDirection === 'in' ? walletCashAmountValue : -walletCashAmountValue;
   const walletCashNextBalance = selectedCustomer
@@ -561,6 +604,23 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     window.print();
   };
 
+  const printLaybyReceipt = (order: LaybyOrder) => {
+    setLaybyReceiptOrder(order);
+    window.setTimeout(() => window.print(), 80);
+  };
+
+  const handleLaybyCreated = async (order: LaybyOrder) => {
+    printLaybyReceipt(order);
+    clearCart();
+    onClearPointsDiscount();
+    await onProductsUpdated?.();
+  };
+
+  const handleLaybyChanged = async () => {
+    await onProductsUpdated?.();
+    await onSalesUpdated?.();
+  };
+
   const openDrawerModal = () => {
     setDrawerReason('');
     setDrawerCustomReason('');
@@ -603,14 +663,14 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     setWalletCashDirection(direction);
     setWalletCashAmount('');
     setWalletCashNote('');
-    setWalletCashError(offlineStatus.isOffline ? 'Wallet cash requires an online connection and cannot be recorded offline.' : '');
+    setWalletCashError(offlineStatus.isOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : '');
     setWalletCashSuccess('');
     setWalletCashModalOpen(true);
   };
 
   const submitWalletCashMovement = async () => {
     if (offlineStatus.isOffline) {
-      setWalletCashError('Wallet cash requires an online connection and cannot be recorded offline.');
+      setWalletCashError(WALLET_ONLINE_REQUIRED_MESSAGE);
       return;
     }
     if (!tenantId || !activeSession?.id) {
@@ -1260,7 +1320,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                           type="button"
                           onClick={() => openWalletCashModal('in')}
                           disabled={!activeSession?.id || walletOnlineRequired}
-                          title={walletOnlineRequired ? 'Wallet cash requires online mode' : 'Record customer wallet cash'}
+                          title={walletOnlineRequired ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Record customer wallet cash'}
                           className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[8px] uppercase tracking-widest text-violet-700 disabled:opacity-50 dark:border-violet-900/50 dark:bg-violet-900/20 dark:text-violet-300"
                         >
                           Cash wallet
@@ -1294,7 +1354,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   }`}>
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <p className="text-[10px] font-black uppercase tracking-widest">
                           {offlineStatus.isOffline ? 'Offline selling' : offlineStatus.syncStatus === 'syncing' ? 'Syncing offline sales' : offlineStatus.syncStatus === 'error' ? 'Offline sync needs review' : 'Offline queue'}
                         </p>
@@ -1307,8 +1367,114 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                                 ? (offlineStatus.lastError || 'One or more offline sales could not sync.')
                                 : `${offlineStatus.pendingCount} offline sale${offlineStatus.pendingCount === 1 ? '' : 's'} waiting to sync.`}
                         </p>
+                        {offlineStatus.lastSummary?.message && (
+                          <p className="mt-1 text-[10px] font-black uppercase tracking-widest opacity-80">
+                            {offlineStatus.lastSummary.message}
+                            {offlineStatus.lastSummary.nextRetryAt ? ` / next retry ${formatOfflineRetryTime(offlineStatus.lastSummary.nextRetryAt)}` : ''}
+                          </p>
+                        )}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {visibleOfflineItems.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setOfflineReviewOpen(open => !open)}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-sm dark:bg-slate-950/60 dark:text-slate-200"
+                            >
+                              <ListChecks className="h-3.5 w-3.5" />
+                              {offlineReviewOpen ? 'Hide' : 'Review'}
+                            </button>
+                          )}
+                          {!offlineStatus.isOffline && offlineStatus.pendingCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => void offlineStatus.syncNow?.()}
+                              disabled={offlineStatus.syncStatus === 'syncing'}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-sm disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${offlineStatus.syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                              Sync
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
+                    {offlineReviewOpen && visibleOfflineItems.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {visibleOfflineItems.map((item) => (
+                          <div key={item.id} className="rounded-xl border border-white/60 bg-white/70 p-2 text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-200">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-[11px] font-black">{item.localReceiptNumber}</p>
+                                <p className="mt-0.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                                  R{Number(item.saleData?.total || 0).toFixed(2)} / {item.method} / {item.attempts} attempt{item.attempts === 1 ? '' : 's'}
+                                  {item.syncBatchId ? ` / batch ${String(item.syncSequence || 0).padStart(2, '0')}` : ''}
+                                </p>
+                              </div>
+                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${
+                                item.status === 'failed'
+                                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'
+                                  : item.status === 'syncing'
+                                    ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-200'
+                                    : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'
+                              }`}>
+                                {item.status}
+                              </span>
+                            </div>
+                            {item.lastError && (
+                              <p className="mt-2 break-words text-[10px] font-bold leading-snug text-rose-600 dark:text-rose-300">
+                                {item.lastError}
+                              </p>
+                            )}
+                            {(item.conflictType || item.recommendedAction) && (
+                              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 dark:border-amber-900/50 dark:bg-amber-900/20">
+                                {item.conflictType && (
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-200">
+                                    {offlineConflictLabel(item.conflictType)}
+                                  </p>
+                                )}
+                                {item.recommendedAction && (
+                                  <p className="mt-1 text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-100">
+                                    {item.recommendedAction}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                            {item.managerReviewReportedAt && (
+                              <p className="mt-2 text-[9px] font-black uppercase tracking-widest text-violet-600 dark:text-violet-300">
+                                Action Center
+                              </p>
+                            )}
+                            {item.nextRetryAt && !item.managerReviewReportedAt && (
+                              <p className="mt-2 text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                                Retry after {formatOfflineRetryTime(item.nextRetryAt)}
+                              </p>
+                            )}
+                            <div className="mt-2 flex gap-2">
+                              {item.status === 'failed' && (
+                                <button
+                                  type="button"
+                                  onClick={() => offlineStatus.retryItem?.(item.id)}
+                                  className="h-8 flex-1 rounded-lg bg-slate-900 text-[10px] font-black uppercase tracking-widest text-white dark:bg-white dark:text-slate-900"
+                                >
+                                  Retry
+                                </button>
+                              )}
+                              {(item.status === 'failed' || item.status === 'synced') && (
+                                <button
+                                  type="button"
+                                  onClick={() => offlineStatus.dismissItem?.(item.id)}
+                                  className="h-8 w-10 rounded-lg border border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                                  aria-label="Dismiss offline sale"
+                                  title="Dismiss"
+                                >
+                                  <Trash2 className="mx-auto h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 {cart.length === 0 ? (
@@ -1463,6 +1629,26 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   Print Bill
                 </button>
 
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <button
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || !selectedCustomer}
+                    onClick={() => setLaybyCreateOpen(true)}
+                    title={!selectedCustomer ? 'Select a customer before creating a lay-by' : 'Create lay-by'}
+                    className="h-14 rounded-2xl bg-teal-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 shadow-lg shadow-teal-600/25 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest"
+                  >
+                    <PackageCheck className="w-4 h-4 shrink-0" />
+                    <span className="truncate">Lay-by</span>
+                  </button>
+                  <button
+                    disabled={isProcessing || !tenantId}
+                    onClick={() => setLaybyManagerOpen(true)}
+                    className="h-14 rounded-2xl bg-slate-50 dark:bg-[#0B1120] text-slate-700 dark:text-slate-200 font-black transition-all hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 active:scale-95 border border-slate-200 dark:border-slate-700/60 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest"
+                  >
+                    <ListChecks className="w-4 h-4 shrink-0" />
+                    <span className="truncate">Lay-bys</span>
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   <button 
                     disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
@@ -1505,7 +1691,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   <button
                     disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || selectedCustomerWalletBalance < amountDue || walletOnlineRequired}
                     onClick={handleWalletCheckout}
-                    title={walletOnlineRequired ? 'Wallet payments require online mode' : 'Pay with wallet'}
+                    title={walletOnlineRequired ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Pay with wallet'}
                     className="w-full mb-4 h-14 rounded-2xl bg-violet-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-40 active:scale-95 shadow-lg shadow-violet-600/30 flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
                   >
                     <Wallet className="w-4 h-4" />
@@ -1979,7 +2165,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   </button>
                   <button
                     type="button"
-                    disabled={isRecordingWalletCash || !walletCashAmount || walletCashAmountValue <= 0}
+                    disabled={isRecordingWalletCash || walletOnlineRequired || !walletCashAmount || walletCashAmountValue <= 0}
+                    title={walletOnlineRequired ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Save wallet cash'}
                     onClick={submitWalletCashMovement}
                     className="h-12 flex-1 rounded-2xl bg-violet-600 text-sm font-black text-white shadow-lg shadow-violet-600/20 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
@@ -2155,6 +2342,37 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <LaybyCreateModal
+        isOpen={laybyCreateOpen}
+        tenantId={tenantId}
+        cart={cart}
+        customer={selectedCustomer}
+        currentUserStaff={currentUserStaff}
+        activeSession={activeSession}
+        config={config}
+        subtotal={cartTotal}
+        taxAmount={laybyTaxAmount}
+        taxRate={laybyTaxRate}
+        taxInclusive={laybyTaxInclusive}
+        totalAmount={amountDue}
+        isProcessing={isProcessing}
+        onProcessingChange={setIsProcessing}
+        onCreated={handleLaybyCreated}
+        onClose={() => setLaybyCreateOpen(false)}
+      />
+
+      <LaybyManagerModal
+        isOpen={laybyManagerOpen}
+        tenantId={tenantId}
+        activeSession={activeSession}
+        currentUserStaff={currentUserStaff}
+        config={config}
+        onChanged={handleLaybyChanged}
+        onClose={() => setLaybyManagerOpen(false)}
+      />
+
+      {laybyReceiptOrder && <LaybyReceipt order={laybyReceiptOrder} config={config} />}
 
       {modifyingProduct && (
         <ModifierSelectionModal

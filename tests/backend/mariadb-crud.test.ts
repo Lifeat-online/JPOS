@@ -138,7 +138,7 @@ describe('mariadb-crud', () => {
 
     expect(conn.beginTransaction).toHaveBeenCalled();
     expect(conn.commit).toHaveBeenCalled();
-    expect(conn.query).toHaveBeenNthCalledWith(1, expect.stringContaining('SELECT status, transaction_type, staff_id, customer_id FROM sales'), ['tenant_1', 'sale_1']);
+    expect(conn.query).toHaveBeenNthCalledWith(1, expect.stringContaining('SELECT status, transaction_type, staff_id, customer_id, offline_event_id FROM sales'), ['tenant_1', 'sale_1']);
     expect(conn.query).toHaveBeenNthCalledWith(2, expect.stringContaining('UPDATE sales SET'), [25, 'kitchen', 'tenant_1', 'sale_1']);
     expect(conn.query).toHaveBeenNthCalledWith(3, expect.stringContaining('SELECT * FROM sale_items WHERE sale_id = ?'), ['sale_1']);
     expect(conn.query).toHaveBeenNthCalledWith(4, expect.stringContaining('DELETE FROM sale_items WHERE sale_id = ?'), ['sale_1']);
@@ -186,6 +186,87 @@ describe('mariadb-crud', () => {
       expect.stringContaining('INSERT INTO audit_events'),
       expect.arrayContaining(['tenant_1', 'sale.created', 'sale'])
     );
+  });
+
+  it('includes offline_event_id and sync_source in the INSERT when provided', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockResolvedValue([[]]),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await createSale('tenant_1', {
+      staffId: 'staff_1',
+      status: 'completed',
+      total: 30,
+      subtotal: 30,
+      paymentMethod: 'cash',
+      items: [{ id: 'prod_1', name: 'Tea', price: 30, quantity: 1 } as any],
+      offlineEventId: 'offline_sale_123_test',
+      localReceiptNumber: 'OFF-DEV-000001',
+      deviceId: 'device_test_1',
+    } as any);
+
+    // offline_event_id and sync_source should appear in the INSERT
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO sales'),
+      expect.arrayContaining(['offline_sale_123_test', 'offline'])
+    );
+    // offline.sale_synced audit event should be recorded
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'offline.sale_synced', 'sale'])
+    );
+  });
+
+  it('records manager-review conflicts when an offline sync would oversell stock', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('SELECT id, name, stock')) return Promise.resolve([[{ id: 'prod_1', name: 'Tea', stock: 1 }]]);
+        if (sql.includes('SELECT bulk_item_id')) return Promise.resolve([[]]);
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.query as any).mockResolvedValue([[]]);
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await createSale('tenant_1', {
+      staffId: 'staff_1',
+      status: 'completed',
+      total: 90,
+      subtotal: 90,
+      paymentMethod: 'cash',
+      items: [{ id: 'prod_1', name: 'Tea', price: 30, quantity: 3 } as any],
+      offlineEventId: 'offline_sale_stock_short',
+      localReceiptNumber: 'OFF-DEV-000002',
+      deviceId: 'device_test_1',
+    } as any);
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'offline.sync_conflict', 'sale'])
+    );
+    const conflictAudit = conn.query.mock.calls.find(([sql, params]: any[]) => (
+      String(sql).includes('INSERT INTO audit_events') && params?.[2] === 'offline.sync_conflict'
+    ));
+    const details = JSON.parse(conflictAudit?.[1]?.[10] || '{}');
+    expect(details).toMatchObject({
+      offlineEventId: 'offline_sale_stock_short',
+      conflictType: 'negative_stock_after_sync',
+      recommendedAction: expect.stringContaining('adjust stock'),
+    });
+    expect(details.conflicts[0]).toMatchObject({
+      productId: 'prod_1',
+      requestedQuantity: 3,
+      availableStock: 1,
+    });
   });
 
   it('deducts customer wallet inside completed wallet checkout transactions', async () => {
@@ -256,6 +337,152 @@ describe('mariadb-crud', () => {
       expect.arrayContaining(['tenant_1', 'staff_1', 'Jess', 35, 'pending'])
     );
     expect(request).toMatchObject({ staffId: 'staff_1', amount: 35, status: 'pending' });
+  });
+
+  describe('transaction-safe checkout side effects', () => {
+    function makeConn() {
+      return {
+        beginTransaction: vi.fn().mockResolvedValue(undefined),
+        query: vi.fn().mockResolvedValue([[]]),
+        commit: vi.fn().mockResolvedValue(undefined),
+        rollback: vi.fn().mockResolvedValue(undefined),
+        release: vi.fn(),
+      };
+    }
+
+    const baseSale = {
+      items: [{ id: 'prod_1', name: 'Item', price: 50, quantity: 1 }],
+      total: 50,
+      subtotal: 50,
+      taxAmount: 0,
+      taxRate: 0,
+      taxInclusive: true,
+      paymentMethod: 'cash',
+      status: 'completed',
+      transactionType: 'sale',
+      customerId: 'cust_1',
+      staffId: 'staff_1',
+      payments: [{ method: 'cash', amount: 50, tenderedAmount: 50, changeAmount: 0, tipAmount: 0, cashOutAmount: 0 }],
+    };
+
+    it('applies loyalty points, cash session, staff metrics and account balance atomically within the sale transaction', async () => {
+      const conn = makeConn();
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      const sale = {
+        ...baseSale,
+        cashSessionId: 'cs_1',
+        loyaltyPoints: 100,
+        expectedCashDelta: 50,
+        cashMovements: [{ type: 'cash_sale', direction: 'in', amount: 50, staffId: 'staff_1', note: 'Cash sale' }],
+        staffMetrics: { ordersDelta: 1, tipsDelta: 0 },
+      };
+
+      await createSale('tenant_1', sale as any);
+
+      // Verify loyalty points update within the transaction
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE customers'),
+        expect.arrayContaining([100, 'tenant_1', 'cust_1'])
+      );
+
+      // Verify cash session expected_cash update within the transaction
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE cash_sessions'),
+        expect.arrayContaining([50, 'cs_1', 'tenant_1'])
+      );
+
+      // Verify cash movement recorded within the transaction
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO cash_movements'),
+        expect.arrayContaining(['tenant_1', 'cs_1', 'cash_sale', 'in', 50, expect.stringContaining('sale_')])
+      );
+
+      // Verify staff metrics update within the transaction
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE staff'),
+        expect.arrayContaining([expect.stringContaining('orders'), 'tenant_1', 'staff_1'])
+      );
+
+      // Verify commit was called (not rollback)
+      expect(conn.commit).toHaveBeenCalled();
+      expect(conn.rollback).not.toHaveBeenCalled();
+    });
+
+    it('applies tips delta for card payments', async () => {
+      const conn = makeConn();
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      const sale = {
+        ...baseSale,
+        paymentMethod: 'card',
+        payments: [{ method: 'card', amount: 60, tenderedAmount: 60, tipAmount: 10, cashOutAmount: 0 }],
+        cashSessionId: 'cs_1',
+        tipsDelta: 10,
+        cashMovements: [{ type: 'tip', direction: 'neutral', amount: 10, staffId: 'staff_1', note: 'Card tip' }],
+        staffMetrics: { ordersDelta: 1, tipsDelta: 10 },
+      };
+
+      await createSale('tenant_1', sale as any);
+
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE cash_sessions'),
+        expect.arrayContaining([10, 'cs_1', 'tenant_1'])
+      );
+
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO cash_movements'),
+        expect.arrayContaining(['tenant_1', 'cs_1', 'tip', 'neutral', 10])
+      );
+
+      expect(conn.commit).toHaveBeenCalled();
+    });
+
+    it('applies account balance delta for account payments', async () => {
+      const conn = makeConn();
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      const sale = {
+        ...baseSale,
+        paymentMethod: 'account',
+        payments: [{ method: 'account', amount: 50, tenderedAmount: 50, changeAmount: 0, tipAmount: 0, cashOutAmount: 0 }],
+        cashSessionId: 'cs_1',
+        accountBalanceDelta: 50,
+        staffMetrics: { ordersDelta: 1 },
+      };
+
+      await createSale('tenant_1', sale as any);
+
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('GREATEST'),
+        expect.arrayContaining([50, 'tenant_1', 'cust_1'])
+      );
+
+      expect(conn.commit).toHaveBeenCalled();
+    });
+
+    it('rolls back entire transaction when a side effect fails', async () => {
+      const conn = makeConn();
+      // Make the staff metrics query (FOR UPDATE on staff) fail
+      conn.query.mockImplementation((sql: string) => {
+        if (sql.includes('staff') && sql.includes('FOR UPDATE')) {
+          return Promise.reject(new Error('DB lock timeout'));
+        }
+        return Promise.resolve([[]]);
+      });
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      const sale = {
+        ...baseSale,
+        cashSessionId: 'cs_1',
+        staffMetrics: { ordersDelta: 1 },
+      };
+
+      await expect(createSale('tenant_1', sale as any)).rejects.toThrow('DB lock timeout');
+
+      expect(conn.rollback).toHaveBeenCalled();
+      expect(conn.commit).not.toHaveBeenCalled();
+    });
   });
 
   it('reserves customer wallet balance when creating customer payout requests', async () => {

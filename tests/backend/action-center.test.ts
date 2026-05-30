@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistory } from '../../server/actionCenter.js';
+import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistory, getManagerAuditReport } from '../../server/actionCenter.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
@@ -30,6 +30,7 @@ describe('manager action center', () => {
           previousQuantity: '5',
           newQuantity: '3',
           reason: 'sale',
+          reasonCode: 'sale',
         },
       ])
       .mockResolvedValueOnce([
@@ -101,7 +102,7 @@ describe('manager action center', () => {
     });
     expect(result.urgentCount).toBe(6);
     expect(result.auditEvents[0].details).toEqual({ total: 25, reason: 'wrong item' });
-    expect(result.stockMovements[0]).toMatchObject({ quantityDelta: -2, previousQuantity: 5, newQuantity: 3 });
+    expect(result.stockMovements[0]).toMatchObject({ quantityDelta: -2, previousQuantity: 5, newQuantity: 3, reasonCode: 'sale' });
     expect(result.lowStock[0]).toMatchObject({ stock: 1, minStock: 5 });
     expect(result.cashExceptions[0]).toMatchObject({ expectedCash: 100, actualCash: 90, difference: -10 });
     expect(result.saleExceptions[0]).toMatchObject({ total: -25, refundedAmount: 25 });
@@ -136,6 +137,7 @@ describe('manager action center', () => {
           previousQuantity: '5',
           newQuantity: '7',
           reason: 'manual_adjustment',
+          reasonCode: 'adjustment',
           referenceType: 'manager_task',
           referenceId: 'task_1',
           staffId: 'mgr_1',
@@ -166,6 +168,7 @@ describe('manager action center', () => {
     expect(result.items[0]).toMatchObject({
       kind: 'stock',
       title: 'Milk',
+      reasonCode: 'adjustment',
       quantityDelta: 2,
       productId: 'prod_1',
     });
@@ -195,6 +198,66 @@ describe('manager action center', () => {
     );
   });
 
+  it('filters audit and stock history by device metadata in audit details', async () => {
+    (dbModule.query as any)
+      .mockResolvedValueOnce([
+        {
+          id: 'audit_device_1',
+          action: 'offline.sale_synced',
+          entityType: 'sale',
+          entityId: 'sale_1',
+          relatedSaleId: 'sale_1',
+          staffId: 'staff_1',
+          staffName: 'Cashier',
+          customerId: 'cust_1',
+          source: 'offline_queue',
+          details: '{"deviceId":"device_1","cashSessionId":"cash_1","localReceiptNumber":"OFF-CASH1-000001"}',
+          createdAt: '2026-05-26T10:05:00.000Z',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'stock_1',
+          productId: 'prod_1',
+          itemName: 'Bread',
+          quantityDelta: '-1',
+          previousQuantity: '10',
+          newQuantity: '9',
+          reason: 'sale',
+          reasonCode: 'sale',
+          referenceType: 'sale',
+          referenceId: 'sale_1',
+          saleId: 'sale_1',
+          staffId: 'staff_1',
+          staffName: 'Cashier',
+          createdAt: '2026-05-26T10:06:00.000Z',
+        },
+      ]);
+
+    const result = await getManagerActivityHistory('tenant_1', {
+      deviceId: 'device_1',
+      search: 'off-cash1',
+      limit: 20,
+    });
+
+    expect(dbModule.query).toHaveBeenCalledTimes(2);
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('LOWER(COALESCE(details'),
+      expect.arrayContaining(['device_1', '%device_1%', '%off-cash1%', 20])
+    );
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('FROM stock_movements'),
+      expect.arrayContaining(['device_1', 'tenant_1', '%device_1%', 'tenant_1', '%device_1%', 20])
+    );
+    expect(result.items[0]).toMatchObject({ kind: 'stock', saleId: 'sale_1' });
+    expect(result.items[1]).toMatchObject({
+      kind: 'audit',
+      deviceId: 'device_1',
+      registerId: 'cash_1',
+      localReceiptNumber: 'OFF-CASH1-000001',
+    });
+  });
+
   it('exports filtered activity as csv content', async () => {
     (dbModule.query as any)
       .mockResolvedValueOnce([
@@ -221,5 +284,79 @@ describe('manager action center', () => {
     expect(result.csv).toContain('"kind","createdAt","title"');
     expect(result.csv).toContain('"audit","2026-05-26T10:05:00.000Z","sale.refunded"');
     expect(result.csv).toContain('"cust_1"');
+  });
+
+  it('exports owner/accounting/compliance audit report packs with summaries and detail rows', async () => {
+    (dbModule.query as any)
+      .mockResolvedValueOnce([
+        {
+          id: 'audit_1',
+          action: 'permission.denied',
+          entityType: 'security',
+          entityId: 'staff_1',
+          relatedSaleId: null,
+          staffId: 'staff_1',
+          staffName: 'Cashier',
+          customerId: null,
+          source: 'permission',
+          details: '{"attemptedAction":"manager_cash.summary_view","deviceId":"device_1"}',
+          createdAt: '2026-05-26T10:05:00.000Z',
+        },
+        {
+          id: 'audit_2',
+          action: 'sale.refunded',
+          entityType: 'sale',
+          entityId: 'refund_1',
+          relatedSaleId: 'sale_1',
+          staffId: 'mgr_1',
+          staffName: 'Manager',
+          customerId: 'cust_1',
+          source: 'history',
+          details: '{"refundTotal":25,"cashSessionId":"cash_1","localReceiptNumber":"OFF-CASH1-000001"}',
+          createdAt: '2026-05-26T10:06:00.000Z',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'stock_1',
+          productId: 'prod_1',
+          itemName: 'Bread',
+          quantityDelta: '-2',
+          previousQuantity: '10',
+          newQuantity: '8',
+          reason: 'sale',
+          reasonCode: 'sale',
+          referenceType: 'sale',
+          referenceId: 'sale_1',
+          saleId: 'sale_1',
+          staffId: 'mgr_1',
+          staffName: 'Manager',
+          createdAt: '2026-05-26T10:07:00.000Z',
+        },
+      ]);
+
+    const result = await getManagerAuditReport('tenant_1', {
+      audience: 'compliance',
+      from: '2026-05-26',
+      to: '2026-05-26',
+      limit: 50,
+    });
+
+    expect(result.filename).toMatch(/masepos-compliance-audit-report-\d{4}-\d{2}-\d{2}\.csv/);
+    expect(result.audience).toBe('compliance');
+    expect(result.count).toBe(3);
+    expect(result.summary).toMatchObject({
+      totalRows: 3,
+      auditEvents: 2,
+      stockMovements: 1,
+      permissionDenied: 1,
+    });
+    expect(result.csv).toContain('"section","audience","generatedAt"');
+    expect(result.csv).toContain('"summary","compliance"');
+    expect(result.csv).toContain('"breakdown","compliance"');
+    expect(result.csv).toContain('"activity","compliance"');
+    expect(result.csv).toContain('"permission.denied"');
+    expect(result.csv).toContain('"security access"');
+    expect(result.csv).toContain('"OFF-CASH1-000001"');
   });
 });

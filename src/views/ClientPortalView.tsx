@@ -9,6 +9,8 @@ import {
 import { createCustomerPayoutRequest } from '../api';
 import { Customer, Sale, PayoutRequest } from '../types';
 import { getDate } from '../utils/date';
+import { useBrowserOnlineStatus } from '../hooks/useBrowserOnlineStatus';
+import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../utils/offlineGuards';
 
 interface ClientPortalViewProps {
   user: JwtUser;
@@ -50,6 +52,7 @@ export function ClientPortalView({
   user, customer, tenantId, sales, payoutRequests,
   isDarkMode, toggleDarkMode, onLogout, businessName, onRefresh,
 }: ClientPortalViewProps) {
+  const { isOffline: isBrowserOffline } = useBrowserOnlineStatus();
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'wallet' | 'profile'>('overview');
   const [payoutAmount, setPayoutAmount] = useState('');
   const [payoutNote, setPayoutNote] = useState('');
@@ -66,6 +69,10 @@ export function ClientPortalView({
 
   const handleRequestPayout = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isBrowserOffline) {
+      setPayoutError(WALLET_ONLINE_REQUIRED_MESSAGE);
+      return;
+    }
     const amount = parseFloat(payoutAmount);
     if (!amount || amount <= 0 || amount > walletBalance) return;
     setPayoutProcessing(true);
@@ -306,6 +313,12 @@ export function ClientPortalView({
                   {payoutError}
                 </div>
               )}
+              {isBrowserOffline && (
+                <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/50 rounded-2xl text-amber-800 dark:text-amber-200 font-bold text-sm">
+                  <XCircle className="w-5 h-5 shrink-0" />
+                  {WALLET_ONLINE_REQUIRED_MESSAGE}
+                </div>
+              )}
 
               {/* Request payout form */}
               {walletBalance > 0 && (
@@ -321,6 +334,7 @@ export function ClientPortalView({
                         required type="number" step="0.01" min="0.01" max={walletBalance}
                         value={payoutAmount}
                         onChange={e => setPayoutAmount(e.target.value)}
+                        disabled={isBrowserOffline}
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary/50 text-lg font-black text-center dark:text-white"
                         placeholder="0.00"
                       />
@@ -332,13 +346,15 @@ export function ClientPortalView({
                         type="text"
                         value={payoutNote}
                         onChange={e => setPayoutNote(e.target.value)}
+                        disabled={isBrowserOffline}
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-semibold dark:text-white"
                         placeholder="e.g. Bank transfer, cash pickup..."
                       />
                     </div>
                     <button
                       type="submit"
-                      disabled={payoutProcessing || !payoutAmount || parseFloat(payoutAmount) <= 0}
+                      disabled={payoutProcessing || isBrowserOffline || !payoutAmount || parseFloat(payoutAmount) <= 0}
+                      title={isBrowserOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Request payout'}
                       className="w-full py-4 bg-primary text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-primary/30 hover:bg-primary/90 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                       {payoutProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <DollarSign className="w-5 h-5" />}

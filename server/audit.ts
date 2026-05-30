@@ -1,6 +1,22 @@
-import type { DbConnection } from "./db.js";
+import { query, type DbConnection } from "./db.js";
 
 type Queryable = Pick<DbConnection, "query">;
+
+export const STOCK_MOVEMENT_REASON_CODES = [
+  "receiving",
+  "sale",
+  "refund",
+  "void",
+  "adjustment",
+  "count_correction",
+  "transfer",
+  "wastage",
+  "shrinkage",
+] as const;
+
+export type StockMovementReasonCode = typeof STOCK_MOVEMENT_REASON_CODES[number];
+
+const stockMovementReasonCodeSet = new Set<string>(STOCK_MOVEMENT_REASON_CODES);
 
 function makeId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -10,6 +26,35 @@ function json(value: unknown, fallback: unknown = {}) {
   if (value === undefined || value === null) return JSON.stringify(fallback);
   if (typeof value === "string") return value;
   return JSON.stringify(value);
+}
+
+export function normalizeStockMovementReasonCode(
+  reason?: string | null,
+  referenceType?: string | null
+): StockMovementReasonCode {
+  const raw = String(reason || "").trim().toLowerCase();
+  const codeish = raw.replace(/[\s-]+/g, "_");
+  if (stockMovementReasonCodeSet.has(codeish)) return codeish as StockMovementReasonCode;
+
+  if (["sale_completed", "sale_deduction", "checkout"].includes(codeish)) return "sale";
+  if (["refund_restock", "refund_reversal", "refund"].includes(codeish)) return "refund";
+  if (["void_restock", "void_reversal", "void"].includes(codeish)) return "void";
+  if (["manual_adjustment", "adjustment", "stock_adjustment"].includes(codeish)) return "adjustment";
+  if (["stock_take", "stocktake", "cycle_count", "spot_check", "count_correction"].includes(codeish)) return "count_correction";
+  if (["purchase_order", "invoice_receiving", "receiving", "received"].includes(codeish)) return "receiving";
+  if (["stock_transfer", "transfer"].includes(codeish)) return "transfer";
+  if (["waste", "wastage", "expired", "expiry", "spoiled", "spoilage", "damage", "damaged"].includes(codeish)) return "wastage";
+  if (["shrink", "shrinkage", "theft", "loss", "lost", "missing"].includes(codeish)) return "shrinkage";
+
+  const reference = String(referenceType || "").trim().toLowerCase();
+  if (reference === "sale") return "sale";
+  if (reference === "refund") return "refund";
+  if (reference === "void") return "void";
+  if (reference === "stock_take_session" || reference === "stock_take_item") return "count_correction";
+  if (reference === "purchase_order" || reference === "receiving" || reference === "invoice") return "receiving";
+  if (reference === "stock_transfer" || reference === "transfer") return "transfer";
+
+  return "adjustment";
 }
 
 export type AuditEventInput = {
@@ -49,6 +94,17 @@ export async function recordAuditEvent(conn: Queryable, input: AuditEventInput) 
   return id;
 }
 
+export async function recordAuditEventSafe(input: AuditEventInput) {
+  if (!input.tenantId) return null;
+
+  try {
+    return await recordAuditEvent({ query } as any, input);
+  } catch (error) {
+    console.warn("Unable to record audit event:", error);
+    return null;
+  }
+}
+
 export type StockMovementInput = {
   tenantId: string;
   itemType: "product" | "bulk";
@@ -59,6 +115,7 @@ export type StockMovementInput = {
   previousQuantity: number;
   newQuantity: number;
   reason: string;
+  reasonCode?: StockMovementReasonCode | string | null;
   referenceType?: string | null;
   referenceId?: string | null;
   saleId?: string | null;
@@ -70,13 +127,14 @@ export type StockMovementInput = {
 
 export async function recordStockMovement(conn: Queryable, input: StockMovementInput) {
   const id = makeId("stock");
+  const reasonCode = normalizeStockMovementReasonCode(input.reasonCode || input.reason, input.referenceType);
   await conn.query(
     `INSERT INTO stock_movements (
       id, tenant_id, item_type, product_id, bulk_item_id, item_name,
-      quantity_delta, previous_quantity, new_quantity, reason,
+      quantity_delta, previous_quantity, new_quantity, reason, reason_code,
       reference_type, reference_id, sale_id, sale_item_id,
       staff_id, staff_name, note, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       id,
       input.tenantId,
@@ -88,6 +146,7 @@ export async function recordStockMovement(conn: Queryable, input: StockMovementI
       input.previousQuantity,
       input.newQuantity,
       input.reason,
+      reasonCode,
       input.referenceType || null,
       input.referenceId || null,
       input.saleId || null,

@@ -176,8 +176,12 @@ CREATE TABLE IF NOT EXISTS sales (
   table_number VARCHAR(64),
   is_tab BOOLEAN DEFAULT FALSE,
   tab_name VARCHAR(255),
+  offline_event_id VARCHAR(128) DEFAULT NULL,
+  sync_source VARCHAR(24) DEFAULT 'online',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_sales_tenant_offline_event (tenant_id, offline_event_id),
+  KEY idx_sales_tenant_sync_source (tenant_id, sync_source, created_at),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
@@ -212,6 +216,73 @@ CREATE TABLE IF NOT EXISTS sale_payments (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS layby_orders (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  customer_id VARCHAR(64) NOT NULL,
+  customer_name VARCHAR(255) NOT NULL,
+  staff_id VARCHAR(64),
+  staff_name VARCHAR(255),
+  status ENUM('active','completed','cancelled') DEFAULT 'active',
+  subtotal DECIMAL(12,2) DEFAULT 0,
+  tax_amount DECIMAL(12,2) DEFAULT 0,
+  tax_rate DECIMAL(5,2) DEFAULT 0,
+  tax_inclusive BOOLEAN DEFAULT TRUE,
+  total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  deposit_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  amount_paid DECIMAL(12,2) NOT NULL DEFAULT 0,
+  balance_due DECIMAL(12,2) NOT NULL DEFAULT 0,
+  refund_amount DECIMAL(12,2) DEFAULT 0,
+  forfeited_amount DECIMAL(12,2) DEFAULT 0,
+  due_date DATE NOT NULL,
+  cancel_reason TEXT,
+  cancelled_by VARCHAR(64),
+  cancelled_by_name VARCHAR(255),
+  cancelled_at DATETIME,
+  completed_sale_id VARCHAR(64),
+  completed_by VARCHAR(64),
+  completed_by_name VARCHAR(255),
+  completed_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_layby_orders_tenant_status (tenant_id, status, due_date),
+  INDEX idx_layby_orders_customer (tenant_id, customer_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+  FOREIGN KEY (completed_sale_id) REFERENCES sales(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS layby_items (
+  id VARCHAR(64) PRIMARY KEY,
+  layby_order_id VARCHAR(64) NOT NULL,
+  product_id VARCHAR(64),
+  product_name VARCHAR(255) NOT NULL,
+  price DECIMAL(12,2) DEFAULT 0,
+  quantity DECIMAL(12,3) NOT NULL DEFAULT 1,
+  reserved_quantity DECIMAL(12,3) NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_layby_items_order (layby_order_id),
+  INDEX idx_layby_items_product (product_id),
+  FOREIGN KEY (layby_order_id) REFERENCES layby_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS layby_payments (
+  id VARCHAR(64) PRIMARY KEY,
+  layby_order_id VARCHAR(64) NOT NULL,
+  method ENUM('cash','payfast','card','wallet','account') NOT NULL,
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  tendered_amount DECIMAL(12,2) DEFAULT 0,
+  change_amount DECIMAL(12,2) DEFAULT 0,
+  staff_id VARCHAR(64),
+  staff_name VARCHAR(255),
+  cash_session_id VARCHAR(64),
+  note TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_layby_payments_order (layby_order_id, created_at),
+  FOREIGN KEY (layby_order_id) REFERENCES layby_orders(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS cash_sessions (
@@ -274,15 +345,22 @@ CREATE TABLE IF NOT EXISTS manager_cash_movements (
   customer_id VARCHAR(64),
   customer_name VARCHAR(255),
   source_type VARCHAR(64) DEFAULT 'manager_float',
+  cash_source VARCHAR(64) DEFAULT 'manager_float',
   reference_id VARCHAR(128),
   category VARCHAR(96),
   note TEXT,
+  receipt_attachment_url TEXT,
+  receipt_attachment_name VARCHAR(255),
   counted_breakdown JSON DEFAULT JSON_OBJECT(),
+  approved_by VARCHAR(64),
+  approved_by_name VARCHAR(255),
+  approved_at DATETIME,
   created_by VARCHAR(64),
   created_by_name VARCHAR(255),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_manager_cash_tenant_created (tenant_id, created_at),
   INDEX idx_manager_cash_reference (tenant_id, movement_type, reference_id),
+  INDEX idx_manager_cash_source (tenant_id, cash_source, created_at),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
 );
@@ -382,6 +460,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   previous_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
   new_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
   reason VARCHAR(64) NOT NULL,
+  reason_code ENUM('receiving','sale','refund','void','adjustment','count_correction','transfer','wastage','shrinkage') NOT NULL DEFAULT 'adjustment',
   reference_type VARCHAR(64),
   reference_id VARCHAR(64),
   sale_id VARCHAR(64),
@@ -393,6 +472,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   INDEX idx_stock_movements_tenant_created (tenant_id, created_at),
   INDEX idx_stock_movements_product (tenant_id, product_id),
   INDEX idx_stock_movements_sale (tenant_id, sale_id),
+  INDEX idx_stock_movements_reason_code (tenant_id, reason_code, created_at),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 

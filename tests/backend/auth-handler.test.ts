@@ -13,7 +13,7 @@ describe('auth-handler', () => {
 
   it('returns invalid credentials when no user is found', async () => {
     (dbModule.query as any).mockResolvedValue([]);
-    const req: any = { body: { email: 'noone@example.com', password: 'password' } };
+    const req: any = { body: { email: 'noone@example.com', password: 'password', tenantId: 'tenant_1' } };
     const json = vi.fn();
     const status = vi.fn(() => ({ json }));
     const res: any = { status };
@@ -22,6 +22,10 @@ describe('auth-handler', () => {
 
     expect(status).toHaveBeenCalledWith(401);
     expect(json).toHaveBeenCalledWith({ error: 'Invalid credentials' });
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'auth.login_failed', 'security'])
+    );
   });
 
   it('returns tokens for valid credentials', async () => {
@@ -39,6 +43,10 @@ describe('auth-handler', () => {
     expect(response).toHaveProperty('accessToken');
     expect(response).toHaveProperty('refreshToken');
     expect(response.user).toMatchObject({ email: 'test@example.com', name: 'Test User', role: 'admin', tenantId: 'tenant_1' });
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'auth.login_succeeded', 'security', 'staff_1'])
+    );
   });
 
   it('accepts the matching DEV password when a stale tenant1 duplicate exists', async () => {

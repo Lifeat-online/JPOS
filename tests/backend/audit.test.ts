@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { applyProductStockDelta, recordAuditEvent } from '../../server/audit.js';
+import { applyProductStockDelta, normalizeStockMovementReasonCode, recordAuditEvent } from '../../server/audit.js';
 
 describe('audit helpers', () => {
   it('records JSON audit event details', async () => {
@@ -51,5 +51,19 @@ describe('audit helpers', () => {
       expect.stringContaining('INSERT INTO stock_movements'),
       expect.arrayContaining(['tenant_1', 'product', 'prod_1', null, 'Bread', -3, 10, 7, 'sale'])
     );
+    const insertCall = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO stock_movements'));
+    expect(insertCall?.[1][9]).toBe('sale');
+    expect(insertCall?.[1][10]).toBe('sale');
+  });
+
+  it('normalizes stock movement reason codes to the reporting taxonomy', () => {
+    expect(normalizeStockMovementReasonCode('refund_restock')).toBe('refund');
+    expect(normalizeStockMovementReasonCode('void_restock')).toBe('void');
+    expect(normalizeStockMovementReasonCode('manual_adjustment')).toBe('adjustment');
+    expect(normalizeStockMovementReasonCode('stock_take')).toBe('count_correction');
+    expect(normalizeStockMovementReasonCode('Count correction')).toBe('count_correction');
+    expect(normalizeStockMovementReasonCode('damaged')).toBe('wastage');
+    expect(normalizeStockMovementReasonCode('missing')).toBe('shrinkage');
+    expect(normalizeStockMovementReasonCode(null, 'purchase_order')).toBe('receiving');
   });
 });

@@ -34,7 +34,11 @@ describe('cash management schema', () => {
     expect(schema).toContain('safe_drop');
     expect(schema).toContain('wallet_cash_in');
     expect(schema).toContain('register_close');
+    expect(schema).toContain('cash_source');
+    expect(schema).toContain('receipt_attachment_url');
+    expect(schema).toContain('approved_by_name');
     expect(schema).toContain('idx_manager_cash_tenant_created');
+    expect(schema).toContain('idx_manager_cash_source');
   });
 
   it('defines cash custody handovers with dual confirmation fields', () => {

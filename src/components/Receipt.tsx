@@ -44,6 +44,11 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
         {config?.business?.phone && <p>{config.business.phone}</p>}
         <div className="border-b border-black border-dashed my-2" />
         <p className="font-bold">{isRefund ? 'REFUND RECEIPT' : 'TAX INVOICE'}</p>
+        {(sale as any).isOfflineSale && (
+          <p className="text-red-600 font-bold mt-1">
+            {(sale as any).syncStatus === 'synced' ? 'SYNCED' : 'PENDING SYNC'}
+          </p>
+        )}
         <p>Order #{sale.id.slice(-8).toUpperCase()}</p>
         {sale.parentSaleId && <p>Original #{sale.parentSaleId.slice(-8).toUpperCase()}</p>}
         {dateDisplay && <p>{dateDisplay}</p>}
@@ -157,6 +162,11 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
 
       {/* Footer */}
       <div className="text-center mt-2 text-[11px]">
+        {(sale as any).isOfflineSale && (
+          <p className="text-red-600 font-bold mb-1">
+            OFFLINE SALE — {(sale as any).syncStatus === 'synced' ? 'Synced to server' : 'Pending sync'}
+          </p>
+        )}
         {config?.business?.receiptFooter ? (
           <p className="whitespace-pre-line">{config.business.receiptFooter}</p>
         ) : (

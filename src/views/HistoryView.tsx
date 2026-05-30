@@ -5,6 +5,8 @@ import { getDate } from '../utils/date';
 import { Receipt } from '../components/Receipt';
 import { refundSale, voidSale } from '../api';
 import { usePosStore } from '../store/usePosStore';
+import { useBrowserOnlineStatus } from '../hooks/useBrowserOnlineStatus';
+import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../utils/offlineGuards';
 
 interface HistoryViewProps {
   sales: Sale[];
@@ -38,6 +40,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const tenantId = usePosStore(s => s.tenantId);
   const currentUserStaff = usePosStore(s => s.currentUserStaff);
   const activeSession = usePosStore(s => s.activeSession);
+  const { isOffline: isBrowserOffline } = useBrowserOnlineStatus();
   const isManagerRole = ['admin', 'manager', 'dev'].includes(String(currentUserStaff?.role || '').toLowerCase());
 
   const filteredSales = useMemo(() => {
@@ -118,6 +121,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     }
     if (refundMethod === 'cash' && !activeSession?.id) {
       setRefundError('Open the register before processing a cash refund.');
+      return;
+    }
+    if (refundMethod === 'wallet' && isBrowserOffline) {
+      setRefundError(WALLET_ONLINE_REQUIRED_MESSAGE);
       return;
     }
 
@@ -560,17 +567,33 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     <div>
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Refund method</label>
                       <div className="mt-2 grid grid-cols-3 gap-2">
-                        {(['cash', 'card', 'wallet'] as const).map(method => (
+                        {(['cash', 'card', 'wallet'] as const).map(method => {
+                          const walletBlocked = method === 'wallet' && isBrowserOffline;
+                          return (
                           <button
                             key={method}
                             type="button"
-                            onClick={() => setRefundMethod(method)}
-                            className={`h-11 rounded-xl border text-xs font-black uppercase tracking-widest ${refundMethod === method ? 'border-primary bg-primary text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}
+                            onClick={() => {
+                              if (walletBlocked) {
+                                setRefundError(WALLET_ONLINE_REQUIRED_MESSAGE);
+                                return;
+                              }
+                              setRefundMethod(method);
+                            }}
+                            disabled={walletBlocked}
+                            title={walletBlocked ? WALLET_ONLINE_REQUIRED_MESSAGE : method}
+                            className={`h-11 rounded-xl border text-xs font-black uppercase tracking-widest disabled:opacity-40 ${refundMethod === method ? 'border-primary bg-primary text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}
                           >
                             {method}
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
+                      {isBrowserOffline && (
+                        <p className="mt-2 text-xs font-semibold text-amber-600 dark:text-amber-300">
+                          Wallet refunds are online-only.
+                        </p>
+                      )}
                     </div>
                     <label className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3">
                       <input

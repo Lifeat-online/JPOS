@@ -4,7 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
-import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary } from './types';
+import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, LaybyOrder, LaybyPaymentMethod, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
@@ -262,6 +262,18 @@ export function exportManagerActivityHistoryCsv(tenantId: string, filters: Recor
   );
 }
 
+export function exportManagerAuditReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<{ filename: string; mimeType: string; audience: string; count: number; summary: Record<string, number>; csv: string; generatedAt: string }>(
+    `/api/mariadb/tenants/${tenantId}/action-center/activity/report${query ? `?${query}` : ''}`
+  );
+}
+
 export function decideManagerTask(tenantId: string, taskId: string, data: { action: string; note?: string; assignedTo?: string | null }) {
   return apiPut<any>(`/api/mariadb/tenants/${tenantId}/action-center/tasks/${encodeURIComponent(taskId)}`, data);
 }
@@ -489,6 +501,28 @@ export function createSale(tenantId: string, sale: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/sales`, sale);
 }
 
+export function reportOfflineSyncIssue(tenantId: string, data: {
+  offlineEventId: string;
+  localReceiptNumber?: string | null;
+  deviceId?: string | null;
+  operation?: string | null;
+  method?: string | null;
+  status?: string | null;
+  attempts?: number;
+  message: string;
+  cloudSaleId?: string | null;
+  targetSaleId?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+  total?: number | null;
+  conflictType?: string | null;
+  recommendedAction?: string | null;
+  syncBatchId?: string | null;
+  syncSequence?: number | null;
+}) {
+  return apiPost<{ eventId: string }>(`/api/mariadb/tenants/${tenantId}/offline-sync/issues`, data);
+}
+
 export function getSaleById(tenantId: string, saleId: string) {
   return apiGet<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}`);
 }
@@ -521,6 +555,84 @@ export function voidSale(tenantId: string, saleId: string, data: {
 // ─────────────────────────────────────────────────────────────────────────────
 // Payout Requests
 // ─────────────────────────────────────────────────────────────────────────────
+
+export function getLaybyOrders(tenantId: string, filters: { status?: string; search?: string; limit?: number } = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      params.set(key, String(value));
+    }
+  });
+  const query = params.toString();
+  return apiGet<LaybyOrder[]>(`/api/mariadb/tenants/${tenantId}/laybys${query ? `?${query}` : ''}`);
+}
+
+export function getLaybyOrderById(tenantId: string, laybyId: string) {
+  return apiGet<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}`);
+}
+
+export function createLaybyOrder(tenantId: string, data: {
+  customerId: string;
+  customerName?: string;
+  items: any[];
+  subtotal: number;
+  taxAmount?: number;
+  taxRate?: number;
+  taxInclusive?: boolean;
+  totalAmount: number;
+  dueDate: string;
+  payment: {
+    method: LaybyPaymentMethod;
+    amount: number;
+    tenderedAmount?: number;
+    changeAmount?: number;
+    cashSessionId?: string | null;
+    note?: string | null;
+  };
+  staffId?: string | null;
+  staffName?: string | null;
+}) {
+  return apiPost<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys`, data);
+}
+
+export function addLaybyPayment(tenantId: string, laybyId: string, data: {
+  method: LaybyPaymentMethod;
+  amount: number;
+  tenderedAmount?: number;
+  changeAmount?: number;
+  cashSessionId?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+  note?: string | null;
+}) {
+  return apiPost<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}/payments`, data);
+}
+
+export function completeLaybyOrder(tenantId: string, laybyId: string, data: {
+  payment?: {
+    method: LaybyPaymentMethod;
+    amount: number;
+    tenderedAmount?: number;
+    changeAmount?: number;
+    cashSessionId?: string | null;
+    note?: string | null;
+  };
+  staffId?: string | null;
+  staffName?: string | null;
+} = {}) {
+  return apiPost<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}/complete`, data);
+}
+
+export function cancelLaybyOrder(tenantId: string, laybyId: string, data: {
+  reason?: string | null;
+  refundAmount?: number;
+  refundMethod?: LaybyPaymentMethod;
+  cashSessionId?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+}) {
+  return apiPost<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}/cancel`, data);
+}
 
 export function getPayoutRequests(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/payout-requests`);
@@ -559,6 +671,40 @@ export function getManagerCashSummary(tenantId: string) {
   return apiGet<ManagerCashSummary>(`/api/mariadb/tenants/${tenantId}/manager-cash/summary`);
 }
 
+export type ManagerCashMovementFilters = {
+  limit?: number;
+  movementType?: ManagerCashMovementType | '';
+  direction?: 'in' | 'out' | 'neutral' | '';
+  cashSource?: string;
+  sourceType?: string;
+  staffId?: string;
+  customerId?: string;
+  from?: string;
+  to?: string;
+  search?: string;
+};
+
+function managerCashMovementQuery(filters: ManagerCashMovementFilters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      params.set(key, String(value));
+    }
+  });
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+export function getManagerCashMovements(tenantId: string, filters: ManagerCashMovementFilters = {}) {
+  return apiGet<ManagerCashMovement[]>(`/api/mariadb/tenants/${tenantId}/manager-cash/movements${managerCashMovementQuery(filters)}`);
+}
+
+export function exportManagerCashMovementsCsv(tenantId: string, filters: ManagerCashMovementFilters = {}) {
+  return apiGet<{ filename: string; mimeType: string; csv: string; generatedAt: string; count: number }>(
+    `/api/mariadb/tenants/${tenantId}/manager-cash/movements/export${managerCashMovementQuery(filters)}`
+  );
+}
+
 export function recordManagerCashMovement(tenantId: string, data: {
   movementType: ManagerCashMovementType;
   direction?: 'in' | 'out' | 'neutral';
@@ -569,10 +715,15 @@ export function recordManagerCashMovement(tenantId: string, data: {
   customerId?: string | null;
   customerName?: string | null;
   sourceType?: string | null;
+  cashSource?: string | null;
   referenceId?: string | null;
   category?: string | null;
   note?: string | null;
+  receiptAttachmentUrl?: string | null;
+  receiptAttachmentName?: string | null;
   countedBreakdown?: Record<string, number>;
+  approvedBy?: string | null;
+  approvedByName?: string | null;
 }) {
   return apiPost<ManagerCashMovement>(`/api/mariadb/tenants/${tenantId}/manager-cash/movements`, data);
 }
@@ -645,6 +796,11 @@ export function recordWalletCashMovement(tenantId: string, data: {
   note?: string | null;
   referenceId?: string | null;
   applyWalletDelta?: boolean;
+  cashSource?: string | null;
+  receiptAttachmentUrl?: string | null;
+  receiptAttachmentName?: string | null;
+  approvedBy?: string | null;
+  approvedByName?: string | null;
 }) {
   return apiPost<{
     movement: ManagerCashMovement;

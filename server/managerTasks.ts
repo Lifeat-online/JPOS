@@ -1,5 +1,5 @@
 import { getConnection, isPostgres, query } from "./db.js";
-import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
+import { applyProductStockDelta, normalizeStockMovementReasonCode, recordAuditEvent } from "./audit.js";
 import { processSaleRefund, processSaleVoid } from "./mariadb-crud.js";
 import { approveStockTakeSession } from "./stockTake.js";
 
@@ -267,6 +267,7 @@ export async function applyStockAdjustment(
       productId,
       quantityDelta: delta,
       reason: "manual_adjustment",
+      reasonCode: normalizeStockMovementReasonCode(reason),
       referenceType: referenceId ? "manager_task" : "stock_adjustment",
       referenceId: referenceId || null,
       staffId: actor.staffId || null,
@@ -483,9 +484,10 @@ export async function syncManagerTasksFromSignals(tenantId: string) {
        WHERE tenant_id = ?
          AND action NOT LIKE 'manager_task.%'
          AND (
-           action LIKE 'offline.%'
+           action IN ('offline.sync_failed', 'offline.sync_conflict')
            OR action LIKE 'sync.%'
            OR action LIKE '%sync_failed%'
+           OR action LIKE '%sync_conflict%'
            OR action LIKE '%sync.conflict%'
          )
        ORDER BY created_at DESC

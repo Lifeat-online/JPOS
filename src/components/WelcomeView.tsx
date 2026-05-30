@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowRight,
   BarChart3,
@@ -14,6 +14,7 @@ import {
   Globe2,
   Lock,
   Maximize2,
+  Menu,
   MessageSquare,
   Moon,
   Package,
@@ -28,6 +29,7 @@ import {
   Users,
   Utensils,
   WalletCards,
+  X,
 } from 'lucide-react';
 import { PackagesPricing } from './PackagesPricing';
 
@@ -676,6 +678,8 @@ function WorkstationNotificationShowcase() {
 
 export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, isDarkMode, toggleDarkMode }: WelcomeViewProps) {
   const [openFaq, setOpenFaq] = useState(0);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const closeMobileMenu = () => setMobileMenuOpen(false);
 
   return (
     <div className={`min-h-screen w-full flex flex-col font-sans ${isDarkMode ? 'dark bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'}`}>
@@ -707,13 +711,13 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             <button
               onClick={toggleDarkMode}
               aria-label="Toggle dark mode"
-              className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+              className="hidden h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 lg:flex"
             >
               {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
             <button
               onClick={onClientLogin}
-              className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 sm:flex"
+              className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 lg:flex"
             >
               <ShoppingBag className="h-4 w-4" />
               Client Login
@@ -725,9 +729,118 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
               <UserCircle className="h-4 w-4" />
               Admin Login
             </button>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open menu"
+              aria-expanded={mobileMenuOpen}
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 lg:hidden"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
           </div>
         </div>
       </header>
+
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-sm lg:hidden"
+            onClick={closeMobileMenu}
+          >
+            <motion.aside
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', stiffness: 340, damping: 34 }}
+              className="ml-auto flex h-full w-[min(88vw,24rem)] flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex h-20 items-center justify-between border-b border-slate-200 px-5 dark:border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
+                    <Store className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-base font-black tracking-tight text-slate-950 dark:text-white">MasePOS</p>
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Menu</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeMobileMenu}
+                  aria-label="Close menu"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:border-slate-300 dark:border-slate-800 dark:text-slate-300"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-5 py-5">
+                <div className="grid gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { onClientLogin(); closeMobileMenu(); }}
+                    className="flex items-center justify-center gap-3 rounded-lg bg-emerald-600 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-emerald-500"
+                  >
+                    <ShoppingBag className="h-4 w-4" />
+                    Client Login
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { onLogin(); closeMobileMenu(); }}
+                    className="flex items-center justify-center gap-3 rounded-lg bg-slate-950 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+                  >
+                    <UserCircle className="h-4 w-4" />
+                    Admin Login
+                  </button>
+                </div>
+
+                <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900/70">
+                  <button
+                    type="button"
+                    onClick={toggleDarkMode}
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-sm font-bold text-slate-700 transition hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                      {isDarkMode ? <Sun className="h-4 w-4 text-amber-500" /> : <Moon className="h-4 w-4" />}
+                    </span>
+                    {isDarkMode ? 'Light Mode' : 'Dark Mode'}
+                  </button>
+                </div>
+
+                <nav className="mt-5 grid gap-1">
+                  {navLinks.map((item) => (
+                    <a
+                      key={item.label}
+                      href={item.href}
+                      onClick={closeMobileMenu}
+                      className="flex items-center justify-between rounded-lg px-3 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+                    >
+                      {item.label}
+                      <ArrowRight className="h-4 w-4 text-slate-400" />
+                    </a>
+                  ))}
+                </nav>
+              </div>
+
+              <div className="border-t border-slate-200 p-5 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => { onStartSetup(); closeMobileMenu(); }}
+                  className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white px-5 py-3.5 text-sm font-bold text-slate-900 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
+                >
+                  Start Setup
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            </motion.aside>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className="flex-1">
         <section className="relative overflow-hidden border-b border-slate-200 bg-[linear-gradient(135deg,#ffffff_0%,#f8fafc_48%,#eef6ff_100%)] px-4 py-16 dark:border-slate-800 dark:bg-[linear-gradient(135deg,#020617_0%,#0f172a_58%,#082f49_100%)] sm:px-6 lg:px-10 lg:py-24">

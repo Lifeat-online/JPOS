@@ -393,6 +393,8 @@ describe('manager task queue', () => {
       expect.stringContaining('INSERT INTO stock_movements'),
       expect.arrayContaining(['tenant_1', 'product', 'prod_1', null, 'Milk', 2, 5, 7, 'manual_adjustment'])
     );
+    const stockInsertCall = (conn.query as any).mock.calls.find((call: any[]) => String(call[0]).includes('INSERT INTO stock_movements'));
+    expect(stockInsertCall?.[1]?.[10]).toBe('count_correction');
     expect(conn.commit).toHaveBeenCalled();
     expect(result).toMatchObject({
       id: 'task_stock_1',

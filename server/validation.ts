@@ -129,7 +129,33 @@ export const SaleSchema = z.object({
   staffId: z.string().nullish(),
   tableNumber: z.string().nullish(),
   isTab: z.boolean().nullish(),
-  tabName: z.string().nullish()
+  tabName: z.string().nullish(),
+  cashSessionId: z.string().nullish(),
+  loyaltyPoints: z.number().min(0).nullish(),
+  expectedCashDelta: z.number().nullish(),
+  tipsDelta: z.number().nullish(),
+  accountBalanceDelta: z.number().nullish(),
+  cashMovements: z.array(z.object({
+    type: z.string().min(1),
+    direction: z.enum(['in', 'out', 'neutral']).nullish(),
+    amount: z.number().min(0),
+    paymentId: z.string().nullish(),
+    staffId: z.string().nullish(),
+    staffName: z.string().nullish(),
+    note: z.string().nullish()
+  })).optional(),
+  staffMetrics: z.object({
+    ordersDelta: z.number().optional(),
+    tipsDelta: z.number().optional()
+  }).nullish(),
+  offlineEventId: z.string().nullish(),
+  localReceiptNumber: z.string().nullish(),
+  deviceId: z.string().nullish(),
+  syncSource: z.enum(['online', 'offline']).nullish(),
+  syncEventType: z.string().nullish(),
+  syncEventVersion: z.number().nullish(),
+  syncBatchId: z.string().nullish(),
+  syncSequence: z.number().int().min(0).nullish()
 });
 
 export const SaleRefundSchema = z.object({

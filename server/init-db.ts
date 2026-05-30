@@ -149,6 +149,8 @@ CREATE TABLE IF NOT EXISTS sales (
   table_number TEXT,
   is_tab SMALLINT DEFAULT 0 CHECK (is_tab IN (0, 1)),
   tab_name TEXT,
+  offline_event_id TEXT,
+  sync_source TEXT DEFAULT 'online',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -228,10 +230,16 @@ CREATE TABLE IF NOT EXISTS manager_cash_movements (
   customer_id TEXT,
   customer_name TEXT,
   source_type TEXT DEFAULT 'manager_float',
+  cash_source TEXT DEFAULT 'manager_float',
   reference_id TEXT,
   category TEXT,
   note TEXT,
+  receipt_attachment_url TEXT,
+  receipt_attachment_name TEXT,
   counted_breakdown TEXT DEFAULT '{}'::TEXT,
+  approved_by TEXT,
+  approved_by_name TEXT,
+  approved_at TIMESTAMPTZ,
   created_by TEXT,
   created_by_name TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -467,7 +475,9 @@ export async function initDb() {
   await ensurePersonDiscountSchema();
   await ensureCashManagementSchema();
   await ensureRefundSchema();
+  await ensureOfflineSaleSyncSchema();
   await ensureAuditAndStockLedgerSchema();
+  await ensureLaybySchema();
   await ensureManagerTaskSchema();
   await ensureStockTakeSchema();
   await ensureBulkInventorySchema();
@@ -629,17 +639,30 @@ export async function ensureCashManagementSchema() {
         customer_id TEXT,
         customer_name TEXT,
         source_type TEXT DEFAULT 'manager_float',
+        cash_source TEXT DEFAULT 'manager_float',
         reference_id TEXT,
         category TEXT,
         note TEXT,
+        receipt_attachment_url TEXT,
+        receipt_attachment_name TEXT,
         counted_breakdown TEXT DEFAULT '{}'::TEXT,
+        approved_by TEXT,
+        approved_by_name TEXT,
+        approved_at TIMESTAMPTZ,
         created_by TEXT,
         created_by_name TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    await query(`ALTER TABLE manager_cash_movements ADD COLUMN IF NOT EXISTS cash_source TEXT DEFAULT 'manager_float'`);
+    await query(`ALTER TABLE manager_cash_movements ADD COLUMN IF NOT EXISTS receipt_attachment_url TEXT`);
+    await query(`ALTER TABLE manager_cash_movements ADD COLUMN IF NOT EXISTS receipt_attachment_name TEXT`);
+    await query(`ALTER TABLE manager_cash_movements ADD COLUMN IF NOT EXISTS approved_by TEXT`);
+    await query(`ALTER TABLE manager_cash_movements ADD COLUMN IF NOT EXISTS approved_by_name TEXT`);
+    await query(`ALTER TABLE manager_cash_movements ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`);
     await query(`CREATE INDEX IF NOT EXISTS idx_manager_cash_tenant_created ON manager_cash_movements (tenant_id, created_at)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_manager_cash_reference ON manager_cash_movements (tenant_id, movement_type, reference_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_manager_cash_source ON manager_cash_movements (tenant_id, cash_source, created_at)`);
     await query(`
       CREATE TABLE IF NOT EXISTS cash_custody_transfers (
         id TEXT PRIMARY KEY,
@@ -761,19 +784,46 @@ export async function ensureCashManagementSchema() {
       customer_id VARCHAR(64),
       customer_name VARCHAR(255),
       source_type VARCHAR(64) DEFAULT 'manager_float',
+      cash_source VARCHAR(64) DEFAULT 'manager_float',
       reference_id VARCHAR(128),
       category VARCHAR(96),
       note TEXT,
+      receipt_attachment_url TEXT,
+      receipt_attachment_name VARCHAR(255),
       counted_breakdown JSON DEFAULT JSON_OBJECT(),
+      approved_by VARCHAR(64),
+      approved_by_name VARCHAR(255),
+      approved_at DATETIME,
       created_by VARCHAR(64),
       created_by_name VARCHAR(255),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_manager_cash_tenant_created (tenant_id, created_at),
       INDEX idx_manager_cash_reference (tenant_id, movement_type, reference_id),
+      INDEX idx_manager_cash_source (tenant_id, cash_source, created_at),
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
       FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id) ON DELETE SET NULL
     )
   `);
+  const addManagerCashColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE manager_cash_movements ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  await addManagerCashColumn(`cash_source VARCHAR(64) DEFAULT 'manager_float' AFTER source_type`);
+  await addManagerCashColumn(`receipt_attachment_url TEXT AFTER note`);
+  await addManagerCashColumn(`receipt_attachment_name VARCHAR(255) AFTER receipt_attachment_url`);
+  await addManagerCashColumn(`approved_by VARCHAR(64) AFTER counted_breakdown`);
+  await addManagerCashColumn(`approved_by_name VARCHAR(255) AFTER approved_by`);
+  await addManagerCashColumn(`approved_at DATETIME AFTER approved_by_name`);
+  try {
+    await query(`CREATE INDEX idx_manager_cash_source ON manager_cash_movements (tenant_id, cash_source, created_at)`);
+  } catch (err: any) {
+    const message = String(err?.message || "");
+    if (!message.includes("Duplicate key name")) throw err;
+  }
   await query(`
     CREATE TABLE IF NOT EXISTS cash_custody_transfers (
       id VARCHAR(64) PRIMARY KEY,
@@ -878,7 +928,58 @@ export async function ensureRefundSchema() {
   await query(`UPDATE sales SET transaction_type = COALESCE(transaction_type, 'sale'), refund_status = COALESCE(refund_status, 'none'), refunded_amount = COALESCE(refunded_amount, 0)`);
 }
 
+export async function ensureOfflineSaleSyncSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS offline_event_id TEXT`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sync_source TEXT DEFAULT 'online'`);
+    await query(`UPDATE sales SET sync_source = COALESCE(sync_source, 'online')`);
+    await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_tenant_offline_event ON sales (tenant_id, offline_event_id) WHERE offline_event_id IS NOT NULL`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_sales_tenant_sync_source ON sales (tenant_id, sync_source, created_at)`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE sales ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key name")) throw err;
+    }
+  };
+
+  await addColumn(`offline_event_id VARCHAR(128) DEFAULT NULL AFTER tab_name`);
+  await addColumn(`sync_source VARCHAR(24) DEFAULT 'online' AFTER offline_event_id`);
+  await query(`UPDATE sales SET sync_source = COALESCE(sync_source, 'online')`);
+  await addIndex(`CREATE UNIQUE INDEX idx_sales_tenant_offline_event ON sales (tenant_id, offline_event_id)`);
+  await addIndex(`CREATE INDEX idx_sales_tenant_sync_source ON sales (tenant_id, sync_source, created_at)`);
+}
+
 export async function ensureAuditAndStockLedgerSchema() {
+  const stockReasonCodes = "'receiving','sale','refund','void','adjustment','count_correction','transfer','wastage','shrinkage'";
+  const stockReasonBackfill = `
+    UPDATE stock_movements
+       SET reason_code = CASE
+         WHEN LOWER(COALESCE(reason, '')) IN ('sale','sale_completed','sale_deduction','checkout') THEN 'sale'
+         WHEN LOWER(COALESCE(reason, '')) IN ('refund','refund_restock','refund_reversal') THEN 'refund'
+         WHEN LOWER(COALESCE(reason, '')) IN ('void','void_restock','void_reversal') THEN 'void'
+         WHEN LOWER(COALESCE(reason, '')) IN ('stock_take','stocktake','cycle_count','spot_check','count_correction') THEN 'count_correction'
+         WHEN LOWER(COALESCE(reason, '')) IN ('purchase_order','invoice_receiving','receiving','received') THEN 'receiving'
+         WHEN LOWER(COALESCE(reason, '')) IN ('stock_transfer','transfer') THEN 'transfer'
+         WHEN LOWER(COALESCE(reason, '')) IN ('waste','wastage','expired','expiry','spoiled','spoilage','damage','damaged') THEN 'wastage'
+         WHEN LOWER(COALESCE(reason, '')) IN ('shrink','shrinkage','theft','loss','lost','missing') THEN 'shrinkage'
+         ELSE 'adjustment'
+       END
+     WHERE reason_code IS NULL OR reason_code = 'adjustment'
+  `;
+
   if (isPostgres()) {
     await query(`
       CREATE TABLE IF NOT EXISTS audit_events (
@@ -911,6 +1012,7 @@ export async function ensureAuditAndStockLedgerSchema() {
         previous_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
         new_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
         reason TEXT NOT NULL,
+        reason_code TEXT NOT NULL DEFAULT 'adjustment' CHECK (reason_code IN ('receiving','sale','refund','void','adjustment','count_correction','transfer','wastage','shrinkage')),
         reference_type TEXT,
         reference_id TEXT,
         sale_id TEXT,
@@ -924,6 +1026,9 @@ export async function ensureAuditAndStockLedgerSchema() {
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_tenant_created ON stock_movements (tenant_id, created_at)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements (tenant_id, product_id)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_sale ON stock_movements (tenant_id, sale_id)`);
+    await query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS reason_code TEXT NOT NULL DEFAULT 'adjustment' CHECK (reason_code IN (${stockReasonCodes}))`);
+    await query(stockReasonBackfill);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_reason_code ON stock_movements (tenant_id, reason_code, created_at)`);
     return;
   }
 
@@ -959,6 +1064,7 @@ export async function ensureAuditAndStockLedgerSchema() {
       previous_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
       new_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
       reason VARCHAR(64) NOT NULL,
+      reason_code ENUM('receiving','sale','refund','void','adjustment','count_correction','transfer','wastage','shrinkage') NOT NULL DEFAULT 'adjustment',
       reference_type VARCHAR(64),
       reference_id VARCHAR(64),
       sale_id VARCHAR(64),
@@ -970,7 +1076,168 @@ export async function ensureAuditAndStockLedgerSchema() {
       INDEX idx_stock_movements_tenant_created (tenant_id, created_at),
       INDEX idx_stock_movements_product (tenant_id, product_id),
       INDEX idx_stock_movements_sale (tenant_id, sale_id),
+      INDEX idx_stock_movements_reason_code (tenant_id, reason_code, created_at),
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  const addColumn = async (statement: string) => {
+    try {
+      await query(`ALTER TABLE stock_movements ADD COLUMN ${statement}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column name")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key name")) throw err;
+    }
+  };
+  await addColumn(`reason_code ENUM('receiving','sale','refund','void','adjustment','count_correction','transfer','wastage','shrinkage') NOT NULL DEFAULT 'adjustment' AFTER reason`);
+  await query(stockReasonBackfill);
+  await addIndex(`CREATE INDEX idx_stock_movements_reason_code ON stock_movements (tenant_id, reason_code, created_at)`);
+}
+
+export async function ensureLaybySchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS layby_orders (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        customer_name TEXT NOT NULL,
+        staff_id TEXT,
+        staff_name TEXT,
+        status TEXT DEFAULT 'active' CHECK (status IN ('active','completed','cancelled')),
+        subtotal NUMERIC(12,2) DEFAULT 0,
+        tax_amount NUMERIC(12,2) DEFAULT 0,
+        tax_rate NUMERIC(5,2) DEFAULT 0,
+        tax_inclusive SMALLINT DEFAULT 1 CHECK (tax_inclusive IN (0, 1)),
+        total_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        deposit_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        amount_paid NUMERIC(12,2) NOT NULL DEFAULT 0,
+        balance_due NUMERIC(12,2) NOT NULL DEFAULT 0,
+        refund_amount NUMERIC(12,2) DEFAULT 0,
+        forfeited_amount NUMERIC(12,2) DEFAULT 0,
+        due_date DATE NOT NULL,
+        cancel_reason TEXT,
+        cancelled_by TEXT,
+        cancelled_by_name TEXT,
+        cancelled_at TIMESTAMPTZ,
+        completed_sale_id TEXT REFERENCES sales(id) ON DELETE SET NULL,
+        completed_by TEXT,
+        completed_by_name TEXT,
+        completed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_layby_orders_tenant_status ON layby_orders (tenant_id, status, due_date)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_layby_orders_customer ON layby_orders (tenant_id, customer_id)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS layby_items (
+        id TEXT PRIMARY KEY,
+        layby_order_id TEXT NOT NULL REFERENCES layby_orders(id) ON DELETE CASCADE,
+        product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+        product_name TEXT NOT NULL,
+        price NUMERIC(12,2) DEFAULT 0,
+        quantity NUMERIC(12,3) NOT NULL DEFAULT 1,
+        reserved_quantity NUMERIC(12,3) NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_layby_items_order ON layby_items (layby_order_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_layby_items_product ON layby_items (product_id)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS layby_payments (
+        id TEXT PRIMARY KEY,
+        layby_order_id TEXT NOT NULL REFERENCES layby_orders(id) ON DELETE CASCADE,
+        method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet','account')),
+        amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        tendered_amount NUMERIC(12,2) DEFAULT 0,
+        change_amount NUMERIC(12,2) DEFAULT 0,
+        staff_id TEXT,
+        staff_name TEXT,
+        cash_session_id TEXT,
+        note TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_layby_payments_order ON layby_payments (layby_order_id, created_at)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS layby_orders (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      customer_id VARCHAR(64) NOT NULL,
+      customer_name VARCHAR(255) NOT NULL,
+      staff_id VARCHAR(64),
+      staff_name VARCHAR(255),
+      status ENUM('active','completed','cancelled') DEFAULT 'active',
+      subtotal DECIMAL(12,2) DEFAULT 0,
+      tax_amount DECIMAL(12,2) DEFAULT 0,
+      tax_rate DECIMAL(5,2) DEFAULT 0,
+      tax_inclusive BOOLEAN DEFAULT TRUE,
+      total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      deposit_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      amount_paid DECIMAL(12,2) NOT NULL DEFAULT 0,
+      balance_due DECIMAL(12,2) NOT NULL DEFAULT 0,
+      refund_amount DECIMAL(12,2) DEFAULT 0,
+      forfeited_amount DECIMAL(12,2) DEFAULT 0,
+      due_date DATE NOT NULL,
+      cancel_reason TEXT,
+      cancelled_by VARCHAR(64),
+      cancelled_by_name VARCHAR(255),
+      cancelled_at DATETIME,
+      completed_sale_id VARCHAR(64),
+      completed_by VARCHAR(64),
+      completed_by_name VARCHAR(255),
+      completed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_layby_orders_tenant_status (tenant_id, status, due_date),
+      INDEX idx_layby_orders_customer (tenant_id, customer_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+      FOREIGN KEY (completed_sale_id) REFERENCES sales(id) ON DELETE SET NULL
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS layby_items (
+      id VARCHAR(64) PRIMARY KEY,
+      layby_order_id VARCHAR(64) NOT NULL,
+      product_id VARCHAR(64),
+      product_name VARCHAR(255) NOT NULL,
+      price DECIMAL(12,2) DEFAULT 0,
+      quantity DECIMAL(12,3) NOT NULL DEFAULT 1,
+      reserved_quantity DECIMAL(12,3) NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_layby_items_order (layby_order_id),
+      INDEX idx_layby_items_product (product_id),
+      FOREIGN KEY (layby_order_id) REFERENCES layby_orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS layby_payments (
+      id VARCHAR(64) PRIMARY KEY,
+      layby_order_id VARCHAR(64) NOT NULL,
+      method ENUM('cash','payfast','card','wallet','account') NOT NULL,
+      amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      tendered_amount DECIMAL(12,2) DEFAULT 0,
+      change_amount DECIMAL(12,2) DEFAULT 0,
+      staff_id VARCHAR(64),
+      staff_name VARCHAR(255),
+      cash_session_id VARCHAR(64),
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_layby_payments_order (layby_order_id, created_at),
+      FOREIGN KEY (layby_order_id) REFERENCES layby_orders(id) ON DELETE CASCADE
     )
   `);
 }

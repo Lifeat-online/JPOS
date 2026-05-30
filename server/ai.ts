@@ -1,6 +1,7 @@
 import { query, isPostgres } from "./db.js";
 import type { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
+import { recordAuditEventSafe } from "./audit.js";
 
 export type AiRole = "admin" | "manager" | "dev" | "cashier" | "chef";
 export type AiProviderName = "openai" | "ollama" | "anythingllm" | "google" | "vertex" | "openrouter";
@@ -273,10 +274,37 @@ function hasRoleAccess(role: unknown, roles: string[]) {
   return roles.includes(r) || r === "dev";
 }
 
+function auditAiPermissionDenied(req: Request, attemptedAction: string, reason: string) {
+  const tenantId = req.params?.tenantId || req.user?.tenantId || null;
+  if (!tenantId) return;
+  void recordAuditEventSafe({
+    tenantId,
+    action: "permission.denied",
+    entityType: "security",
+    entityId: req.user?.staffId || req.user?.uid || null,
+    staffId: req.user?.staffId || req.user?.uid || null,
+    staffName: req.user?.name || null,
+    source: "permission",
+    details: {
+      attemptedAction,
+      reason,
+      role: req.user?.role || null,
+      method: req.method,
+      route: req.originalUrl || req.url,
+      ip: req.ip || req.socket?.remoteAddress || null,
+      userAgent: req.get?.("user-agent") || null,
+    },
+  });
+}
+
 export async function requireAiRoleAccess(req: Request, res: Response, next: NextFunction) {
   const settings = await getAiSettings(req.params.tenantId);
-  if (!settings.enabled) return res.status(403).json({ error: "AI is disabled for this tenant" });
+  if (!settings.enabled) {
+    auditAiPermissionDenied(req, "ai.access", "ai_disabled");
+    return res.status(403).json({ error: "AI is disabled for this tenant" });
+  }
   if (!hasRoleAccess(req.user?.role, settings.visibleRoles)) {
+    auditAiPermissionDenied(req, "ai.access", "role_not_allowed");
     return res.status(403).json({ error: "Your role cannot access AI Copilot" });
   }
   next();
@@ -285,9 +313,11 @@ export async function requireAiRoleAccess(req: Request, res: Response, next: Nex
 export async function requireAiStaffScoreAccess(req: Request, res: Response, next: NextFunction) {
   const settings = await getAiSettings(req.params.tenantId);
   if (!settings.enabled || !settings.staffScoringEnabled) {
+    auditAiPermissionDenied(req, "ai.staff_scores", !settings.enabled ? "ai_disabled" : "staff_scoring_disabled");
     return res.status(403).json({ error: "AI staff scoring is disabled for this tenant" });
   }
   if (!hasRoleAccess(req.user?.role, settings.staffScoreVisibleRoles)) {
+    auditAiPermissionDenied(req, "ai.staff_scores", "role_not_allowed");
     return res.status(403).json({ error: "Your role cannot access AI staff scores" });
   }
   next();

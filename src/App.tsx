@@ -1244,6 +1244,7 @@ export default function App() {
             restaurantTables={restaurantTables}
             onSalesUpdated={refreshSales}
             onCustomersUpdated={refreshCustomers}
+            onProductsUpdated={refreshProducts}
             lastReceiptSale={lastReceiptSale}
             onPrintLastReceipt={() => printReceipt(lastReceiptSale)}
             suppressBillPrint={Boolean(receiptToPrint)}

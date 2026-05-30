@@ -1,6 +1,6 @@
 # Jimmy POS Master Todo
 
-Last updated: 2026-05-27
+Last updated: 2026-05-30
 
 This is the single source of truth for Jimmy POS implementation work. Add new roadmap items, blueprint gaps, security todo items, migration todo items, AI todo items, and restaurant-mode todo items here first. Older specialist planning documents are retained only as historical context or verification notes.
 
@@ -33,7 +33,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 
 ## UX and Workflow Backlog
 
-- [ ] Run a daily-operator workflow audit across POS, tables, tabs, refunds, voids, receipts, cash-up, inventory receiving, stock adjustments, staff permissions, and AI approvals.
+- [x] Run a daily-operator workflow audit across POS, tables, tabs, refunds, voids, receipts, cash-up, inventory receiving, stock adjustments, staff permissions, and AI approvals.
 - [x] Add first manager Action Center surface for cash exceptions, refund/void activity, low stock, AI warnings, recent stock movements, and recent audit activity.
 - [x] Add manager task queue with take, approve, decline, dismiss, required decision notes, source drill-through, and audited decisions.
 - [x] Add cashier refund and void approval requests that appear in Action Center and execute only after manager approval.
@@ -45,39 +45,49 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [x] Add manager-scheduled daily spot-check rules with assigned staff, product scope controls, one-run-per-day protection, and Action Center/manual run support.
 - [x] Add manager cash float view that shows all register floats, petty cash/payouts, wallet cash movements, manager-safe cash, and total cash in the system at any moment.
 - [x] Extend the manager action center into remaining pre-action approval requests: AI recommendation tasks, failed/offline sync items, and scheduled stocktake exceptions.
-- [ ] Expand operator-friendly audit/stock visibility with deeper device attribution, richer customer/register labels, drill-through context, and PDF/accounting export packs.
-- [ ] Add guided stock receiving and deeper stock-count flows that explain valuation, variance reason taxonomy, count sheets, exports, and batch/location impact.
-- [ ] Add quick-access daily actions in the POS shell: reprint last receipt, cash drawer/no-sale, active register status, parked sales, open tabs/tables, and pending workstation items.
+- [ ] Expand operator-friendly audit/stock visibility with deeper device attribution, richer customer/register labels, drill-through context, and PDF/accounting export packs beyond current CSV exports.
+- [ ] Add guided stock receiving and deeper stock-count flows that explain valuation, variance reason taxonomy, count sheets, exports, and batch/location impact; current purchase-order receiving is still status-only.
+- [ ] Add quick-access daily actions in the POS shell: consolidate currently scattered reprint last receipt, cash drawer/no-sale, active register status, parked sales, open tabs/tables, and pending workstation items into one first-screen operator strip.
 - [ ] Add workflow-focused empty states and recovery actions for no open register, no stock, no customer selected, payment failure, offline mode, and printer readiness.
-- [ ] Add role-specific onboarding/checklists for cashier, waiter, manager, owner, kitchen/bar, and Dev users.
+- [ ] Add role-specific onboarding/checklists for cashier, waiter, manager, owner, kitchen/bar, and Dev users that route each role to its first daily actions and missing setup.
+
+### Daily Operator Workflow Audit - 2026-05-30
+
+- Covered POS sell/park/table/tab flows, refund/void/reprint history, cash drawer/no-sale, register open/close/cash-up, manager cash/EOD, inventory receiving, stock adjustments, stocktake, staff permissions, manager approvals, and AI inventory approvals.
+- Confirmed working surfaces: POS has active-register guarding, parked sales, table save, no-sale drawer logging, last receipt reprint, offline queue review, and wallet/account online guards; History has guided refund/void/reprint with manager approval routing; Cash Management has open/close, manager review, Z checklist, printer readiness, EOD checkpoint, cash custody, and searchable/exportable manager-cash movements.
+- Confirmed approval surfaces: refund, void, stock adjustment, stocktake variance, AI warnings, and offline sync conflicts now converge into Action Center or guarded manager routes.
+- Remaining operator friction: daily POS actions are discoverable but split across separate panels instead of a single first-screen action strip.
+- Remaining stock friction: purchase orders can be created and marked received, but receiving does not yet book stock with invoice/variance evidence, batches, valuation, or ledger review.
+- Remaining guidance friction: empty states and role checklists are inconsistent, especially for first login, no register, no customer, no stock, payment failure, offline recovery, and printer readiness.
+- Remaining AI/approval friction: AI proposal application is guarded, but per-step persisted agent runs, one-mutation approval records, and stronger manager task conversion remain active P3/P8 gaps.
 
 ## P0 - Data Integrity, Audit, and Offline Reliability
 
 - [x] Add audit and stock movement foundation tables/helpers, with completed sale stock deductions, refund restocks, void restocks, and sale create/update/refund/void audit events recorded.
 - [x] Add manager-facing audit/stock activity search with date, staff, product, sale, customer, register, source, and action/reason filters.
 - [x] Add CSV export for owner/accountant review of filtered audit and stock activity.
-- [ ] Add immutable audit/event log for every sale, refund, void, cash movement, stock change, customer change, staff change, settings change, login/security event, failed permission check, and AI/autopilot approval.
-- [ ] Make audit logs searchable by staff member, customer, sale, register, device, action type, and date range.
-- [ ] Add exportable audit reports for owners, accountants, and compliance review.
-- [ ] Add transaction-safe checkout boundaries across sale rows, sale items, payments, stock deduction, cash-session movements, loyalty/customer-account updates, wallet changes, and staff metrics.
+- [x] Add immutable audit/event log for every sale, refund, void, cash movement, stock change, customer change, staff change, settings change, login/security event, failed permission check, and AI/autopilot approval.
+- [x] Make audit logs searchable by staff member, customer, sale, register, device, action type, and date range.
+- [x] Add exportable audit reports for owners, accountants, and compliance review.
+- [x] Add transaction-safe checkout boundaries across sale rows, sale items, payments, stock deduction, cash-session movements, loyalty/customer-account updates, wallet changes, and staff metrics.
 - [x] Add manager float/safe ledger that aggregates till floats, cash drops, cash added, petty cash, payouts, wallet cash movements, reconciled cash-ups, and manager-held cash into a real-time cash position.
 - [x] Add first cash-in-system dashboard: open register expected cash + pending cash-ups + manager float/safe = total physical cash, with wallet liability and pending payouts shown separately.
 - [x] Expand cash custody transfers between registers, staff, and the manager float/safe with counted denominations, expected-vs-counted variance, dual confirmation, manager approval, and audit trail.
-- [ ] Expand petty cash and payout tracking with receipt/photo attachment, cash-source selection, approver, and searchable/exportable reports.
+- [x] Expand petty cash and payout tracking with receipt/photo attachment, cash-source selection, approver, and searchable/exportable reports.
 - [x] Add manager/admin wallet cash reconciliation path so wallet cash top-ups and wallet cash payouts update wallet balance, manager float, and audit ledger atomically.
 - [x] Extend wallet cash reconciliation into cashier/customer self-service flows so customer wallet top-ups, withdrawals, refunds, and liabilities automatically update the relevant register/session, manager float, and audit ledger consistently.
 - [x] Expand end-of-day cash reconciliation so register cash + manager float/safe + petty cash + pending drops/pickups + wallet cash movements produces a total expected physical cash checkpoint, with variances surfaced in Action Center.
-- [ ] Add stock movement ledger with reason codes for receiving, sale, refund, void, adjustment, count correction, transfer, wastage, and shrinkage.
+- [x] Add stock movement ledger with reason codes for receiving, sale, refund, void, adjustment, count correction, transfer, wastage, and shrinkage.
 - [x] Add first Offline Solo frontend foundation: browser-local cash/card sale queue, local offline receipt number, cashier offline banner, wallet/account/PayFast offline blocking, and background replay when the browser returns online.
-- [ ] Add offline transaction queue with local sale capture, local receipt, sync/retry status, conflict handling, stock reconciliation, and clear cashier warnings.
-- [ ] Add offline sync/reconciliation UI for failed, pending, duplicated, and conflicted transactions.
-- [ ] Add offline sync event model that replays durable business facts only, with idempotency keys, register-prefixed local receipt numbers, batch upload, priority ordering, retry/backpressure, and summary notifications instead of stale live alert replay.
-- [ ] Block all wallet usage while offline, including customer/staff wallet spend, top-up, payout, refund-to-wallet, transfer, and adjustment flows; show an online-required warning and do not queue wallet balance mutations for later replay.
-- [ ] Add offline conflict policies for multi-device solo mode: allow sale capture, then surface negative stock, duplicate table/tab, receipt sequence, and duplicate customer/order issues as manager review tasks after sync.
+- [x] Add offline transaction queue with local sale capture, local receipt, sync/retry status, conflict handling, stock reconciliation, and clear cashier warnings.
+- [x] Add offline sync/reconciliation UI for failed, pending, duplicated, and conflicted transactions.
+- [x] Add offline sync event model that replays durable business facts only, with idempotency keys, register-prefixed local receipt numbers, batch upload, priority ordering, retry/backpressure, and summary notifications instead of stale live alert replay.
+- [x] Block all wallet usage while offline, including customer/staff wallet spend, top-up, payout, refund-to-wallet, transfer, and adjustment flows; show an online-required warning and do not queue wallet balance mutations for later replay.
+- [x] Add offline conflict policies for multi-device solo mode: allow sale capture, then surface negative stock, duplicate table/tab, receipt sequence, and duplicate customer/order issues as manager review tasks after sync.
 
 ## P1 - Payments and Checkout
 
-- [ ] Add formal lay-by workflow: deposit, instalments, due dates, cancellation, final collection, reserved stock, and lay-by receipts.
+- [x] Add formal lay-by workflow: deposit, instalments, due dates, cancellation, final collection, reserved stock, and lay-by receipts.
 - [ ] Add QR/mobile-wallet rails: SnapScan, Yoco payment links/terminal flows, and generic QR payment capture.
 - [ ] Add BNPL providers: PayJustNow, Mobicred, PayFlex, provider reconciliation, settlement status, and return/refund handling.
 - [ ] Add card-terminal pairing so card payment is confirmed by an acquiring provider instead of only recorded manually.
@@ -257,3 +267,27 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - 2026-05-26: Consolidated active roadmap/todo items from the former implementation roadmap, AI Inventory Copilot plan, AI Manager Copilot todo, MariaDB/Nginx migration plan, migration status notes, security checklist, security implementation summary, and POS feature blueprint audit into this master todo.
 - 2026-05-26: Confirmed current code references JWT-based `useAuth`, bearer-token API helpers, `/api/auth/login`, password-hash schema columns, and refresh-token handlers, so old migration docs about frontend auth migration are historical rather than active.
 - 2026-05-27: Added first Offline Solo frontend foundation with local sale queue storage, offline cashier banner, wallet/account/PayFast offline blocking, external card/cash queueing, offline receipt messaging, split-payment offline guardrails, and automatic replay when the browser reports online again; passed `npx.cmd vitest run tests/frontend/offline-sales.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-05-30: Completed transaction-safe checkout boundary hardening. Checkout now attaches loyalty, cash-session, cash-movement, staff-metric, and account-balance side-effect payloads before online writes or offline queueing; the backend applies those effects inside the sale create/update transaction with sale rows, items, payments, stock deduction, and wallet changes, and only runs update side effects on the transition into completed sale state.
+- 2026-05-30: Added offline sale sync idempotency support with `offline_event_id`, `sync_source`, startup schema healing, durable local receipt/device metadata, server-owned sync audit events, and removal of the old frontend post-sale cash/staff replay path so offline sync cannot double-apply register or staff totals.
+- 2026-05-30: Passed focused verification for this slice: `npx.cmd vitest run tests/frontend/offline-sales.test.ts tests/backend/mariadb-crud.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-05-30: Added POS offline queue review controls for pending/syncing/failed sales, manual retry, local dismiss, and a server endpoint that records browser-side sync failures/conflicts as `offline.sync_failed` or `offline.sync_conflict` audit events so existing Action Center sync creates manager `offline_sync` tasks.
+- 2026-05-30: Passed offline recovery verification: `npx.cmd vitest run tests/frontend/offline-sales.test.ts tests/backend/offline-sync.test.ts tests/backend/manager-tasks.test.ts tests/backend/action-center.test.ts`, `npx.cmd vitest run tests/backend/mariadb-crud.test.ts tests/frontend/offline-sales.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-05-30: Completed offline conflict policy hardening. Offline sync now classifies negative-stock, duplicate-receipt, duplicate-table/tab, duplicate-customer/order, and generic sync failures with recommended manager actions; backend offline sale sync records `offline.sync_conflict` audit events for stock shortages and open table/tab/customer-order collisions; POS and Action Center show the conflict category and next action.
+- 2026-05-30: Passed conflict policy verification: `npx.cmd vitest run tests/frontend/offline-sales.test.ts tests/backend/offline-sync.test.ts tests/backend/mariadb-crud.test.ts tests/backend/manager-tasks.test.ts tests/backend/action-center.test.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, and `git diff --check` only reported LF-to-CRLF normalization warnings.
+- 2026-05-30: Completed offline sync event model hardening. Queued offline checkouts now carry durable sale sync event envelopes with idempotency keys, register-prefixed local receipt numbers, batch IDs, sequence numbers, priority ordering, bounded batch replay, retry backpressure windows, and POS summary messaging; server-side offline audit details include batch/sequence/event metadata for Action Center review.
+- 2026-05-30: Passed offline event model verification: `npx.cmd vitest run tests/frontend/offline-sales.test.ts tests/backend/offline-sync.test.ts tests/backend/mariadb-crud.test.ts tests/backend/manager-tasks.test.ts tests/backend/action-center.test.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, and `git diff --check` only reported LF-to-CRLF normalization warnings.
+- 2026-05-30: Completed offline wallet online-only blocking. Added a shared wallet online-required guard and browser online-status hook, then wired it through POS wallet checkout/split/wallet cash, refund-to-wallet, staff and customer payout requests, Wallet Admin payout/adjustment actions, and Cash Management wallet-cash movement controls so wallet balance mutations are not queued offline.
+- 2026-05-30: Passed wallet offline verification: `npx.cmd vitest run tests/frontend/offline-guards.test.ts tests/frontend/offline-sales.test.ts tests/backend/offline-sync.test.ts tests/backend/mariadb-crud.test.ts tests/backend/manager-tasks.test.ts tests/backend/action-center.test.ts tests/backend/manager-cash.test.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, `git diff --check` only reported LF-to-CRLF normalization warnings, and the in-app browser reached `http://127.0.0.1:8080` but visual verification remained limited by the existing blank-root/Vite websocket issue.
+- 2026-05-30: Added structured stock movement `reason_code` taxonomy for receiving, sale, refund, void, adjustment, count correction, transfer, wastage, and shrinkage while preserving the existing free-text `reason`; schema self-healing backfills legacy movement reasons, stock writes classify sale/refund/void/stocktake/manual-adjustment movements, and Action Center search/export now includes the reason code.
+- 2026-05-30: Passed stock reason-code verification: `npx.cmd vitest run tests/backend/audit.test.ts tests/backend/audit-stock-ledger-schema.test.ts tests/backend/action-center.test.ts tests/backend/manager-tasks.test.ts tests/backend/mariadb-crud.test.ts tests/backend/stock-take.test.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, and `git diff --check` only reported LF-to-CRLF normalization warnings.
+- 2026-05-30: Expanded immutable audit coverage across auth login/logout/password setup, failed role/package checks, AI settings/test/autopilot apply, app/logo/push/device settings, customer/staff CRUD, cash-session lifecycle events, and every server-side cash-movement insertion path.
+- 2026-05-30: Passed immutable audit coverage verification: `npx.cmd vitest run tests/backend/audit.test.ts tests/backend/audit-coverage.test.ts tests/backend/auth-handler.test.ts tests/backend/mariadb-crud.test.ts tests/backend/manager-cash.test.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, and `git diff --check` only reported LF-to-CRLF normalization warnings.
+- 2026-05-30: Completed audit searchability expansion. Action Center audit/stock activity search now includes device ID filtering, audit-detail metadata search for register/customer/device/local receipt context, richer display of device/local receipt fields, and sale audit details now carry cash-session/device/local receipt metadata for searchable online/offline traces.
+- 2026-05-30: Passed audit searchability verification: `npx.cmd vitest run tests/backend/action-center.test.ts tests/backend/audit-coverage.test.ts tests/backend/mariadb-crud.test.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, and `git diff --check` only reported LF-to-CRLF normalization warnings.
+- 2026-05-30: Added exportable audit report packs for owner, accounting, and compliance review. Reports reuse Action Center filters, include metadata, summary counts, action/source/staff/stock-reason breakdowns, review-focus labels, and full activity detail rows with register/device/local receipt context.
+- 2026-05-30: Passed audit report export verification: `npx.cmd vitest run tests/backend/action-center.test.ts tests/backend/audit-coverage.test.ts tests/backend/mariadb-crud.test.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, and `git diff --check` only reported LF-to-CRLF normalization warnings.
+- 2026-05-30: Expanded petty cash and payout tracking on the manager-cash ledger with physical cash source, receipt/photo reference fields, approver metadata, searchable filters, CSV export route, and Cash Management UI controls; Wallet Admin paid wallet payouts now write approver/source metadata into the ledger.
+- 2026-05-30: Passed petty cash/payout tracking verification: `npx.cmd vitest run tests/backend/manager-cash.test.ts tests/backend/cash-management-schema.test.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, and `git diff --check` only reported LF-to-CRLF normalization warnings.
+- 2026-05-30: Completed the daily-operator workflow audit across POS, tables/tabs, refund/void/reprint, cash-up, stock receiving, stock adjustments, staff permissions, and AI approvals; captured confirmed working surfaces and converted the remaining operator friction into active UX/P2/P3/P8 roadmap gaps inside this master todo.
+- 2026-05-30: Added the formal lay-by workflow with `layby_orders`, `layby_items`, and `layby_payments` schema/startup healing, POS lay-by creation, active lay-by manager controls for instalments, final collection, cancellation/release, reserved-stock stock movements, cash-session movement capture for cash lay-by payments/refunds, completed `layby_final` sale creation, audit events, and printable lay-by receipts.
+- 2026-05-30: Passed lay-by verification: `npx.cmd vitest run tests/backend/layby.test.ts tests/backend/layby-schema.test.ts`, `node --check server\layby.ts`, `npm.cmd run build`, and `npm.cmd run lint`; build still reports the existing large-chunk warning.

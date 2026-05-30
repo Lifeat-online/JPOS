@@ -3,6 +3,8 @@ import { Staff } from '../types';
 import { Mail, Phone, Wallet, Loader2, DollarSign } from 'lucide-react';
 import { apiPost } from '../api';
 import { usePosStore } from '../store/usePosStore';
+import { useBrowserOnlineStatus } from '../hooks/useBrowserOnlineStatus';
+import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../utils/offlineGuards';
 
 interface StaffProfileViewProps {
   currentUserStaff: Staff | null;
@@ -11,6 +13,7 @@ interface StaffProfileViewProps {
 
 export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProfileViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
+  const { isOffline: isBrowserOffline } = useBrowserOnlineStatus();
   const [isProcessing, setIsProcessing] = useState(false);
   const [payoutAmount, setPayoutAmount] = useState<number | string>('');
   const [showPayoutModal, setShowPayoutModal] = useState(false);
@@ -24,6 +27,10 @@ export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProf
   const handleRequestPayout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUserStaff) return;
+    if (isBrowserOffline) {
+      setErrorMsg(WALLET_ONLINE_REQUIRED_MESSAGE);
+      return;
+    }
     const amount = Number(payoutAmount);
     if (amount <= 0 || amount > (currentUserStaff.walletBalance || 0)) return;
 
@@ -61,6 +68,11 @@ export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProf
         {errorMsg && (
           <div className="bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 p-4 rounded-xl border border-red-200 dark:border-red-500/20 font-bold mb-4 flex items-center justify-center">
             {errorMsg}
+          </div>
+        )}
+        {isBrowserOffline && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 p-4 rounded-xl border border-amber-200 dark:border-amber-900/50 font-bold mb-4 flex items-center justify-center">
+            {WALLET_ONLINE_REQUIRED_MESSAGE}
           </div>
         )}
 
@@ -121,8 +133,15 @@ export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProf
           </h2>
           
           <button 
-            onClick={() => setShowPayoutModal(true)}
-            disabled={(currentUserStaff.walletBalance || 0) <= 0}
+            onClick={() => {
+              if (isBrowserOffline) {
+                setErrorMsg(WALLET_ONLINE_REQUIRED_MESSAGE);
+                return;
+              }
+              setShowPayoutModal(true);
+            }}
+            disabled={(currentUserStaff.walletBalance || 0) <= 0 || isBrowserOffline}
+            title={isBrowserOffline ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Request payout'}
             className="bg-primary text-white px-8 py-4 rounded-xl font-black tracking-widest text-xs uppercase shadow-lg shadow-primary/30 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100 flex items-center gap-2 mx-auto justify-center w-full max-w-sm"
           >
             <DollarSign className="w-4 h-4" /> Request Payout
@@ -141,7 +160,7 @@ export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProf
                  </div>
                  <div className="flex gap-2 pt-4">
                     <button type="button" onClick={() => setShowPayoutModal(false)} className="flex-1 py-4 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">Cancel</button>
-                    <button type="submit" disabled={isProcessing} className="flex-1 py-4 bg-primary text-white font-bold rounded-xl text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-primary/90 transition-all">
+                    <button type="submit" disabled={isProcessing || isBrowserOffline} className="flex-1 py-4 bg-primary text-white font-bold rounded-xl text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-primary/90 transition-all disabled:opacity-50">
                       {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : 'Request'}
                     </button>
                  </div>

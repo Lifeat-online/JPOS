@@ -1026,6 +1026,7 @@ export async function approveStockTakeSession(tenantId: string, sessionId: strin
           itemName: item.productName ?? item.product_name,
           quantityDelta: variance,
           reason: "stock_take",
+          reasonCode: "count_correction",
           referenceType: "stock_take_session",
           referenceId: sessionId,
           staffId: actor.staffId || null,

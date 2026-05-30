@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, CashSession, CashTransaction, ManagerCashMovementType, ManagerCashSummary, Sale, Staff } from '../types';
+import { CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, CashSession, CashTransaction, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, Sale, Staff } from '../types';
 import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank, ArrowLeftRight, Download } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
-import { apiGet, apiPost, apiPut, cancelCashCustodyTransfer, confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, exportCashCloseCheckpointCsv, getCashCloseCheckpoints, getCashClosePreview, getCashCustodyTransfers, getManagerCashSummary, recordCashMovement, recordManagerCashMovement } from '../api';
+import { apiGet, apiPost, apiPut, cancelCashCustodyTransfer, confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, exportCashCloseCheckpointCsv, exportManagerCashMovementsCsv, getCashCloseCheckpoints, getCashClosePreview, getCashCustodyTransfers, getManagerCashMovements, getManagerCashSummary, recordCashMovement, recordManagerCashMovement } from '../api';
 import { PrinterReadinessPanel } from './PrinterReadinessPanel';
 import { usePrinterReadiness } from '../hooks/usePrinterReadiness';
+import { useBrowserOnlineStatus } from '../hooks/useBrowserOnlineStatus';
+import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../utils/offlineGuards';
 
 interface CashManagementViewProps {
   currentUserStaff: Staff | null;
@@ -68,6 +70,32 @@ const CUSTODY_PARTY_TYPES: Array<{ id: CashCustodyTransferPartyType; label: stri
   { id: 'petty_cash', label: 'Petty cash box' },
 ];
 
+const MANAGER_CASH_SOURCES = [
+  { id: 'manager_float', label: 'Manager float' },
+  { id: 'safe', label: 'Safe' },
+  { id: 'register', label: 'Register' },
+  { id: 'petty_cash', label: 'Petty cash box' },
+  { id: 'wallet_cash', label: 'Wallet cash' },
+  { id: 'cash_custody', label: 'Cash handover' },
+  { id: 'supplier', label: 'Supplier payout' },
+  { id: 'external', label: 'External cash' },
+];
+
+function isWalletManagerMovementType(type: ManagerCashMovementType) {
+  return type === 'wallet_cash_in' || type === 'wallet_cash_out';
+}
+
+function defaultManagerCashSource(type: ManagerCashMovementType) {
+  if (type === 'safe_drop') return 'register';
+  if (type === 'transfer') return 'cash_custody';
+  if (type === 'wallet_cash_in' || type === 'wallet_cash_out') return 'wallet_cash';
+  return 'manager_float';
+}
+
+function needsPettyCashAttachment(type: ManagerCashMovementType) {
+  return type === 'petty_cash' || type === 'payout';
+}
+
 function DenominationCounter({ breakdown, setBreakdown, total }: { breakdown: Record<string, number>, setBreakdown: (b: Record<string, number>) => void, total: number }) {
   const updateQty = (value: number, qty: number) => {
     setBreakdown({ ...breakdown, [value.toString()]: qty });
@@ -111,6 +139,7 @@ function DenominationCounter({ breakdown, setBreakdown, total }: { breakdown: Re
 export function CashManagementView({ currentUserStaff, sales }: CashManagementViewProps) {
   const tenantId = usePosStore(s => s.tenantId);
   const printerReadiness = usePrinterReadiness(tenantId);
+  const { isOffline: isBrowserOffline } = useBrowserOnlineStatus();
   const [sessions, setSessions] = useState<CashSession[]>([]);
   const [cashMovements, setCashMovements] = useState<Record<string, CashTransaction[]>>({});
   const [loading, setLoading] = useState(true);
@@ -125,10 +154,17 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
   const [movementNote, setMovementNote] = useState('');
   const [movementError, setMovementError] = useState('');
   const [managerCash, setManagerCash] = useState<ManagerCashSummary | null>(null);
+  const [managerMovements, setManagerMovements] = useState<ManagerCashMovement[]>([]);
   const [managerMovementType, setManagerMovementType] = useState<ManagerCashMovementType>('manager_adjustment');
   const [managerMovementDirection, setManagerMovementDirection] = useState<'in' | 'out'>('in');
   const [managerMovementAmount, setManagerMovementAmount] = useState('');
   const [managerMovementNote, setManagerMovementNote] = useState('');
+  const [managerMovementCashSource, setManagerMovementCashSource] = useState(defaultManagerCashSource('manager_adjustment'));
+  const [managerMovementAttachmentUrl, setManagerMovementAttachmentUrl] = useState('');
+  const [managerMovementAttachmentName, setManagerMovementAttachmentName] = useState('');
+  const [managerMovementFilterType, setManagerMovementFilterType] = useState<ManagerCashMovementType | ''>('');
+  const [managerMovementFilterSource, setManagerMovementFilterSource] = useState('');
+  const [managerMovementSearch, setManagerMovementSearch] = useState('');
   const [managerMovementMessage, setManagerMovementMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [custodyTransfers, setCustodyTransfers] = useState<CashCustodyTransfer[]>([]);
   const [transferFromType, setTransferFromType] = useState<CashCustodyTransferPartyType>('manager_float');
@@ -156,6 +192,8 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
 
   const activeSession = sessions.find(s => s.status === 'open' && s.staffId === currentUserStaff?.id);
   const canManageCash = ['admin', 'manager', 'dev'].includes(currentUserStaff?.role || '');
+  const selectedManagerMovementType = MANAGER_MOVEMENT_TYPES.find(type => type.id === managerMovementType) || MANAGER_MOVEMENT_TYPES[0];
+  const managerWalletMovementBlocked = isBrowserOffline && isWalletManagerMovementType(managerMovementType);
   const pendingReview = sessions.filter(s => s.status === 'closed' && (s.reviewStatus || 'submitted') !== 'reconciled');
   const openRegisterSessions = sessions.filter(s => s.status === 'open');
   const pendingCustodyTransfers = custodyTransfers.filter(t => t.status === 'pending_confirmation');
@@ -275,12 +313,20 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
       }));
       setCashMovements(Object.fromEntries(movementPairs));
       if (canManageCash) {
-        const [cashSummary, transfers] = await Promise.all([
+        const managerMovementFilters = {
+          limit: 40,
+          movementType: managerMovementFilterType || undefined,
+          cashSource: managerMovementFilterSource || undefined,
+          search: managerMovementSearch.trim() || undefined,
+        };
+        const [cashSummary, transfers, movementRows] = await Promise.all([
           getManagerCashSummary(tenantId).catch(() => null),
           getCashCustodyTransfers(tenantId, { limit: 30 }).catch(() => []),
+          getManagerCashMovements(tenantId, managerMovementFilters).catch(() => []),
         ]);
         setManagerCash(cashSummary);
         setCustodyTransfers(transfers);
+        setManagerMovements(movementRows);
         const [closePreview, closeHistory] = await Promise.all([
           getCashClosePreview(tenantId).catch(() => null),
           getCashCloseCheckpoints(tenantId, 5).catch(() => []),
@@ -289,6 +335,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
         setCashCloseHistory(closeHistory);
       } else {
         setManagerCash(null);
+        setManagerMovements([]);
         setCustodyTransfers([]);
         setCashClosePreview(null);
         setCashCloseHistory([]);
@@ -305,7 +352,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
     fetchSessions();
     const interval = setInterval(fetchSessions, 30000);
     return () => clearInterval(interval);
-  }, [tenantId, currentUserStaff?.role, currentUserStaff?.id]);
+  }, [tenantId, currentUserStaff?.role, currentUserStaff?.id, managerMovementFilterType, managerMovementFilterSource, managerMovementSearch]);
 
   const openRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -417,10 +464,17 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
 
   const recordManagerMovement = async () => {
     if (!tenantId || !currentUserStaff || !canManageCash) return;
-    const selected = MANAGER_MOVEMENT_TYPES.find(type => type.id === managerMovementType) || MANAGER_MOVEMENT_TYPES[0];
+    const selected = selectedManagerMovementType;
     const amount = toNumber(managerMovementAmount);
     const direction = selected.direction && selected.direction !== 'neutral' ? selected.direction : managerMovementDirection;
+    const receiptAttachmentUrl = managerMovementAttachmentUrl.trim();
+    const receiptAttachmentName = managerMovementAttachmentName.trim() || receiptAttachmentUrl;
     setManagerMovementMessage(null);
+
+    if (isBrowserOffline && isWalletManagerMovementType(selected.id)) {
+      setManagerMovementMessage({ tone: 'error', text: WALLET_ONLINE_REQUIRED_MESSAGE });
+      return;
+    }
 
     if (amount <= 0) {
       setManagerMovementMessage({ tone: 'error', text: 'Enter the cash amount first.' });
@@ -428,6 +482,10 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
     }
     if (managerMovementNote.trim().length < 3) {
       setManagerMovementMessage({ tone: 'error', text: 'Add a short note so the manager float audit trail is clear.' });
+      return;
+    }
+    if (needsPettyCashAttachment(selected.id) && !receiptAttachmentUrl && !receiptAttachmentName) {
+      setManagerMovementMessage({ tone: 'error', text: 'Add a receipt/photo link or reference for petty cash and payouts.' });
       return;
     }
 
@@ -438,15 +496,23 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
         direction,
         amount,
         sourceType: 'manager_float',
+        cashSource: managerMovementCashSource,
         category: selected.id,
         staffId: currentUserStaff.id,
         staffName: currentUserStaff.name,
         note: managerMovementNote.trim(),
+        receiptAttachmentUrl: receiptAttachmentUrl || null,
+        receiptAttachmentName: receiptAttachmentName || null,
+        approvedBy: currentUserStaff.id,
+        approvedByName: currentUserStaff.name,
       });
       setManagerMovementAmount('');
       setManagerMovementNote('');
+      setManagerMovementAttachmentUrl('');
+      setManagerMovementAttachmentName('');
       setManagerMovementType('manager_adjustment');
       setManagerMovementDirection('in');
+      setManagerMovementCashSource(defaultManagerCashSource('manager_adjustment'));
       setManagerMovementMessage({ tone: 'success', text: 'Manager float movement recorded.' });
       await fetchSessions();
     } catch (err: any) {
@@ -603,6 +669,31 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
     }
   };
 
+  const downloadManagerMovementsCsv = async () => {
+    if (!tenantId) return;
+    setManagerMovementMessage(null);
+    try {
+      const result = await exportManagerCashMovementsCsv(tenantId, {
+        limit: 500,
+        movementType: managerMovementFilterType || undefined,
+        cashSource: managerMovementFilterSource || undefined,
+        search: managerMovementSearch.trim() || undefined,
+      });
+      const blob = new Blob([result.csv], { type: result.mimeType || 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.filename || 'manager-cash-movements.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setManagerMovementMessage({ tone: 'success', text: `Exported ${result.count || 0} manager cash movement${result.count === 1 ? '' : 's'}.` });
+    } catch (err: any) {
+      setManagerMovementMessage({ tone: 'error', text: err?.message || 'Could not export manager cash movements.' });
+    }
+  };
+
   const reviewBadge = (session: CashSession) => {
     const status = session.reviewStatus || (session.status === 'open' ? 'in_progress' : 'submitted');
     if (status === 'reconciled') return 'bg-emerald-100 text-emerald-700';
@@ -705,24 +796,38 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
                 )}
 
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {MANAGER_MOVEMENT_TYPES.map(type => (
-                    <button
-                      key={type.id}
-                      type="button"
-                      onClick={() => setManagerMovementType(type.id)}
-                      className={`rounded-xl border p-3 text-left transition-all ${
-                        managerMovementType === type.id
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/50 text-slate-700 dark:text-slate-200'
-                      }`}
-                    >
-                      <span className="block text-xs font-black uppercase tracking-widest">{type.label}</span>
-                      <span className="mt-1 block text-xs font-semibold text-slate-500">{type.helper}</span>
-                    </button>
-                  ))}
+                  {MANAGER_MOVEMENT_TYPES.map(type => {
+                    const walletBlocked = isBrowserOffline && isWalletManagerMovementType(type.id);
+                    return (
+                      <button
+                        key={type.id}
+                        type="button"
+                        onClick={() => {
+                          setManagerMovementType(type.id);
+                          setManagerMovementCashSource(defaultManagerCashSource(type.id));
+                        }}
+                        disabled={walletBlocked}
+                        title={walletBlocked ? WALLET_ONLINE_REQUIRED_MESSAGE : type.label}
+                        className={`rounded-xl border p-3 text-left transition-all disabled:opacity-50 ${
+                          managerMovementType === type.id
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/50 text-slate-700 dark:text-slate-200'
+                        }`}
+                      >
+                        <span className="block text-xs font-black uppercase tracking-widest">{type.label}</span>
+                        <span className="mt-1 block text-xs font-semibold text-slate-500">{type.helper}</span>
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {!MANAGER_MOVEMENT_TYPES.find(type => type.id === managerMovementType)?.direction && (
+                {managerWalletMovementBlocked && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+                    {WALLET_ONLINE_REQUIRED_MESSAGE}
+                  </div>
+                )}
+
+                {!selectedManagerMovementType.direction && (
                   <div className="grid grid-cols-2 gap-2">
                     {(['in', 'out'] as const).map(direction => (
                       <button
@@ -765,9 +870,37 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
                   </div>
                 </div>
 
+                <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Cash source</label>
+                    <select
+                      value={managerMovementCashSource}
+                      onChange={e => setManagerMovementCashSource(e.target.value)}
+                      className="w-full h-12 px-3 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-bold"
+                    >
+                      {MANAGER_CASH_SOURCES.map(source => <option key={source.id} value={source.id}>{source.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">
+                      Receipt/photo {needsPettyCashAttachment(selectedManagerMovementType.id) ? 'required' : 'optional'}
+                    </label>
+                    <input
+                      value={managerMovementAttachmentUrl}
+                      onChange={e => {
+                        setManagerMovementAttachmentUrl(e.target.value);
+                        setManagerMovementAttachmentName(e.target.value);
+                      }}
+                      placeholder="Receipt URL, photo link, or reference"
+                      className="w-full h-12 px-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary text-sm font-bold"
+                    />
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  disabled={isProcessing}
+                  disabled={isProcessing || managerWalletMovementBlocked}
+                  title={managerWalletMovementBlocked ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Record manager movement'}
                   onClick={recordManagerMovement}
                   className="w-full h-12 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-all"
                 >
@@ -777,16 +910,73 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
               </div>
 
               <div className="rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
-                <div className="px-4 py-3 bg-slate-50 dark:bg-slate-950/50 text-[10px] font-black uppercase tracking-widest text-slate-500">Recent manager cash movements</div>
+                <div className="px-4 py-3 bg-slate-50 dark:bg-slate-950/50 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Manager cash movements</p>
+                    <button
+                      type="button"
+                      onClick={downloadManagerMovementsCsv}
+                      className="h-9 px-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-200 flex items-center gap-2 active:scale-95 transition-all"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Export
+                    </button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <input
+                      value={managerMovementSearch}
+                      onChange={e => setManagerMovementSearch(e.target.value)}
+                      placeholder="Search notes, staff, receipt"
+                      className="h-10 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-primary text-xs font-bold"
+                    />
+                    <select
+                      value={managerMovementFilterType}
+                      onChange={e => setManagerMovementFilterType(e.target.value as ManagerCashMovementType | '')}
+                      className="h-10 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-primary text-xs font-bold"
+                    >
+                      <option value="">All movement types</option>
+                      {MANAGER_MOVEMENT_TYPES.map(type => <option key={type.id} value={type.id}>{type.label}</option>)}
+                    </select>
+                    <select
+                      value={managerMovementFilterSource}
+                      onChange={e => setManagerMovementFilterSource(e.target.value)}
+                      className="h-10 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-primary text-xs font-bold"
+                    >
+                      <option value="">All cash sources</option>
+                      {MANAGER_CASH_SOURCES.map(source => <option key={source.id} value={source.id}>{source.label}</option>)}
+                    </select>
+                  </div>
+                </div>
                 <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[390px] overflow-y-auto custom-scrollbar">
-                  {managerCash.recentMovements.length === 0 ? (
-                    <div className="p-6 text-sm font-bold text-slate-500">No manager float movements yet.</div>
-                  ) : managerCash.recentMovements.map(movement => (
+                  {managerMovements.length === 0 ? (
+                    <div className="p-6 text-sm font-bold text-slate-500">No manager cash movements match the current filters.</div>
+                  ) : managerMovements.map(movement => (
                     <div key={movement.id} className="p-4 flex items-start justify-between gap-4">
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-sm font-black text-slate-900 dark:text-white">{movement.movementType.replace(/_/g, ' ')}</p>
                         <p className="mt-1 text-xs font-semibold text-slate-500">{movement.note || movement.sourceType || 'Manager float'}</p>
-                        {movement.staffName && <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{movement.staffName}</p>}
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {movement.cashSource && (
+                            <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                              {movement.cashSource.replace(/_/g, ' ')}
+                            </span>
+                          )}
+                          {movement.staffName && (
+                            <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                              {movement.staffName}
+                            </span>
+                          )}
+                          {movement.approvedByName && (
+                            <span className="rounded-full bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+                              Approved by {movement.approvedByName}
+                            </span>
+                          )}
+                          {(movement.receiptAttachmentName || movement.receiptAttachmentUrl) && (
+                            <span className="rounded-full bg-blue-50 dark:bg-blue-900/20 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-blue-700 dark:text-blue-300">
+                              Receipt attached
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="text-right">
                         <p className={`text-sm font-black ${movement.direction === 'in' ? 'text-emerald-600' : movement.direction === 'out' ? 'text-rose-600' : 'text-slate-500'}`}>

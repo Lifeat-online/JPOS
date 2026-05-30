@@ -96,6 +96,68 @@ export interface Sale {
   tabName?: string;
 }
 
+export type LaybyStatus = 'active' | 'completed' | 'cancelled';
+export type LaybyPaymentMethod = 'cash' | 'payfast' | 'card' | 'wallet' | 'account';
+
+export interface LaybyItem {
+  id: string;
+  laybyOrderId: string;
+  productId?: string | null;
+  productName: string;
+  name?: string;
+  price: number;
+  quantity: number;
+  reservedQuantity: number;
+  createdAt?: any;
+}
+
+export interface LaybyPayment {
+  id: string;
+  laybyOrderId: string;
+  method: LaybyPaymentMethod;
+  amount: number;
+  tenderedAmount?: number;
+  changeAmount?: number;
+  staffId?: string | null;
+  staffName?: string | null;
+  cashSessionId?: string | null;
+  note?: string | null;
+  createdAt?: any;
+}
+
+export interface LaybyOrder {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  customerName: string;
+  staffId?: string | null;
+  staffName?: string | null;
+  status: LaybyStatus;
+  subtotal: number;
+  taxAmount: number;
+  taxRate: number;
+  taxInclusive: boolean;
+  totalAmount: number;
+  depositAmount: number;
+  amountPaid: number;
+  balanceDue: number;
+  refundAmount?: number;
+  forfeitedAmount?: number;
+  dueDate: any;
+  cancelReason?: string | null;
+  cancelledBy?: string | null;
+  cancelledByName?: string | null;
+  cancelledAt?: any;
+  completedSaleId?: string | null;
+  completedBy?: string | null;
+  completedByName?: string | null;
+  completedAt?: any;
+  createdAt?: any;
+  updatedAt?: any;
+  items: LaybyItem[];
+  payments: LaybyPayment[];
+}
+
 export interface StaffPermissions {
   canSell?: boolean;
   canManageCash?: boolean;
@@ -334,10 +396,16 @@ export interface ManagerCashMovement {
   customerId?: string | null;
   customerName?: string | null;
   sourceType?: string | null;
+  cashSource?: string | null;
   referenceId?: string | null;
   category?: string | null;
   note?: string | null;
+  receiptAttachmentUrl?: string | null;
+  receiptAttachmentName?: string | null;
   countedBreakdown?: Record<string, number>;
+  approvedBy?: string | null;
+  approvedByName?: string | null;
+  approvedAt?: any;
   createdBy?: string | null;
   createdByName?: string | null;
   createdAt?: any;

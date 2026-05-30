@@ -4,6 +4,7 @@ import { query, getConnection } from './db.js';
 import { seedDemoData, type DemoSeedMode } from './demo-seed.js';
 import { ensureBulkInventorySchema } from './init-db.js';
 import { getHostedPackage } from '../shared/packageCatalog.js';
+import { recordAuditEventSafe } from './audit.js';
 import { 
   generateAccessToken, 
   generateRefreshToken, 
@@ -104,6 +105,46 @@ function buildAuthResponse(staff: {
       tenantName: staff.tenant_name,
     },
   };
+}
+
+function requestAuditDetails(req: Request, extra: Record<string, unknown> = {}) {
+  return {
+    ip: req.ip || req.socket?.remoteAddress || null,
+    userAgent: req.get?.('user-agent') || null,
+    ...extra,
+  };
+}
+
+function resolveAuthUser(req: Request): AuthTokenPayload | null {
+  if (req.user) return req.user;
+
+  const authHeader = req.headers?.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  return verifyToken(authHeader.substring(7));
+}
+
+async function recordLoginFailure(req: Request, input: {
+  tenantId?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+  email?: string | null;
+  reason: string;
+}) {
+  if (!input.tenantId) return;
+
+  await recordAuditEventSafe({
+    tenantId: input.tenantId,
+    action: 'auth.login_failed',
+    entityType: 'security',
+    entityId: input.staffId || null,
+    staffId: input.staffId || null,
+    staffName: input.staffName || null,
+    source: 'auth',
+    details: requestAuditDetails(req, {
+      email: input.email || null,
+      reason: input.reason,
+    }),
+  });
 }
 
 function parseDemoMode(value: unknown): DemoSeedMode {
@@ -344,6 +385,11 @@ export async function handleLogin(req: Request, res: Response) {
     const rows = await query<any>(sql, params);
 
     if (rows.length === 0) {
+      await recordLoginFailure(req, {
+        tenantId: typeof tenantId === 'string' ? tenantId : null,
+        email: emailValue,
+        reason: 'staff_not_found',
+      });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -360,14 +406,41 @@ export async function handleLogin(req: Request, res: Response) {
     }
 
     if (!hasConfiguredPassword) {
+      await recordLoginFailure(req, {
+        tenantId: candidates[0]?.tenant_id || null,
+        staffId: candidates[0]?.id || null,
+        staffName: candidates[0]?.name || null,
+        email: emailValue,
+        reason: 'password_not_configured',
+      });
       return res.status(401).json({ error: 'Account not configured for password login. Contact admin.' });
     }
 
     if (!staff) {
+      await recordLoginFailure(req, {
+        tenantId: candidates[0]?.tenant_id || null,
+        staffId: candidates[0]?.id || null,
+        staffName: candidates[0]?.name || null,
+        email: emailValue,
+        reason: 'password_mismatch',
+      });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const authStaff = isDev ? await normalizeDevStaff(staff) : staff;
+    await recordAuditEventSafe({
+      tenantId: authStaff.tenant_id,
+      action: 'auth.login_succeeded',
+      entityType: 'security',
+      entityId: authStaff.id,
+      staffId: authStaff.id,
+      staffName: authStaff.name,
+      source: 'auth',
+      details: requestAuditDetails(req, {
+        email: authStaff.email,
+        role: authStaff.role,
+      }),
+    });
     res.json(buildAuthResponse(authStaff));
 
   } catch (error) {
@@ -378,6 +451,23 @@ export async function handleLogin(req: Request, res: Response) {
 
 // Logout endpoint handler
 export async function handleLogout(req: Request, res: Response) {
+  const user = resolveAuthUser(req);
+  if (user?.tenantId) {
+    await recordAuditEventSafe({
+      tenantId: user.tenantId,
+      action: 'auth.logout',
+      entityType: 'security',
+      entityId: user.staffId || user.uid || null,
+      staffId: user.staffId || user.uid || null,
+      staffName: user.name || null,
+      source: 'auth',
+      details: requestAuditDetails(req, {
+        email: user.email,
+        role: user.role,
+      }),
+    });
+  }
+
   // In a stateless JWT setup, the client simply discards the token
   // For enhanced security, you could maintain a token blacklist
   // or store refresh tokens and revoke them here
@@ -444,6 +534,21 @@ export async function handleGetMe(req: Request, res: Response) {
 export async function handleSetupPassword(req: Request, res: Response) {
   try {
     if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'dev')) {
+      if (req.user?.tenantId) {
+        await recordAuditEventSafe({
+          tenantId: req.user.tenantId,
+          action: 'permission.denied',
+          entityType: 'security',
+          entityId: req.user.staffId || req.user.uid || null,
+          staffId: req.user.staffId || req.user.uid || null,
+          staffName: req.user.name || null,
+          source: 'permission',
+          details: requestAuditDetails(req, {
+            attemptedAction: 'auth.setup_password',
+            role: req.user.role || null,
+          }),
+        });
+      }
       return res.status(403).json({ error: 'Admin access required' });
     }
 
@@ -463,6 +568,20 @@ export async function handleSetupPassword(req: Request, res: Response) {
       'UPDATE staff SET password_hash = ? WHERE id = ? AND tenant_id = ?',
       [passwordHash, staffId, req.user.tenantId]
     );
+
+    await recordAuditEventSafe({
+      tenantId: req.user.tenantId,
+      action: 'staff.password_set',
+      entityType: 'staff',
+      entityId: staffId,
+      staffId: req.user.staffId || req.user.uid || null,
+      staffName: req.user.name || null,
+      source: 'auth',
+      details: requestAuditDetails(req, {
+        targetStaffId: staffId,
+        actorRole: req.user.role,
+      }),
+    });
 
     res.json({ message: 'Password set successfully' });
 

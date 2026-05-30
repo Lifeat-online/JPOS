@@ -17,10 +17,15 @@ type ManagerCashMovementInput = {
   customerId?: string | null;
   customerName?: string | null;
   sourceType?: string | null;
+  cashSource?: string | null;
   referenceId?: string | null;
   category?: string | null;
   note?: string | null;
+  receiptAttachmentUrl?: string | null;
+  receiptAttachmentName?: string | null;
   countedBreakdown?: Record<string, number> | null;
+  approvedBy?: string | null;
+  approvedByName?: string | null;
 };
 
 type WalletCashMovementInput = {
@@ -31,6 +36,11 @@ type WalletCashMovementInput = {
   note?: string | null;
   referenceId?: string | null;
   applyWalletDelta?: boolean;
+  cashSource?: string | null;
+  receiptAttachmentUrl?: string | null;
+  receiptAttachmentName?: string | null;
+  approvedBy?: string | null;
+  approvedByName?: string | null;
 };
 
 type RegisterWalletCashMovementInput = {
@@ -88,6 +98,19 @@ const CUSTODY_PARTY_TYPES = new Set([
   "petty_cash",
 ]);
 
+const CASH_SOURCES = new Set([
+  "manager_float",
+  "safe",
+  "register",
+  "staff",
+  "cash_session",
+  "petty_cash",
+  "wallet_cash",
+  "cash_custody",
+  "supplier",
+  "external",
+]);
+
 function makeId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -139,6 +162,21 @@ function normalizeDirection(value: unknown, type: string) {
   return defaultDirection(type);
 }
 
+function defaultCashSource(movementType: string, sourceType?: string | null) {
+  const source = String(sourceType || "").trim();
+  if (source === "register" || source === "cash_session") return "register";
+  if (source === "wallet_cash") return "wallet_cash";
+  if (source === "custody_transfer") return "cash_custody";
+  if (movementType === "safe_drop") return "register";
+  if (movementType === "petty_cash" || movementType === "payout" || movementType === "cash_added") return "manager_float";
+  return "manager_float";
+}
+
+function normalizeCashSource(value: unknown, movementType: string, sourceType?: string | null) {
+  const source = cleanString(value, 64) || defaultCashSource(movementType, sourceType);
+  return CASH_SOURCES.has(source) ? source : defaultCashSource(movementType, sourceType);
+}
+
 function normalizeCustodyPartyType(value: unknown, fallback: string) {
   const type = String(value || fallback).trim();
   return CUSTODY_PARTY_TYPES.has(type) ? type : fallback;
@@ -164,6 +202,10 @@ function breakdownTotal(value: Record<string, number>) {
 
 function todayBusinessDate() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function csvCell(value: unknown) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
 }
 
 function normalizeBusinessDate(value: unknown) {
@@ -202,15 +244,21 @@ function rowToMovement(row: any) {
     customerId: row.customerId ?? row.customer_id,
     customerName: row.customerName ?? row.customer_name,
     sourceType: row.sourceType ?? row.source_type,
+    cashSource: row.cashSource ?? row.cash_source,
     referenceId: row.referenceId ?? row.reference_id,
     category: row.category,
     note: row.note,
+    receiptAttachmentUrl: row.receiptAttachmentUrl ?? row.receipt_attachment_url,
+    receiptAttachmentName: row.receiptAttachmentName ?? row.receipt_attachment_name,
     countedBreakdown: (() => {
       const value = row.countedBreakdown ?? row.counted_breakdown;
       if (!value) return {};
       if (typeof value !== "string") return value;
       try { return JSON.parse(value); } catch { return {}; }
     })(),
+    approvedBy: row.approvedBy ?? row.approved_by,
+    approvedByName: row.approvedByName ?? row.approved_by_name,
+    approvedAt: row.approvedAt ?? row.approved_at,
     createdBy: row.createdBy ?? row.created_by,
     createdByName: row.createdByName ?? row.created_by_name,
     createdAt: row.createdAt ?? row.created_at,
@@ -292,12 +340,16 @@ function rowToCashClose(row: any) {
 }
 
 async function insertManagerCashMovement(conn: Pick<Awaited<ReturnType<typeof getConnection>>, "query">, movement: any) {
+  const approvedBy = movement.approvedBy || movement.createdBy || null;
+  const approvedByName = movement.approvedByName || movement.createdByName || null;
   await conn.query(
     `INSERT INTO manager_cash_movements (
        id, tenant_id, movement_type, direction, amount, cash_session_id,
        staff_id, staff_name, customer_id, customer_name, source_type, reference_id,
-       category, note, counted_breakdown, created_by, created_by_name, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+       cash_source, category, note, receipt_attachment_url, receipt_attachment_name,
+       counted_breakdown, approved_by, approved_by_name, approved_at,
+       created_by, created_by_name, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       movement.id,
       movement.tenantId,
@@ -311,9 +363,15 @@ async function insertManagerCashMovement(conn: Pick<Awaited<ReturnType<typeof ge
       movement.customerName || null,
       movement.sourceType || "manager_float",
       movement.referenceId || null,
+      movement.cashSource || defaultCashSource(movement.movementType, movement.sourceType),
       movement.category || null,
       movement.note || null,
+      movement.receiptAttachmentUrl || null,
+      movement.receiptAttachmentName || null,
       json(movement.countedBreakdown, {}),
+      approvedBy,
+      approvedByName,
+      movement.approvedAt || (approvedBy ? new Date() : null),
       movement.createdBy || null,
       movement.createdByName || null,
     ]
@@ -331,6 +389,7 @@ async function insertRegisterTransferMovement(conn: Pick<Awaited<ReturnType<type
   const delta = fromType === "register" ? -amount : amount;
   const movementType = fromType === "register" ? "cash_drop" : "cash_added";
   const direction = fromType === "register" ? "out" : "in";
+  const cashMovementId = makeId("cm");
 
   await conn.query(
     `UPDATE cash_sessions
@@ -346,7 +405,7 @@ async function insertRegisterTransferMovement(conn: Pick<Awaited<ReturnType<type
       staff_id, staff_name, created_by, note, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
-      makeId("cm"),
+      cashMovementId,
       transfer.tenantId,
       transfer.cashSessionId,
       movementType,
@@ -360,6 +419,23 @@ async function insertRegisterTransferMovement(conn: Pick<Awaited<ReturnType<type
       `Custody transfer confirmed: ${transfer.fromName || transfer.fromType} to ${transfer.toName || transfer.toType}`,
     ]
   );
+
+  await recordAuditEvent(conn, {
+    tenantId: transfer.tenantId,
+    action: "cash_movement.recorded",
+    entityType: "cash_movement",
+    entityId: cashMovementId,
+    staffId: actor.staffId || null,
+    staffName: actor.staffName || null,
+    source: "cash_custody",
+    details: {
+      cashSessionId: transfer.cashSessionId,
+      transferId: transfer.id,
+      type: movementType,
+      direction,
+      amount,
+    },
+  });
 }
 
 export async function recordManagerCashMovement(tenantId: string, input: ManagerCashMovementInput, actor: Actor = {}) {
@@ -369,6 +445,9 @@ export async function recordManagerCashMovement(tenantId: string, input: Manager
   if (amount <= 0) throw new Error("Enter a manager cash amount greater than zero.");
 
   const id = makeId("mcm");
+  const sourceType = cleanString(input.sourceType, 64) || "manager_float";
+  const approvedBy = cleanString(input.approvedBy, 64) || actor.staffId || null;
+  const approvedByName = cleanString(input.approvedByName, 255) || actor.staffName || null;
   const movement = {
     id,
     tenantId,
@@ -380,11 +459,17 @@ export async function recordManagerCashMovement(tenantId: string, input: Manager
     staffName: cleanString(input.staffName, 255),
     customerId: cleanString(input.customerId, 64),
     customerName: cleanString(input.customerName, 255),
-    sourceType: cleanString(input.sourceType, 64) || "manager_float",
+    sourceType,
+    cashSource: normalizeCashSource(input.cashSource, movementType, sourceType),
     referenceId: cleanString(input.referenceId, 128),
     category: cleanString(input.category, 96),
     note: cleanString(input.note, 500),
+    receiptAttachmentUrl: cleanString(input.receiptAttachmentUrl, 1000),
+    receiptAttachmentName: cleanString(input.receiptAttachmentName, 255),
     countedBreakdown: input.countedBreakdown || {},
+    approvedBy,
+    approvedByName,
+    approvedAt: approvedBy ? new Date() : null,
     createdBy: actor.staffId || null,
     createdByName: actor.staffName || null,
   };
@@ -599,10 +684,13 @@ export async function confirmCashCustodyTransfer(tenantId: string, transferId: s
         customerId: null,
         customerName: null,
         sourceType: "custody_transfer",
+        cashSource: direction === "in" ? current.fromType : current.toType,
         referenceId: transferId,
         category: "cash_custody",
         note: `Confirmed transfer from ${current.fromName || current.fromType} to ${current.toName || current.toType}`,
         countedBreakdown,
+        approvedBy: actor.staffId || null,
+        approvedByName: actor.staffName || null,
         createdBy: actor.staffId || null,
         createdByName: actor.staffName || null,
       });
@@ -710,10 +798,15 @@ export async function recordWalletCashMovement(tenantId: string, input: WalletCa
       customerId: ownerType === "customer" ? owner.id : null,
       customerName: ownerType === "customer" ? owner.name : null,
       sourceType: "wallet_cash",
+      cashSource: normalizeCashSource(input.cashSource, direction === "in" ? "wallet_cash_in" : "wallet_cash_out", "wallet_cash"),
       referenceId: cleanString(input.referenceId, 128),
       category: direction === "in" ? "wallet_top_up" : "wallet_payout",
       note: cleanString(input.note, 500) || (direction === "in" ? "Wallet cash received" : "Wallet cash paid out"),
+      receiptAttachmentUrl: cleanString(input.receiptAttachmentUrl, 1000),
+      receiptAttachmentName: cleanString(input.receiptAttachmentName, 255),
       countedBreakdown: {},
+      approvedBy: cleanString(input.approvedBy, 64) || actor.staffId || null,
+      approvedByName: cleanString(input.approvedByName, 255) || actor.staffName || null,
       createdBy: actor.staffId || null,
       createdByName: actor.staffName || null,
     };
@@ -850,6 +943,25 @@ export async function recordRegisterWalletCashMovement(tenantId: string, input: 
         note,
       ]
     );
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: "cash_movement.recorded",
+      entityType: "cash_movement",
+      entityId: cashMovementId,
+      staffId: actor.staffId || null,
+      staffName: actor.staffName || null,
+      customerId: customer.id,
+      source: "cashier_wallet_cash",
+      details: {
+        cashSessionId,
+        type: cashMovementType,
+        direction,
+        amount,
+        customerId: customer.id,
+        customerName: customer.name,
+        note,
+      },
+    });
 
     const movement = {
       id: makeId("mcm"),
@@ -863,10 +975,13 @@ export async function recordRegisterWalletCashMovement(tenantId: string, input: 
       customerId: customer.id,
       customerName: customer.name,
       sourceType: "cash_session",
+      cashSource: "register",
       referenceId: cashMovementId,
       category: direction === "in" ? "wallet_top_up" : "wallet_payout",
       note,
       countedBreakdown: {},
+      approvedBy: actor.staffId || null,
+      approvedByName: actor.staffName || null,
       createdBy: actor.staffId || null,
       createdByName: actor.staffName || null,
     };
@@ -912,7 +1027,99 @@ export async function recordRegisterWalletCashMovement(tenantId: string, input: 
   }
 }
 
-export async function getManagerCashMovements(tenantId: string, limit = 40) {
+type ManagerCashMovementFilters = {
+  limit?: number | string | null;
+  movementType?: string | null;
+  direction?: string | null;
+  cashSource?: string | null;
+  sourceType?: string | null;
+  staffId?: string | null;
+  customerId?: string | null;
+  from?: string | null;
+  to?: string | null;
+  search?: string | null;
+};
+
+function normalizeManagerCashMovementFilters(filtersOrLimit?: ManagerCashMovementFilters | number | null): ManagerCashMovementFilters {
+  if (typeof filtersOrLimit === "number") return { limit: filtersOrLimit };
+  return filtersOrLimit || {};
+}
+
+function managerCashMovementWhere(tenantId: string, filtersOrLimit?: ManagerCashMovementFilters | number | null) {
+  const filters = normalizeManagerCashMovementFilters(filtersOrLimit);
+  const clauses = ["tenant_id = ?"];
+  const params: any[] = [tenantId];
+
+  const movementType = cleanString(filters.movementType, 64);
+  if (movementType && MOVEMENT_TYPES.has(movementType)) {
+    clauses.push("movement_type = ?");
+    params.push(movementType);
+  }
+
+  const direction = cleanString(filters.direction, 16);
+  if (direction && ["in", "out", "neutral"].includes(direction)) {
+    clauses.push("direction = ?");
+    params.push(direction);
+  }
+
+  const cashSource = cleanString(filters.cashSource, 64);
+  if (cashSource) {
+    clauses.push("cash_source = ?");
+    params.push(cashSource);
+  }
+
+  const sourceType = cleanString(filters.sourceType, 64);
+  if (sourceType) {
+    clauses.push("source_type = ?");
+    params.push(sourceType);
+  }
+
+  const staffId = cleanString(filters.staffId, 64);
+  if (staffId) {
+    clauses.push("staff_id = ?");
+    params.push(staffId);
+  }
+
+  const customerId = cleanString(filters.customerId, 64);
+  if (customerId) {
+    clauses.push("customer_id = ?");
+    params.push(customerId);
+  }
+
+  const from = cleanString(filters.from, 40);
+  if (from) {
+    clauses.push("created_at >= ?");
+    params.push(from);
+  }
+
+  const to = cleanString(filters.to, 40);
+  if (to) {
+    clauses.push("created_at <= ?");
+    params.push(to);
+  }
+
+  const search = cleanString(filters.search, 120);
+  if (search) {
+    clauses.push(`LOWER(CONCAT_WS(' ',
+      COALESCE(note, ''),
+      COALESCE(category, ''),
+      COALESCE(staff_name, ''),
+      COALESCE(customer_name, ''),
+      COALESCE(source_type, ''),
+      COALESCE(cash_source, ''),
+      COALESCE(reference_id, ''),
+      COALESCE(receipt_attachment_name, ''),
+      COALESCE(approved_by_name, '')
+    )) LIKE ?`);
+    params.push(`%${search.toLowerCase()}%`);
+  }
+
+  const limit = Math.max(1, Math.min(500, Math.round(toNumber(filters.limit) || 40)));
+  return { where: clauses.join(" AND "), params, limit };
+}
+
+export async function getManagerCashMovements(tenantId: string, filtersOrLimit: ManagerCashMovementFilters | number = 40) {
+  const { where, params, limit } = managerCashMovementWhere(tenantId, filtersOrLimit);
   const rows = await query<any>(
     `SELECT id,
             tenant_id AS tenantId,
@@ -925,20 +1132,72 @@ export async function getManagerCashMovements(tenantId: string, limit = 40) {
             customer_id AS customerId,
             customer_name AS customerName,
             source_type AS sourceType,
+            cash_source AS cashSource,
             reference_id AS referenceId,
             category,
             note,
+            receipt_attachment_url AS receiptAttachmentUrl,
+            receipt_attachment_name AS receiptAttachmentName,
             counted_breakdown AS countedBreakdown,
+            approved_by AS approvedBy,
+            approved_by_name AS approvedByName,
+            approved_at AS approvedAt,
             created_by AS createdBy,
             created_by_name AS createdByName,
             created_at AS createdAt
        FROM manager_cash_movements
-      WHERE tenant_id = ?
+      WHERE ${where}
       ORDER BY created_at DESC
       LIMIT ?`,
-    [tenantId, Math.max(1, Math.min(200, Math.round(toNumber(limit) || 40)))]
+    [...params, limit]
   );
   return rows.map(rowToMovement);
+}
+
+export async function exportManagerCashMovementsCsv(tenantId: string, filters: ManagerCashMovementFilters = {}) {
+  const movements = await getManagerCashMovements(tenantId, {
+    ...filters,
+    limit: filters.limit || 500,
+  });
+  const header = [
+    "created_at",
+    "movement_type",
+    "direction",
+    "amount",
+    "cash_source",
+    "source_type",
+    "category",
+    "staff",
+    "customer",
+    "approver",
+    "receipt_attachment",
+    "reference_id",
+    "note",
+  ];
+  const rows = movements.map((movement) => [
+    movement.createdAt || "",
+    movement.movementType,
+    movement.direction,
+    movement.amount,
+    movement.cashSource || "",
+    movement.sourceType || "",
+    movement.category || "",
+    movement.staffName || movement.staffId || "",
+    movement.customerName || movement.customerId || "",
+    movement.approvedByName || movement.approvedBy || "",
+    movement.receiptAttachmentName || movement.receiptAttachmentUrl || "",
+    movement.referenceId || "",
+    movement.note || "",
+  ]);
+
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  return {
+    filename: `masepos-manager-cash-${new Date().toISOString().slice(0, 10)}.csv`,
+    mimeType: "text/csv",
+    generatedAt: new Date().toISOString(),
+    count: movements.length,
+    csv,
+  };
 }
 
 export async function getManagerCashSummary(tenantId: string) {

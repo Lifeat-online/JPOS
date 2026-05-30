@@ -1,6 +1,6 @@
-# Docker Setup for Jimmy's POS
+# Docker Setup for MasePOS
 
-This guide helps you run Jimmy's POS using Docker and Docker Compose.
+This guide helps you run MasePOS using Docker and Docker Compose.
 
 ## Prerequisites
 
@@ -49,20 +49,20 @@ The application will be available at port 80 (HTTP).
 ## Services
 
 ### MariaDB Database
-- **Container**: jimmy-pos-db
+- **Container**: masepos-db
 - **Port**: 3306 (exposed for local development)
 - **Volume**: `mariadb_data` (persistent database storage)
 - **Health Check**: Automatic
 
 ### POS Application
-- **Container**: jimmy-pos-app
+- **Container**: masepos-app
 - **Port**: 3000 (internal, proxied through nginx)
 - **Volumes**: 
   - `./logs:/app/logs` (application logs)
 - **Health Check**: HTTP health check to port 3000
 
 ### Nginx Reverse Proxy
-- **Container**: jimmy-pos-nginx
+- **Container**: masepos-nginx
 - **Ports**: 80 (HTTP), 443 (HTTPS - configure SSL certificates)
 - **Features**:
   - Request rate limiting
@@ -107,12 +107,12 @@ docker-compose up -d
 
 ### Access database directly
 ```bash
-docker exec -it jimmy-pos-db mysql -u pos_user -p jimmy_pos
+docker exec -it masepos-db mysql -u pos_user -p jimmy_pos
 ```
 
 ### Execute commands in app container
 ```bash
-docker exec jimmy-pos-app npm run db:init
+docker exec masepos-app npm run db:init
 ```
 
 ### View resource usage
@@ -146,7 +146,7 @@ docker-compose ps
 docker-compose logs mariadb
 
 # Verify connectivity from app container
-docker exec jimmy-pos-app mysql -h mariadb -u pos_user -p jimmy_pos -e "SELECT 1"
+docker exec masepos-app mysql -h mariadb -u pos_user -p jimmy_pos -e "SELECT 1"
 ```
 
 ### Port 3000 or 80 already in use
@@ -222,12 +222,12 @@ For production use:
 
 ### Backup the database
 ```bash
-docker exec jimmy-pos-db mysqldump -u root -p jimmy_pos > backup_$(date +%Y%m%d_%H%M%S).sql
+docker exec masepos-db mysqldump -u root -p jimmy_pos > backup_$(date +%Y%m%d_%H%M%S).sql
 ```
 
 ### Restore from backup
 ```bash
-docker exec -i jimmy-pos-db mysql -u root -p jimmy_pos < backup_20260506_142000.sql
+docker exec -i masepos-db mysql -u root -p jimmy_pos < backup_20260506_142000.sql
 ```
 
 ## Network
@@ -246,26 +246,26 @@ Persistent data is stored in named Docker volumes:
 
 View volumes:
 ```bash
-docker volume ls | grep jimmy
+docker volume ls | grep masepos
 ```
 
 ## Development Tips
 
 ### Run commands in app container
 ```bash
-docker exec jimmy-pos-app npm run db:init
-docker exec jimmy-pos-app npm run test:unit
+docker exec masepos-app npm run db:init
+docker exec masepos-app npm run test:unit
 ```
 
 ### Build image with custom tags
 ```bash
-docker build -t jimmy-pos:v1.0 .
+docker build -t masepos:v1.0 .
 ```
 
 ### Push to registry (e.g., Docker Hub)
 ```bash
-docker tag jimmy-pos:v1.0 yourusername/jimmy-pos:v1.0
-docker push yourusername/jimmy-pos:v1.0
+docker tag masepos:v1.0 yourusername/masepos:v1.0
+docker push yourusername/masepos:v1.0
 ```
 
 ## Support

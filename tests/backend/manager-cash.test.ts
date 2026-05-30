@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, getCashClosePreview, getManagerCashSummary, recordManagerCashMovement, recordRegisterWalletCashMovement, recordWalletCashMovement, transferCashSessionToManagerFloat } from '../../server/managerCash.js';
+import { confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, exportManagerCashMovementsCsv, getCashClosePreview, getManagerCashSummary, getManagerCashMovements, recordManagerCashMovement, recordRegisterWalletCashMovement, recordWalletCashMovement, transferCashSessionToManagerFloat } from '../../server/managerCash.js';
 
 vi.mock('../../server/db.js', () => ({
   getConnection: vi.fn(),
@@ -175,6 +175,9 @@ describe('manager cash float', () => {
     const movement = await recordManagerCashMovement('tenant_1', {
       movementType: 'petty_cash',
       amount: 35,
+      cashSource: 'safe',
+      receiptAttachmentUrl: 'https://receipts.example/cleaning.jpg',
+      receiptAttachmentName: 'cleaning.jpg',
       note: 'Bought cleaning supplies',
     }, {
       staffId: 'mgr_1',
@@ -190,7 +193,61 @@ describe('manager cash float', () => {
       expect.stringContaining('INSERT INTO audit_events'),
       expect.arrayContaining(['tenant_1', 'manager_cash.petty_cash', 'manager_cash_movement'])
     );
-    expect(movement).toMatchObject({ movementType: 'petty_cash', direction: 'out', amount: 35 });
+    expect(movement).toMatchObject({
+      movementType: 'petty_cash',
+      direction: 'out',
+      amount: 35,
+      cashSource: 'safe',
+      receiptAttachmentName: 'cleaning.jpg',
+      approvedBy: 'mgr_1',
+      approvedByName: 'Manager',
+    });
+  });
+
+  it('searches and exports manager cash movements with approver and receipt fields', async () => {
+    (dbModule.query as any).mockResolvedValue([{
+      id: 'mcm_1',
+      tenantId: 'tenant_1',
+      movementType: 'payout',
+      direction: 'out',
+      amount: '75.00',
+      cashSource: 'manager_float',
+      sourceType: 'manager_float',
+      category: 'supplier',
+      staffName: 'Manager',
+      approvedByName: 'Manager',
+      receiptAttachmentName: 'supplier-slip.jpg',
+      referenceId: 'ref_1',
+      note: 'Supplier change payout',
+      createdAt: '2026-05-30T10:00:00.000Z',
+    }]);
+
+    const rows = await getManagerCashMovements('tenant_1', {
+      movementType: 'payout',
+      cashSource: 'manager_float',
+      search: 'supplier',
+      limit: 25,
+    });
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('cash_source = ?'),
+      expect.arrayContaining(['tenant_1', 'payout', 'manager_float', '%supplier%', 25])
+    );
+    expect(rows[0]).toMatchObject({
+      movementType: 'payout',
+      cashSource: 'manager_float',
+      receiptAttachmentName: 'supplier-slip.jpg',
+      approvedByName: 'Manager',
+    });
+
+    const report = await exportManagerCashMovementsCsv('tenant_1', {
+      movementType: 'payout',
+      cashSource: 'manager_float',
+      search: 'supplier',
+    });
+    expect(report.filename).toContain('masepos-manager-cash-');
+    expect(report.csv).toContain('"cash_source"');
+    expect(report.csv).toContain('"supplier-slip.jpg"');
+    expect(report.csv).toContain('"Manager"');
   });
 
   it('creates pending cash custody transfers with counted variance and audit trail', async () => {

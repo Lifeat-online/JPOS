@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, Ban, Banknote, Boxes, CalendarDays, CheckCircle2, ClipboardCheck, ClipboardList, Download, ExternalLink, Filter, History, Monitor, Package, PlayCircle, RefreshCw, Search, ShieldCheck, Sparkles, UserRound, Users, WifiOff, XCircle } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Ban, Banknote, Boxes, CalendarDays, CheckCircle2, ClipboardCheck, ClipboardList, Download, ExternalLink, Filter, History, Monitor, Package, PlayCircle, RefreshCw, Search, ShieldCheck, Smartphone, Sparkles, UserRound, Users, WifiOff, XCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { decideManagerTask, exportManagerActivityHistoryCsv, getManagerActionCenter, getManagerActivityHistory, getManagerTasks } from '../api';
+import { decideManagerTask, exportManagerActivityHistoryCsv, exportManagerAuditReport, getManagerActionCenter, getManagerActivityHistory, getManagerTasks } from '../api';
 import { getDate } from '../utils/date';
 
 type ActionCenterData = {
@@ -59,6 +59,7 @@ type ActivityFilters = {
   saleId: string;
   customerId: string;
   registerId: string;
+  deviceId: string;
   source: string;
   action: string;
   from: string;
@@ -74,6 +75,8 @@ type ActivityHistoryData = {
   items: any[];
   generatedAt: string;
 };
+
+type AuditReportAudience = 'owner' | 'accountant' | 'compliance';
 
 const countCards = [
   { key: 'cashExceptions', label: 'Cash', icon: Banknote, path: '/cash', tone: 'amber' },
@@ -115,6 +118,32 @@ function when(value: unknown) {
   const d = getDate(value);
   if (Number.isNaN(d.getTime())) return 'No time';
   return d.toLocaleString([], { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function offlineConflictLabel(type?: string | null) {
+  const labels: Record<string, string> = {
+    negative_stock_after_sync: 'Stock shortage',
+    duplicate_local_receipt: 'Duplicate receipt',
+    duplicate_table_or_tab: 'Table / tab conflict',
+    duplicate_customer_order: 'Customer order conflict',
+    sync_failure: 'Sync failure',
+  };
+  return type ? labels[type] || type.replace(/_/g, ' ') : null;
+}
+
+function stockReasonLabel(code?: string | null) {
+  const labels: Record<string, string> = {
+    receiving: 'Receiving',
+    sale: 'Sale',
+    refund: 'Refund',
+    void: 'Void',
+    adjustment: 'Adjustment',
+    count_correction: 'Count correction',
+    transfer: 'Transfer',
+    wastage: 'Wastage',
+    shrinkage: 'Shrinkage',
+  };
+  return code ? labels[code] || code.replace(/_/g, ' ') : null;
 }
 
 function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
@@ -163,6 +192,7 @@ const defaultActivityFilters: ActivityFilters = {
   saleId: '',
   customerId: '',
   registerId: '',
+  deviceId: '',
   source: '',
   action: '',
   from: '',
@@ -180,6 +210,8 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
   const [loading, setLoading] = useState(false);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityExporting, setActivityExporting] = useState(false);
+  const [activityReportAudience, setActivityReportAudience] = useState<AuditReportAudience>('owner');
+  const [activityReportExporting, setActivityReportExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -238,6 +270,32 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setActivityExporting(false);
+    }
+  };
+
+  const exportAuditReport = async () => {
+    if (!tenantId) return;
+    setActivityReportExporting(true);
+    setError(null);
+    try {
+      const result = await exportManagerAuditReport(tenantId, {
+        ...activityFilters,
+        audience: activityReportAudience,
+        limit: 500,
+      });
+      const blob = new Blob([result.csv], { type: result.mimeType || 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.filename || `masepos-${activityReportAudience}-audit-report.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActivityReportExporting(false);
     }
   };
 
@@ -429,6 +487,18 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
               />
             </label>
             <label className="lg:col-span-2">
+              <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <Smartphone className="h-3.5 w-3.5" />
+                Device
+              </span>
+              <input
+                value={activityFilters.deviceId}
+                onChange={(event) => updateActivityFilter('deviceId', event.target.value)}
+                placeholder="Device ID"
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-indigo-400 dark:border-slate-800 dark:bg-[#0B1120] dark:text-slate-200"
+              />
+            </label>
+            <label className="lg:col-span-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Source</span>
               <input
                 value={activityFilters.source}
@@ -496,6 +566,24 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                 <Download className="h-4 w-4" />
                 {activityExporting ? 'Exporting...' : 'CSV'}
               </button>
+              <select
+                value={activityReportAudience}
+                onChange={(event) => setActivityReportAudience(event.target.value as AuditReportAudience)}
+                className="min-h-[42px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-indigo-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+              >
+                <option value="owner">Owner Report</option>
+                <option value="accountant">Accounting Report</option>
+                <option value="compliance">Compliance Report</option>
+              </select>
+              <button
+                type="button"
+                onClick={exportAuditReport}
+                disabled={!tenantId || activityReportExporting}
+                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-indigo-700 shadow-sm transition hover:bg-indigo-100 disabled:opacity-60 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-300"
+              >
+                <Download className="h-4 w-4" />
+                {activityReportExporting ? 'Exporting...' : 'Report'}
+              </button>
             </div>
           </div>
 
@@ -516,6 +604,11 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                           <span className="rounded-full bg-white px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-400 dark:bg-slate-900">
                             {item.kind}
                           </span>
+                          {isStock && item.reasonCode && (
+                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                              {stockReasonLabel(item.reasonCode)}
+                            </span>
+                          )}
                         </div>
                         <p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">
                           {item.subtitle || 'Activity'} - {item.staffName || item.staffId || 'System'} - {when(item.createdAt)}
@@ -525,6 +618,8 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                           {item.saleId && <span>Sale {item.saleId}</span>}
                           {item.customerId && <span>Customer {item.customerId}</span>}
                           {item.registerId && <span>Register {item.registerId}</span>}
+                          {item.deviceId && <span>Device {item.deviceId}</span>}
+                          {item.localReceiptNumber && <span>Receipt {item.localReceiptNumber}</span>}
                           {item.source && <span>Source {item.source}</span>}
                           {item.referenceId && <span>Ref {item.referenceId}</span>}
                         </div>
@@ -564,7 +659,10 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
         >
           <div className="space-y-3">
             {managerTasks.length === 0 && <EmptyLine label="No manager tasks need action." />}
-            {managerTasks.slice(0, 8).map((task) => (
+            {managerTasks.slice(0, 8).map((task) => {
+              const offlineDetails = task.taskType === 'offline_sync' ? task.details?.details || {} : {};
+              const conflictLabel = offlineConflictLabel(offlineDetails.conflictType);
+              return (
               <article key={task.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-[#0B1120]">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0 flex-1">
@@ -581,6 +679,20 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                     </div>
                     <h4 className="mt-3 text-base font-black text-slate-900 dark:text-white">{task.title}</h4>
                     <p className="mt-1 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">{task.summary}</p>
+                    {(conflictLabel || offlineDetails.recommendedAction) && (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-900/20">
+                        {conflictLabel && (
+                          <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-200">
+                            {conflictLabel}
+                          </p>
+                        )}
+                        {offlineDetails.recommendedAction && (
+                          <p className="mt-1 text-xs font-semibold leading-5 text-amber-800 dark:text-amber-100">
+                            {offlineDetails.recommendedAction}
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -647,7 +759,8 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                   </div>
                 </div>
               </article>
-            ))}
+              );
+            })}
           </div>
         </Panel>
 
@@ -687,7 +800,9 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
           >
             <div className="space-y-3">
               {(data?.offlineSyncIssues || []).length === 0 && <EmptyLine label="No offline sync issues." />}
-              {(data?.offlineSyncIssues || []).slice(0, 5).map((event) => (
+              {(data?.offlineSyncIssues || []).slice(0, 5).map((event) => {
+                const conflictLabel = offlineConflictLabel(event.details?.conflictType);
+                return (
                 <div key={event.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-[#0B1120]">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -703,8 +818,23 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                     {event.entityId && <span>{event.entityId}</span>}
                     {event.source && <span>{event.source}</span>}
                   </div>
+                  {(conflictLabel || event.details?.recommendedAction) && (
+                    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-900/20">
+                      {conflictLabel && (
+                        <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-200">
+                          {conflictLabel}
+                        </p>
+                      )}
+                      {event.details?.recommendedAction && (
+                        <p className="mt-1 text-xs font-semibold leading-5 text-amber-800 dark:text-amber-100">
+                          {event.details.recommendedAction}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </Panel>
         </div>
@@ -807,7 +937,11 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                     <Boxes className="h-4 w-4 shrink-0 text-slate-400" />
                     <div className="min-w-0">
                       <div className="truncate text-sm font-black text-slate-900 dark:text-white">{movement.itemName || movement.productId || 'Stock item'}</div>
-                      <div className="mt-0.5 text-xs font-bold text-slate-400">{movement.reason} - {when(movement.createdAt)}</div>
+                      <div className="mt-0.5 text-xs font-bold text-slate-400">
+                        {movement.reasonCode
+                          ? `${stockReasonLabel(movement.reasonCode)} - ${movement.reason} - ${when(movement.createdAt)}`
+                          : `${movement.reason} - ${when(movement.createdAt)}`}
+                      </div>
                     </div>
                   </div>
                   <div className={`text-sm font-black ${number(movement.quantityDelta) < 0 ? 'text-rose-600 dark:text-rose-300' : 'text-emerald-600 dark:text-emerald-300'}`}>

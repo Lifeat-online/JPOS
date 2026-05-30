@@ -247,6 +247,8 @@ export async function getActiveSalesByTenant(tenantId: string) {
         table_number AS tableNumber,
         is_tab AS isTab,
         tab_name AS tabName,
+        offline_event_id AS offlineEventId,
+        sync_source AS syncSource,
         created_at AS createdAt,
         updated_at AS updatedAt
       FROM sales

@@ -97,6 +97,124 @@ async function applyWalletSalePayment(
   return { previousBalance, nextBalance, walletAmount };
 }
 
+/**
+ * Apply checkout completion side effects within the sale transaction.
+ * Covers: loyalty points, cash session expected_cash/tips, cash movements,
+ * staff metrics (orders, tips), and customer account balance.
+ * Throws on any failure — caller's transaction will roll back.
+ */
+async function applyCheckoutSideEffects(
+  conn: any,
+  tenantId: string,
+  saleId: string,
+  context: {
+    staffId?: string | null;
+    customerId?: string | null;
+    cashSessionId?: string | null;
+    loyaltyPoints?: number;
+    expectedCashDelta?: number;
+    tipsDelta?: number;
+    cashMovements?: any[];
+    staffMetrics?: { ordersDelta?: number; tipsDelta?: number } | null;
+    accountBalanceDelta?: number;
+  }
+): Promise<void> {
+  const sid = saleId;
+
+  // 1. Customer loyalty points
+  if (context.loyaltyPoints !== undefined && context.customerId) {
+    await conn.query(
+      `UPDATE customers SET loyalty_points = ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
+      [context.loyaltyPoints, tenantId, context.customerId]
+    );
+  }
+
+  // 2. Cash session expected cash / tips
+  if (context.cashSessionId) {
+    const sessionFields: string[] = [];
+    const sessionValues: (string | number | null)[] = [];
+    if (context.expectedCashDelta !== undefined) {
+      sessionFields.push("expected_cash = COALESCE(expected_cash, 0) + ?");
+      sessionValues.push(context.expectedCashDelta);
+    }
+    if (context.tipsDelta !== undefined) {
+      sessionFields.push("accumulated_tips = COALESCE(accumulated_tips, 0) + ?");
+      sessionValues.push(context.tipsDelta);
+    }
+    if (sessionFields.length > 0) {
+      sessionFields.push("updated_at = NOW()");
+      sessionValues.push(context.cashSessionId, tenantId);
+      await conn.query(
+        `UPDATE cash_sessions SET ${sessionFields.join(", ")} WHERE id = ? AND tenant_id = ?`,
+        sessionValues
+      );
+    }
+  }
+
+  // 3. Cash movements
+  if (context.cashMovements && context.cashMovements.length > 0 && context.cashSessionId) {
+    for (const m of context.cashMovements) {
+      const movId = `cm_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      await conn.query(
+        `INSERT INTO cash_movements (id, tenant_id, cash_session_id, type, direction, amount, sale_id, payment_id, staff_id, staff_name, note, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          movId, tenantId, context.cashSessionId,
+          m.type, m.direction || "neutral", m.amount, sid,
+          m.paymentId || null, m.staffId || null, m.staffName || null,
+          m.note || null,
+        ]
+      );
+      await recordAuditEvent(conn, {
+        tenantId,
+        action: "cash_movement.recorded",
+        entityType: "cash_movement",
+        entityId: movId,
+        relatedSaleId: sid,
+        staffId: m.staffId || context.staffId || null,
+        staffName: m.staffName || null,
+        source: "checkout",
+        details: {
+          cashSessionId: context.cashSessionId,
+          type: m.type,
+          direction: m.direction || "neutral",
+          amount: m.amount,
+          paymentId: m.paymentId || null,
+          note: m.note || null,
+        },
+      });
+    }
+  }
+
+  // 4. Staff metrics (orders count and aggregated tips)
+  if (context.staffMetrics && context.staffId) {
+    const sm = context.staffMetrics;
+    const [staffRows] = await conn.query(
+      `SELECT metrics FROM staff WHERE tenant_id = ? AND id = ? LIMIT 1 FOR UPDATE`,
+      [tenantId, context.staffId]
+    );
+    const row = (staffRows as any[])[0];
+    const currentMetrics = row?.metrics ? (typeof row.metrics === 'string' ? safeParse(row.metrics, {}) : row.metrics) : {};
+    const updatedMetrics = {
+      ...currentMetrics,
+      orders: (Number(currentMetrics.orders) || 0) + (sm.ordersDelta || 0),
+      tips: (Number(currentMetrics.tips) || 0) + (sm.tipsDelta || 0),
+    };
+    await conn.query(
+      `UPDATE staff SET metrics = ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
+      [JSON.stringify(updatedMetrics), tenantId, context.staffId]
+    );
+  }
+
+  // 5. Customer account balance
+  if (context.accountBalanceDelta !== undefined && context.customerId) {
+    await conn.query(
+      `UPDATE customers SET account_balance = GREATEST(0, COALESCE(account_balance, 0) + ?), updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
+      [context.accountBalanceDelta, tenantId, context.customerId]
+    );
+  }
+}
+
 async function deductCompletedSaleProductStock(
   conn: any,
   tenantId: string,
@@ -122,6 +240,7 @@ async function deductCompletedSaleProductStock(
       itemName: movement.name || null,
       quantityDelta: -movement.quantity,
       reason: "sale",
+      reasonCode: "sale",
       referenceType: "sale",
       referenceId: context.saleId || null,
       saleId: context.saleId || null,
@@ -135,6 +254,174 @@ async function deductCompletedSaleProductStock(
 // ─────────────────────────────────────────────────────────────────────────
 // CREATE Operations
 // ─────────────────────────────────────────────────────────────────────────
+
+type OfflineSyncConflictType =
+  | "negative_stock_after_sync"
+  | "duplicate_local_receipt"
+  | "duplicate_table_or_tab"
+  | "duplicate_customer_order";
+
+type OfflineSyncConflict = {
+  conflictType: OfflineSyncConflictType;
+  recommendedAction: string;
+  message: string;
+  productId?: string | null;
+  itemName?: string | null;
+  requestedQuantity?: number;
+  availableStock?: number;
+  tableNumber?: string | null;
+  tabName?: string | null;
+  customerId?: string | null;
+  existingSaleId?: string | null;
+};
+
+const offlineSyncConflictActions: Record<OfflineSyncConflictType, string> = {
+  negative_stock_after_sync: "Review the synced sale against current stock, approve the shortage, adjust stock, or create a receiving/count correction.",
+  duplicate_local_receipt: "Check whether this local receipt already exists in cloud sales before retrying or dismissing the local copy.",
+  duplicate_table_or_tab: "Compare the offline sale with the open table/tab and merge, close, or reassign the order before retrying.",
+  duplicate_customer_order: "Check the customer/order history for a duplicate sale before retrying or dismissing the local copy.",
+};
+
+function saleItemProductId(item: any) {
+  return item?.productId || item?.product_id || item?.id || null;
+}
+
+function saleItemName(item: any) {
+  return item?.name || item?.productName || item?.product_name || null;
+}
+
+async function collectOfflineStockConflicts(conn: any, tenantId: string, items: any[] = []) {
+  const totals = new Map<string, { quantity: number; name?: string | null }>();
+  for (const item of items) {
+    const productId = saleItemProductId(item);
+    const quantity = Number(item?.quantity || 0);
+    if (!productId || quantity <= 0) continue;
+    const existing = totals.get(productId) || { quantity: 0, name: saleItemName(item) };
+    totals.set(productId, {
+      quantity: existing.quantity + quantity,
+      name: existing.name || saleItemName(item),
+    });
+  }
+
+  const conflicts: OfflineSyncConflict[] = [];
+  for (const [productId, item] of totals.entries()) {
+    const [rows] = await conn.query(
+      `SELECT id, name, stock
+         FROM products
+        WHERE tenant_id = ? AND id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, productId]
+    );
+    const product = (rows as any[])[0];
+    if (!product) continue;
+    const availableStock = Number(product.stock || 0);
+    if (availableStock < item.quantity) {
+      conflicts.push({
+        conflictType: "negative_stock_after_sync",
+        recommendedAction: offlineSyncConflictActions.negative_stock_after_sync,
+        message: `${product.name || item.name || productId} would go below zero after this offline sale sync.`,
+        productId,
+        itemName: product.name || item.name || null,
+        requestedQuantity: item.quantity,
+        availableStock,
+      });
+    }
+  }
+  return conflicts;
+}
+
+async function collectOfflineSaleSyncConflicts(conn: any, tenantId: string, sale: Partial<Sale>) {
+  const conflicts: OfflineSyncConflict[] = [
+    ...(await collectOfflineStockConflicts(conn, tenantId, Array.isArray(sale.items) ? sale.items : [])),
+  ];
+  const tableNumber = String(sale.tableNumber || "").trim();
+  const tabName = String(sale.tabName || "").trim();
+  const customerId = sale.customerId || null;
+
+  if (tableNumber) {
+    const [rows] = await conn.query(
+      `SELECT id, table_number AS tableNumber, status
+         FROM sales
+        WHERE tenant_id = ?
+          AND table_number = ?
+          AND status IN ('open', 'kitchen', 'pending')
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, tableNumber]
+    );
+    const existingSale = (rows as any[])[0];
+    if (existingSale) {
+      conflicts.push({
+        conflictType: "duplicate_table_or_tab",
+        recommendedAction: offlineSyncConflictActions.duplicate_table_or_tab,
+        message: `Table ${tableNumber} already has an open order while an offline sale is syncing.`,
+        tableNumber,
+        existingSaleId: existingSale.id || null,
+      });
+    }
+  }
+
+  if (sale.isTab && (tabName || customerId)) {
+    const conditions: string[] = [];
+    const values: any[] = [tenantId];
+    if (tabName) {
+      conditions.push("LOWER(tab_name) = LOWER(?)");
+      values.push(tabName);
+    }
+    if (customerId) {
+      conditions.push("customer_id = ?");
+      values.push(customerId);
+    }
+    const [rows] = await conn.query(
+      `SELECT id, tab_name AS tabName, customer_id AS customerId, status
+         FROM sales
+        WHERE tenant_id = ?
+          AND is_tab = 1
+          AND status IN ('open', 'kitchen', 'pending')
+          AND (${conditions.join(" OR ")})
+        LIMIT 1
+        FOR UPDATE`,
+      values
+    );
+    const existingSale = (rows as any[])[0];
+    if (existingSale) {
+      conflicts.push({
+        conflictType: "duplicate_table_or_tab",
+        recommendedAction: offlineSyncConflictActions.duplicate_table_or_tab,
+        message: `Tab ${tabName || customerId} already has an open order while an offline sale is syncing.`,
+        tabName: tabName || null,
+        customerId,
+        existingSaleId: existingSale.id || null,
+      });
+    }
+  }
+
+  if (customerId && !sale.isTab) {
+    const [rows] = await conn.query(
+      `SELECT id, status, total
+         FROM sales
+        WHERE tenant_id = ?
+          AND customer_id = ?
+          AND status IN ('open', 'kitchen', 'pending')
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, customerId]
+    );
+    const existingSale = (rows as any[])[0];
+    if (existingSale) {
+      conflicts.push({
+        conflictType: "duplicate_customer_order",
+        recommendedAction: offlineSyncConflictActions.duplicate_customer_order,
+        message: `Customer ${customerId} already has an open order while an offline sale is syncing.`,
+        customerId,
+        existingSaleId: existingSale.id || null,
+      });
+    }
+  }
+
+  return conflicts;
+}
 
 export async function createProduct(
   tenantId: string,
@@ -908,10 +1195,30 @@ export async function deleteRestaurantTable(tenantId: string, tableId: string): 
 // ─────────────────────────────────────────────────────────────────────────
 
 export async function createSale(tenantId: string, sale: Partial<Sale>): Promise<Sale> {
+  const offlineEventId = (sale as any).offlineEventId || null;
+
+  // Idempotency: if this offline sale was already synced, return the existing record
+  if (offlineEventId) {
+    const [existing] = await query(
+      `SELECT id FROM sales WHERE tenant_id = ? AND offline_event_id = ? LIMIT 1`,
+      [tenantId, offlineEventId]
+    );
+    if ((existing as any[])[0]) {
+      const existingId = (existing as any[])[0].id;
+      const existingSale = await getSaleById(tenantId, existingId);
+      if (existingSale) return existingSale;
+    }
+  }
+
   const id = `sale_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const conn = await getConnection();
   try {
     await conn.beginTransaction();
+
+    const syncSource = offlineEventId ? 'offline' : ((sale as any).syncSource || 'online');
+    const offlineSyncConflicts = offlineEventId
+      ? await collectOfflineSaleSyncConflicts(conn, tenantId, sale)
+      : [];
 
     await conn.query(
       `INSERT INTO sales (
@@ -920,8 +1227,9 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         tip_amount, cash_out_amount, points_discount, status, payfast_payment_id,
         transaction_type, parent_sale_id, refund_status, refunded_amount, refund_reason, refunded_by,
         void_reason, voided_by,
-        table_number, is_tab, tab_name, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        table_number, is_tab, tab_name,
+        offline_event_id, sync_source, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         id,
         tenantId,
@@ -952,6 +1260,8 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         sale.tableNumber || null,
         sale.isTab ? 1 : 0,
         sale.tabName || null,
+        offlineEventId,
+        syncSource,
       ]
     );
 
@@ -1063,8 +1373,77 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         total: Number(sale.total || 0),
         itemCount: Array.isArray(sale.items) ? sale.items.length : 0,
         walletPaymentAmount: walletSalePayment?.walletAmount || 0,
+        offlineEventId,
+        syncSource,
+        cashSessionId: (sale as any).cashSessionId || null,
+        deviceId: (sale as any).deviceId || null,
+        localReceiptNumber: (sale as any).localReceiptNumber || null,
       },
     });
+
+    // Record offline sync audit event when this is an offline sync
+    if (offlineEventId) {
+      await recordAuditEvent(conn, {
+        tenantId,
+        action: "offline.sale_synced",
+        entityType: "sale",
+        entityId: id,
+        relatedSaleId: id,
+        staffId: sale.staffId || null,
+        customerId: sale.customerId || null,
+        details: {
+          offlineEventId,
+          localReceiptNumber: (sale as any).localReceiptNumber || null,
+          deviceId: (sale as any).deviceId || null,
+          syncBatchId: (sale as any).syncBatchId || null,
+          syncSequence: (sale as any).syncSequence ?? null,
+          syncEventType: (sale as any).syncEventType || null,
+          syncEventVersion: (sale as any).syncEventVersion || null,
+        },
+      });
+
+      if (offlineSyncConflicts.length > 0) {
+        const primaryConflict = offlineSyncConflicts[0];
+        await recordAuditEvent(conn, {
+          tenantId,
+          action: "offline.sync_conflict",
+          entityType: "sale",
+          entityId: id,
+          relatedSaleId: id,
+          staffId: sale.staffId || null,
+          customerId: sale.customerId || null,
+          source: "offline_queue",
+          details: {
+            offlineEventId,
+            localReceiptNumber: (sale as any).localReceiptNumber || null,
+            deviceId: (sale as any).deviceId || null,
+            operation: "create_sale",
+            syncBatchId: (sale as any).syncBatchId || null,
+            syncSequence: (sale as any).syncSequence ?? null,
+            syncEventType: (sale as any).syncEventType || null,
+            conflictType: primaryConflict.conflictType,
+            recommendedAction: primaryConflict.recommendedAction,
+            message: primaryConflict.message,
+            conflicts: offlineSyncConflicts,
+          },
+        });
+      }
+    }
+
+    // Transaction-safe checkout side effects (atomic with sale)
+    if ((sale.status || "pending") === "completed") {
+      await applyCheckoutSideEffects(conn, tenantId, id, {
+        staffId: sale.staffId || null,
+        customerId: sale.customerId || null,
+        cashSessionId: (sale as any).cashSessionId || null,
+        loyaltyPoints: (sale as any).loyaltyPoints,
+        expectedCashDelta: (sale as any).expectedCashDelta,
+        tipsDelta: (sale as any).tipsDelta,
+        cashMovements: (sale as any).cashMovements,
+        staffMetrics: (sale as any).staffMetrics || null,
+        accountBalanceDelta: (sale as any).accountBalanceDelta,
+      });
+    }
 
     await conn.commit();
     return { id, ...sale } as Sale;
@@ -1090,10 +1469,17 @@ export async function updateSale(
     await conn.beginTransaction();
 
     const [existingSaleResult] = await conn.query<any>(
-      `SELECT status, transaction_type, staff_id, customer_id FROM sales WHERE tenant_id = ? AND id = ? LIMIT 1`,
+      `SELECT status, transaction_type, staff_id, customer_id, offline_event_id FROM sales WHERE tenant_id = ? AND id = ? LIMIT 1`,
       [tenantId, saleId]
     );
     const existingSale = (existingSaleResult as any[])[0] || null;
+    const updateOfflineEventId = (updates as any).offlineEventId || null;
+
+    if (updateOfflineEventId && existingSale?.offline_event_id === updateOfflineEventId && existingSale?.status === "completed") {
+      await conn.commit();
+      const sale = await getSaleById(tenantId, saleId);
+      if (sale) return sale;
+    }
 
     const fields: string[] = [];
     const values: any[] = [];
@@ -1206,6 +1592,14 @@ export async function updateSale(
       fields.push("tab_name = ?");
       values.push(updates.tabName || null);
     }
+    if ((updates as any).offlineEventId !== undefined) {
+      fields.push("offline_event_id = ?");
+      values.push((updates as any).offlineEventId || null);
+    }
+    if ((updates as any).syncSource !== undefined) {
+      fields.push("sync_source = ?");
+      values.push((updates as any).syncSource || 'online');
+    }
 
     if (fields.length > 0) {
       fields.push("updated_at = NOW()");
@@ -1297,6 +1691,7 @@ export async function updateSale(
     const nextTransactionType = (updates as any).transactionType !== undefined ? ((updates as any).transactionType || "sale") : (existingSale?.transaction_type || "sale");
     const shouldDeductStock = existingSale?.status !== "completed" && nextStatus === "completed" && nextTransactionType === "sale";
     let walletSalePayment: Awaited<ReturnType<typeof applyWalletSalePayment>> | null = null;
+    let offlineSyncConflicts: OfflineSyncConflict[] = [];
     if (shouldDeductStock) {
       let itemsForStock = updates.items as any[] | undefined;
       if (!itemsForStock) {
@@ -1305,6 +1700,9 @@ export async function updateSale(
           [saleId]
         );
         itemsForStock = saleItemsResult as any[];
+      }
+      if (updateOfflineEventId) {
+        offlineSyncConflicts = await collectOfflineStockConflicts(conn, tenantId, itemsForStock || []);
       }
       await deductCompletedSaleProductStock(conn, tenantId, itemsForStock || [], {
         saleId,
@@ -1329,6 +1727,7 @@ export async function updateSale(
       });
     }
 
+    const offlineEventId = updateOfflineEventId;
     await recordAuditEvent(conn, {
       tenantId,
       action: shouldDeductStock ? "sale.completed" : "sale.updated",
@@ -1344,8 +1743,78 @@ export async function updateSale(
         nextTransactionType,
         changedFields: Object.keys(updates || {}),
         walletPaymentAmount: walletSalePayment?.walletAmount || 0,
+        offlineEventId,
+        cashSessionId: (updates as any).cashSessionId || null,
+        deviceId: (updates as any).deviceId || null,
+        localReceiptNumber: (updates as any).localReceiptNumber || null,
       },
     });
+
+    // Record offline sync audit event when this is an offline sync
+    if (offlineEventId && shouldDeductStock) {
+      await recordAuditEvent(conn, {
+        tenantId,
+        action: "offline.sale_synced",
+        entityType: "sale",
+        entityId: saleId,
+        relatedSaleId: saleId,
+        staffId: updates.staffId || existingSale?.staff_id || null,
+        customerId: updates.customerId || existingSale?.customer_id || null,
+        details: {
+          offlineEventId,
+          localReceiptNumber: (updates as any).localReceiptNumber || null,
+          deviceId: (updates as any).deviceId || null,
+          syncBatchId: (updates as any).syncBatchId || null,
+          syncSequence: (updates as any).syncSequence ?? null,
+          syncEventType: (updates as any).syncEventType || null,
+          syncEventVersion: (updates as any).syncEventVersion || null,
+        },
+      });
+
+      if (offlineSyncConflicts.length > 0) {
+        const primaryConflict = offlineSyncConflicts[0];
+        await recordAuditEvent(conn, {
+          tenantId,
+          action: "offline.sync_conflict",
+          entityType: "sale",
+          entityId: saleId,
+          relatedSaleId: saleId,
+          staffId: updates.staffId || existingSale?.staff_id || null,
+          customerId: updates.customerId || existingSale?.customer_id || null,
+          source: "offline_queue",
+          details: {
+            offlineEventId,
+            localReceiptNumber: (updates as any).localReceiptNumber || null,
+            deviceId: (updates as any).deviceId || null,
+            operation: "update_sale",
+            syncBatchId: (updates as any).syncBatchId || null,
+            syncSequence: (updates as any).syncSequence ?? null,
+            syncEventType: (updates as any).syncEventType || null,
+            conflictType: primaryConflict.conflictType,
+            recommendedAction: primaryConflict.recommendedAction,
+            message: primaryConflict.message,
+            conflicts: offlineSyncConflicts,
+          },
+        });
+      }
+    }
+
+    // Transaction-safe checkout side effects (atomic with sale update)
+    if (shouldDeductStock) {
+      const actualStaffId = updates.staffId || existingSale?.staff_id || null;
+      const actualCustomerId = updates.customerId !== undefined ? (updates.customerId || null) : (existingSale?.customer_id || null);
+      await applyCheckoutSideEffects(conn, tenantId, saleId, {
+        staffId: actualStaffId,
+        customerId: actualCustomerId,
+        cashSessionId: (updates as any).cashSessionId || null,
+        loyaltyPoints: (updates as any).loyaltyPoints,
+        expectedCashDelta: (updates as any).expectedCashDelta,
+        tipsDelta: (updates as any).tipsDelta,
+        cashMovements: (updates as any).cashMovements,
+        staffMetrics: (updates as any).staffMetrics || null,
+        accountBalanceDelta: (updates as any).accountBalanceDelta,
+      });
+    }
 
     await conn.commit();
     const sale = await getSaleById(tenantId, saleId);
@@ -1550,6 +2019,7 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
           itemName: item.name,
           quantityDelta: Math.abs(Number(item.quantity || 0)),
           reason: "refund_restock",
+          reasonCode: "refund",
           referenceType: "refund",
           referenceId: refundId,
           saleId: refundId,
@@ -1590,6 +2060,7 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
     }
 
     if (input.method === "cash" && input.cashSessionId) {
+      const cashMovementId = `cash_${Date.now()}_${Math.random().toString(36).substring(7)}`;
       await conn.query(
         `UPDATE cash_sessions
             SET expected_cash = COALESCE(expected_cash, 0) - ?,
@@ -1603,7 +2074,7 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
           staff_id, staff_name, created_by, note, created_at
         ) VALUES (?, ?, ?, 'refund', 'out', ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
-          `cash_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+          cashMovementId,
           tenantId,
           input.cashSessionId,
           refundTotal,
@@ -1615,6 +2086,27 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
           reason,
         ]
       );
+      await recordAuditEvent(conn, {
+        tenantId,
+        action: "cash_movement.recorded",
+        entityType: "cash_movement",
+        entityId: cashMovementId,
+        relatedSaleId: refundId,
+        staffId: input.staffId || null,
+        staffName: input.staffName || null,
+        customerId: original.customer_id || null,
+        source: "refund",
+        details: {
+          cashSessionId: input.cashSessionId,
+          originalSaleId: saleId,
+          refundSaleId: refundId,
+          type: "refund",
+          direction: "out",
+          amount: refundTotal,
+          paymentId,
+          note: reason,
+        },
+      });
     }
 
     await recordAuditEvent(conn, {
@@ -1696,6 +2188,7 @@ export async function processSaleVoid(tenantId: string, saleId: string, input: S
           productId: item.productId,
           quantityDelta: Math.max(0, Number(item.quantity || 0)),
           reason: "void_restock",
+          reasonCode: "void",
           referenceType: "void",
           referenceId: saleId,
           saleId,
@@ -1778,6 +2271,8 @@ export async function getSaleById(tenantId: string, saleId: string): Promise<Sal
       table_number AS tableNumber,
       is_tab AS isTab,
       tab_name AS tabName,
+      offline_event_id AS offlineEventId,
+      sync_source AS syncSource,
       created_at AS createdAt,
       updated_at AS updatedAt
     FROM sales

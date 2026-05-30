@@ -119,7 +119,7 @@ import {
   savePushSubscription,
   sendPushNotification,
 } from "./pushNotifications.js";
-import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistory } from "./actionCenter.js";
+import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistory, getManagerAuditReport } from "./actionCenter.js";
 import { applyStockAdjustment, createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue } from "./managerTasks.js";
 import {
   cancelCashCustodyTransfer,
@@ -127,6 +127,7 @@ import {
   createCashCloseCheckpoint,
   createCashCustodyTransfer,
   exportCashCloseCheckpointCsv,
+  exportManagerCashMovementsCsv,
   getCashCloseCheckpoints,
   getCashClosePreview,
   getCashCustodyTransfers,
@@ -137,6 +138,7 @@ import {
   recordWalletCashMovement,
   transferCashSessionToManagerFloat,
 } from "./managerCash.js";
+import { recordAuditEventSafe } from "./audit.js";
 import {
   approveStockTakeSession,
   createStockTakeRule,
@@ -151,6 +153,15 @@ import {
   submitStockTakeCount,
   updateStockTakeRule,
 } from "./stockTake.js";
+import { recordOfflineSyncIssue } from "./offlineSync.js";
+import {
+  addLaybyPayment,
+  cancelLaybyOrder,
+  completeLaybyOrder,
+  createLaybyOrder,
+  getLaybyOrderById,
+  listLaybyOrders,
+} from "./layby.js";
 
 dotenv.config();
 
@@ -188,6 +199,92 @@ function canManageInventory(role: unknown) {
 
 function canGenerateVapidKeys(role: unknown) {
   return normalizeRole(role) === "dev";
+}
+
+function auditActorFromRequest(req: Request) {
+  return {
+    staffId: req.user?.staffId || req.user?.uid || null,
+    staffName: req.user?.name || null,
+    role: req.user?.role || null,
+  };
+}
+
+function tenantIdFromRequest(req: Request) {
+  return req.params?.tenantId || req.user?.tenantId || null;
+}
+
+function auditRequestContext(req: Request, extra: Record<string, unknown> = {}) {
+  return {
+    method: req.method,
+    route: req.originalUrl || req.url,
+    ip: req.ip || req.socket?.remoteAddress || null,
+    userAgent: req.get?.("user-agent") || null,
+    ...extra,
+  };
+}
+
+function auditChangedFields(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const sensitive = new Set([
+    "password",
+    "passwordHash",
+    "password_hash",
+    "apiKey",
+    "api_key",
+    "accessToken",
+    "refreshToken",
+    "token",
+    "payfastMerchantKey",
+    "payfastPassphrase",
+    "payfast_merchant_key",
+    "payfast_passphrase",
+    "merchant_key",
+    "passphrase",
+  ]);
+  return Object.keys(value as Record<string, unknown>)
+    .filter((key) => !sensitive.has(key))
+    .sort();
+}
+
+async function auditRouteEvent(
+  req: Request,
+  action: string,
+  entityType: string,
+  details: Record<string, unknown> = {},
+  entityId?: string | null,
+  source = "api"
+) {
+  const tenantId = tenantIdFromRequest(req);
+  if (!tenantId) return null;
+  const actor = auditActorFromRequest(req);
+  return recordAuditEventSafe({
+    tenantId,
+    action,
+    entityType,
+    entityId: entityId || null,
+    staffId: actor.staffId,
+    staffName: actor.staffName,
+    source,
+    details: auditRequestContext(req, {
+      actorRole: actor.role,
+      ...details,
+    }),
+  });
+}
+
+function denyWithAudit(
+  req: Request,
+  res: Response,
+  attemptedAction: string,
+  message: string,
+  details: Record<string, unknown> = {}
+) {
+  void auditRouteEvent(req, "permission.denied", "security", {
+    attemptedAction,
+    role: req.user?.role || null,
+    ...details,
+  }, auditActorFromRequest(req).staffId, "permission");
+  return res.status(403).json({ error: message });
 }
 
 function safeJsonField(value: unknown, fallback: any) {
@@ -279,6 +376,24 @@ async function recordCashMovement(tenantId: string, data: any) {
       data.note || null,
     ]
   );
+  await recordAuditEventSafe({
+    tenantId,
+    action: "cash_movement.recorded",
+    entityType: "cash_movement",
+    entityId: id,
+    relatedSaleId: data.saleId || null,
+    staffId: data.createdBy || data.staffId || null,
+    staffName: data.staffName || null,
+    source: "cash_session",
+    details: {
+      cashSessionId: data.cashSessionId || null,
+      type: data.type,
+      direction: data.direction || "neutral",
+      amount: data.amount || 0,
+      paymentId: data.paymentId || null,
+      note: data.note || null,
+    },
+  });
   return { id, ...data };
 }
 
@@ -535,6 +650,14 @@ export async function createApp(io: any = null) {
       const usage = await getTenantPackageUsage(req.params.tenantId);
       const limit = Number((context.package as any)[limitKey]);
       if (limitReached(Number((usage as any)[usageKey]), limit)) {
+        void auditRouteEvent(req, "permission.denied", "security", {
+          attemptedAction: `package.capacity.${usageKey}`,
+          reason: "package_limit_reached",
+          package: context.package.id,
+          limitName,
+          limit,
+          current: Number((usage as any)[usageKey]),
+        }, auditActorFromRequest(req).staffId, "permission");
         packageLimitResponse(res, {
           packageId: context.package.id,
           limitName,
@@ -554,6 +677,12 @@ export async function createApp(io: any = null) {
       try {
         const context = await getTenantPackageContext(req.params.tenantId);
         if (!hasPackageFeature(context.package.features, feature)) {
+          void auditRouteEvent(req, "permission.denied", "security", {
+            attemptedAction: `package.feature.${feature}`,
+            reason: "feature_not_available",
+            package: context.package.id,
+            feature,
+          }, auditActorFromRequest(req).staffId, "permission");
           return res.status(403).json({
             error: "Feature not available on your package",
             package: context.package.id,
@@ -777,9 +906,13 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/push/vapid/generate", requireAuth, async (req, res) => {
     try {
       if (!canGenerateVapidKeys(req.user?.role)) {
-        return res.status(403).json({ error: "Only Dev users can generate VAPID keys" });
+        return denyWithAudit(req, res, "push.vapid_generate", "Only Dev users can generate VAPID keys");
       }
-      res.json(await generateTenantVapidKeys(req.params.tenantId, req.body?.subject));
+      const result = await generateTenantVapidKeys(req.params.tenantId, req.body?.subject);
+      await auditRouteEvent(req, "settings.push_vapid_generated", "settings", {
+        subject: req.body?.subject || null,
+      }, req.params.tenantId, "push");
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -817,7 +950,7 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/push/test", requireAuth, async (req, res) => {
     try {
       if (!canManagePush(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers, admins, and devs can send test push notifications" });
+        return denyWithAudit(req, res, "push.test_send", "Only managers, admins, and devs can send test push notifications");
       }
       const staffIds = req.user?.staffId ? [String(req.user.staffId)] : undefined;
       const result = await sendPushNotification(req.params.tenantId, {
@@ -834,6 +967,10 @@ export async function createApp(io: any = null) {
           { action: "open-messages", title: "Open messages" },
         ],
       }, { staffIds, urgency: "high", ttl: 60 });
+      await auditRouteEvent(req, "settings.push_test_sent", "settings", {
+        success: true,
+        recipientStaffIds: staffIds || [],
+      }, req.params.tenantId, "push");
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -885,9 +1022,18 @@ export async function createApp(io: any = null) {
     async (req, res) => {
       try {
         if (!canManageAi(req.user?.role)) {
-          return res.status(403).json({ error: "Only managers, admins, and devs can manage AI settings" });
+          return denyWithAudit(req, res, "ai.settings_update", "Only managers, admins, and devs can manage AI settings");
         }
         const settings = await saveAiSettings(req.params.tenantId, req.body || {});
+        await auditRouteEvent(req, "ai.settings_updated", "settings", {
+          provider: settings.provider,
+          model: settings.model,
+          enabled: settings.enabled,
+          insightsEnabled: settings.insightsEnabled,
+          staffScoringEnabled: settings.staffScoringEnabled,
+          changedFields: auditChangedFields(req.body || {}),
+          apiKeySubmitted: req.body?.apiKey !== undefined,
+        }, req.params.tenantId, "ai");
         res.json(serializeAiSettings(settings));
       } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -902,9 +1048,14 @@ export async function createApp(io: any = null) {
     async (req, res) => {
       try {
         if (!canManageAi(req.user?.role)) {
-          return res.status(403).json({ error: "Only managers, admins, and devs can manage AI settings" });
+          return denyWithAudit(req, res, "ai.models_list", "Only managers, admins, and devs can manage AI settings");
         }
-        res.json({ models: await listAiModels(req.params.tenantId, req.body || {}) });
+        const models = await listAiModels(req.params.tenantId, req.body || {});
+        await auditRouteEvent(req, "ai.models_listed", "settings", {
+          provider: req.body?.provider || null,
+          modelCount: models.length,
+        }, req.params.tenantId, "ai");
+        res.json({ models });
       } catch (err: any) {
         res.status(400).json({ error: err.message });
       }
@@ -918,9 +1069,17 @@ export async function createApp(io: any = null) {
     async (req, res) => {
       try {
         if (!canManageAi(req.user?.role)) {
-          return res.status(403).json({ error: "Only managers, admins, and devs can test AI provider credentials" });
+          return denyWithAudit(req, res, "ai.provider_test", "Only managers, admins, and devs can test AI provider credentials");
         }
-        res.json(await testAiProviderContact(req.params.tenantId, req.body || {}));
+        const result = await testAiProviderContact(req.params.tenantId, req.body || {});
+        await auditRouteEvent(req, "ai.provider_tested", "settings", {
+          provider: result.provider,
+          model: result.model,
+          imageCount: Array.isArray(req.body?.images) ? req.body.images.length : 0,
+          documentCount: Array.isArray(req.body?.documents) ? req.body.documents.length : 0,
+          messageLength: String(req.body?.message || "").length,
+        }, req.params.tenantId, "ai");
+        res.json(result);
       } catch (err: any) {
         res.status(400).json({ error: err.message });
       }
@@ -1020,9 +1179,20 @@ export async function createApp(io: any = null) {
       try {
         const fullAutopilot = Boolean(req.body?.fullAutopilot);
         if (fullAutopilot && normalizeRole(req.user?.role) !== "dev") {
-          return res.status(403).json({ error: "Full autopilot is restricted to Dev users" });
+          return denyWithAudit(req, res, "ai.inventory_full_autopilot", "Full autopilot is restricted to Dev users", {
+            stepCount: Array.isArray(req.body?.steps) ? req.body.steps.length : 0,
+          });
         }
-        res.json(await applyApprovedInventoryAgentSteps(req.params.tenantId, req.body?.steps || [], { fullAutopilot }));
+        const result = await applyApprovedInventoryAgentSteps(req.params.tenantId, req.body?.steps || [], { fullAutopilot });
+        await auditRouteEvent(req, "ai.inventory_steps_applied", "ai_agent_run", {
+          fullAutopilot,
+          requestedStepCount: Array.isArray(req.body?.steps) ? req.body.steps.length : 0,
+          appliedCount: result.applied.length,
+          skippedCount: result.skipped.length,
+          appliedTypes: result.applied.map((step: any) => step.type),
+          skippedTypes: result.skipped.map((step: any) => step.type),
+        }, null, "ai");
+        res.json(result);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -1034,6 +1204,12 @@ export async function createApp(io: any = null) {
       if (req.body?.business?.logoUrl) {
         const context = await getTenantPackageContext(req.params.tenantId);
         if (!hasPackageFeature(context.package.features, "own_logo")) {
+          void auditRouteEvent(req, "permission.denied", "security", {
+            attemptedAction: "settings.logo_update",
+            role: req.user?.role || null,
+            package: context.package.id,
+            feature: "own_logo",
+          }, auditActorFromRequest(req).staffId, "permission");
           return res.status(403).json({
             error: "Feature not available on your package",
             package: context.package.id,
@@ -1043,6 +1219,10 @@ export async function createApp(io: any = null) {
         }
       }
       await updateAppConfig(req.params.tenantId, req.body);
+      await auditRouteEvent(req, "settings.app_updated", "settings", {
+        changedFields: auditChangedFields(req.body || {}),
+        businessFields: auditChangedFields(req.body?.business || {}),
+      }, req.params.tenantId, "settings");
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1053,6 +1233,12 @@ export async function createApp(io: any = null) {
     try {
       const context = await getTenantPackageContext(req.params.tenantId);
       if (!hasPackageFeature(context.package.features, "own_logo")) {
+        void auditRouteEvent(req, "permission.denied", "security", {
+          attemptedAction: "settings.logo_upload",
+          role: req.user?.role || null,
+          package: context.package.id,
+          feature: "own_logo",
+        }, auditActorFromRequest(req).staffId, "permission");
         return res.status(403).json({
           error: "Feature not available on your package",
           package: context.package.id,
@@ -1088,6 +1274,11 @@ export async function createApp(io: any = null) {
         },
       };
       await updateAppConfig(req.params.tenantId, nextConfig);
+      await auditRouteEvent(req, "settings.logo_uploaded", "settings", {
+        logoUrl,
+        mimeType: parsed.mimeType,
+        sizeBytes: parsed.buffer.length,
+      }, req.params.tenantId, "settings");
 
       res.json({ logoUrl, config: nextConfig });
     } catch (err: any) {
@@ -1098,8 +1289,7 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/action-center", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required for the action center." });
-        return;
+        return denyWithAudit(req, res, "action_center.view", "Manager access is required for the action center.");
       }
       res.json(await getManagerActionCenter(req.params.tenantId));
     } catch (err: any) {
@@ -1110,8 +1300,7 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/action-center/tasks", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required for action center tasks." });
-        return;
+        return denyWithAudit(req, res, "action_center.tasks_view", "Manager access is required for action center tasks.");
       }
       res.json(await getManagerTaskQueue(req.params.tenantId));
     } catch (err: any) {
@@ -1122,8 +1311,7 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/action-center/activity", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required for action center activity." });
-        return;
+        return denyWithAudit(req, res, "action_center.activity_view", "Manager access is required for action center activity.");
       }
       res.json(await getManagerActivityHistory(req.params.tenantId, req.query));
     } catch (err: any) {
@@ -1134,10 +1322,26 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/action-center/activity/export", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required for action center activity export." });
-        return;
+        return denyWithAudit(req, res, "action_center.activity_export", "Manager access is required for action center activity export.");
       }
       res.json(await getManagerActivityCsv(req.params.tenantId, req.query));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/action-center/activity/report", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "action_center.audit_report_export", "Manager access is required for audit reports.");
+      }
+      const report = await getManagerAuditReport(req.params.tenantId, req.query);
+      await auditRouteEvent(req, "audit_report.exported", "audit_report", {
+        audience: report.audience,
+        rowCount: report.count,
+        filters: req.query || {},
+      }, null, "action_center");
+      res.json(report);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1146,8 +1350,9 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/action-center/tasks/:taskId", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required for action center tasks." });
-        return;
+        return denyWithAudit(req, res, "action_center.task_decide", "Manager access is required for action center tasks.", {
+          taskId: req.params.taskId,
+        });
       }
       res.json(await decideManagerTask(req.params.tenantId, req.params.taskId, {
         action: req.body?.action,
@@ -1164,8 +1369,7 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/stocktakes", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required for stocktake sessions." });
-        return;
+        return denyWithAudit(req, res, "stocktake.sessions_view", "Manager access is required for stocktake sessions.");
       }
       res.json(await getStockTakeSessions(req.params.tenantId, {
         status: typeof req.query.status === "string" ? req.query.status : undefined,
@@ -1179,8 +1383,7 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/stocktakes", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required to start a stocktake." });
-        return;
+        return denyWithAudit(req, res, "stocktake.create", "Manager access is required to start a stocktake.");
       }
       const session = await createStockTakeSession(req.params.tenantId, req.body || {}, {
         staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
@@ -1196,8 +1399,7 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/stocktakes/rules", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required for stocktake rules." });
-        return;
+        return denyWithAudit(req, res, "stocktake.rules_view", "Manager access is required for stocktake rules.");
       }
       res.json(await getStockTakeRules(req.params.tenantId));
     } catch (err: any) {
@@ -1208,8 +1410,7 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/stocktakes/rules", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required to create stocktake rules." });
-        return;
+        return denyWithAudit(req, res, "stocktake.rule_create", "Manager access is required to create stocktake rules.");
       }
       res.status(201).json(await createStockTakeRule(req.params.tenantId, req.body || {}, {
         staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
@@ -1224,8 +1425,7 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/stocktakes/rules/run-due", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required to run stocktake rules." });
-        return;
+        return denyWithAudit(req, res, "stocktake.rule_run_due", "Manager access is required to run stocktake rules.");
       }
       res.json(await runDueStockTakeRules(req.params.tenantId, {
         staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
@@ -1243,8 +1443,9 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/stocktakes/rules/:ruleId", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required to update stocktake rules." });
-        return;
+        return denyWithAudit(req, res, "stocktake.rule_update", "Manager access is required to update stocktake rules.", {
+          ruleId: req.params.ruleId,
+        });
       }
       res.json(await updateStockTakeRule(req.params.tenantId, req.params.ruleId, req.body || {}, {
         staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
@@ -1259,8 +1460,9 @@ export async function createApp(io: any = null) {
   app.delete("/api/mariadb/tenants/:tenantId/stocktakes/rules/:ruleId", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required to delete stocktake rules." });
-        return;
+        return denyWithAudit(req, res, "stocktake.rule_delete", "Manager access is required to delete stocktake rules.", {
+          ruleId: req.params.ruleId,
+        });
       }
       res.json(await deleteStockTakeRule(req.params.tenantId, req.params.ruleId, {
         staffId: req.user?.staffId || req.user?.uid || null,
@@ -1316,8 +1518,9 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/stocktakes/items/:itemId/recount", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required to request a recount." });
-        return;
+        return denyWithAudit(req, res, "stocktake.recount_request", "Manager access is required to request a recount.", {
+          itemId: req.params.itemId,
+        });
       }
       res.json(await requestStockTakeRecount(req.params.tenantId, req.params.itemId, {
         note: req.body?.note || null,
@@ -1334,8 +1537,9 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/stocktakes/:sessionId/approve", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
-        res.status(403).json({ error: "Manager access is required to approve a stocktake." });
-        return;
+        return denyWithAudit(req, res, "stocktake.approve", "Manager access is required to approve a stocktake.", {
+          sessionId: req.params.sessionId,
+        });
       }
       res.json(await approveStockTakeSession(req.params.tenantId, req.params.sessionId, {
         staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
@@ -1380,6 +1584,88 @@ export async function createApp(io: any = null) {
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/laybys", requireAuth, async (req, res) => {
+    try {
+      res.json(await listLaybyOrders(req.params.tenantId, req.query || {}));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/laybys", requireAuth, async (req, res) => {
+    try {
+      const order = await createLaybyOrder(req.params.tenantId, {
+        ...req.body,
+        staffId: req.body?.staffId || req.user?.staffId || req.user?.uid || null,
+        staffName: req.body?.staffName || req.user?.name || null,
+      });
+      res.json(order);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/laybys/:laybyId", requireAuth, async (req, res) => {
+    try {
+      const order = await getLaybyOrderById(req.params.tenantId, req.params.laybyId);
+      if (!order) {
+        res.status(404).json({ error: "Lay-by not found" });
+        return;
+      }
+      res.json(order);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/laybys/:laybyId/payments", requireAuth, async (req, res) => {
+    try {
+      const order = await addLaybyPayment(req.params.tenantId, req.params.laybyId, {
+        ...req.body,
+        staffId: req.body?.staffId || req.user?.staffId || req.user?.uid || null,
+        staffName: req.body?.staffName || req.user?.name || null,
+      });
+      res.json(order);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/laybys/:laybyId/complete", requireAuth, async (req, res) => {
+    try {
+      const order = await completeLaybyOrder(req.params.tenantId, req.params.laybyId, {
+        ...req.body,
+        staffId: req.body?.staffId || req.user?.staffId || req.user?.uid || null,
+        staffName: req.body?.staffName || req.user?.name || null,
+        payment: req.body?.payment
+          ? {
+            ...req.body.payment,
+            staffId: req.body.payment.staffId || req.body?.staffId || req.user?.staffId || req.user?.uid || null,
+            staffName: req.body.payment.staffName || req.body?.staffName || req.user?.name || null,
+          }
+          : undefined,
+      });
+      const liveIo = realtimeIo();
+      if (liveIo && order.completedSaleId) broadcastSalesUpdate(liveIo, req.params.tenantId, order.completedSaleId);
+      res.json(order);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/laybys/:laybyId/cancel", requireAuth, async (req, res) => {
+    try {
+      const order = await cancelLaybyOrder(req.params.tenantId, req.params.laybyId, {
+        ...req.body,
+        staffId: req.body?.staffId || req.user?.staffId || req.user?.uid || null,
+        staffName: req.body?.staffName || req.user?.name || null,
+      });
+      res.json(order);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -1515,6 +1801,15 @@ export async function createApp(io: any = null) {
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/offline-sync/issues", requireAuth, async (req, res) => {
+    try {
+      const result = await recordOfflineSyncIssue(req.params.tenantId, req.body || {});
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -2120,6 +2415,10 @@ export async function createApp(io: any = null) {
     async (req, res) => {
     try {
       const data = await createCustomer(req.params.tenantId, req.body);
+      await auditRouteEvent(req, "customer.created", "customer", {
+        customerName: data?.name || req.body?.name || null,
+        changedFields: auditChangedFields(req.body || {}),
+      }, data?.id || null, "customer_admin");
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2129,6 +2428,10 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, validateSchema(CustomerUpdateSchema), async (req, res) => {
     try {
       const data = await updateCustomer(req.params.tenantId, req.params.id, req.body);
+      await auditRouteEvent(req, "customer.updated", "customer", {
+        customerName: data?.name || req.body?.name || null,
+        changedFields: auditChangedFields(req.body || {}),
+      }, req.params.id, "customer_admin");
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2138,6 +2441,9 @@ export async function createApp(io: any = null) {
   app.delete("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, async (req, res) => {
     try {
       await deleteCustomer(req.params.tenantId, req.params.id);
+      await auditRouteEvent(req, "customer.deleted", "customer", {
+        customerId: req.params.id,
+      }, req.params.id, "customer_admin");
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2152,6 +2458,11 @@ export async function createApp(io: any = null) {
     async (req, res) => {
     try {
       const data = await createStaff(req.params.tenantId, req.body);
+      await auditRouteEvent(req, "staff.created", "staff", {
+        staffName: data?.name || req.body?.name || null,
+        role: data?.role || req.body?.role || null,
+        changedFields: auditChangedFields(req.body || {}),
+      }, data?.id || null, "staff_admin");
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2161,6 +2472,11 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, validateSchema(StaffUpdateSchema), async (req, res) => {
     try {
       const data = await updateStaff(req.params.tenantId, req.params.id, req.body);
+      await auditRouteEvent(req, "staff.updated", "staff", {
+        staffName: data?.name || req.body?.name || null,
+        role: data?.role || req.body?.role || null,
+        changedFields: auditChangedFields(req.body || {}),
+      }, req.params.id, "staff_admin");
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2170,6 +2486,9 @@ export async function createApp(io: any = null) {
   app.delete("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, async (req, res) => {
     try {
       await deleteStaff(req.params.tenantId, req.params.id);
+      await auditRouteEvent(req, "staff.deleted", "staff", {
+        targetStaffId: req.params.id,
+      }, req.params.id, "staff_admin");
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2249,7 +2568,9 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/companion-device-assignments/:deviceId", requireAuth, async (req, res) => {
     try {
       if (!canManageCompanionDevices(req.user?.role)) {
-        return res.status(403).json({ error: "Only admins and devs can assign companion devices" });
+        return denyWithAudit(req, res, "companion_device.assign", "Only admins and devs can assign companion devices", {
+          deviceId: req.params.deviceId,
+        });
       }
 
       const deviceId = String(req.params.deviceId || "").trim();
@@ -2317,6 +2638,12 @@ export async function createApp(io: any = null) {
           LIMIT 1`,
         [req.params.tenantId, deviceId]
       );
+      await auditRouteEvent(req, "settings.companion_device_assigned", "companion_device_assignment", {
+        deviceId,
+        deviceName: deviceName || "Mobile device",
+        workstationId,
+        defaultMode,
+      }, rows[0]?.id || deviceId, "device_admin");
       res.json(rows[0]);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2326,12 +2653,17 @@ export async function createApp(io: any = null) {
   app.delete("/api/mariadb/tenants/:tenantId/companion-device-assignments/:deviceId", requireAuth, async (req, res) => {
     try {
       if (!canManageCompanionDevices(req.user?.role)) {
-        return res.status(403).json({ error: "Only admins and devs can revoke companion device assignments" });
+        return denyWithAudit(req, res, "companion_device.revoke", "Only admins and devs can revoke companion device assignments", {
+          deviceId: req.params.deviceId,
+        });
       }
       await query(
         `DELETE FROM companion_device_assignments WHERE tenant_id = ? AND device_id = ?`,
         [req.params.tenantId, req.params.deviceId]
       );
+      await auditRouteEvent(req, "settings.companion_device_revoked", "companion_device_assignment", {
+        deviceId: req.params.deviceId,
+      }, req.params.deviceId, "device_admin");
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2409,7 +2741,7 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/manager-cash/summary", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can view the manager float." });
+        return denyWithAudit(req, res, "manager_cash.summary_view", "Only managers and admins can view the manager float.");
       }
       res.json(await getManagerCashSummary(req.params.tenantId));
     } catch (err: any) {
@@ -2420,9 +2752,42 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/manager-cash/movements", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can view manager cash movements." });
+        return denyWithAudit(req, res, "manager_cash.movements_view", "Only managers and admins can view manager cash movements.");
       }
-      res.json(await getManagerCashMovements(req.params.tenantId, Number(req.query.limit || 40)));
+      res.json(await getManagerCashMovements(req.params.tenantId, {
+        limit: typeof req.query.limit === "string" ? req.query.limit : 40,
+        movementType: typeof req.query.movementType === "string" ? req.query.movementType : null,
+        direction: typeof req.query.direction === "string" ? req.query.direction : null,
+        cashSource: typeof req.query.cashSource === "string" ? req.query.cashSource : null,
+        sourceType: typeof req.query.sourceType === "string" ? req.query.sourceType : null,
+        staffId: typeof req.query.staffId === "string" ? req.query.staffId : null,
+        customerId: typeof req.query.customerId === "string" ? req.query.customerId : null,
+        from: typeof req.query.from === "string" ? req.query.from : null,
+        to: typeof req.query.to === "string" ? req.query.to : null,
+        search: typeof req.query.search === "string" ? req.query.search : null,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/manager-cash/movements/export", requireAuth, async (req, res) => {
+    try {
+      if (!canManageCash(req.user?.role)) {
+        return denyWithAudit(req, res, "manager_cash.movements_export", "Only managers and admins can export manager cash movements.");
+      }
+      res.json(await exportManagerCashMovementsCsv(req.params.tenantId, {
+        limit: typeof req.query.limit === "string" ? req.query.limit : 500,
+        movementType: typeof req.query.movementType === "string" ? req.query.movementType : null,
+        direction: typeof req.query.direction === "string" ? req.query.direction : null,
+        cashSource: typeof req.query.cashSource === "string" ? req.query.cashSource : null,
+        sourceType: typeof req.query.sourceType === "string" ? req.query.sourceType : null,
+        staffId: typeof req.query.staffId === "string" ? req.query.staffId : null,
+        customerId: typeof req.query.customerId === "string" ? req.query.customerId : null,
+        from: typeof req.query.from === "string" ? req.query.from : null,
+        to: typeof req.query.to === "string" ? req.query.to : null,
+        search: typeof req.query.search === "string" ? req.query.search : null,
+      }));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2431,7 +2796,7 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/manager-cash/movements", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can record manager cash movements." });
+        return denyWithAudit(req, res, "manager_cash.movement_create", "Only managers and admins can record manager cash movements.");
       }
       const movement = await recordManagerCashMovement(req.params.tenantId, req.body || {}, {
         staffId: req.user?.staffId,
@@ -2447,7 +2812,7 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/manager-cash/transfers", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can view cash custody transfers." });
+        return denyWithAudit(req, res, "manager_cash.transfers_view", "Only managers and admins can view cash custody transfers.");
       }
       res.json(await getCashCustodyTransfers(
         req.params.tenantId,
@@ -2462,7 +2827,7 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/manager-cash/transfers", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can request cash custody transfers." });
+        return denyWithAudit(req, res, "manager_cash.transfer_request", "Only managers and admins can request cash custody transfers.");
       }
       const transfer = await createCashCustodyTransfer(req.params.tenantId, req.body || {}, {
         staffId: req.user?.staffId,
@@ -2478,7 +2843,9 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/manager-cash/transfers/:transferId/confirm", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can confirm cash custody transfers." });
+        return denyWithAudit(req, res, "manager_cash.transfer_confirm", "Only managers and admins can confirm cash custody transfers.", {
+          transferId: req.params.transferId,
+        });
       }
       const transfer = await confirmCashCustodyTransfer(req.params.tenantId, req.params.transferId, req.body || {}, {
         staffId: req.user?.staffId,
@@ -2494,7 +2861,9 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/manager-cash/transfers/:transferId/cancel", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can cancel cash custody transfers." });
+        return denyWithAudit(req, res, "manager_cash.transfer_cancel", "Only managers and admins can cancel cash custody transfers.", {
+          transferId: req.params.transferId,
+        });
       }
       const result = await cancelCashCustodyTransfer(req.params.tenantId, req.params.transferId, req.body || {}, {
         staffId: req.user?.staffId,
@@ -2510,7 +2879,7 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/manager-cash/close/preview", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can preview end-of-day cash close." });
+        return denyWithAudit(req, res, "manager_cash.close_preview", "Only managers and admins can preview end-of-day cash close.");
       }
       res.json(await getCashClosePreview(
         req.params.tenantId,
@@ -2524,7 +2893,7 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/manager-cash/close", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can view end-of-day cash close records." });
+        return denyWithAudit(req, res, "manager_cash.close_view", "Only managers and admins can view end-of-day cash close records.");
       }
       res.json(await getCashCloseCheckpoints(req.params.tenantId, Number(req.query.limit || 20)));
     } catch (err: any) {
@@ -2535,7 +2904,7 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/manager-cash/close", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can create end-of-day cash close checkpoints." });
+        return denyWithAudit(req, res, "manager_cash.close_create", "Only managers and admins can create end-of-day cash close checkpoints.");
       }
       const checkpoint = await createCashCloseCheckpoint(req.params.tenantId, req.body || {}, {
         staffId: req.user?.staffId,
@@ -2551,7 +2920,9 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/manager-cash/close/:checkpointId/export", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can export end-of-day cash close records." });
+        return denyWithAudit(req, res, "manager_cash.close_export", "Only managers and admins can export end-of-day cash close records.", {
+          checkpointId: req.params.checkpointId,
+        });
       }
       res.json(await exportCashCloseCheckpointCsv(req.params.tenantId, req.params.checkpointId));
     } catch (err: any) {
@@ -2562,7 +2933,7 @@ export async function createApp(io: any = null) {
   app.post("/api/mariadb/tenants/:tenantId/manager-cash/wallet-cash", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can reconcile wallet cash." });
+        return denyWithAudit(req, res, "manager_cash.wallet_cash_reconcile", "Only managers and admins can reconcile wallet cash.");
       }
       const result = await recordWalletCashMovement(req.params.tenantId, req.body || {}, {
         staffId: req.user?.staffId,
@@ -2603,6 +2974,13 @@ export async function createApp(io: any = null) {
       const hostedLimitReached = !licence.shouldEnforceLicence() && hostedPackage.maxRegisters !== -1 && activeRegisters >= hostedPackage.maxRegisters;
       if (!licence.checkRegisterLimit(activeRegisters) || hostedLimitReached) {
         const info = licence.getLicenceInfo();
+        void auditRouteEvent(req, "permission.denied", "security", {
+          attemptedAction: "cash_session.open",
+          reason: "register_limit_reached",
+          activeRegisters,
+          package: info.payload?.tier || hostedPackage.id,
+          limit: info.payload?.maxRegisters ?? hostedPackage.maxRegisters,
+        }, auditActorFromRequest(req).staffId, "permission");
         return res.status(403).json({
           error: "Register limit reached",
           package: info.payload?.tier || hostedPackage.id,
@@ -2642,6 +3020,12 @@ export async function createApp(io: any = null) {
           note: "Opening float counted",
         });
       }
+      await auditRouteEvent(req, "cash_session.opened", "cash_session", {
+        staffId: req.body.staffId || null,
+        staffName: req.body.staffName || null,
+        openingFloat: req.body.openingFloat || 0,
+        status: req.body.status || "open",
+      }, id, "cash_session");
       res.json({ id, ...req.body, reviewStatus: 'in_progress' });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2652,8 +3036,10 @@ export async function createApp(io: any = null) {
     try {
       const movementType = String(req.body.type || "");
       if (["cash_drop", "cash_added", "cash_removed"].includes(movementType) && !canManageCash(req.user?.role)) {
-        res.status(403).json({ error: "Manager approval is required for cash movements." });
-        return;
+        return denyWithAudit(req, res, "cash_session.manager_movement", "Manager approval is required for cash movements.", {
+          cashSessionId: req.params.id,
+          movementType,
+        });
       }
       const amount = toMoneyNumber(req.body.amount);
       const movement = await recordCashMovement(req.params.tenantId, {
@@ -2693,7 +3079,10 @@ export async function createApp(io: any = null) {
         ["reviewed", "reconciled", "disputed"].includes(updates.reviewStatus) &&
         !canManageCash(req.user?.role)
       ) {
-        return res.status(403).json({ error: "Only managers and admins can finalize cash reviews" });
+        return denyWithAudit(req, res, "cash_session.review_finalize", "Only managers and admins can finalize cash reviews", {
+          cashSessionId: req.params.id,
+          reviewStatus: updates.reviewStatus,
+        });
       }
       const isSubmittingCashUp = updates.status === "closed" || updates.reviewStatus === "submitted";
       let walletTipsDelta = 0;
@@ -2764,6 +3153,14 @@ export async function createApp(io: any = null) {
           conn.release();
         }
       }
+      await auditRouteEvent(req, "cash_session.updated", "cash_session", {
+        cashSessionId: req.params.id,
+        changedFields: auditChangedFields(updates || {}),
+        status: updates.status || null,
+        reviewStatus: updates.reviewStatus || null,
+        walletTipsDelta,
+        walletTipsStaffId,
+      }, req.params.id, "cash_session");
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2773,7 +3170,9 @@ export async function createApp(io: any = null) {
   app.put("/api/mariadb/tenants/:tenantId/cash-sessions/:id/review", requireAuth, async (req, res) => {
     try {
       if (!canManageCash(req.user?.role)) {
-        return res.status(403).json({ error: "Only managers and admins can review cash ups" });
+        return denyWithAudit(req, res, "cash_session.review", "Only managers and admins can review cash ups", {
+          cashSessionId: req.params.id,
+        });
       }
       const reviewStatus = req.body.reviewStatus || "reviewed";
       if (!["reviewed", "reconciled", "disputed"].includes(reviewStatus)) {
@@ -2809,6 +3208,12 @@ export async function createApp(io: any = null) {
           role: req.user?.role,
         });
       }
+      await auditRouteEvent(req, "cash_session.reviewed", "cash_session", {
+        cashSessionId: req.params.id,
+        reviewStatus,
+        managerNotesPresent: Boolean(req.body.managerNotes),
+        varianceReasonPresent: Boolean(req.body.varianceReason),
+      }, req.params.id, "cash_session");
       res.json({ success: true, reviewStatus });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

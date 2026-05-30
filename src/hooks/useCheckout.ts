@@ -2,24 +2,29 @@
  * useCheckout — MariaDB REST edition.
  * Replaces all Firestore addDoc/updateDoc calls with REST API calls.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { JwtUser } from './useAuth';
 import { Customer, Staff, AppConfig } from '../types';
 import { usePosStore } from '../store/usePosStore';
-import { apiPost, apiPut, createSale, updateCustomer, updateStaff, getSaleById } from '../api';
+import { apiPut, createSale, getSaleById } from '../api';
 import { useSocket } from './useSocket';
-import { isStaffCustomerProfile } from '../utils/customerProfiles';
 import { getApplicablePricingDiscount } from '../utils/discounts';
 import {
   CheckoutMethod,
+  dismissOfflineSale,
   countPendingOfflineSales,
   enqueueOfflineSale,
   getOfflineCheckoutBlock,
   isOfflineLikeError,
+  listOfflineSales,
+  OfflineSaleQueueItem,
+  OfflineSyncBatchSummary,
   offlineSaleToReceiptSale,
   offlineSalesChangedEventName,
+  retryOfflineSale,
   syncQueuedOfflineSales,
 } from '../utils/offlineSales';
+import { isStaffCustomerProfile } from '../utils/customerProfiles';
 
 interface CheckoutDeps {
   user: JwtUser | null;
@@ -68,8 +73,22 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   const [offlineQueueCount, setOfflineQueueCount] = useState(() => (
     tenantId ? countPendingOfflineSales(tenantId) : 0
   ));
+  const [offlineQueueItems, setOfflineQueueItems] = useState<OfflineSaleQueueItem[]>(() => (
+    tenantId ? listOfflineSales(tenantId) : []
+  ));
   const [offlineSyncStatus, setOfflineSyncStatus] = useState<'idle' | 'syncing' | 'error'>('idle');
   const [offlineSyncError, setOfflineSyncError] = useState<string | null>(null);
+  const [offlineSyncSummary, setOfflineSyncSummary] = useState<OfflineSyncBatchSummary | null>(null);
+
+  const refreshOfflineQueue = useCallback(() => {
+    if (!tenantId) {
+      setOfflineQueueItems([]);
+      setOfflineQueueCount(0);
+      return;
+    }
+    setOfflineQueueItems(listOfflineSales(tenantId));
+    setOfflineQueueCount(countPendingOfflineSales(tenantId));
+  }, [tenantId]);
 
   useEffect(() => {
     const updateOnlineState = () => setIsBrowserOffline(typeof navigator !== 'undefined' ? navigator.onLine === false : false);
@@ -84,44 +103,75 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
   useEffect(() => {
     if (!tenantId) {
-      setOfflineQueueCount(0);
+      refreshOfflineQueue();
       return;
     }
 
-    const refreshOfflineQueueCount = () => setOfflineQueueCount(countPendingOfflineSales(tenantId));
-    refreshOfflineQueueCount();
-    window.addEventListener(offlineSalesChangedEventName(), refreshOfflineQueueCount);
-    return () => window.removeEventListener(offlineSalesChangedEventName(), refreshOfflineQueueCount);
-  }, [tenantId]);
+    refreshOfflineQueue();
+    window.addEventListener(offlineSalesChangedEventName(), refreshOfflineQueue);
+    return () => window.removeEventListener(offlineSalesChangedEventName(), refreshOfflineQueue);
+  }, [tenantId, refreshOfflineQueue]);
 
-  useEffect(() => {
-    if (!tenantId || isBrowserOffline || offlineQueueCount <= 0 || offlineSyncStatus === 'syncing') return;
-
-    let cancelled = false;
+  const runOfflineSync = useCallback(async (force = false) => {
+    if (!tenantId || isBrowserOffline || offlineSyncStatus === 'syncing') return;
+    const hasSyncCandidates = listOfflineSales(tenantId).some(item => item.status === 'pending' || item.status === 'syncing' || item.status === 'failed');
+    if (!hasSyncCandidates) return;
     setOfflineSyncStatus('syncing');
     setOfflineSyncError(null);
 
-    syncQueuedOfflineSales(tenantId)
-      .then(async (result) => {
-        if (cancelled) return;
-        setOfflineQueueCount(result.pending);
-        setOfflineSyncStatus(result.failed.length > 0 ? 'error' : 'idle');
-        setOfflineSyncError(result.failed[0]?.lastError || null);
-        if (result.synced.length > 0) {
-          await refreshSales().catch(e => console.warn('Failed to refresh sales after offline sync:', e));
-          await refreshCustomers?.().catch(e => console.warn('Failed to refresh customers after offline sync:', e));
-        }
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setOfflineSyncStatus('error');
-        setOfflineSyncError(error instanceof Error ? error.message : String(error || 'Offline sync failed'));
-      });
+    try {
+      const result = await syncQueuedOfflineSales(tenantId, { force });
+      refreshOfflineQueue();
+      setOfflineSyncSummary(result.summary);
+      setOfflineSyncStatus(result.failed.length > 0 ? 'error' : 'idle');
+      setOfflineSyncError(result.failed[0]?.lastError || (result.skipped > 0 ? result.summary.message : null));
+      if (result.synced.length > 0) {
+        await refreshSales().catch(e => console.warn('Failed to refresh sales after offline sync:', e));
+        await refreshCustomers?.().catch(e => console.warn('Failed to refresh customers after offline sync:', e));
+      }
+    } catch (error) {
+      refreshOfflineQueue();
+      setOfflineSyncStatus('error');
+      setOfflineSyncError(error instanceof Error ? error.message : String(error || 'Offline sync failed'));
+      setOfflineSyncSummary(null);
+    }
+  }, [tenantId, isBrowserOffline, offlineSyncStatus, refreshOfflineQueue, refreshSales, refreshCustomers]);
 
+  useEffect(() => {
+    if (!tenantId || isBrowserOffline || offlineSyncStatus !== 'idle') return;
+    const hasPendingSync = offlineQueueItems.some(item => item.status === 'pending' || item.status === 'syncing');
+    if (!hasPendingSync) return;
+
+    let cancelled = false;
+    runOfflineSync(false).catch((error) => {
+      if (cancelled) return;
+      setOfflineSyncStatus('error');
+      setOfflineSyncError(error instanceof Error ? error.message : String(error || 'Offline sync failed'));
+    });
     return () => {
       cancelled = true;
     };
-  }, [tenantId, isBrowserOffline, offlineQueueCount, offlineSyncStatus, refreshSales, refreshCustomers]);
+  }, [tenantId, isBrowserOffline, offlineQueueItems, offlineSyncStatus, runOfflineSync]);
+
+  const retryQueuedOfflineSale = useCallback((itemId: string) => {
+    if (!tenantId) return;
+    retryOfflineSale(tenantId, itemId);
+    setOfflineSyncStatus('idle');
+    setOfflineSyncError(null);
+    setOfflineSyncSummary(null);
+    refreshOfflineQueue();
+  }, [tenantId, refreshOfflineQueue]);
+
+  const dismissQueuedOfflineSale = useCallback((itemId: string) => {
+    if (!tenantId) return;
+    dismissOfflineSale(tenantId, itemId);
+    refreshOfflineQueue();
+    if (countPendingOfflineSales(tenantId) === 0) {
+      setOfflineSyncStatus('idle');
+      setOfflineSyncError(null);
+      setOfflineSyncSummary(null);
+    }
+  }, [tenantId, refreshOfflineQueue]);
 
   // ── Tax calculations ─────────────────────────────────────────────────────────
   const taxRate = config?.business?.taxRate || 0;
@@ -175,23 +225,6 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
   const clearPointsDiscount = () => setPointsDiscount(0);
 
-  // ── Shared loyalty points update ─────────────────────────────────────────────
-  const updateLoyaltyPoints = async (amountPaid: number) => {
-    if (!selectedCustomerId || !config?.business?.enableLoyalty || !config?.business?.pointsEarnedPerCurrency || !tenantId) return;
-    const pointsEarned = Math.floor(amountPaid / config.business.pointsEarnedPerCurrency);
-    const customer = customers.find(c => c.id === selectedCustomerId);
-    if (isStaffCustomerProfile(customer)) return;
-    const currentPoints = customer?.loyaltyPoints || customer?.points || 0;
-    let pointsConsumed = 0;
-    if (pointsDiscount > 0 && config.business.pointsRequiredForDiscount && config.business.discountAmountForPoints) {
-      pointsConsumed = Math.ceil(pointsDiscount / config.business.discountAmountForPoints) * config.business.pointsRequiredForDiscount;
-    }
-    const newPoints = Math.max(0, currentPoints - pointsConsumed) + pointsEarned;
-    await updateCustomer(tenantId, selectedCustomerId, { loyaltyPoints: newPoints }).catch(e =>
-      console.warn('Failed to update loyalty points:', e)
-    );
-  };
-
   // ── Reset cart state after checkout ─────────────────────────────────────────
   const resetAfterCheckout = () => {
     clearCart();
@@ -212,12 +245,94 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       staffId: currentUserStaff?.id || null,
       staffName: currentUserStaff?.name || null,
     });
-    setOfflineQueueCount(countPendingOfflineSales(tenantId));
+    refreshOfflineQueue();
     resetAfterCheckout();
     setTenderModal({ isOpen: false, method: null });
     setSplitPaymentModal(false);
     setCheckoutModal({ isOpen: true, paymentMethod: method, saleData: offlineSaleToReceiptSale(queued) });
     return queued;
+  };
+
+  const attachCheckoutSideEffects = (saleData: any) => {
+    if (saleData.status !== 'completed') return;
+
+    if (selectedCustomerId && config?.business?.enableLoyalty && config?.business?.pointsEarnedPerCurrency) {
+      const pointsEarned = Math.floor(cartTotalAfterDiscount / config.business.pointsEarnedPerCurrency);
+      const customer = customers.find(c => c.id === selectedCustomerId);
+      if (!isStaffCustomerProfile(customer)) {
+        const currentPoints = Number(customer?.loyaltyPoints || customer?.points || 0);
+        let pointsConsumed = 0;
+        if (pointsDiscount > 0 && config.business.pointsRequiredForDiscount && config.business.discountAmountForPoints) {
+          pointsConsumed = Math.ceil(pointsDiscount / config.business.discountAmountForPoints) * config.business.pointsRequiredForDiscount;
+        }
+        saleData.loyaltyPoints = Math.max(0, currentPoints - pointsConsumed) + pointsEarned;
+      }
+    }
+
+    const totalTips = saleData.payments
+      ? saleData.payments.reduce((sum: number, p: any) => sum + Number(p.tipAmount || 0), 0)
+      : 0;
+    let expectedCashDelta = 0;
+    let tipsDelta = 0;
+    const cashMovements: any[] = [];
+
+    if (activeSession?.id && saleData.payments) {
+      for (const payment of saleData.payments) {
+        if (payment.method === 'cash') {
+          const amount = Number(payment.amount || 0);
+          expectedCashDelta += amount;
+          cashMovements.push({
+            type: 'cash_sale',
+            direction: 'in',
+            amount,
+            paymentId: null,
+            staffId: currentUserStaff?.id || null,
+            staffName: currentUserStaff?.name || null,
+            note: 'Cash sale recorded from checkout',
+          });
+        } else if (payment.method === 'card') {
+          const cashOutAmount = Number(payment.cashOutAmount || 0);
+          const tipAmount = Number(payment.tipAmount || 0);
+          if (cashOutAmount > 0) {
+            expectedCashDelta -= cashOutAmount;
+            cashMovements.push({
+              type: 'cash_out',
+              direction: 'out',
+              amount: cashOutAmount,
+              paymentId: null,
+              staffId: currentUserStaff?.id || null,
+              staffName: currentUserStaff?.name || null,
+              note: 'Cash paid out against card overage',
+            });
+          } else if (tipAmount > 0) {
+            tipsDelta += tipAmount;
+            cashMovements.push({
+              type: 'tip',
+              direction: 'neutral',
+              amount: tipAmount,
+              paymentId: null,
+              staffId: currentUserStaff?.id || null,
+              staffName: currentUserStaff?.name || null,
+              note: 'Card tip recorded',
+            });
+          }
+        }
+      }
+    }
+
+    saleData.cashSessionId = activeSession?.id || null;
+    if (expectedCashDelta !== 0) saleData.expectedCashDelta = expectedCashDelta;
+    if (tipsDelta !== 0) saleData.tipsDelta = tipsDelta;
+    if (cashMovements.length > 0) saleData.cashMovements = cashMovements;
+    if (currentUserStaff?.id) {
+      saleData.staffMetrics = { ordersDelta: 1 };
+      if (totalTips > 0) saleData.staffMetrics.tipsDelta = totalTips;
+    }
+
+    const accountPayment = saleData.payments?.find((p: any) => p.method === 'account');
+    if (accountPayment && selectedCustomer) {
+      saleData.accountBalanceDelta = Number(accountPayment.amount || 0);
+    }
   };
 
   // ── Save order (restaurant hold/send to workstations) ────────────────────────
@@ -502,6 +617,10 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         saleData.cashOutAmount = p.cashOutAmount;
       }
 
+      if (method !== 'payfast') {
+        attachCheckoutSideEffects(saleData);
+      }
+
       if (isBrowserOffline) {
         queueOfflineCheckout(saleData, method);
         setIsProcessing(false);
@@ -535,90 +654,16 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       await refreshSales();
 
       if (method !== 'payfast') {
-        // Update loyalty points
-        await updateLoyaltyPoints(cartTotalAfterDiscount);
-
-        // Update cash session totals for each payment
-        if (activeSession?.id && saleData.payments) {
-          for (const payment of saleData.payments) {
-            const sessionUpdates: any = {};
-            const movements: any[] = [];
-            if (payment.method === 'cash') {
-              sessionUpdates.expectedCashDelta = payment.amount;
-              movements.push({
-                type: 'cash_sale',
-                direction: 'in',
-                amount: payment.amount,
-                saleId,
-                staffId: currentUserStaff?.id || null,
-                staffName: currentUserStaff?.name || null,
-                note: 'Cash sale recorded from checkout',
-              });
-            } else if (payment.method === 'card') {
-              if (payment.cashOutAmount > 0) {
-                sessionUpdates.expectedCashDelta = -(payment.cashOutAmount);
-                movements.push({
-                  type: 'cash_out',
-                  direction: 'out',
-                  amount: payment.cashOutAmount,
-                  saleId,
-                  staffId: currentUserStaff?.id || null,
-                  staffName: currentUserStaff?.name || null,
-                  note: 'Cash paid out against card overage',
-                });
-              } else if (payment.tipAmount > 0) {
-                sessionUpdates.tipsDelta = payment.tipAmount;
-                movements.push({
-                  type: 'tip',
-                  direction: 'neutral',
-                  amount: payment.tipAmount,
-                  saleId,
-                  staffId: currentUserStaff?.id || null,
-                  staffName: currentUserStaff?.name || null,
-                  note: 'Card tip recorded',
-                });
-              }
-            }
-            if (Object.keys(sessionUpdates).length > 0) {
-              await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}`, sessionUpdates)
-                .catch(e => console.warn('Failed to update session:', e));
-            }
-            for (const movement of movements) {
-              await apiPost(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}/movements`, movement)
-                .catch(e => console.warn('Failed to record cash movement:', e));
-            }
-          }
-        }
-
-        // Update staff metrics (aggregated tips)
-        if (currentUserStaff?.id && saleData.payments) {
-          const totalTips = saleData.payments.reduce((sum: number, p: any) => sum + (p.tipAmount || 0), 0);
-          const metricsUpdate: any = { metricsOrdersDelta: 1 };
-          if (totalTips > 0) metricsUpdate.metricsTipsDelta = totalTips;
-          await updateStaff(tenantId, currentUserStaff.id, metricsUpdate)
-            .catch(e => console.warn('Failed to update staff metrics:', e));
-        }
-        
-        const walletPayment = (method === 'split' || method === 'wallet')
-          ? saleData.payments.find((p: any) => p.method === 'wallet')
-          : null;
-        if (method === 'split' || method === 'account') {
-          const accountPayment = saleData.payments.find((p: any) => p.method === 'account');
-          if (accountPayment && selectedCustomer) {
-            await updateCustomer(tenantId, selectedCustomer.id, {
-              accountBalanceDelta: Number(accountPayment.amount || 0)
-            }).catch(e => console.warn('Failed to update account balance:', e));
-          }
-        }
-        if (walletPayment || method === 'account' || method === 'split') {
-          await refreshCustomers?.().catch(e => console.warn('Failed to refresh customer balances:', e));
-        }
-
         resetAfterCheckout();
         setTenderModal({ isOpen: false, method: null });
         setSplitPaymentModal(false);
         setCheckoutModal({ isOpen: true, paymentMethod: method, saleData: { ...saleData, id: saleId } });
         setIsProcessing(false);
+
+        // Refresh customer balances in the background
+        if (method === 'wallet' || method === 'account' || method === 'split') {
+          refreshCustomers?.();
+        }
       } else {
         // PayFast redirect (PayFast currently doesn't support being part of a split in this implementation)
         const response = await fetch('/api/payfast/generate', {
@@ -679,6 +724,11 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       pendingCount: offlineQueueCount,
       syncStatus: offlineSyncStatus,
       lastError: offlineSyncError,
+      lastSummary: offlineSyncSummary,
+      queueItems: offlineQueueItems,
+      syncNow: () => runOfflineSync(true),
+      retryItem: retryQueuedOfflineSale,
+      dismissItem: dismissQueuedOfflineSale,
     },
     activeOrderId,
     handleParkSale,
