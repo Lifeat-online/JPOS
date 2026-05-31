@@ -1270,12 +1270,14 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
       for (const item of sale.items) {
         const itemId = generateSaleItemId();
         const productId = (item as any).productId || item.id || null;
+        const stampSentAt = shouldStampWorkstationSentAt(sale.status || "pending", item);
+        const orderedAtSql = stampSentAt ? timerNowExpression() : "NULL";
         
         await conn.query(
           `INSERT INTO sale_items (
             id, sale_id, product_id, product_name, price, quantity, status,
             workstation_id, ordered_at, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${orderedAtSql}, NOW(), NOW())`,
           [
             itemId,
             id,
@@ -1459,6 +1461,18 @@ function generateSaleItemId() {
   return `item_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 }
 
+function shouldStampWorkstationSentAt(status: unknown, item: any) {
+  return String(status || "").toLowerCase() === "kitchen" && Boolean(item?.workstationId);
+}
+
+function timestampExpression(value: unknown, fallbackSql = "NULL") {
+  return value ? "?" : fallbackSql;
+}
+
+function timerNowExpression() {
+  return typeof isPostgres === "function" && isPostgres() ? "CURRENT_TIMESTAMP" : "UTC_TIMESTAMP()";
+}
+
 export async function updateSale(
   tenantId: string,
   saleId: string,
@@ -1600,6 +1614,8 @@ export async function updateSale(
       fields.push("sync_source = ?");
       values.push((updates as any).syncSource || 'online');
     }
+    const nextStatus = updates.status !== undefined ? updates.status : existingSale?.status;
+    const nextTransactionType = (updates as any).transactionType !== undefined ? ((updates as any).transactionType || "sale") : (existingSale?.transaction_type || "sale");
 
     if (fields.length > 0) {
       fields.push("updated_at = NOW()");
@@ -1635,17 +1651,28 @@ export async function updateSale(
         // Preserve status and timestamps if it exists
         const ex = existingMap.get(saleItemId);
         const finalStatus = ex ? ex.status : (item.status || "pending");
-        const finalOrderedAt = ex?.ordered_at || (item.orderedAt ? new Date(item.orderedAt) : null);
-        const finalAcceptedAt = ex?.accepted_at || (item.acceptedAt ? new Date(item.acceptedAt) : null);
-        const finalReadyAt = ex?.ready_at || (item.readyAt ? new Date(item.readyAt) : null);
-        const finalDeliveredAt = ex?.delivered_at || (item.deliveredAt ? new Date(item.deliveredAt) : null);
+        const shouldStampSentAt = !ex?.ordered_at && shouldStampWorkstationSentAt(nextStatus, item);
+        const finalOrderedAt = ex?.ordered_at || null;
+        const finalAcceptedAt = ex?.accepted_at || null;
+        const finalReadyAt = ex?.ready_at || null;
+        const finalDeliveredAt = ex?.delivered_at || null;
+        const orderedAtSql = shouldStampSentAt ? timerNowExpression() : timestampExpression(finalOrderedAt);
+        const acceptedAtSql = timestampExpression(finalAcceptedAt);
+        const readyAtSql = timestampExpression(finalReadyAt);
+        const deliveredAtSql = timestampExpression(finalDeliveredAt);
+        const timestampValues = [
+          ...(finalOrderedAt && !shouldStampSentAt ? [finalOrderedAt] : []),
+          ...(finalAcceptedAt ? [finalAcceptedAt] : []),
+          ...(finalReadyAt ? [finalReadyAt] : []),
+          ...(finalDeliveredAt ? [finalDeliveredAt] : []),
+        ];
 
         await conn.query(
           `INSERT INTO sale_items (
             id, sale_id, product_id, product_name, price, quantity, status,
             workstation_id, ordered_at, accepted_at, ready_at, delivered_at,
             action_staff_id, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${orderedAtSql}, ${acceptedAtSql}, ${readyAtSql}, ${deliveredAtSql}, ?, NOW(), NOW())`,
           [
             saleItemId,
             saleId,
@@ -1655,10 +1682,7 @@ export async function updateSale(
             item.quantity || 0,
             finalStatus,
             item.workstationId || null,
-            finalOrderedAt,
-            finalAcceptedAt,
-            finalReadyAt,
-            finalDeliveredAt,
+            ...timestampValues,
             item.actionStaffId || null,
           ]
         );
@@ -1687,8 +1711,6 @@ export async function updateSale(
       }
     }
 
-    const nextStatus = updates.status !== undefined ? updates.status : existingSale?.status;
-    const nextTransactionType = (updates as any).transactionType !== undefined ? ((updates as any).transactionType || "sale") : (existingSale?.transaction_type || "sale");
     const shouldDeductStock = existingSale?.status !== "completed" && nextStatus === "completed" && nextTransactionType === "sale";
     let walletSalePayment: Awaited<ReturnType<typeof applyWalletSalePayment>> | null = null;
     let offlineSyncConflicts: OfflineSyncConflict[] = [];
@@ -1844,11 +1866,11 @@ export async function updateSaleItem(
     values.push(updates.status);
 
     if (updates.status === 'accepted') {
-      fields.push("accepted_at = NOW()");
+      fields.push(`accepted_at = COALESCE(accepted_at, ${timerNowExpression()})`);
     } else if (updates.status === 'ready') {
-      fields.push("ready_at = NOW()");
+      fields.push(`ready_at = COALESCE(ready_at, ${timerNowExpression()})`);
     } else if (updates.status === 'delivered') {
-      fields.push("delivered_at = NOW()");
+      fields.push(`delivered_at = COALESCE(delivered_at, ${timerNowExpression()})`);
     }
   }
 
@@ -2008,7 +2030,7 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
         `INSERT INTO sale_items (
           id, sale_id, product_id, product_name, price, quantity, status,
           ordered_at, delivered_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'delivered', NOW(), NOW(), NOW(), NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, 'delivered', ${timerNowExpression()}, ${timerNowExpression()}, NOW(), NOW())`,
         [item.id, refundId, item.productId, item.name, item.price, item.quantity]
       );
 

@@ -643,8 +643,17 @@ export interface LiveWorkstationQueueRow {
   readyCount: number;
   queueCount: number;
   oldestOrderedAt?: any;
+  oldestActiveAt?: any;
   oldestAgeSeconds: number;
+  oldestActiveAgeSeconds: number;
+  activeMedianAgeSeconds: number;
+  activeP90AgeSeconds: number;
+  staleTimerCount: number;
+  unclosedHandoffCount: number;
+  avgAcceptSecondsLast2h: number;
   avgPrepSecondsLast2h: number;
+  avgHandoffSecondsLast2h: number;
+  avgTotalSecondsLast2h: number;
 }
 
 export interface LiveRestaurantStats {

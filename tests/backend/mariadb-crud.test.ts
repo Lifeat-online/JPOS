@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { createCustomerPayoutRequest, createPayoutRequest, createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale } from '../../server/mariadb-crud.js';
+import { createCustomerPayoutRequest, createPayoutRequest, createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale, updateSaleItem } from '../../server/mariadb-crud.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
   getConnection: vi.fn(),
+  isPostgres: vi.fn(() => false),
 }));
 
 describe('mariadb-crud', () => {
@@ -112,6 +113,56 @@ describe('mariadb-crud', () => {
     );
   });
 
+  it('does not stamp ordered_at for held workstation items', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('SELECT bulk_item_id')) return Promise.resolve([[]]);
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await createSale('tenant_1', {
+      status: 'open',
+      total: 25,
+      subtotal: 25,
+      paymentMethod: 'pending',
+      items: [{ id: 'prod_1', name: 'Burger', price: 25, quantity: 1, workstationId: 'ws_kitchen' } as any],
+    });
+
+    const itemInsert = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO sale_items'));
+    expect(String(itemInsert?.[0]).replace(/\s+/g, ' ')).toContain('?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW(), NOW())');
+  });
+
+  it('stamps ordered_at with server time when sending workstation items', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('SELECT bulk_item_id')) return Promise.resolve([[]]);
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await createSale('tenant_1', {
+      status: 'kitchen',
+      total: 25,
+      subtotal: 25,
+      paymentMethod: 'pending',
+      items: [{ id: 'prod_1', name: 'Burger', price: 25, quantity: 1, workstationId: 'ws_kitchen' } as any],
+    });
+
+    const itemInsert = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO sale_items'));
+    expect(String(itemInsert?.[0]).replace(/\s+/g, ' ')).toContain('?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), NOW(), NOW())');
+  });
+
   it('updates a sale and replaces its items', async () => {
     const conn = {
       beginTransaction: vi.fn().mockResolvedValue(undefined),
@@ -148,6 +199,98 @@ describe('mariadb-crud', () => {
       expect.arrayContaining(['sale_1', 'prod_1', 'Burger', 25, 1, 'pending'])
     );
     expect(result).toMatchObject({ id: 'sale_1', status: 'kitchen' });
+  });
+
+  it('preserves existing workstation timestamps and stamps newly re-added items on resend', async () => {
+    const orderedAt = '2026-05-31T09:00:00.000Z';
+    const acceptedAt = '2026-05-31T09:04:00.000Z';
+    const clientClockValue = '1999-01-01T00:00:00.000Z';
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('SELECT status, transaction_type')) {
+          return Promise.resolve([[{ status: 'kitchen', transaction_type: 'sale' }]]);
+        }
+        if (sql.includes('SELECT * FROM sale_items')) {
+          return Promise.resolve([[
+            {
+              id: 'item_existing',
+              status: 'accepted',
+              ordered_at: orderedAt,
+              accepted_at: acceptedAt,
+              ready_at: null,
+              delivered_at: null,
+            },
+          ]]);
+        }
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+    (dbModule.query as any)
+      .mockResolvedValueOnce([{ id: 'sale_1', status: 'kitchen', total: 40 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    await updateSale('tenant_1', 'sale_1', {
+      status: 'kitchen',
+      total: 40,
+      items: [
+        {
+          id: 'item_existing',
+          productId: 'prod_1',
+          name: 'Burger',
+          price: 25,
+          quantity: 1,
+          status: 'pending',
+          workstationId: 'ws_kitchen',
+          orderedAt: clientClockValue,
+          acceptedAt: clientClockValue,
+        },
+        {
+          id: 'prod_2',
+          name: 'Fries',
+          price: 15,
+          quantity: 1,
+          status: 'pending',
+          workstationId: 'ws_kitchen',
+          orderedAt: clientClockValue,
+        },
+      ] as any,
+    });
+
+    const itemInserts = conn.query.mock.calls.filter(([sql]: any[]) => String(sql).includes('INSERT INTO sale_items'));
+    expect(itemInserts).toHaveLength(2);
+    expect(String(itemInserts[0][0]).replace(/\s+/g, ' ')).toContain('?, ?, NULL, NULL, ?, NOW(), NOW())');
+    expect(itemInserts[0][1]).toEqual(expect.arrayContaining([orderedAt, acceptedAt]));
+    expect(itemInserts[0][1]).not.toContain(clientClockValue);
+    expect(String(itemInserts[1][0]).replace(/\s+/g, ' ')).toContain('UTC_TIMESTAMP(), NULL, NULL, NULL, ?, NOW(), NOW())');
+    expect(itemInserts[1][1]).not.toContain(clientClockValue);
+  });
+
+  it.each([
+    ['accepted', 'accepted_at'],
+    ['ready', 'ready_at'],
+    ['delivered', 'delivered_at'],
+  ])('stamps %s items without trusting client timestamps', async (status, column) => {
+    (dbModule.query as any).mockResolvedValue([{}]);
+
+    await updateSaleItem('tenant_1', 'sale_1', 'item_1', {
+      status,
+      actionStaffId: 'staff_1',
+      orderedAt: '1999-01-01T00:00:00.000Z',
+      acceptedAt: '1999-01-01T00:00:00.000Z',
+      readyAt: '1999-01-01T00:00:00.000Z',
+      deliveredAt: '1999-01-01T00:00:00.000Z',
+    });
+
+    const [sql, values] = (dbModule.query as any).mock.calls[0];
+    expect(sql).toContain(`${column} = COALESCE(${column}, UTC_TIMESTAMP())`);
+    expect(sql).not.toContain('ordered_at = ?');
+    expect(values).toEqual([status, 'staff_1', 'sale_1', 'item_1']);
   });
 
   it('records stock movements and audit events when a sale completes', async () => {

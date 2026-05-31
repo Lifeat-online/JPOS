@@ -2,6 +2,7 @@ import { query, isPostgres } from "./db.js";
 import type { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import { recordAuditEventSafe } from "./audit.js";
+import { summarizeWorkstationTiming } from "../shared/workstationTiming.js";
 
 export type AiRole = "admin" | "manager" | "dev" | "cashier" | "chef";
 export type AiProviderName = "openai" | "ollama" | "anythingllm" | "google" | "vertex" | "openrouter";
@@ -90,6 +91,8 @@ const DEFAULT_SETTINGS: Omit<AiSettings, "tenantId"> = {
 };
 
 const AI_PROVIDERS: AiProviderName[] = ["openai", "ollama", "anythingllm", "google", "vertex", "openrouter"];
+const MAX_MANAGER_INSIGHTS = 10;
+const ACTIVE_MANAGER_TASK_STATUSES = new Set(["open", "in_review"]);
 
 function asBool(value: unknown, fallback = false) {
   if (value === null || value === undefined) return fallback;
@@ -492,18 +495,410 @@ async function insertAudit(tenantId: string, action: string, requestedBy: string
   );
 }
 
+function rowsOf(value: unknown): any[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function rowValue(row: any, ...keys: string[]) {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return null;
+}
+
+function sumRows(rows: any[], getter: (row: any) => unknown) {
+  return rows.reduce((sum, row) => sum + toNumber(getter(row)), 0);
+}
+
+function countRows(rows: any[], predicate: (row: any) => boolean) {
+  return rows.reduce((count, row) => count + (predicate(row) ? 1 : 0), 0);
+}
+
+function countByKey(rows: any[], getter: (row: any) => unknown, fallback = "unspecified") {
+  return rows.reduce<Record<string, number>>((acc, row) => {
+    const raw = getter(row);
+    const key = String(raw === undefined || raw === null || raw === "" ? fallback : raw).trim() || fallback;
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function dateTime(value: unknown) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isPastDue(value: unknown, now = new Date()) {
+  const date = dateTime(value);
+  return Boolean(date && date.getTime() < now.getTime());
+}
+
+function isDueSoon(value: unknown, days = 7, now = new Date()) {
+  const date = dateTime(value);
+  if (!date) return false;
+  const soon = now.getTime() + days * 24 * 60 * 60 * 1000;
+  return date.getTime() >= now.getTime() && date.getTime() <= soon;
+}
+
+function directionAmount(row: any) {
+  const amount = toNumber(rowValue(row, "amount"));
+  const direction = String(rowValue(row, "direction") || "").toLowerCase();
+  if (direction === "in") return amount;
+  if (direction === "out") return -amount;
+  return 0;
+}
+
+function activeTasks(rows: any[]) {
+  return rows.filter((task) => ACTIVE_MANAGER_TASK_STATUSES.has(String(rowValue(task, "status") || "").toLowerCase()));
+}
+
+function buildBusinessMetrics(dataset: any) {
+  const products = rowsOf(dataset.products);
+  const staff = rowsOf(dataset.staff);
+  const sales = rowsOf(dataset.sales);
+  const saleItems = rowsOf(dataset.saleItems);
+  const salePayments = rowsOf(dataset.salePayments);
+  const cashSessions = rowsOf(dataset.cashSessions);
+  const cashMovements = rowsOf(dataset.cashMovements);
+  const managerCashMovements = rowsOf(dataset.managerCashMovements);
+  const cashCloseCheckpoints = rowsOf(dataset.cashCloseCheckpoints);
+  const cashCustodyTransfers = rowsOf(dataset.cashCustodyTransfers);
+  const customers = rowsOf(dataset.customers);
+  const customerPayoutRequests = rowsOf(dataset.customerPayoutRequests);
+  const staffPayoutRequests = rowsOf(dataset.staffPayoutRequests);
+  const auditEvents = rowsOf(dataset.auditEvents);
+  const stockMovements = rowsOf(dataset.stockMovements);
+  const managerTaskRows = rowsOf(dataset.managerTasks);
+  const stockTakeSessions = rowsOf(dataset.stockTakeSessions);
+  const stockTakeItems = rowsOf(dataset.stockTakeItems);
+  const stockTakeRules = rowsOf(dataset.stockTakeRules);
+  const laybyOrders = rowsOf(dataset.laybyOrders);
+  const laybyItems = rowsOf(dataset.laybyItems);
+  const purchaseOrders = rowsOf(dataset.purchaseOrders);
+  const companionDevices = rowsOf(dataset.companionDevices);
+  const pushSubscriptions = rowsOf(dataset.pushSubscriptions);
+
+  const now = new Date();
+  const completedSales = sales.filter((sale) => rowValue(sale, "status") === "completed");
+  const revenue = sumRows(completedSales, (sale) => rowValue(sale, "total"));
+  const refundSales = sales.filter((sale) => (
+    String(rowValue(sale, "refund_status", "refundStatus") || "none") !== "none" ||
+    toNumber(rowValue(sale, "refunded_amount", "refundedAmount")) > 0
+  ));
+  const voidedSales = sales.filter((sale) => Boolean(rowValue(sale, "void_reason", "voidReason", "voided_by", "voidedBy")));
+  const offlineSales = sales.filter((sale) => (
+    Boolean(rowValue(sale, "offline_event_id", "offlineEventId")) ||
+    String(rowValue(sale, "sync_source", "syncSource") || "online") !== "online"
+  ));
+  const tabSales = sales.filter((sale) => Number(rowValue(sale, "is_tab", "isTab") || 0) === 1 || Boolean(rowValue(sale, "tab_name", "tabName")));
+  const tableSales = sales.filter((sale) => Boolean(rowValue(sale, "table_number", "tableNumber")));
+  const openOrders = sales.filter((sale) => ["open", "kitchen", "pending"].includes(String(rowValue(sale, "status") || "")));
+  const splitPaymentSaleIds = new Set<string>();
+  const paymentCountBySale = salePayments.reduce<Record<string, number>>((acc, payment) => {
+    const saleId = String(rowValue(payment, "sale_id", "saleId") || "");
+    if (!saleId) return acc;
+    acc[saleId] = (acc[saleId] || 0) + 1;
+    if (acc[saleId] > 1) splitPaymentSaleIds.add(saleId);
+    return acc;
+  }, {});
+  void paymentCountBySale;
+
+  const lowStock = products.filter((product) => toNumber(rowValue(product, "stock")) <= Math.max(1, toNumber(rowValue(product, "min_stock", "minStock"))));
+  const stockReasonCounts = countByKey(stockMovements, (movement) => rowValue(movement, "reason_code", "reasonCode", "reason"));
+  const shrinkageMovements = stockMovements.filter((movement) => ["shrinkage", "wastage"].includes(String(rowValue(movement, "reason_code", "reasonCode") || "")));
+  const countCorrectionMovements = stockMovements.filter((movement) => String(rowValue(movement, "reason_code", "reasonCode") || "") === "count_correction");
+
+  const openManagerTasks = activeTasks(managerTaskRows);
+  const highPriorityTasks = openManagerTasks.filter((task) => ["high", "critical"].includes(String(rowValue(task, "priority") || "")));
+  const openTaskCounts = countByKey(openManagerTasks, (task) => rowValue(task, "task_type", "taskType"));
+  const offlineAuditEvents = auditEvents.filter((event) => String(rowValue(event, "action") || "").startsWith("offline."));
+  const offlineConflictEvents = offlineAuditEvents.filter((event) => String(rowValue(event, "action") || "").includes("conflict"));
+  const deviceIds = new Set<string>();
+  const localReceiptNumbers = new Set<string>();
+  for (const event of auditEvents) {
+    const details = parseJson<Record<string, any>>(rowValue(event, "details"), {});
+    const deviceId = rowValue(details, "deviceId", "device_id", "registerDeviceId", "register_device_id");
+    const localReceiptNumber = rowValue(details, "localReceiptNumber", "local_receipt_number");
+    if (deviceId) deviceIds.add(String(deviceId));
+    if (localReceiptNumber) localReceiptNumbers.add(String(localReceiptNumber));
+  }
+
+  const cashVariance = cashSessions
+    .filter((session) => {
+      const status = String(rowValue(session, "status") || "");
+      const reviewStatus = String(rowValue(session, "review_status", "reviewStatus") || "");
+      return status === "closed" || ["submitted", "disputed", "reconciled"].includes(reviewStatus);
+    })
+    .reduce((sum, session) => sum + Math.abs(toNumber(rowValue(session, "difference"))), 0);
+  const latestCashCheckpoint = cashCloseCheckpoints[0] || null;
+  const latestCashCheckpointVariance = latestCashCheckpoint ? Math.abs(toNumber(rowValue(latestCashCheckpoint, "variance"))) : 0;
+  const managerCashNet = sumRows(managerCashMovements, directionAmount);
+  const pettyCashTotal = sumRows(
+    managerCashMovements.filter((movement) => rowValue(movement, "movement_type", "movementType") === "petty_cash"),
+    (movement) => rowValue(movement, "amount")
+  );
+  const payoutCashTotal = sumRows(
+    managerCashMovements.filter((movement) => rowValue(movement, "movement_type", "movementType") === "payout"),
+    (movement) => rowValue(movement, "amount")
+  );
+  const pendingCashCustodyTransfers = cashCustodyTransfers.filter((transfer) => rowValue(transfer, "status") === "pending_confirmation");
+  const custodyVariance = sumRows(cashCustodyTransfers, (transfer) => Math.abs(toNumber(rowValue(transfer, "variance"))));
+
+  const stockTakeVarianceItems = stockTakeItems.filter((item) => Math.abs(toNumber(rowValue(item, "variance_quantity", "varianceQuantity"))) > 0);
+  const stockTakeVarianceQuantity = sumRows(stockTakeVarianceItems, (item) => Math.abs(toNumber(rowValue(item, "variance_quantity", "varianceQuantity"))));
+  const submittedStockTakeSessions = stockTakeSessions.filter((session) => rowValue(session, "status") === "submitted");
+  const overdueStockTakeSessions = stockTakeSessions.filter((session) => (
+    ["active", "submitted"].includes(String(rowValue(session, "status") || "")) &&
+    isPastDue(rowValue(session, "due_at", "dueAt"), now)
+  ));
+
+  const activeLaybys = laybyOrders.filter((order) => rowValue(order, "status") === "active");
+  const overdueLaybys = activeLaybys.filter((order) => isPastDue(rowValue(order, "due_date", "dueDate"), now));
+  const dueSoonLaybys = activeLaybys.filter((order) => isDueSoon(rowValue(order, "due_date", "dueDate"), 7, now));
+  const activeLaybyBalance = sumRows(activeLaybys, (order) => rowValue(order, "balance_due", "balanceDue"));
+  const reservedLaybyQuantity = sumRows(laybyItems.filter((item) => rowValue(item, "order_status", "orderStatus") === "active"), (item) => rowValue(item, "reserved_quantity", "reservedQuantity"));
+
+  const accountCustomers = customers.filter((customer) => Number(rowValue(customer, "account_enabled", "accountEnabled") || 0) === 1 || toNumber(rowValue(customer, "account_balance", "accountBalance")) > 0);
+  const accountOwing = sumRows(accountCustomers, (customer) => rowValue(customer, "account_balance", "accountBalance"));
+  const overLimitAccounts = accountCustomers.filter((customer) => {
+    const limit = toNumber(rowValue(customer, "account_limit", "accountLimit"));
+    return limit > 0 && toNumber(rowValue(customer, "account_balance", "accountBalance")) > limit;
+  });
+  const walletLiability = sumRows(customers, (customer) => Math.max(0, toNumber(rowValue(customer, "wallet_balance", "walletBalance"))));
+  const pendingCustomerPayouts = customerPayoutRequests.filter((request) => ["pending", "approved"].includes(String(rowValue(request, "status") || "")));
+  const pendingStaffPayouts = staffPayoutRequests.filter((request) => ["pending", "approved"].includes(String(rowValue(request, "status") || "")));
+
+  const kitchenItems = saleItems.filter((item) => ["pending", "accepted", "ready"].includes(String(rowValue(item, "status") || "")));
+  const workstationTimingItems = saleItems.filter((item) => Boolean(rowValue(item, "workstationId", "workstation_id")));
+  const liveTiming = summarizeWorkstationTiming(workstationTimingItems, { now, completedWindowSeconds: 2 * 60 * 60 });
+  const servicePeriodTiming = summarizeWorkstationTiming(workstationTimingItems, { now, completedWindowSeconds: 12 * 60 * 60 });
+  const activePurchaseOrders = purchaseOrders.filter((order) => ["draft", "sent"].includes(String(rowValue(order, "status") || "")));
+  const overduePurchaseOrders = activePurchaseOrders.filter((order) => isPastDue(rowValue(order, "expected_delivery_date", "expectedDeliveryDate"), now));
+
+  return {
+    sales: {
+      completedCount: completedSales.length,
+      revenue,
+      averageOrder: completedSales.length ? revenue / completedSales.length : 0,
+      refundCount: refundSales.length,
+      refundedAmount: sumRows(refundSales, (sale) => rowValue(sale, "refunded_amount", "refundedAmount")),
+      voidCount: voidedSales.length,
+      offlineSaleCount: offlineSales.length,
+      splitPaymentSaleCount: splitPaymentSaleIds.size,
+      paymentMix: salePayments.length
+        ? countByKey(salePayments, (payment) => rowValue(payment, "method"))
+        : countByKey(sales, (sale) => rowValue(sale, "payment_method", "paymentMethod")),
+      openOrderCount: openOrders.length,
+      openTabCount: tabSales.filter((sale) => ["open", "kitchen", "pending"].includes(String(rowValue(sale, "status") || ""))).length,
+      tableOrderCount: tableSales.length,
+    },
+    stock: {
+      productCount: products.length,
+      lowStockCount: lowStock.length,
+      lowStockProducts: lowStock.slice(0, 5).map((product) => `${rowValue(product, "name")}: ${toNumber(rowValue(product, "stock"))} left`),
+      movementCount: stockMovements.length,
+      reasonCounts: stockReasonCounts,
+      shrinkageOrWastageCount: shrinkageMovements.length,
+      shrinkageOrWastageQuantity: sumRows(shrinkageMovements, (movement) => Math.abs(toNumber(rowValue(movement, "quantity_delta", "quantityDelta")))),
+      countCorrectionCount: countCorrectionMovements.length,
+      countCorrectionQuantity: sumRows(countCorrectionMovements, (movement) => Math.abs(toNumber(rowValue(movement, "quantity_delta", "quantityDelta")))),
+      activePurchaseOrderCount: activePurchaseOrders.length,
+      overduePurchaseOrderCount: overduePurchaseOrders.length,
+    },
+    stocktake: {
+      sessionCounts: countByKey(stockTakeSessions, (session) => rowValue(session, "status")),
+      activeRuleCount: countRows(stockTakeRules, (rule) => rowValue(rule, "status") === "active"),
+      submittedSessionCount: submittedStockTakeSessions.length,
+      overdueSessionCount: overdueStockTakeSessions.length,
+      varianceItemCount: stockTakeVarianceItems.length,
+      absoluteVarianceQuantity: stockTakeVarianceQuantity,
+    },
+    cash: {
+      activeRegisterCount: toNumber(dataset.activeRegisters),
+      cashVariance,
+      recentCashMovementCount: cashMovements.length,
+      managerCashMovementCount: managerCashMovements.length,
+      managerCashNet,
+      pettyCashTotal,
+      payoutCashTotal,
+      latestCheckpointStatus: rowValue(latestCashCheckpoint, "status"),
+      latestCheckpointVariance: latestCashCheckpointVariance,
+      latestCheckpointWalletLiability: toNumber(rowValue(latestCashCheckpoint, "wallet_liability", "walletLiability")),
+      latestCheckpointPendingPayouts: toNumber(rowValue(latestCashCheckpoint, "pending_payouts", "pendingPayouts")),
+      pendingCashCustodyTransferCount: pendingCashCustodyTransfers.length,
+      custodyVariance,
+    },
+    tasks: {
+      openCount: openManagerTasks.length,
+      highPriorityCount: highPriorityTasks.length,
+      countsByType: openTaskCounts,
+      aiRecommendationCount: toNumber(openTaskCounts.ai_recommendation),
+      offlineSyncCount: toNumber(openTaskCounts.offline_sync),
+      stockVarianceCount: toNumber(openTaskCounts.stock_variance),
+    },
+    offline: {
+      auditEventCount: offlineAuditEvents.length,
+      conflictEventCount: offlineConflictEvents.length,
+      localReceiptCount: localReceiptNumbers.size,
+      deviceCount: deviceIds.size,
+      companionDeviceCount: companionDevices.length,
+      activePushDeviceCount: pushSubscriptions.filter((sub) => !rowValue(sub, "disabled_at", "disabledAt")).length,
+    },
+    layby: {
+      activeCount: activeLaybys.length,
+      overdueCount: overdueLaybys.length,
+      dueSoonCount: dueSoonLaybys.length,
+      balanceDue: activeLaybyBalance,
+      reservedQuantity: reservedLaybyQuantity,
+      completedCount: countRows(laybyOrders, (order) => rowValue(order, "status") === "completed"),
+      cancelledCount: countRows(laybyOrders, (order) => rowValue(order, "status") === "cancelled"),
+    },
+    customer: {
+      count: customers.length,
+      walletCustomerCount: countRows(customers, (customer) => toNumber(rowValue(customer, "wallet_balance", "walletBalance")) > 0),
+      walletLiability,
+      accountCustomerCount: accountCustomers.length,
+      accountOwing,
+      overLimitAccountCount: overLimitAccounts.length,
+      pendingCustomerPayoutAmount: sumRows(pendingCustomerPayouts, (request) => rowValue(request, "amount")),
+      pendingStaffPayoutAmount: sumRows(pendingStaffPayouts, (request) => rowValue(request, "amount")),
+    },
+    staff: {
+      activeCount: countRows(staff, (member) => rowValue(member, "status") === "active"),
+      totalCount: staff.length,
+    },
+    restaurant: {
+      enabled: Boolean(dataset.business?.isRestaurantMode),
+      openOrderCount: openOrders.length,
+      openTabCount: tabSales.filter((sale) => ["open", "kitchen", "pending"].includes(String(rowValue(sale, "status") || ""))).length,
+      kitchenItemCount: kitchenItems.length,
+      liveTiming,
+      servicePeriodTiming,
+    },
+    audit: {
+      recentEventCount: auditEvents.length,
+      actionCounts: countByKey(auditEvents, (event) => rowValue(event, "action")),
+      sourceCounts: countByKey(auditEvents, (event) => rowValue(event, "source")),
+      permissionDeniedCount: countRows(auditEvents, (event) => rowValue(event, "action") === "permission.denied"),
+      aiEventCount: countRows(auditEvents, (event) => String(rowValue(event, "action") || "").startsWith("ai.")),
+    },
+  };
+}
+
 async function getBusinessDataset(tenantId: string) {
-  const [products, staff, sales, cashSessions, cashMovements, customers, configRows, packageRows] = await Promise.all([
+  const [
+    products,
+    staff,
+    sales,
+    saleItems,
+    salePayments,
+    cashSessions,
+    cashMovements,
+    managerCashMovements,
+    cashCloseCheckpoints,
+    cashCustodyTransfers,
+    customers,
+    customerPayoutRequests,
+    staffPayoutRequests,
+    auditEvents,
+    stockMovements,
+    managerTasks,
+    stockTakeSessions,
+    stockTakeItems,
+    stockTakeRules,
+    laybyOrders,
+    laybyItems,
+    laybyPayments,
+    purchaseOrders,
+    vendors,
+    companionDevices,
+    pushSubscriptions,
+    configRows,
+    packageRows,
+  ] = await Promise.all([
     query<any>("SELECT id, name, category, section, stock, min_stock, price, cost_price, workstation_id FROM products WHERE tenant_id = ?", [tenantId]),
     query<any>("SELECT id, name, role, status, wallet_balance FROM staff WHERE tenant_id = ?", [tenantId]),
     query<any>(
-      `SELECT id, staff_id, customer_id, total, subtotal, payment_method, status, tip_amount, cash_out_amount, points_discount, table_number, is_tab, created_at
+      `SELECT
+         id, staff_id, customer_id, total, subtotal, payment_method, status,
+         tip_amount, cash_out_amount, points_discount, table_number, is_tab,
+         tab_name, transaction_type, parent_sale_id, refund_status,
+         refunded_amount, refund_reason, refunded_by, void_reason, voided_by,
+         payfast_payment_id, offline_event_id, sync_source, created_at
        FROM sales WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 500`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT
+         si.id, si.sale_id AS saleId, si.product_id AS productId,
+         si.product_name AS productName, si.price, si.quantity, si.status,
+         si.workstation_id AS workstationId, si.action_staff_id AS actionStaffId,
+         si.ordered_at AS orderedAt, si.accepted_at AS acceptedAt,
+         si.ready_at AS readyAt, si.delivered_at AS deliveredAt,
+         si.created_at AS createdAt
+       FROM sale_items si
+       JOIN sales s ON s.id = si.sale_id
+       WHERE s.tenant_id = ?
+       ORDER BY si.created_at DESC
+       LIMIT 1000`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT
+         sp.id, sp.sale_id AS saleId, sp.method, sp.amount, sp.tip_amount AS tipAmount,
+         sp.cash_out_amount AS cashOutAmount, sp.created_at AS createdAt
+       FROM sale_payments sp
+       JOIN sales s ON s.id = sp.sale_id
+       WHERE s.tenant_id = ?
+       ORDER BY sp.created_at DESC
+       LIMIT 1000`,
       [tenantId]
     ),
     query<any>("SELECT * FROM cash_sessions WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 150", [tenantId]),
     query<any>("SELECT * FROM cash_movements WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 300", [tenantId]),
+    query<any>("SELECT * FROM manager_cash_movements WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 300", [tenantId]),
+    query<any>("SELECT * FROM cash_close_checkpoints WHERE tenant_id = ? ORDER BY business_date DESC LIMIT 30", [tenantId]),
+    query<any>("SELECT * FROM cash_custody_transfers WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 100", [tenantId]),
     query<any>("SELECT id, name, wallet_balance, account_enabled, account_limit, account_balance, loyalty_points, created_at FROM customers WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 300", [tenantId]),
+    query<any>("SELECT id, customer_id, customer_name, amount, status, created_at, processed_at FROM customer_payout_requests WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 100", [tenantId]),
+    query<any>("SELECT id, staff_id, staff_name, customer_id, customer_name, amount, status, created_at, processed_at FROM payout_requests WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 100", [tenantId]),
+    query<any>("SELECT id, action, entity_type, entity_id, related_sale_id, staff_id, staff_name, customer_id, source, details, created_at FROM audit_events WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 500", [tenantId]),
+    query<any>("SELECT id, item_type, product_id, bulk_item_id, item_name, quantity_delta, previous_quantity, new_quantity, reason, reason_code, reference_type, reference_id, sale_id, staff_id, staff_name, note, created_at FROM stock_movements WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 500", [tenantId]),
+    query<any>("SELECT id, task_type, title, summary, priority, status, source_type, source_id, related_sale_id, related_product_id, assigned_to, requested_by, decided_by, details, due_at, created_at, updated_at FROM manager_tasks WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 500", [tenantId]),
+    query<any>("SELECT id, name, type, status, assigned_by, assigned_by_name, due_at, submitted_at, approved_at, approved_by, approved_by_name, created_at, updated_at FROM stock_take_sessions WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 150", [tenantId]),
+    query<any>("SELECT id, session_id, product_id, product_name, expected_quantity, counted_quantity, variance_quantity, assigned_to, assigned_to_name, counted_by, counted_by_name, status, counted_at, confirmed_at, created_at, updated_at FROM stock_take_items WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 500", [tenantId]),
+    query<any>("SELECT id, name, status, schedule_type, run_time, product_scope, product_count, category, assigned_to, assigned_to_name, last_run_for_date, last_run_at, created_at, updated_at FROM stock_take_rules WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 100", [tenantId]),
+    query<any>("SELECT id, customer_id, customer_name, staff_id, staff_name, status, total_amount, deposit_amount, amount_paid, balance_due, refund_amount, forfeited_amount, due_date, completed_sale_id, created_at, updated_at FROM layby_orders WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 200", [tenantId]),
+    query<any>(
+      `SELECT
+         li.id, li.layby_order_id AS laybyOrderId, li.product_id AS productId,
+         li.product_name AS productName, li.quantity, li.reserved_quantity AS reservedQuantity,
+         lo.status AS orderStatus
+       FROM layby_items li
+       JOIN layby_orders lo ON lo.id = li.layby_order_id
+       WHERE lo.tenant_id = ?
+       ORDER BY li.created_at DESC
+       LIMIT 500`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT
+         lp.id, lp.layby_order_id AS laybyOrderId, lp.method, lp.amount,
+         lp.staff_id AS staffId, lp.staff_name AS staffName, lp.cash_session_id AS cashSessionId,
+         lp.created_at AS createdAt
+       FROM layby_payments lp
+       JOIN layby_orders lo ON lo.id = lp.layby_order_id
+       WHERE lo.tenant_id = ?
+       ORDER BY lp.created_at DESC
+       LIMIT 300`,
+      [tenantId]
+    ),
+    query<any>("SELECT id, vendor_id, status, type, total_amount, expected_delivery_date, invoice_status, created_at, updated_at FROM purchase_orders WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 200", [tenantId]),
+    query<any>("SELECT id, name, status, created_at, updated_at FROM vendors WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 200", [tenantId]),
+    query<any>("SELECT id, device_id, device_name, workstation_id, default_mode, assigned_by, created_at, updated_at FROM companion_device_assignments WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 200", [tenantId]),
+    query<any>("SELECT id, staff_id, device_label, disabled_at, last_seen_at, created_at, updated_at FROM push_subscriptions WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 200", [tenantId]),
     query<any>("SELECT business FROM app_settings WHERE tenant_id = ? LIMIT 1", [tenantId]),
     query<any>("SELECT COUNT(*) AS active_registers FROM cash_sessions WHERE tenant_id = ? AND status = 'open'", [tenantId]),
   ]);
@@ -511,9 +906,29 @@ async function getBusinessDataset(tenantId: string) {
     products,
     staff,
     sales,
+    saleItems,
+    salePayments,
     cashSessions,
     cashMovements,
+    managerCashMovements,
+    cashCloseCheckpoints,
+    cashCustodyTransfers,
     customers,
+    customerPayoutRequests,
+    staffPayoutRequests,
+    auditEvents,
+    stockMovements,
+    managerTasks,
+    stockTakeSessions,
+    stockTakeItems,
+    stockTakeRules,
+    laybyOrders,
+    laybyItems,
+    laybyPayments,
+    purchaseOrders,
+    vendors,
+    companionDevices,
+    pushSubscriptions,
     business: parseJson(configRows[0]?.business, {}),
     activeRegisters: toNumber(packageRows[0]?.active_registers),
   };
@@ -541,41 +956,233 @@ export async function generateInsights(tenantId: string, requestedBy?: string | 
   return listInsights(tenantId);
 }
 
-function buildDeterministicInsights(tenantId: string, dataset: any): AiInsight[] {
-  const completedSales = dataset.sales.filter((sale: any) => sale.status === "completed");
-  const revenue = completedSales.reduce((sum: number, sale: any) => sum + toNumber(sale.total), 0);
-  const avgOrder = completedSales.length ? revenue / completedSales.length : 0;
-  const lowStock = dataset.products.filter((p: any) => toNumber(p.stock) <= Math.max(1, toNumber(p.min_stock)));
-  const cashVariance = dataset.cashSessions
-    .filter((s: any) => s.status === "closed" || s.review_status === "submitted" || s.review_status === "disputed")
-    .reduce((sum: number, s: any) => sum + Math.abs(toNumber(s.difference)), 0);
-  const openOrders = dataset.sales.filter((s: any) => ["open", "kitchen", "pending"].includes(s.status)).length;
-  const activeStaff = dataset.staff.filter((s: any) => s.status === "active").length;
-  const atRiskCustomers = dataset.customers.filter((c: any) => toNumber(c.wallet_balance) > 0).length;
-  const accountCustomers = dataset.customers.filter((c: any) => Number(c.account_enabled || 0) === 1 || toNumber(c.account_balance) > 0);
-  const accountOwing = accountCustomers.reduce((sum: number, c: any) => sum + toNumber(c.account_balance), 0);
-  const overLimitAccounts = accountCustomers.filter((c: any) => toNumber(c.account_balance) > toNumber(c.account_limit) && toNumber(c.account_limit) > 0);
+export function buildDeterministicInsights(tenantId: string, dataset: any): AiInsight[] {
+  const metrics = buildBusinessMetrics(dataset);
   const insights: AiInsight[] = [];
 
-  insights.push(makeInsight(tenantId, "sales", revenue > 0 ? "success" : "info", "Sales pulse", `Completed revenue is R${revenue.toFixed(2)} across ${completedSales.length} completed sales.`, `Use the R${avgOrder.toFixed(2)} average order value as the baseline for upsells and combos.`, [`Completed sales: ${completedSales.length}`, `Average order: R${avgOrder.toFixed(2)}`], 82));
+  insights.push(makeInsight(
+    tenantId,
+    "sales",
+    metrics.sales.revenue > 0 ? "success" : "info",
+    "Sales pulse",
+    `Completed revenue is R${metrics.sales.revenue.toFixed(2)} across ${metrics.sales.completedCount} completed sales.`,
+    `Use the R${metrics.sales.averageOrder.toFixed(2)} average order value alongside payment mix, table/tab, and offline-sale signals when shaping upsells or shift targets.`,
+    [
+      `Completed sales: ${metrics.sales.completedCount}`,
+      `Average order: R${metrics.sales.averageOrder.toFixed(2)}`,
+      `Split-payment sales: ${metrics.sales.splitPaymentSaleCount}`,
+      `Offline-synced sales: ${metrics.sales.offlineSaleCount}`,
+    ],
+    84
+  ));
 
-  if (lowStock.length > 0) {
-    insights.push(makeInsight(tenantId, "stock", lowStock.length > 5 ? "critical" : "warning", "Stock needs attention", `${lowStock.length} products are at or below their minimum stock level.`, "Review these products and create reorder drafts before the next rush.", lowStock.slice(0, 5).map((p: any) => `${p.name}: ${toNumber(p.stock)} left`), 88));
+  if (metrics.tasks.openCount > 0) {
+    insights.push(makeInsight(
+      tenantId,
+      "staff",
+      metrics.tasks.highPriorityCount > 0 ? "critical" : "warning",
+      "Manager action queue",
+      `${metrics.tasks.openCount} Action Center task${metrics.tasks.openCount === 1 ? "" : "s"} are open or in review, including ${metrics.tasks.highPriorityCount} high-priority item${metrics.tasks.highPriorityCount === 1 ? "" : "s"}.`,
+      "Work the queue from highest priority first, and convert AI recommendations into tracked manager tasks before anyone changes stock, cash, refunds, or settings.",
+      [
+        `Open tasks: ${metrics.tasks.openCount}`,
+        `AI recommendation tasks: ${metrics.tasks.aiRecommendationCount}`,
+        `Stock variance tasks: ${metrics.tasks.stockVarianceCount}`,
+        `Offline sync tasks: ${metrics.tasks.offlineSyncCount}`,
+      ],
+      metrics.tasks.highPriorityCount > 0 ? 91 : 84
+    ));
+  }
+
+  if (metrics.offline.auditEventCount > 0 || metrics.tasks.offlineSyncCount > 0 || metrics.sales.offlineSaleCount > 0) {
+    insights.push(makeInsight(
+      tenantId,
+      "sales",
+      metrics.offline.conflictEventCount > 0 || metrics.tasks.offlineSyncCount > 0 ? "warning" : "info",
+      "Offline sync health",
+      `${metrics.sales.offlineSaleCount} recent sale${metrics.sales.offlineSaleCount === 1 ? "" : "s"} carry offline sync metadata, with ${metrics.offline.conflictEventCount} conflict event${metrics.offline.conflictEventCount === 1 ? "" : "s"}.`,
+      metrics.offline.conflictEventCount > 0 || metrics.tasks.offlineSyncCount > 0
+        ? "Review duplicate receipts, stock shortages, and table/tab collisions before clearing offline sync tasks."
+        : "Keep device and local receipt metadata visible so successful offline trading remains auditable.",
+      [
+        `Offline audit events: ${metrics.offline.auditEventCount}`,
+        `Local receipts tracked: ${metrics.offline.localReceiptCount}`,
+        `Devices in audit details: ${metrics.offline.deviceCount}`,
+        `Companion devices: ${metrics.offline.companionDeviceCount}`,
+      ],
+      metrics.offline.conflictEventCount > 0 ? 88 : 76
+    ));
+  }
+
+  if (metrics.stock.lowStockCount > 0) {
+    insights.push(makeInsight(
+      tenantId,
+      "stock",
+      metrics.stock.lowStockCount > 5 || metrics.stock.shrinkageOrWastageCount > 0 ? "critical" : "warning",
+      "Stock needs attention",
+      `${metrics.stock.lowStockCount} products are at or below their minimum stock level, with ${metrics.stock.countCorrectionCount} recent count-correction movement${metrics.stock.countCorrectionCount === 1 ? "" : "s"}.`,
+      "Prioritize low-stock items that also show count corrections, shrinkage, wastage, or overdue supplier orders.",
+      [
+        ...metrics.stock.lowStockProducts,
+        `Shrinkage/wastage movements: ${metrics.stock.shrinkageOrWastageCount}`,
+        `Active purchase orders: ${metrics.stock.activePurchaseOrderCount}`,
+      ].slice(0, 5),
+      89
+    ));
   } else {
-    insights.push(makeInsight(tenantId, "stock", "success", "Stock looks stable", "No products are currently below their configured minimum stock.", "Keep min-stock levels updated so AI can warn earlier.", ["No low-stock products found"], 74));
+    insights.push(makeInsight(
+      tenantId,
+      "stock",
+      metrics.stock.shrinkageOrWastageCount > 0 || metrics.stock.countCorrectionCount > 0 ? "warning" : "success",
+      metrics.stock.shrinkageOrWastageCount > 0 ? "Stock exceptions" : "Stock looks stable",
+      metrics.stock.shrinkageOrWastageCount > 0
+        ? `${metrics.stock.shrinkageOrWastageCount} shrinkage or wastage movement${metrics.stock.shrinkageOrWastageCount === 1 ? "" : "s"} are visible in the recent ledger.`
+        : "No products are currently below their configured minimum stock.",
+      metrics.stock.shrinkageOrWastageCount > 0
+        ? "Use reason-code patterns to decide which products need spot checks, recipe review, or tighter receiving controls."
+        : "Keep min-stock levels and stock movement reason codes updated so AI can warn earlier.",
+      [
+        `Stock movements: ${metrics.stock.movementCount}`,
+        `Count corrections: ${metrics.stock.countCorrectionCount}`,
+        `Active purchase orders: ${metrics.stock.activePurchaseOrderCount}`,
+      ],
+      metrics.stock.shrinkageOrWastageCount > 0 ? 82 : 74
+    ));
   }
 
-  insights.push(makeInsight(tenantId, "cash", cashVariance > 0 ? "warning" : "success", "Cash control", cashVariance > 0 ? `Recent submitted/closed sessions show R${cashVariance.toFixed(2)} total absolute variance.` : "No cash variance is visible in recent submitted/closed sessions.", cashVariance > 0 ? "Review the largest variance sessions before reconciliation and coach staff on cash-up habits." : "Keep reviewing sessions promptly so exceptions remain visible.", [`Recent cash sessions: ${dataset.cashSessions.length}`], cashVariance > 0 ? 84 : 72));
-
-  insights.push(makeInsight(tenantId, "staff", "info", "Staff coverage", `${activeStaff} active staff members are configured and ${openOrders} orders are currently active.`, "Use the staff scores to balance coaching, recognition, and shift allocation.", [`Active staff: ${activeStaff}`, `Active orders: ${openOrders}`], 78));
-
-  if (dataset.business?.isRestaurantMode) {
-    insights.push(makeInsight(tenantId, "restaurant", openOrders > 8 ? "warning" : "info", "Restaurant load", `${openOrders} orders are currently open, in kitchen, or pending.`, openOrders > 8 ? "Watch kitchen queues and consider adding support during rush periods." : "Current open-order load is manageable.", [`Open/kitchen/pending orders: ${openOrders}`], 77));
+  if (metrics.stocktake.submittedSessionCount > 0 || metrics.stocktake.varianceItemCount > 0 || metrics.stocktake.overdueSessionCount > 0) {
+    insights.push(makeInsight(
+      tenantId,
+      "stock",
+      metrics.stocktake.overdueSessionCount > 0 || metrics.stocktake.varianceItemCount > 5 ? "warning" : "info",
+      "Stocktake variance watch",
+      `${metrics.stocktake.varianceItemCount} stocktake item${metrics.stocktake.varianceItemCount === 1 ? "" : "s"} have variance, totalling ${metrics.stocktake.absoluteVarianceQuantity.toFixed(3)} units absolute variance.`,
+      "Approve clean stocktakes promptly and send high-variance items to recount before posting count-correction movements.",
+      [
+        `Submitted sessions: ${metrics.stocktake.submittedSessionCount}`,
+        `Overdue sessions: ${metrics.stocktake.overdueSessionCount}`,
+        `Active spot-check rules: ${metrics.stocktake.activeRuleCount}`,
+      ],
+      86
+    ));
   }
 
-  insights.push(makeInsight(tenantId, "customer", atRiskCustomers > 0 ? "info" : "success", "Customer wallet liability", `${atRiskCustomers} customers currently have wallet balances.`, "Keep wallet liability visible during cash planning and payout review.", [`Customers with wallet balances: ${atRiskCustomers}`], 75));
-  insights.push(makeInsight(tenantId, "customer", overLimitAccounts.length > 0 ? "warning" : accountOwing > 0 ? "info" : "success", "Account receivables", accountOwing > 0 ? `Customer accounts currently owe R${accountOwing.toFixed(2)}.` : "No customer account debt is currently visible.", overLimitAccounts.length > 0 ? "Review over-limit customers before extending more account credit." : "Monitor account debt alongside cash flow and follow up on older balances.", [`Active/customer accounts: ${accountCustomers.length}`, `Over limit accounts: ${overLimitAccounts.length}`], accountOwing > 0 ? 84 : 72));
-  return insights.slice(0, 8);
+  if (metrics.stock.activePurchaseOrderCount > 0 || metrics.stock.overduePurchaseOrderCount > 0) {
+    insights.push(makeInsight(
+      tenantId,
+      "stock",
+      metrics.stock.overduePurchaseOrderCount > 0 ? "warning" : "info",
+      "Purchasing pipeline",
+      `${metrics.stock.activePurchaseOrderCount} purchase order${metrics.stock.activePurchaseOrderCount === 1 ? "" : "s"} are still draft or sent, with ${metrics.stock.overduePurchaseOrderCount} overdue expected deliver${metrics.stock.overduePurchaseOrderCount === 1 ? "y" : "ies"}.`,
+      "Use open purchase orders together with low-stock and receiving gaps before creating more supplier work.",
+      [
+        `Active POs: ${metrics.stock.activePurchaseOrderCount}`,
+        `Overdue POs: ${metrics.stock.overduePurchaseOrderCount}`,
+      ],
+      metrics.stock.overduePurchaseOrderCount > 0 ? 83 : 72
+    ));
+  }
+
+  const cashNeedsReview = metrics.cash.cashVariance > 0 || metrics.cash.latestCheckpointVariance > 0 || metrics.cash.pendingCashCustodyTransferCount > 0;
+  insights.push(makeInsight(
+    tenantId,
+    "cash",
+    cashNeedsReview ? "warning" : "success",
+    "Cash control",
+    cashNeedsReview
+      ? `Recent cash sessions and EOD checkpoints show R${(metrics.cash.cashVariance + metrics.cash.latestCheckpointVariance).toFixed(2)} total visible variance.`
+      : "No cash variance is visible in recent submitted, closed, or EOD checkpoint data.",
+    cashNeedsReview
+      ? "Review register variance, manager float movement, petty cash, pending custody transfers, and wallet-cash activity before closing the day."
+      : "Keep reviewing sessions promptly so exceptions remain visible while the manager cash ledger stays balanced.",
+    [
+      `Open registers: ${metrics.cash.activeRegisterCount}`,
+      `Manager cash net: R${metrics.cash.managerCashNet.toFixed(2)}`,
+      `Pending custody transfers: ${metrics.cash.pendingCashCustodyTransferCount}`,
+      `Petty cash: R${metrics.cash.pettyCashTotal.toFixed(2)}`,
+    ],
+    cashNeedsReview ? 86 : 74
+  ));
+
+  if (metrics.layby.activeCount > 0) {
+    insights.push(makeInsight(
+      tenantId,
+      "customer",
+      metrics.layby.overdueCount > 0 ? "warning" : "info",
+      "Lay-by exposure",
+      `${metrics.layby.activeCount} active lay-by order${metrics.layby.activeCount === 1 ? "" : "s"} hold R${metrics.layby.balanceDue.toFixed(2)} balance due and ${metrics.layby.reservedQuantity.toFixed(3)} reserved unit${metrics.layby.reservedQuantity === 1 ? "" : "s"}.`,
+      metrics.layby.overdueCount > 0
+        ? "Follow up overdue lay-bys before reserved stock sits idle or cancellation refunds affect cash planning."
+        : "Watch due-soon lay-bys alongside reserved stock so managers can follow up before deadlines pass.",
+      [
+        `Overdue lay-bys: ${metrics.layby.overdueCount}`,
+        `Due in 7 days: ${metrics.layby.dueSoonCount}`,
+        `Completed lay-bys: ${metrics.layby.completedCount}`,
+      ],
+      metrics.layby.overdueCount > 0 ? 84 : 76
+    ));
+  }
+
+  if (metrics.restaurant.enabled || metrics.restaurant.openOrderCount > 0 || metrics.restaurant.openTabCount > 0) {
+    const liveTiming = metrics.restaurant.liveTiming;
+    insights.push(makeInsight(
+      tenantId,
+      "restaurant",
+      metrics.restaurant.openOrderCount > 8 || metrics.restaurant.kitchenItemCount > 12 || liveTiming.staleTimerCount > 0 ? "warning" : "info",
+      "Restaurant load",
+      `${metrics.restaurant.openOrderCount} orders are open, kitchen, or pending, with ${metrics.restaurant.openTabCount} open tab${metrics.restaurant.openTabCount === 1 ? "" : "s"}.`,
+      liveTiming.staleTimerCount > 0
+        ? "Clear stale workstation timers before using prep averages for coaching, then watch kitchen queues, open tabs, and table turnover before the next rush."
+        : metrics.restaurant.openOrderCount > 8
+          ? "Watch kitchen queues, open tabs, and table turnover before the next rush."
+        : "Current restaurant load is manageable; keep table and tab collisions visible when offline sync catches up.",
+      [
+        `Kitchen items: ${metrics.restaurant.kitchenItemCount}`,
+        `Table-linked sales: ${metrics.sales.tableOrderCount}`,
+        `Live avg prep: ${liveTiming.avgPrepSeconds}s`,
+        `Live stale timers: ${liveTiming.staleTimerCount}`,
+      ],
+      78
+    ));
+  }
+
+  const customerExposure = metrics.customer.walletLiability + metrics.customer.accountOwing + metrics.customer.pendingCustomerPayoutAmount + metrics.customer.pendingStaffPayoutAmount;
+  insights.push(makeInsight(
+    tenantId,
+    "customer",
+    metrics.customer.overLimitAccountCount > 0 ? "warning" : customerExposure > 0 ? "info" : "success",
+    "Customer and wallet exposure",
+    customerExposure > 0
+      ? `Wallet, account, and payout exposure totals R${customerExposure.toFixed(2)} across current customer and payout records.`
+      : "No customer wallet, account, or payout exposure is currently visible.",
+    metrics.customer.overLimitAccountCount > 0
+      ? "Review over-limit accounts before extending more account credit or approving wallet payouts."
+      : "Monitor wallet liability, account debt, and pending payouts alongside cash-in-system planning.",
+    [
+      `Wallet customers: ${metrics.customer.walletCustomerCount}`,
+      `Account owing: R${metrics.customer.accountOwing.toFixed(2)}`,
+      `Over-limit accounts: ${metrics.customer.overLimitAccountCount}`,
+      `Pending payouts: R${(metrics.customer.pendingCustomerPayoutAmount + metrics.customer.pendingStaffPayoutAmount).toFixed(2)}`,
+    ],
+    customerExposure > 0 ? 84 : 72
+  ));
+
+  insights.push(makeInsight(
+    tenantId,
+    "staff",
+    "info",
+    "Staff coverage",
+    `${metrics.staff.activeCount} active staff members are configured and ${metrics.sales.openOrderCount} orders are currently active.`,
+    "Use staff scores together with cash variance, stocktake participation, refund/void patterns, and Action Center follow-through for coaching.",
+    [
+      `Active staff: ${metrics.staff.activeCount}`,
+      `Open tasks: ${metrics.tasks.openCount}`,
+      `Recent audit events: ${metrics.audit.recentEventCount}`,
+    ],
+    78
+  ));
+
+  return insights.slice(0, MAX_MANAGER_INSIGHTS);
 }
 
 function makeInsight(tenantId: string, category: AiInsightCategory, severity: AiSeverity, title: string, summary: string, recommendation: string, evidence: string[], confidence: number): AiInsight {
@@ -671,23 +1278,66 @@ export async function generateStaffScores(tenantId: string, requestedBy?: string
 }
 
 export function buildDeterministicStaffScores(tenantId: string, dataset: any, periodStart: Date, periodEnd: Date): StaffScore[] {
-  const completed = dataset.sales.filter((s: any) => s.status === "completed");
-  const maxRevenue = Math.max(1, ...dataset.staff.map((staff: any) => completed.filter((sale: any) => sale.staff_id === staff.id).reduce((sum: number, sale: any) => sum + toNumber(sale.total), 0)));
+  const staffRows = rowsOf(dataset.staff);
+  const sales = rowsOf(dataset.sales);
+  const cashSessions = rowsOf(dataset.cashSessions);
+  const cashMovements = rowsOf(dataset.cashMovements);
+  const managerTasks = rowsOf(dataset.managerTasks);
+  const stockTakeItems = rowsOf(dataset.stockTakeItems);
+  const auditEvents = rowsOf(dataset.auditEvents);
+  const completed = sales.filter((sale: any) => rowValue(sale, "status") === "completed");
+  const maxRevenue = Math.max(1, ...staffRows.map((staff: any) => completed.filter((sale: any) => rowValue(sale, "staff_id", "staffId") === staff.id).reduce((sum: number, sale: any) => sum + toNumber(rowValue(sale, "total")), 0)));
 
-  return dataset.staff
+  return staffRows
     .filter((staff: any) => staff.status === "active")
     .map((staff: any) => {
-      const staffSales = completed.filter((sale: any) => sale.staff_id === staff.id);
-      const staffRevenue = staffSales.reduce((sum: number, sale: any) => sum + toNumber(sale.total), 0);
-      const sessions = dataset.cashSessions.filter((s: any) => s.staff_id === staff.id);
-      const variance = sessions.reduce((sum: number, s: any) => sum + Math.abs(toNumber(s.difference)), 0);
-      const tips = staffSales.reduce((sum: number, sale: any) => sum + toNumber(sale.tip_amount), 0) + sessions.reduce((sum: number, s: any) => sum + toNumber(s.net_tips), 0);
-      const openSessions = sessions.filter((s: any) => s.status === "open").length;
-      const disputed = sessions.filter((s: any) => s.review_status === "disputed").length;
+      const staffSales = completed.filter((sale: any) => rowValue(sale, "staff_id", "staffId") === staff.id);
+      const staffRevenue = staffSales.reduce((sum: number, sale: any) => sum + toNumber(rowValue(sale, "total")), 0);
+      const sessions = cashSessions.filter((session: any) => rowValue(session, "staff_id", "staffId") === staff.id);
+      const variance = sessions.reduce((sum: number, session: any) => sum + Math.abs(toNumber(rowValue(session, "difference"))), 0);
+      const tips = staffSales.reduce((sum: number, sale: any) => sum + toNumber(rowValue(sale, "tip_amount", "tipAmount")), 0) + sessions.reduce((sum: number, session: any) => sum + toNumber(rowValue(session, "net_tips", "netTips")), 0);
+      const openSessions = sessions.filter((session: any) => rowValue(session, "status") === "open").length;
+      const disputed = sessions.filter((session: any) => rowValue(session, "review_status", "reviewStatus") === "disputed").length;
+      const staffRefunds = sales.filter((sale: any) => (
+        rowValue(sale, "refunded_by", "refundedBy") === staff.id ||
+        (rowValue(sale, "staff_id", "staffId") === staff.id && String(rowValue(sale, "refund_status", "refundStatus") || "none") !== "none")
+      ));
+      const staffVoids = sales.filter((sale: any) => (
+        rowValue(sale, "voided_by", "voidedBy") === staff.id ||
+        (rowValue(sale, "staff_id", "staffId") === staff.id && Boolean(rowValue(sale, "void_reason", "voidReason")))
+      ));
+      const refundVoidCount = staffRefunds.length + staffVoids.length;
+      const staffTasks = managerTasks.filter((task: any) => (
+        rowValue(task, "assigned_to", "assignedTo") === staff.id ||
+        rowValue(task, "requested_by", "requestedBy") === staff.id ||
+        rowValue(task, "decided_by", "decidedBy") === staff.id
+      ));
+      const openAssignedTasks = staffTasks.filter((task: any) => (
+        rowValue(task, "assigned_to", "assignedTo") === staff.id &&
+        ACTIVE_MANAGER_TASK_STATUSES.has(String(rowValue(task, "status") || ""))
+      ));
+      const resolvedTasks = staffTasks.filter((task: any) => ["approved", "done", "dismissed"].includes(String(rowValue(task, "status") || "")));
+      const countedStockItems = stockTakeItems.filter((item: any) => (
+        rowValue(item, "counted_by", "countedBy") === staff.id ||
+        rowValue(item, "assigned_to", "assignedTo") === staff.id
+      ));
+      const stockVariance = countedStockItems.reduce((sum: number, item: any) => sum + Math.abs(toNumber(rowValue(item, "variance_quantity", "varianceQuantity"))), 0);
+      const offlineIssues = auditEvents.filter((event: any) => (
+        String(rowValue(event, "action") || "").startsWith("offline.") &&
+        rowValue(event, "staff_id", "staffId") === staff.id
+      ));
+      const noSaleMovements = cashMovements.filter((movement: any) => (
+        rowValue(movement, "staff_id", "staffId") === staff.id &&
+        rowValue(movement, "type") === "no_sale"
+      ));
       const riskFlags = [
         ...(variance > 50 ? [`Cash variance R${variance.toFixed(2)}`] : []),
         ...(disputed > 0 ? [`${disputed} disputed cash-up${disputed > 1 ? "s" : ""}`] : []),
         ...(openSessions > 1 ? [`${openSessions} open sessions`] : []),
+        ...(refundVoidCount > 2 ? [`${refundVoidCount} refund/void exceptions`] : []),
+        ...(openAssignedTasks.length > 0 ? [`${openAssignedTasks.length} open assigned task${openAssignedTasks.length === 1 ? "" : "s"}`] : []),
+        ...(offlineIssues.length > 0 ? [`${offlineIssues.length} offline sync issue${offlineIssues.length === 1 ? "" : "s"}`] : []),
+        ...(stockVariance > 5 ? [`${stockVariance.toFixed(3)} stocktake variance units`] : []),
       ];
       const componentScores = {
         salesThroughput: clamp((staffRevenue / maxRevenue) * 100),
@@ -695,29 +1345,41 @@ export function buildDeterministicStaffScores(tenantId: string, dataset: any, pe
         orderHandling: clamp(staffSales.length * 12),
         reliability: clamp(100 - openSessions * 15 - disputed * 20),
         serviceSignals: clamp(tips * 4 + staffSales.length * 3),
-        riskDiscipline: clamp(100 - riskFlags.length * 22),
+        riskDiscipline: clamp(100 - riskFlags.length * 18),
+        taskFollowThrough: clamp(75 + resolvedTasks.length * 6 - openAssignedTasks.length * 14),
+        stockDiscipline: clamp(88 + countedStockItems.length * 2 - stockVariance * 4),
+        exceptionControl: clamp(100 - refundVoidCount * 8 - offlineIssues.length * 15 - noSaleMovements.length * 3),
       };
       const score = clamp(
-        componentScores.salesThroughput * 0.25 +
-        componentScores.cashAccuracy * 0.2 +
-        componentScores.orderHandling * 0.15 +
-        componentScores.reliability * 0.15 +
+        componentScores.salesThroughput * 0.2 +
+        componentScores.cashAccuracy * 0.18 +
+        componentScores.orderHandling * 0.12 +
+        componentScores.reliability * 0.12 +
         componentScores.serviceSignals * 0.1 +
-        componentScores.riskDiscipline * 0.15
+        componentScores.riskDiscipline * 0.12 +
+        componentScores.taskFollowThrough * 0.1 +
+        componentScores.stockDiscipline * 0.08 +
+        componentScores.exceptionControl * 0.08
       );
       const strengths = [
         staffSales.length > 0 ? `${staffSales.length} completed sales` : "Ready for more tracked activity",
         variance <= 10 ? "Strong cash accuracy" : "Cash-up habits are visible and coachable",
         tips > 0 ? `R${tips.toFixed(2)} in tips/service signals` : "Service signals can grow with more tracked tips",
+        countedStockItems.length > 0 ? `${countedStockItems.length} stocktake item${countedStockItems.length === 1 ? "" : "s"} handled` : "Can build stocktake participation",
+        resolvedTasks.length > 0 ? `${resolvedTasks.length} Action Center task${resolvedTasks.length === 1 ? "" : "s"} resolved` : "Action Center follow-through can build a stronger track record",
       ];
       const coachingNotes = [
         score >= 85 ? "Recognize this performance and keep the momentum visible." : "Set one clear improvement target for the next shift.",
         variance > 20 ? "Review cash-up flow and variance reasons together." : "Keep cash-up review discipline consistent.",
+        refundVoidCount > 2 ? "Review refund and void reasons so exception handling stays consistent." : "Keep exception notes clear for future audit reviews.",
+        openAssignedTasks.length > 0 ? "Close or reassign open Action Center tasks before the next cash-up." : "Use Action Center tasks as positive evidence for follow-through.",
       ];
       const badges = [
         ...(score >= 85 ? ["Top performer"] : []),
         ...(variance <= 10 ? ["Cash steady"] : []),
         ...(staffSales.length >= 10 ? ["Rush ready"] : []),
+        ...(countedStockItems.length >= 5 ? ["Stock count support"] : []),
+        ...(refundVoidCount === 0 && offlineIssues.length === 0 ? ["Clean exception trail"] : []),
       ];
       return {
         id: id("aiscore"),
@@ -795,22 +1457,47 @@ function isProviderConfigured(settings: AiSettings) {
 }
 
 async function callProviderForInsights(settings: AiSettings, deterministic: AiInsight[], dataset: any): Promise<AiInsight[]> {
+  const metrics = buildBusinessMetrics(dataset);
   const text = await callConfiguredProvider(settings, {
-    task: "Improve these POS manager insight cards. Keep recommendations suggest-only. Return JSON array only.",
+    task: "Improve these POS manager insight cards. Keep recommendations suggest-only and approval-first. Return JSON array only.",
     deterministic,
     metrics: {
-      productCount: dataset.products.length,
-      staffCount: dataset.staff.length,
-      recentSalesCount: dataset.sales.length,
-      recentCashSessions: dataset.cashSessions.length,
-      accountOwing: dataset.customers.reduce((sum: number, c: any) => sum + toNumber(c.account_balance), 0),
-      activeAccountCustomers: dataset.customers.filter((c: any) => Number(c.account_enabled || 0) === 1).length,
-      restaurantMode: Boolean(dataset.business?.isRestaurantMode),
+      sales: metrics.sales,
+      stock: metrics.stock,
+      stocktake: metrics.stocktake,
+      cash: metrics.cash,
+      managerTasks: metrics.tasks,
+      offline: metrics.offline,
+      layby: metrics.layby,
+      customer: metrics.customer,
+      staff: metrics.staff,
+      restaurant: metrics.restaurant,
+      audit: {
+        recentEventCount: metrics.audit.recentEventCount,
+        permissionDeniedCount: metrics.audit.permissionDeniedCount,
+        aiEventCount: metrics.audit.aiEventCount,
+      },
+      businessMode: {
+        restaurantMode: Boolean(dataset.business?.isRestaurantMode),
+      },
+    },
+    signalDigest: {
+      openTaskTypes: metrics.tasks.countsByType,
+      stockReasonCounts: metrics.stock.reasonCounts,
+      paymentMix: metrics.sales.paymentMix,
+      latestCashCheckpoint: {
+        status: metrics.cash.latestCheckpointStatus,
+        variance: metrics.cash.latestCheckpointVariance,
+        walletLiability: metrics.cash.latestCheckpointWalletLiability,
+        pendingPayouts: metrics.cash.latestCheckpointPendingPayouts,
+      },
+      auditSources: metrics.audit.sourceCounts,
+      auditActions: Object.fromEntries(Object.entries(metrics.audit.actionCounts).slice(0, 20)),
     },
   });
   const parsed = parseJson(text, deterministic);
   if (!Array.isArray(parsed)) return deterministic;
-  return parsed.slice(0, 8).map((item: any, idx: number) => ({
+  return parsed.slice(0, MAX_MANAGER_INSIGHTS).map((item: any, idx: number) => ({
     ...deterministic[idx % deterministic.length],
     ...item,
     id: deterministic[idx]?.id || id("aiins"),

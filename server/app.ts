@@ -11,6 +11,7 @@ import { initDb } from "./init-db.js";
 import rateLimit from "express-rate-limit";
 import http from "http";
 import { setupSocketIO, broadcastToMessages, broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "./socket.js";
+import { buildLiveWorkstationQueueRows } from "./workstationStats.js";
 import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
 import { NextFunction, Request, Response } from "express";
 import {
@@ -1977,71 +1978,25 @@ export async function createApp(io: any = null) {
         );
 
         const workstationRows = await query<any>(
-          pg
-            ? `
-                SELECT
-                  w.id AS workstationId,
-                  w.name AS workstationName,
-                  w.type AS workstationType,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS acceptedCount,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS readyCount,
-                  MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS oldestOrderedAt,
-                  AVG(
-                    CASE
-                      WHEN si.ordered_at IS NOT NULL
-                       AND si.ready_at IS NOT NULL
-                       AND si.ordered_at >= (NOW() - INTERVAL '2 hours')
-                      THEN EXTRACT(EPOCH FROM (si.ready_at - si.ordered_at))
-                      ELSE NULL
-                    END
-                  ) AS avgPrepSecondsLast2h
-                FROM workstations w
-                LEFT JOIN sale_items si
-                  ON si.workstation_id = w.id
-                LEFT JOIN sales s
-                  ON s.id = si.sale_id
-                 AND s.tenant_id = w.tenant_id
-                WHERE w.tenant_id = ?
-                  AND w.status = 'active'
-                GROUP BY w.id
-                ORDER BY (
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END)
-                  + SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END)
-                ) DESC, w.name ASC
-              `
-            : `
-                SELECT
-                  w.id AS workstationId,
-                  w.name AS workstationName,
-                  w.type AS workstationType,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END) AS acceptedCount,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'ready' THEN 1 ELSE 0 END) AS readyCount,
-                  MIN(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status IN ('pending','accepted') THEN si.ordered_at END) AS oldestOrderedAt,
-                  AVG(
-                    CASE
-                      WHEN si.ordered_at IS NOT NULL
-                       AND si.ready_at IS NOT NULL
-                       AND si.ordered_at >= (NOW() - INTERVAL 2 HOUR)
-                      THEN TIMESTAMPDIFF(SECOND, si.ordered_at, si.ready_at)
-                      ELSE NULL
-                    END
-                  ) AS avgPrepSecondsLast2h
-                FROM workstations w
-                LEFT JOIN sale_items si
-                  ON si.workstation_id = w.id
-                LEFT JOIN sales s
-                  ON s.id = si.sale_id
-                 AND s.tenant_id = w.tenant_id
-                WHERE w.tenant_id = ?
-                  AND w.status = 'active'
-                GROUP BY w.id
-                ORDER BY (
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'pending' THEN 1 ELSE 0 END)
-                  + SUM(CASE WHEN s.status IN ('open','kitchen','pending') AND si.status = 'accepted' THEN 1 ELSE 0 END)
-                ) DESC, w.name ASC
-              `,
+          `SELECT id, name, type FROM workstations WHERE tenant_id = ? AND status = 'active' ORDER BY name ASC`,
+          [tenantId]
+        );
+        const workstationTimingRows = await query<any>(
+          `SELECT
+             si.workstation_id AS workstationId,
+             si.status,
+             si.ordered_at AS orderedAt,
+             si.accepted_at AS acceptedAt,
+             si.ready_at AS readyAt,
+             si.delivered_at AS deliveredAt,
+             s.status AS saleStatus
+           FROM sale_items si
+           JOIN sales s
+             ON s.id = si.sale_id
+            AND s.tenant_id = ?
+           WHERE si.workstation_id IS NOT NULL
+           ORDER BY COALESCE(si.delivered_at, si.ready_at, si.accepted_at, si.ordered_at, s.created_at) DESC
+           LIMIT 2000`,
           [tenantId]
         );
 
@@ -2065,27 +2020,7 @@ export async function createApp(io: any = null) {
             activeOrders: toNumber(s.activeOrders),
             lastSaleAt: s.lastSaleAt,
           })),
-          workstationQueues: workstationRows.map((w: any) => {
-            const oldestOrderedAt = w.oldestOrderedAt;
-            const oldestAgeSeconds = oldestOrderedAt
-              ? Math.max(0, Math.floor((Date.now() - new Date(oldestOrderedAt).getTime()) / 1000))
-              : 0;
-            const pendingCount = toNumber(w.pendingCount);
-            const acceptedCount = toNumber(w.acceptedCount);
-            const readyCount = toNumber(w.readyCount);
-            return {
-              workstationId: String(w.workstationId),
-              workstationName: String(w.workstationName || ""),
-              workstationType: String(w.workstationType || ""),
-              pendingCount,
-              acceptedCount,
-              readyCount,
-              queueCount: pendingCount + acceptedCount,
-              oldestOrderedAt,
-              oldestAgeSeconds,
-              avgPrepSecondsLast2h: toNumber(w.avgPrepSecondsLast2h),
-            };
-          }),
+          workstationQueues: buildLiveWorkstationQueueRows(workstationRows, workstationTimingRows),
         };
       }
 

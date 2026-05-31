@@ -366,7 +366,7 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
                 </div>
                 <div>
                   <h3 className="text-lg font-black text-slate-900 dark:text-white">Workstation Queues</h3>
-                  <p className="text-sm text-slate-500 font-medium">Pending/accepted counts and queue age.</p>
+                  <p className="text-sm text-slate-500 font-medium">Queue pressure, phase timing, and stale handoff flags.</p>
                 </div>
               </div>
 
@@ -383,7 +383,7 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
                       <div className="min-w-0">
                         <div className="text-sm font-black text-slate-900 dark:text-white truncate">{w.workstationName}</div>
                         <div className="text-xs font-bold text-slate-400 mt-1">
-                          Oldest {w.oldestOrderedAt ? fmtAge(w.oldestAgeSeconds) : '—'} • Avg prep {w.avgPrepSecondsLast2h ? fmtAge(w.avgPrepSecondsLast2h) : '—'}
+                          Oldest {w.oldestActiveAt || w.oldestOrderedAt ? fmtAge(w.oldestActiveAgeSeconds || w.oldestAgeSeconds) : '—'} • P90 {w.activeP90AgeSeconds ? fmtAge(w.activeP90AgeSeconds) : '—'}
                         </div>
                       </div>
                       <div className="text-right">
@@ -392,7 +392,33 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
                       </div>
                     </div>
 
-                    <div className="mt-4 grid grid-cols-3 gap-3">
+                    {(w.staleTimerCount > 0 || w.unclosedHandoffCount > 0) && (
+                      <div className="mt-3 rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-950/20 px-3 py-2 text-[11px] font-bold text-red-700 dark:text-red-300">
+                        {w.staleTimerCount} stale timer{w.staleTimerCount === 1 ? '' : 's'}
+                        {w.unclosedHandoffCount > 0 && ` - ${w.unclosedHandoffCount} unclosed handoff${w.unclosedHandoffCount === 1 ? '' : 's'}`}
+                      </div>
+                    )}
+
+                    <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Accept Avg</div>
+                        <div className="text-sm font-black text-slate-900 dark:text-white mt-1">{w.avgAcceptSecondsLast2h ? fmtAge(w.avgAcceptSecondsLast2h) : '—'}</div>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Prep Avg</div>
+                        <div className="text-sm font-black text-slate-900 dark:text-white mt-1">{w.avgPrepSecondsLast2h ? fmtAge(w.avgPrepSecondsLast2h) : '—'}</div>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Handoff</div>
+                        <div className="text-sm font-black text-slate-900 dark:text-white mt-1">{w.avgHandoffSecondsLast2h ? fmtAge(w.avgHandoffSecondsLast2h) : '—'}</div>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Avg</div>
+                        <div className="text-sm font-black text-slate-900 dark:text-white mt-1">{w.avgTotalSecondsLast2h ? fmtAge(w.avgTotalSecondsLast2h) : '—'}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-3 gap-3">
                       <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3">
                         <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Pending</div>
                         <div className="text-sm font-black text-slate-900 dark:text-white mt-1">{w.pendingCount}</div>
@@ -416,4 +442,3 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
     </div>
   );
 }
-

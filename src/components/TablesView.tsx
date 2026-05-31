@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Sale, OrderItem, RestaurantTable, TableSection } from '../types';
-import { Utensils, Users, CheckCircle2, X, Plus } from 'lucide-react';
+import { Utensils, Users, CheckCircle2, X, Plus, Clock } from 'lucide-react';
 import { apiPut } from '../api';
 import { usePosStore } from '../store/usePosStore';
+import { deriveWorkstationItemTiming, formatWorkstationDuration } from '../../shared/workstationTiming';
 
 interface TablesViewProps {
   sales: Sale[];
@@ -16,6 +17,12 @@ export function TablesView({ sales, tableSections, restaurantTables, onSalesUpda
   const tenantId = usePosStore(s => s.tenantId);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>('all');
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 15000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // Fall back to 20 hardcoded tables if none configured
   const useFallback = restaurantTables.length === 0;
@@ -48,7 +55,6 @@ export function TablesView({ sales, tableSections, restaurantTables, onSalesUpda
       const o = item as OrderItem;
       await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${sale.id}/items/${o.id}`, {
         status: 'delivered',
-        deliveredAt: new Date().toISOString()
       });
     }
 
@@ -179,12 +185,18 @@ export function TablesView({ sales, tableSections, restaurantTables, onSalesUpda
             <div className="flex-1 overflow-y-auto p-5 space-y-3">
               {selectedSale.items.map((item, idx) => {
                 const o = item as OrderItem;
+                const timing = deriveWorkstationItemTiming(o, { now });
                 const statusColor = {
                   pending: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
                   accepted: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
                   ready: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
                   delivered: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
                 }[o.status || 'pending'] || 'bg-slate-100 text-slate-500';
+                const timerColor = timing.phaseState === 'stale' || timing.phaseState === 'critical'
+                  ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                  : timing.phaseState === 'warning'
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
 
                 return (
                   <div key={idx} className={`flex items-center justify-between p-3 rounded-2xl border ${
@@ -200,9 +212,17 @@ export function TablesView({ sales, tableSections, restaurantTables, onSalesUpda
                         {item.name}
                       </span>
                     </div>
-                    <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${statusColor}`}>
-                      {o.status || 'pending'}
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${statusColor}`}>
+                        {o.status || 'pending'}
+                      </span>
+                      {timing.activePhase === 'handoff' && (
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${timerColor}`}>
+                          <Clock className="w-3 h-3" />
+                          Handoff {formatWorkstationDuration(timing.phaseElapsedSeconds)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })}

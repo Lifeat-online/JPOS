@@ -173,6 +173,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 
 - [x] AI Manager Copilot V1 supports provider settings, deterministic staff scores, persisted insights, dashboard strips, refresh/delete controls, and provider test diagnostics.
 - [x] AI providers include OpenAI, Ollama, AnythingLLM, Google Gemini, Vertex AI, and OpenRouter.
+- [x] Refresh AI Manager Copilot data model with Action Center tasks, audit/offline/device metadata, stock movement reason codes, stocktake sessions/items/rules, manager cash/EOD/custody signals, lay-bys, purchase orders, split payments, refund/void traces, customer/payout exposure, and workstation timing groups.
 - [ ] Add cashier-facing AI upsell prompts using cart contents, customer history, current stock, margin rules, active promotions, and time-of-day demand.
 - [ ] Add AI menu/product optimization using product margin, category performance, low stock, wastage, and recipe-cost data.
 - [ ] Add category performance, margin, table turnover, refund/void, cash variance, and staff exception insight types.
@@ -195,6 +196,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 ## P10 - Restaurant Mode
 
 - [x] Workstation model, product routing, item lifecycle statuses, table/tab workflows, staff metrics, leaderboard surfaces, and live queue reporting exist.
+- [x] Add server-owned per-item workstation timers for accept, prep, handoff, and total elapsed time with stale timer quality flags.
 - [ ] Add restaurant split-by-seat/person/table bill workflows.
 - [ ] Add reservations connected to tables, customers, deposits, and reminders.
 - [ ] Add table-turnover reporting, open-tab aging, prep-time trend reporting, and staff coaching history.
@@ -291,3 +293,5 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - 2026-05-30: Completed the daily-operator workflow audit across POS, tables/tabs, refund/void/reprint, cash-up, stock receiving, stock adjustments, staff permissions, and AI approvals; captured confirmed working surfaces and converted the remaining operator friction into active UX/P2/P3/P8 roadmap gaps inside this master todo.
 - 2026-05-30: Added the formal lay-by workflow with `layby_orders`, `layby_items`, and `layby_payments` schema/startup healing, POS lay-by creation, active lay-by manager controls for instalments, final collection, cancellation/release, reserved-stock stock movements, cash-session movement capture for cash lay-by payments/refunds, completed `layby_final` sale creation, audit events, and printable lay-by receipts.
 - 2026-05-30: Passed lay-by verification: `npx.cmd vitest run tests/backend/layby.test.ts tests/backend/layby-schema.test.ts`, `node --check server\layby.ts`, `npm.cmd run build`, and `npm.cmd run lint`; build still reports the existing large-chunk warning.
+- 2026-05-31: Updated AI Manager Copilot with the newer operational data model: Action Center tasks, audit/offline/device and local-receipt metadata, stock movement reason codes, stocktake workflow signals, manager cash/EOD/custody ledgers, lay-by exposure, purchase-order pipeline, split-payment/refund/void traces, and customer/payout exposure. Staff scoring now includes Action Center follow-through, stocktake variance, refund/void exceptions, no-sale traces, and offline sync issues. Passed `npx.cmd vitest run tests/backend/ai.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-05-31: Implemented workstation timer telemetry with backend-owned UTC/server timestamps: held/open orders do not stamp `ordered_at`, send-to-workstation stamps `ordered_at`, accept/ready/delivered stamp their own phase timestamps once, edit/re-send preserves existing timestamps, and newly added sent items get fresh sent timestamps. Added shared timing thresholds, stale/unclosed-handoff handling, live workstation phase averages/P90/stale counts, Workstation and Tables timer chips, and AI `liveTiming`/`servicePeriodTiming` intake. Passed `npx.cmd vitest run tests/backend/mariadb-crud.test.ts tests/backend/workstation-stats.test.ts tests/frontend/workstation-timing.test.ts tests/backend/ai.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.

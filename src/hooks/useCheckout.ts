@@ -201,13 +201,10 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   const cartTotalAfterDiscount = Math.max(0, cartTotal - totalDiscount);
 
   const stampOrderItems = (items: any[], delivered = false) => {
-    const now = new Date().toISOString();
     return items.map(item => ({
       ...item,
       status: delivered ? 'delivered' : (item.status || 'pending'),
       workstationId: item.workstationId,
-      orderedAt: item.orderedAt || now,
-      ...(delivered ? { deliveredAt: now } : {}),
     }));
   };
 
