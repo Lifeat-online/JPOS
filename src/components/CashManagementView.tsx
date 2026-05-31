@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, CashSession, CashTransaction, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, Sale, Staff } from '../types';
-import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank, ArrowLeftRight, Download } from 'lucide-react';
+import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank, ArrowLeftRight, Download, ArrowRight } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { apiGet, apiPost, apiPut, cancelCashCustodyTransfer, confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, exportCashCloseCheckpointCsv, exportManagerCashMovementsCsv, getCashCloseCheckpoints, getCashClosePreview, getCashCustodyTransfers, getManagerCashMovements, getManagerCashSummary, recordCashMovement, recordManagerCashMovement } from '../api';
 import { PrinterReadinessPanel } from './PrinterReadinessPanel';
@@ -12,6 +12,8 @@ interface CashManagementViewProps {
   currentUserStaff: Staff | null;
   sales: Sale[];
 }
+
+type WorkflowSection = 'register' | 'review' | 'custody' | 'endOfDay';
 
 const DENOMINATIONS = [
   { value: 200, label: 'R200 Notes' },
@@ -180,6 +182,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
   const [cashCloseBreakdown, setCashCloseBreakdown] = useState<Record<string, number>>({});
   const [cashCloseNote, setCashCloseNote] = useState('');
   const [cashCloseMessage, setCashCloseMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [workflowSection, setWorkflowSection] = useState<WorkflowSection>('register');
 
   const toNumber = (value: unknown): number => {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -353,6 +356,12 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
     const interval = setInterval(fetchSessions, 30000);
     return () => clearInterval(interval);
   }, [tenantId, currentUserStaff?.role, currentUserStaff?.id, managerMovementFilterType, managerMovementFilterSource, managerMovementSearch]);
+
+  useEffect(() => {
+    if (!canManageCash && (workflowSection === 'review' || workflowSection === 'custody')) {
+      setWorkflowSection('register');
+    }
+  }, [canManageCash, workflowSection]);
 
   const openRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -703,6 +712,93 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
     return 'bg-slate-100 text-slate-600';
   };
 
+  const closedSessions = sessions.filter(s => s.status === 'closed');
+  const cashCloseIssues = zChecklist.filter(item => !item.ok);
+  const workflowCards: Array<{
+    id: WorkflowSection;
+    label: string;
+    value: string;
+    detail: string;
+    icon: typeof DollarSign;
+    tone: string;
+    managerOnly?: boolean;
+  }> = [
+    {
+      id: 'register' as WorkflowSection,
+      label: '1. Register',
+      value: activeSession ? 'Open' : 'Closed',
+      detail: activeSession ? `Expected R${toNumber((activeSession as any).expectedCash).toFixed(2)}` : 'Count float before cash sales',
+      icon: DollarSign,
+      tone: activeSession ? 'text-emerald-600' : 'text-slate-500',
+    },
+    {
+      id: 'review' as WorkflowSection,
+      label: '2. Cash-up review',
+      value: `${pendingReview.length}`,
+      detail: pendingReview.length === 1 ? 'Cash-up needs review' : 'Cash-ups need review',
+      icon: ClipboardCheck,
+      tone: pendingReview.length > 0 ? 'text-amber-600' : 'text-emerald-600',
+      managerOnly: true,
+    },
+    {
+      id: 'custody' as WorkflowSection,
+      label: '3. Float & handovers',
+      value: `${pendingCustodyTransfers.length}`,
+      detail: pendingCustodyTransfers.length === 1 ? 'Handover waiting' : 'Handovers waiting',
+      icon: ArrowLeftRight,
+      tone: pendingCustodyTransfers.length > 0 ? 'text-orange-600' : 'text-primary',
+      managerOnly: true,
+    },
+    {
+      id: 'endOfDay' as WorkflowSection,
+      label: '4. End of day',
+      value: cashCloseIssues.length === 0 ? 'Ready' : `${cashCloseIssues.length}`,
+      detail: cashCloseIssues.length === 0 ? 'Checks clear' : 'Close checks left',
+      icon: Printer,
+      tone: cashCloseIssues.length === 0 ? 'text-emerald-600' : 'text-amber-600',
+    },
+  ].filter(card => !card.managerOnly || canManageCash);
+
+  const nextWorkflowAction = activeSession
+    ? {
+      section: 'register' as WorkflowSection,
+      eyebrow: 'Current action',
+      title: 'Finish the open register',
+      detail: `Expected cash is R${toNumber((activeSession as any).expectedCash).toFixed(2)} before final count.`,
+      action: 'Go to register',
+    }
+    : canManageCash && pendingReview.length > 0
+      ? {
+        section: 'review' as WorkflowSection,
+        eyebrow: 'Current action',
+        title: `${pendingReview.length} cash-up${pendingReview.length === 1 ? '' : 's'} waiting`,
+        detail: 'Review the variance, add a note if needed, then reconcile or dispute.',
+        action: 'Review cash-ups',
+      }
+      : canManageCash && pendingCustodyTransfers.length > 0
+        ? {
+          section: 'custody' as WorkflowSection,
+          eyebrow: 'Current action',
+          title: `${pendingCustodyTransfers.length} cash handover${pendingCustodyTransfers.length === 1 ? '' : 's'} pending`,
+          detail: 'Confirm the counted cash before it lands in the manager ledger.',
+          action: 'Open handovers',
+        }
+        : cashCloseIssues.length > 0
+          ? {
+            section: 'endOfDay' as WorkflowSection,
+            eyebrow: 'Current action',
+            title: `${cashCloseIssues.length} end-of-day check${cashCloseIssues.length === 1 ? '' : 's'} left`,
+            detail: cashCloseIssues[0]?.detail || 'Clear close checks before saving the day.',
+            action: 'View close',
+          }
+          : {
+            section: 'register' as WorkflowSection,
+            eyebrow: 'All clear',
+            title: 'Cash workflow is balanced',
+            detail: 'Open the next register when the shift starts.',
+            action: 'Open register',
+          };
+
   if (loading) return <div className="p-8 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
   return (
@@ -737,7 +833,54 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
           </div>
         </div>
 
-        {canManageCash && managerCash && (
+        <div className="bg-white dark:bg-slate-900 p-5 lg:p-6 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm space-y-5">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{nextWorkflowAction.eyebrow}</p>
+              <h3 className="mt-1 text-xl font-black tracking-tight text-slate-900 dark:text-white">{nextWorkflowAction.title}</h3>
+              <p className="mt-1 text-sm font-semibold text-slate-500">{nextWorkflowAction.detail}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setWorkflowSection(nextWorkflowAction.section)}
+              className="h-11 px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all"
+            >
+              {nextWorkflowAction.action}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {workflowCards.map(card => {
+              const Icon = card.icon;
+              const isActive = workflowSection === card.id;
+              return (
+                <button
+                  key={card.id}
+                  type="button"
+                  aria-pressed={isActive}
+                  onClick={() => setWorkflowSection(card.id)}
+                  className={`min-h-[112px] rounded-2xl border p-4 text-left transition-all ${
+                    isActive
+                      ? 'border-primary bg-primary/10 shadow-sm'
+                      : 'border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 hover:border-slate-300 dark:hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className={`text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-primary' : 'text-slate-400'}`}>{card.label}</p>
+                      <p className={`mt-2 text-2xl font-black ${card.tone}`}>{card.value}</p>
+                    </div>
+                    <Icon className={`w-5 h-5 ${card.tone}`} />
+                  </div>
+                  <p className="mt-3 text-xs font-semibold text-slate-500">{card.detail}</p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {workflowSection === 'custody' && canManageCash && managerCash && (
           <div className="bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm space-y-6">
             <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
               <div>
@@ -1173,6 +1316,19 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
           </div>
         )}
 
+        {workflowSection === 'custody' && canManageCash && !managerCash && (
+          <div className="bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm">
+            <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="font-black">Manager cash is unavailable</h3>
+                <p className="mt-1 text-sm font-semibold">Refresh once the cash ledger connection is back.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {workflowSection === 'endOfDay' && (
         <div className="z-report-screen bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm space-y-6">
           <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
             <div>
@@ -1394,6 +1550,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
             </div>
           </div>
         </div>
+        )}
 
         <div className="z-report-print-only hidden text-black bg-white p-8 font-sans">
           <h1 className="text-2xl font-black">Z Report</h1>
@@ -1419,7 +1576,11 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm flex flex-col md:flex-row gap-8 lg:gap-12">
+        {(workflowSection === 'register' || workflowSection === 'review') && (
+        <div className={`bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-3xl border border-slate-100 dark:border-slate-800/60 shadow-sm ${
+          workflowSection === 'review' ? 'space-y-8' : 'flex flex-col md:flex-row gap-8 lg:gap-12'
+        }`}>
+          {workflowSection === 'register' && (
           <div className="flex-1 max-w-sm shrink-0">
             <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><DollarSign className="w-6 h-6 text-emerald-500"/> Current shift</h3>
             
@@ -1544,11 +1705,12 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
               </form>
             )}
           </div>
+          )}
           
-          <div className="hidden md:block w-px bg-slate-100 dark:bg-slate-800"></div>
+          {workflowSection === 'register' && <div className="hidden md:block w-px bg-slate-100 dark:bg-slate-800"></div>}
           
-          <div className="flex-1">
-             {canManageCash && (
+          <div className={workflowSection === 'review' ? 'w-full' : 'flex-1'}>
+             {workflowSection === 'review' && canManageCash && (
                <div className="mb-8">
                  <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><ShieldCheck className="w-6 h-6 text-primary"/> Management Review</h3>
                  <div className="space-y-4">
@@ -1589,7 +1751,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
 
              <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Calendar className="w-6 h-6 text-slate-400"/> Recent Sessions</h3>
              <div className="space-y-4 max-h-[800px] overflow-y-auto pr-2 custom-scrollbar">
-                {sessions.filter(s => s.status === 'closed').slice(0, 50).map(s => {
+                {closedSessions.slice(0, 50).map(s => {
                    const opened = new Date(s.openedAt);
                    const closed = s.closedAt ? new Date(s.closedAt) : new Date();
                    const diff = toNumber((s as any).difference);
@@ -1628,7 +1790,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
                      </div>
                    );
                 })}
-                {sessions.filter(s => s.status === 'closed').length === 0 && (
+                {closedSessions.length === 0 && (
                    <div className="text-center py-12 flex flex-col items-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
                      <AlertCircle className="w-8 h-8 text-slate-300 mb-3" />
                      <p className="text-sm text-slate-500 font-medium">No recent closed sessions found.</p>
@@ -1637,6 +1799,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
              </div>
           </div>
         </div>
+        )}
       </div>
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
