@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, CashSession, CashTransaction, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, Sale, Staff } from '../types';
-import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank, ArrowLeftRight, Download, ArrowRight } from 'lucide-react';
+import { Loader2, DollarSign, Calendar, Lock, Unlock, AlertCircle, HandCoins, ShieldCheck, ClipboardCheck, CheckCircle2, XCircle, Clock, Printer, Landmark, Wallet, PiggyBank, ArrowLeftRight, Download, ArrowRight, ChevronDown } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { apiGet, apiPost, apiPut, cancelCashCustodyTransfer, confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, exportCashCloseCheckpointCsv, exportManagerCashMovementsCsv, getCashCloseCheckpoints, getCashClosePreview, getCashCustodyTransfers, getManagerCashMovements, getManagerCashSummary, recordCashMovement, recordManagerCashMovement } from '../api';
 import { PrinterReadinessPanel } from './PrinterReadinessPanel';
@@ -714,7 +714,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
 
   const closedSessions = sessions.filter(s => s.status === 'closed');
   const cashCloseIssues = zChecklist.filter(item => !item.ok);
-  const workflowCards: Array<{
+  const workflowSections: Array<{
     id: WorkflowSection;
     label: string;
     value: string;
@@ -757,7 +757,9 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
       icon: Printer,
       tone: cashCloseIssues.length === 0 ? 'text-emerald-600' : 'text-amber-600',
     },
-  ].filter(card => !card.managerOnly || canManageCash);
+  ].filter(section => !section.managerOnly || canManageCash);
+  const selectedWorkflowSection = workflowSections.find(section => section.id === workflowSection) || workflowSections[0]!;
+  const SelectedWorkflowIcon = selectedWorkflowSection.icon;
 
   const nextWorkflowAction = activeSession
     ? {
@@ -850,33 +852,38 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
             </button>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {workflowCards.map(card => {
-              const Icon = card.icon;
-              const isActive = workflowSection === card.id;
-              return (
-                <button
-                  key={card.id}
-                  type="button"
-                  aria-pressed={isActive}
-                  onClick={() => setWorkflowSection(card.id)}
-                  className={`min-h-[112px] rounded-2xl border p-4 text-left transition-all ${
-                    isActive
-                      ? 'border-primary bg-primary/10 shadow-sm'
-                      : 'border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 hover:border-slate-300 dark:hover:border-slate-700'
-                  }`}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <div>
+              <label htmlFor="cash-workflow-section" className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Work section</label>
+              <div className="relative">
+                <select
+                  id="cash-workflow-section"
+                  value={workflowSection}
+                  onChange={event => setWorkflowSection(event.target.value as WorkflowSection)}
+                  className="w-full h-14 appearance-none rounded-2xl border border-slate-200 bg-slate-50 px-4 pr-12 text-sm font-black text-slate-900 outline-none transition-all focus:border-primary dark:border-slate-700 dark:bg-slate-950/50 dark:text-white"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className={`text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-primary' : 'text-slate-400'}`}>{card.label}</p>
-                      <p className={`mt-2 text-2xl font-black ${card.tone}`}>{card.value}</p>
-                    </div>
-                    <Icon className={`w-5 h-5 ${card.tone}`} />
+                  {workflowSections.map(section => (
+                    <option key={section.id} value={section.id}>
+                      {section.label} - {section.value} - {section.detail}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              </div>
+            </div>
+
+            <div className="min-h-[88px] rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/50">
+              <div className="flex items-start gap-3">
+                <SelectedWorkflowIcon className={`mt-0.5 h-5 w-5 shrink-0 ${selectedWorkflowSection.tone}`} />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{selectedWorkflowSection.label}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className={`text-2xl font-black ${selectedWorkflowSection.tone}`}>{selectedWorkflowSection.value}</p>
+                    <p className="text-sm font-semibold text-slate-500">{selectedWorkflowSection.detail}</p>
                   </div>
-                  <p className="mt-3 text-xs font-semibold text-slate-500">{card.detail}</p>
-                </button>
-              );
-            })}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
