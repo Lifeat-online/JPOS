@@ -90,7 +90,7 @@ export function InventoryAgentView() {
       if (fullAutopilot && isDev && result.steps.length > 0) {
         setApplying(true);
         try {
-          setApplyResult(await applyInventoryAgentSteps(tenantId, result.steps, true));
+          setApplyResult(await applyInventoryAgentSteps(tenantId, result.steps, true, result.runId || result.id));
         } finally {
           setApplying(false);
         }
@@ -108,7 +108,7 @@ export function InventoryAgentView() {
     setError(null);
     try {
       const steps = proposal.steps.map(step => ({ ...step, approved: Boolean(approved[step.id]) }));
-      setApplyResult(await applyInventoryAgentSteps(tenantId, steps, fullAutopilot && isDev));
+      setApplyResult(await applyInventoryAgentSteps(tenantId, steps, fullAutopilot && isDev, proposal.runId || proposal.id));
     } catch (err: any) {
       setError(err?.message || 'Approved steps could not be applied.');
     } finally {

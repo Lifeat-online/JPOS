@@ -2,6 +2,9 @@
 // This file ensures TypeScript types are available in the server runtime
 export type {
   Product,
+  ReorderRecommendation,
+  StockBatch,
+  StockBatchExpiryStatus,
   Workstation,
   CartItem,
   OrderItem,

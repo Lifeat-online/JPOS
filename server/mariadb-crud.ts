@@ -1,6 +1,6 @@
 import { getConnection, isPostgres, query } from "./db.js";
 import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
-import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem, BulkItem, RecipeItem, ModifierGroup, ModifierOption, Vendor, PurchaseOrder } from "./types.js";
+import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem, BulkItem, RecipeItem, ModifierGroup, ModifierOption, Vendor, PurchaseOrder, StockBatch } from "./types.js";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
 const PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY;
@@ -215,6 +215,128 @@ async function applyCheckoutSideEffects(
   }
 }
 
+function makeStockBatchId() {
+  return `batch_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+}
+
+function cleanStockBatchDate(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function daysUntilDate(value: unknown) {
+  const text = cleanStockBatchDate(value);
+  if (!text) return null;
+  const date = new Date(`${text}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  return Math.ceil((date.getTime() - today.getTime()) / 86400000);
+}
+
+async function createReceivingStockBatch(
+  conn: any,
+  input: {
+    tenantId: string;
+    productId: string;
+    productName: string;
+    purchaseOrderId: string;
+    vendorId?: string | null;
+    supplierInvoiceNumber?: string | null;
+    supplierInvoiceDate?: string | null;
+    batchNumber?: string | null;
+    receivedQuantity: number;
+    unitCost: number;
+    expiryDate?: string | null;
+    receivedBy?: string | null;
+    receivedByName?: string | null;
+    note?: string | null;
+  }
+) {
+  const id = makeStockBatchId();
+  await conn.query(
+    `INSERT INTO stock_batches (
+      id, tenant_id, product_id, product_name, purchase_order_id, vendor_id,
+      supplier_invoice_number, supplier_invoice_date, batch_number,
+      received_quantity, remaining_quantity, unit_cost, expiry_date,
+      received_at, received_by, received_by_name, status, note, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, NOW(), NOW())`,
+    [
+      id,
+      input.tenantId,
+      input.productId,
+      input.productName,
+      input.purchaseOrderId,
+      input.vendorId || null,
+      input.supplierInvoiceNumber || null,
+      cleanStockBatchDate(input.supplierInvoiceDate),
+      input.batchNumber || null,
+      input.receivedQuantity,
+      input.receivedQuantity,
+      input.unitCost,
+      cleanStockBatchDate(input.expiryDate),
+      input.receivedBy || null,
+      input.receivedByName || null,
+      "active",
+      input.note || null,
+    ]
+  );
+  return id;
+}
+
+async function consumeProductStockBatches(
+  conn: any,
+  tenantId: string,
+  productId: string,
+  quantity: number
+) {
+  let remainingToConsume = Math.max(0, Number(Number(quantity || 0).toFixed(3)));
+  if (remainingToConsume <= 0) return { requestedQuantity: 0, consumedQuantity: 0, unbatchedQuantity: 0 };
+
+  const [rows] = await conn.query(
+    `SELECT id, remaining_quantity AS remainingQuantity
+       FROM stock_batches
+      WHERE tenant_id = ?
+        AND product_id = ?
+        AND status = 'active'
+        AND remaining_quantity > 0
+      ORDER BY
+        CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END,
+        expiry_date ASC,
+        received_at ASC,
+        created_at ASC
+      FOR UPDATE`,
+    [tenantId, productId]
+  );
+
+  let consumedQuantity = 0;
+  for (const batch of rows as any[]) {
+    if (remainingToConsume <= 0) break;
+    const batchRemaining = Math.max(0, Number(batch.remainingQuantity || batch.remaining_quantity || 0));
+    if (batchRemaining <= 0) continue;
+    const consume = Math.min(batchRemaining, remainingToConsume);
+    const nextRemaining = Number((batchRemaining - consume).toFixed(3));
+    consumedQuantity = Number((consumedQuantity + consume).toFixed(3));
+    remainingToConsume = Number((remainingToConsume - consume).toFixed(3));
+    await conn.query(
+      `UPDATE stock_batches
+          SET remaining_quantity = ?,
+              status = ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [nextRemaining, nextRemaining <= 0 ? "depleted" : "active", tenantId, batch.id]
+    );
+  }
+
+  return {
+    requestedQuantity: Number(Number(quantity || 0).toFixed(3)),
+    consumedQuantity,
+    unbatchedQuantity: remainingToConsume,
+  };
+}
+
 async function deductCompletedSaleProductStock(
   conn: any,
   tenantId: string,
@@ -234,7 +356,7 @@ async function deductCompletedSaleProductStock(
   }
 
   for (const [productId, movement] of totals.entries()) {
-    await applyProductStockDelta(conn, {
+    const stockDelta = await applyProductStockDelta(conn, {
       tenantId,
       productId,
       itemName: movement.name || null,
@@ -248,6 +370,9 @@ async function deductCompletedSaleProductStock(
       staffName: context.staffName || null,
       note: context.note || null,
     });
+    if (stockDelta && movement.quantity > 0) {
+      await consumeProductStockBatches(conn, tenantId, productId, movement.quantity);
+    }
   }
 }
 
@@ -1107,6 +1232,13 @@ export async function getPurchaseOrders(tenantId: string): Promise<PurchaseOrder
        total_amount AS totalAmount,
        expected_delivery_date AS expectedDeliveryDate,
        invoice_status AS invoiceStatus,
+       invoice_number AS invoiceNumber,
+       invoice_date AS invoiceDate,
+       received_at AS receivedAt,
+       received_by AS receivedBy,
+       received_by_name AS receivedByName,
+       receiving_note AS receivingNote,
+       received_total_amount AS receivedTotalAmount,
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM purchase_orders
@@ -1118,6 +1250,9 @@ export async function getPurchaseOrders(tenantId: string): Promise<PurchaseOrder
     ...row,
     items: safeParse(row.items, []),
     totalAmount: Number(row.totalAmount || 0),
+    receivedTotalAmount: row.receivedTotalAmount !== null && row.receivedTotalAmount !== undefined
+      ? Number(row.receivedTotalAmount || 0)
+      : undefined,
   })) as PurchaseOrder[];
 }
 
@@ -1161,6 +1296,365 @@ export async function updatePurchaseOrder(tenantId: string, id: string, updates:
   fields.push("updated_at = NOW()");
   values.push(tenantId, id);
   await query(`UPDATE purchase_orders SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`, values);
+}
+
+function serializeStockBatch(row: any): StockBatch {
+  const remainingQuantity = Number(row.remainingQuantity ?? row.remaining_quantity ?? 0);
+  const status = row.status || "active";
+  const daysToExpiry = daysUntilDate(row.expiryDate ?? row.expiry_date);
+  const expiryStatus =
+    status === "depleted" || remainingQuantity <= 0 ? "depleted" :
+    daysToExpiry !== null && daysToExpiry < 0 ? "expired" :
+    daysToExpiry !== null && daysToExpiry <= 14 ? "expiring" :
+    "ok";
+  return {
+    id: row.id,
+    tenantId: row.tenantId ?? row.tenant_id,
+    productId: row.productId ?? row.product_id,
+    productName: row.productName ?? row.product_name,
+    purchaseOrderId: row.purchaseOrderId ?? row.purchase_order_id ?? null,
+    vendorId: row.vendorId ?? row.vendor_id ?? null,
+    supplierInvoiceNumber: row.supplierInvoiceNumber ?? row.supplier_invoice_number ?? null,
+    supplierInvoiceDate: row.supplierInvoiceDate ?? row.supplier_invoice_date ?? null,
+    batchNumber: row.batchNumber ?? row.batch_number ?? null,
+    receivedQuantity: Number(row.receivedQuantity ?? row.received_quantity ?? 0),
+    remainingQuantity,
+    unitCost: Number(row.unitCost ?? row.unit_cost ?? 0),
+    expiryDate: row.expiryDate ?? row.expiry_date ?? null,
+    receivedAt: row.receivedAt ?? row.received_at ?? null,
+    receivedBy: row.receivedBy ?? row.received_by ?? null,
+    receivedByName: row.receivedByName ?? row.received_by_name ?? null,
+    status,
+    note: row.note || null,
+    daysToExpiry,
+    expiryStatus,
+    rotationRank: null,
+    rotationGuidance: expiryStatus === "depleted" ? "Depleted" : expiryStatus === "expired" ? "Expired stock - isolate" : "Hold",
+    createdAt: row.createdAt ?? row.created_at ?? null,
+    updatedAt: row.updatedAt ?? row.updated_at ?? null,
+  } as StockBatch;
+}
+
+export async function getStockBatches(tenantId: string): Promise<StockBatch[]> {
+  const rows = await query(
+    `SELECT
+       id,
+       tenant_id AS tenantId,
+       product_id AS productId,
+       product_name AS productName,
+       purchase_order_id AS purchaseOrderId,
+       vendor_id AS vendorId,
+       supplier_invoice_number AS supplierInvoiceNumber,
+       supplier_invoice_date AS supplierInvoiceDate,
+       batch_number AS batchNumber,
+       received_quantity AS receivedQuantity,
+       remaining_quantity AS remainingQuantity,
+       unit_cost AS unitCost,
+       expiry_date AS expiryDate,
+       received_at AS receivedAt,
+       received_by AS receivedBy,
+       received_by_name AS receivedByName,
+       status,
+       note,
+       created_at AS createdAt,
+       updated_at AS updatedAt
+     FROM stock_batches
+     WHERE tenant_id = ?
+     ORDER BY
+       CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END,
+       expiry_date ASC,
+       received_at ASC,
+       created_at ASC`,
+    [tenantId]
+  );
+
+  const batches = (rows as any[]).map(serializeStockBatch);
+  const activeByProduct = new Map<string, number>();
+  for (const batch of batches) {
+    if (batch.expiryStatus === "depleted" || batch.expiryStatus === "expired") continue;
+    const nextRank = (activeByProduct.get(batch.productId) || 0) + 1;
+    activeByProduct.set(batch.productId, nextRank);
+    batch.rotationRank = nextRank;
+    batch.rotationGuidance =
+      nextRank === 1 ? "Use first (FEFO)" :
+      batch.expiryStatus === "expiring" ? "Use soon" :
+      "Hold";
+  }
+  return batches;
+}
+
+type PurchaseOrderReceiveLine = {
+  lineIndex?: number;
+  productId?: string | null;
+  receivedQuantity?: number | string | null;
+  receivedPrice?: number | string | null;
+  expiryDate?: string | null;
+  batchNumber?: string | null;
+  note?: string | null;
+};
+
+type PurchaseOrderReceiveInput = {
+  invoiceNumber?: string | null;
+  invoiceDate?: string | null;
+  invoiceStatus?: "unpaid" | "paid" | string | null;
+  note?: string | null;
+  items?: PurchaseOrderReceiveLine[];
+};
+
+type PurchaseOrderReceiveActor = {
+  staffId?: string | null;
+  staffName?: string | null;
+};
+
+function cleanReceivingString(value: unknown, maxLength = 255) {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function cleanReceivingNumber(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Number(number.toFixed(3)) : fallback;
+}
+
+function receiveLineKeyForIndex(index: number) {
+  return `index:${index}`;
+}
+
+function receiveLineKeyForProduct(productId: unknown) {
+  return `product:${String(productId || "")}`;
+}
+
+export async function receivePurchaseOrder(
+  tenantId: string,
+  id: string,
+  input: PurchaseOrderReceiveInput = {},
+  actor: PurchaseOrderReceiveActor = {}
+): Promise<PurchaseOrder> {
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query(
+      `SELECT
+         id,
+         vendor_id AS vendorId,
+         status,
+         type,
+         recurring_frequency AS recurringFrequency,
+         items,
+         total_amount AS totalAmount,
+         expected_delivery_date AS expectedDeliveryDate,
+         invoice_status AS invoiceStatus,
+         created_at AS createdAt,
+         updated_at AS updatedAt
+       FROM purchase_orders
+       WHERE tenant_id = ? AND id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [tenantId, id]
+    );
+    const order = (rows as any[])[0];
+    if (!order) throw new Error("Purchase order not found");
+    if (order.status === "received") throw new Error("Purchase order has already been received");
+    if (order.status === "cancelled") throw new Error("Cancelled purchase orders cannot be received");
+
+    const items = safeParse(order.items, []);
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error("Purchase order has no items to receive");
+    }
+
+    const receiveItems = Array.isArray(input.items) ? input.items : [];
+    const receiveByIndex = new Map<string, PurchaseOrderReceiveLine>();
+    const receiveByProduct = new Map<string, PurchaseOrderReceiveLine>();
+    for (const line of receiveItems) {
+      if (line.lineIndex !== undefined && line.lineIndex !== null) {
+        receiveByIndex.set(receiveLineKeyForIndex(Number(line.lineIndex)), line);
+      }
+      if (line.productId) {
+        receiveByProduct.set(receiveLineKeyForProduct(line.productId), line);
+      }
+    }
+
+    const invoiceNumber = cleanReceivingString(input.invoiceNumber, 128);
+    const invoiceDate = cleanReceivingString(input.invoiceDate, 32);
+    const receivingNote = cleanReceivingString(input.note, 1000);
+    const requestedInvoiceStatus = input.invoiceStatus || order.invoiceStatus;
+    const invoiceStatus = requestedInvoiceStatus === "paid" ? "paid" : "unpaid";
+    const receivedAt = new Date().toISOString();
+    const receivedItems: any[] = [];
+    let totalReceivedQuantity = 0;
+    let totalVarianceQuantity = 0;
+    let receivedTotalAmount = 0;
+
+    for (const [index, item] of items.entries()) {
+      const productId = item.productId || item.product_id || null;
+      if (!productId) throw new Error(`Purchase order line ${index + 1} is missing a product`);
+
+      const lineInput = receiveByIndex.get(receiveLineKeyForIndex(index))
+        || receiveByProduct.get(receiveLineKeyForProduct(productId))
+        || {};
+      const orderedQuantity = cleanReceivingNumber(item.quantity, 0);
+      const receivedQuantity = cleanReceivingNumber(
+        lineInput.receivedQuantity === undefined || lineInput.receivedQuantity === null
+          ? orderedQuantity
+          : lineInput.receivedQuantity,
+        orderedQuantity
+      );
+      if (receivedQuantity < 0) throw new Error("Received quantity cannot be negative");
+
+      const expectedPrice = cleanReceivingNumber(item.expectedPrice, 0);
+      const receivedPrice = cleanReceivingNumber(
+        lineInput.receivedPrice === undefined || lineInput.receivedPrice === null
+          ? expectedPrice
+          : lineInput.receivedPrice,
+        expectedPrice
+      );
+      if (receivedPrice < 0) throw new Error("Received price cannot be negative");
+
+      const batchNumber = cleanReceivingString(lineInput.batchNumber, 128);
+      const expiryDate = cleanStockBatchDate(lineInput.expiryDate);
+      const varianceQuantity = Number((receivedQuantity - orderedQuantity).toFixed(3));
+      totalReceivedQuantity += receivedQuantity;
+      totalVarianceQuantity += varianceQuantity;
+      receivedTotalAmount += receivedQuantity * receivedPrice;
+
+      if (receivedQuantity > 0) {
+        const noteParts = [
+          invoiceNumber ? `Invoice ${invoiceNumber}` : null,
+          varianceQuantity !== 0 ? `Variance ${varianceQuantity}` : null,
+          cleanReceivingString(lineInput.note, 500),
+          receivingNote,
+        ].filter(Boolean);
+        const movement = await applyProductStockDelta(conn, {
+          tenantId,
+          productId,
+          itemName: item.productName || item.name || null,
+          quantityDelta: receivedQuantity,
+          reason: "purchase_order_receiving",
+          reasonCode: "receiving",
+          referenceType: "purchase_order",
+          referenceId: id,
+          staffId: actor.staffId || null,
+          staffName: actor.staffName || null,
+          note: noteParts.join(" | ") || null,
+        });
+        if (!movement) throw new Error(`Product ${item.productName || productId} was not found for receiving`);
+        await createReceivingStockBatch(conn, {
+          tenantId,
+          productId,
+          productName: item.productName || item.name || productId,
+          purchaseOrderId: id,
+          vendorId: order.vendorId || null,
+          supplierInvoiceNumber: invoiceNumber,
+          supplierInvoiceDate: invoiceDate,
+          batchNumber,
+          receivedQuantity,
+          unitCost: receivedPrice,
+          expiryDate,
+          receivedBy: actor.staffId || null,
+          receivedByName: actor.staffName || null,
+          note: noteParts.join(" | ") || null,
+        });
+      }
+
+      receivedItems.push({
+        ...item,
+        receivedQuantity,
+        receivedPrice,
+        varianceQuantity,
+        expiryDate,
+        batchNumber,
+        receivingNote: cleanReceivingString(lineInput.note, 500),
+        receivedAt,
+        receivedBy: actor.staffId || null,
+        receivedByName: actor.staffName || null,
+        invoiceNumber,
+        invoiceDate,
+      });
+    }
+
+    if (totalReceivedQuantity <= 0) {
+      throw new Error("At least one received quantity is required");
+    }
+
+    receivedTotalAmount = Number(receivedTotalAmount.toFixed(2));
+    await conn.query(
+      `UPDATE purchase_orders
+          SET status = ?,
+              invoice_status = ?,
+              items = ?,
+              invoice_number = ?,
+              invoice_date = ?,
+              received_at = NOW(),
+              received_by = ?,
+              received_by_name = ?,
+              receiving_note = ?,
+              received_total_amount = ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [
+        "received",
+        invoiceStatus,
+        normalizeJsonField(receivedItems, []),
+        invoiceNumber,
+        invoiceDate || null,
+        actor.staffId || null,
+        actor.staffName || null,
+        receivingNote,
+        receivedTotalAmount,
+        tenantId,
+        id,
+      ]
+    );
+
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: "purchase_order.received",
+      entityType: "purchase_order",
+      entityId: id,
+      staffId: actor.staffId || null,
+      staffName: actor.staffName || null,
+      source: "inventory_receiving",
+      details: {
+        purchaseOrderId: id,
+        invoiceNumber,
+        invoiceDate,
+        invoiceStatus,
+        receivingNote,
+        totalReceivedQuantity: Number(totalReceivedQuantity.toFixed(3)),
+        totalVarianceQuantity: Number(totalVarianceQuantity.toFixed(3)),
+        receivedTotalAmount,
+        itemCount: receivedItems.length,
+      },
+    });
+
+    await conn.commit();
+    return {
+      id,
+      vendorId: order.vendorId,
+      status: "received",
+      type: order.type || "once_off",
+      recurringFrequency: order.recurringFrequency || undefined,
+      items: receivedItems,
+      totalAmount: Number(order.totalAmount || 0),
+      expectedDeliveryDate: order.expectedDeliveryDate || null,
+      invoiceStatus: invoiceStatus as any,
+      invoiceNumber: invoiceNumber || undefined,
+      invoiceDate: invoiceDate || undefined,
+      receivedAt,
+      receivedBy: actor.staffId || undefined,
+      receivedByName: actor.staffName || undefined,
+      receivingNote: receivingNote || undefined,
+      receivedTotalAmount,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    } as PurchaseOrder;
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
 export async function deleteProduct(tenantId: string, productId: string): Promise<void> {

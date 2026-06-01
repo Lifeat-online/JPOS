@@ -15,6 +15,89 @@ export interface Product {
   recipe?: RecipeItem[];
 }
 
+export type StockBatchExpiryStatus = 'ok' | 'expiring' | 'expired' | 'depleted';
+
+export interface StockBatch {
+  id: string;
+  tenantId?: string;
+  productId: string;
+  productName: string;
+  purchaseOrderId?: string | null;
+  vendorId?: string | null;
+  supplierInvoiceNumber?: string | null;
+  supplierInvoiceDate?: any;
+  batchNumber?: string | null;
+  receivedQuantity: number;
+  remainingQuantity: number;
+  unitCost?: number;
+  expiryDate?: any;
+  receivedAt?: any;
+  receivedBy?: string | null;
+  receivedByName?: string | null;
+  status: 'active' | 'depleted' | 'expired';
+  note?: string | null;
+  daysToExpiry?: number | null;
+  expiryStatus?: StockBatchExpiryStatus;
+  rotationRank?: number | null;
+  rotationGuidance?: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface ReorderRecommendation {
+  id: string;
+  tenantId?: string;
+  productId: string;
+  productName: string;
+  status: 'open' | 'in_review' | 'approved' | 'ordered' | 'dismissed';
+  priority: 'low' | 'normal' | 'high' | 'critical';
+  currentStock: number;
+  minStock: number;
+  targetStock: number;
+  recommendedQuantity: number;
+  estimatedUnitCost: number;
+  estimatedTotalCost: number;
+  avgDailySales: number;
+  daysOfCover: number;
+  vendorId?: string | null;
+  locationId?: string | null;
+  source?: string;
+  evidence: string[];
+  purchaseOrderId?: string | null;
+  requestedBy?: string | null;
+  requestedByName?: string | null;
+  approvedBy?: string | null;
+  approvedByName?: string | null;
+  approvedAt?: any;
+  dismissedAt?: any;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface StockTakeSuggestion {
+  productId: string;
+  productName: string;
+  barcode?: string | null;
+  category?: string | null;
+  section?: string | null;
+  stock: number;
+  minStock: number;
+  score: number;
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  reasons: string[];
+  evidence: string[];
+  signals: {
+    shrinkageQuantity: number;
+    wastageQuantity: number;
+    varianceQuantity: number;
+    expiryQuantity: number;
+    quantitySold: number;
+    avgDailySales: number;
+    daysCover: number | null;
+    lastIssueAt?: any;
+  };
+}
+
 export interface Workstation {
   id: string;
   name: string;
@@ -316,6 +399,17 @@ export interface POItem {
   productName: string;
   quantity: number;
   expectedPrice: number;
+  receivedQuantity?: number;
+  receivedPrice?: number;
+  varianceQuantity?: number;
+  receivedAt?: any;
+  receivedBy?: string | null;
+  receivedByName?: string | null;
+  receivingNote?: string | null;
+  invoiceNumber?: string | null;
+  invoiceDate?: any;
+  expiryDate?: any;
+  batchNumber?: string | null;
 }
 
 export interface PurchaseOrder {
@@ -330,6 +424,13 @@ export interface PurchaseOrder {
   createdAt: any;
   updatedAt: any;
   invoiceStatus?: 'unpaid' | 'paid';
+  invoiceNumber?: string | null;
+  invoiceDate?: any;
+  receivedAt?: any;
+  receivedBy?: string | null;
+  receivedByName?: string | null;
+  receivingNote?: string | null;
+  receivedTotalAmount?: number;
 }
 
 export interface CashSession {
@@ -755,6 +856,7 @@ export interface InventoryAgentStep {
 
 export interface InventoryAgentProposal {
   id: string;
+  runId?: string;
   mode: InventoryAgentMode;
   status: 'draft';
   summary: string;
@@ -767,6 +869,8 @@ export interface InventoryAgentProposal {
 export interface InventoryAgentApplyResult {
   applied: { stepId: string; type: InventoryAgentStep['type']; result: any }[];
   skipped: { stepId: string; type: InventoryAgentStep['type']; reason: string }[];
+  runId?: string;
+  alreadyCompleted?: boolean;
 }
 
 export interface BulkItem {

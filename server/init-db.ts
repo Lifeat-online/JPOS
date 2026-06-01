@@ -344,6 +344,36 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   total_amount NUMERIC(12,2) DEFAULT 0,
   expected_delivery_date TIMESTAMPTZ,
   invoice_status TEXT DEFAULT 'unpaid' CHECK (invoice_status IN ('unpaid','paid')),
+  invoice_number TEXT,
+  invoice_date TIMESTAMPTZ,
+  received_at TIMESTAMPTZ,
+  received_by TEXT,
+  received_by_name TEXT,
+  receiving_note TEXT,
+  received_total_amount NUMERIC(12,2) DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS stock_batches (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  purchase_order_id TEXT,
+  vendor_id TEXT,
+  supplier_invoice_number TEXT,
+  supplier_invoice_date DATE,
+  batch_number TEXT,
+  received_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+  remaining_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+  unit_cost NUMERIC(12,2) DEFAULT 0,
+  expiry_date DATE,
+  received_at TIMESTAMPTZ DEFAULT NOW(),
+  received_by TEXT,
+  received_by_name TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','depleted','expired')),
+  note TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -481,11 +511,184 @@ export async function initDb() {
   await ensureManagerTaskSchema();
   await ensureStockTakeSchema();
   await ensureBulkInventorySchema();
+  await ensurePurchaseOrderReceivingSchema();
+  await ensureStockBatchSchema();
+  await ensureReorderRecommendationSchema();
   await ensurePushNotificationSchema();
   await ensureAiSchema();
 }
 
 export { ensurePushNotificationSchema };
+
+export async function ensurePurchaseOrderReceivingSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_number TEXT`);
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_date TIMESTAMPTZ`);
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS received_by TEXT`);
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS received_by_name TEXT`);
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS receiving_note TEXT`);
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS received_total_amount NUMERIC(12,2) DEFAULT 0`);
+    await query(`UPDATE purchase_orders SET received_total_amount = COALESCE(received_total_amount, 0)`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE purchase_orders ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+
+  await addColumn(`invoice_number VARCHAR(128) AFTER invoice_status`);
+  await addColumn(`invoice_date DATETIME AFTER invoice_number`);
+  await addColumn(`received_at DATETIME AFTER invoice_date`);
+  await addColumn(`received_by VARCHAR(64) AFTER received_at`);
+  await addColumn(`received_by_name VARCHAR(255) AFTER received_by`);
+  await addColumn(`receiving_note TEXT AFTER received_by_name`);
+  await addColumn(`received_total_amount DECIMAL(12,2) DEFAULT 0 AFTER receiving_note`);
+  await query(`UPDATE purchase_orders SET received_total_amount = COALESCE(received_total_amount, 0)`);
+}
+
+export async function ensureStockBatchSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS stock_batches (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        purchase_order_id TEXT,
+        vendor_id TEXT,
+        supplier_invoice_number TEXT,
+        supplier_invoice_date DATE,
+        batch_number TEXT,
+        received_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+        remaining_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+        unit_cost NUMERIC(12,2) DEFAULT 0,
+        expiry_date DATE,
+        received_at TIMESTAMPTZ DEFAULT NOW(),
+        received_by TEXT,
+        received_by_name TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','depleted','expired')),
+        note TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_batches_tenant_expiry ON stock_batches (tenant_id, status, expiry_date)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_batches_product ON stock_batches (tenant_id, product_id, status, expiry_date)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_batches_purchase_order ON stock_batches (tenant_id, purchase_order_id)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS stock_batches (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      product_id VARCHAR(64) NOT NULL,
+      product_name VARCHAR(255) NOT NULL,
+      purchase_order_id VARCHAR(64),
+      vendor_id VARCHAR(64),
+      supplier_invoice_number VARCHAR(128),
+      supplier_invoice_date DATE,
+      batch_number VARCHAR(128),
+      received_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+      remaining_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+      unit_cost DECIMAL(12,2) DEFAULT 0,
+      expiry_date DATE,
+      received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      received_by VARCHAR(64),
+      received_by_name VARCHAR(255),
+      status ENUM('active','depleted','expired') NOT NULL DEFAULT 'active',
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_stock_batches_tenant_expiry (tenant_id, status, expiry_date),
+      INDEX idx_stock_batches_product (tenant_id, product_id, status, expiry_date),
+      INDEX idx_stock_batches_purchase_order (tenant_id, purchase_order_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+export async function ensureReorderRecommendationSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS reorder_recommendations (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_review','approved','ordered','dismissed')),
+        priority TEXT NOT NULL DEFAULT 'high' CHECK (priority IN ('low','normal','high','critical')),
+        current_stock NUMERIC(12,3) NOT NULL DEFAULT 0,
+        min_stock NUMERIC(12,3) NOT NULL DEFAULT 0,
+        target_stock NUMERIC(12,3) NOT NULL DEFAULT 0,
+        recommended_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+        estimated_unit_cost NUMERIC(12,2) DEFAULT 0,
+        estimated_total_cost NUMERIC(12,2) DEFAULT 0,
+        avg_daily_sales NUMERIC(12,3) DEFAULT 0,
+        days_of_cover INTEGER DEFAULT 14,
+        vendor_id TEXT,
+        location_id TEXT,
+        source TEXT DEFAULT 'min_stock',
+        evidence TEXT DEFAULT '[]'::TEXT,
+        purchase_order_id TEXT,
+        requested_by TEXT,
+        requested_by_name TEXT,
+        approved_by TEXT,
+        approved_by_name TEXT,
+        approved_at TIMESTAMPTZ,
+        dismissed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_reorder_recommendations_status ON reorder_recommendations (tenant_id, status, priority, updated_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_reorder_recommendations_product ON reorder_recommendations (tenant_id, product_id, status)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_reorder_recommendations_purchase_order ON reorder_recommendations (tenant_id, purchase_order_id)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS reorder_recommendations (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      product_id VARCHAR(64) NOT NULL,
+      product_name VARCHAR(255) NOT NULL,
+      status ENUM('open','in_review','approved','ordered','dismissed') NOT NULL DEFAULT 'open',
+      priority ENUM('low','normal','high','critical') NOT NULL DEFAULT 'high',
+      current_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
+      min_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
+      target_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
+      recommended_quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+      estimated_unit_cost DECIMAL(12,2) DEFAULT 0,
+      estimated_total_cost DECIMAL(12,2) DEFAULT 0,
+      avg_daily_sales DECIMAL(12,3) DEFAULT 0,
+      days_of_cover INT DEFAULT 14,
+      vendor_id VARCHAR(64),
+      location_id VARCHAR(64),
+      source VARCHAR(32) DEFAULT 'min_stock',
+      evidence JSON DEFAULT JSON_ARRAY(),
+      purchase_order_id VARCHAR(64),
+      requested_by VARCHAR(64),
+      requested_by_name VARCHAR(255),
+      approved_by VARCHAR(64),
+      approved_by_name VARCHAR(255),
+      approved_at DATETIME,
+      dismissed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_reorder_recommendations_status (tenant_id, status, priority, updated_at),
+      INDEX idx_reorder_recommendations_product (tenant_id, product_id, status),
+      INDEX idx_reorder_recommendations_purchase_order (tenant_id, purchase_order_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+}
 
 export async function ensurePersonDiscountSchema() {
   if (isPostgres()) {
@@ -1368,6 +1571,14 @@ export async function ensureStockTakeSchema() {
         assigned_to_name TEXT,
         counted_by TEXT,
         counted_by_name TEXT,
+        variance_reason TEXT,
+        variance_reason_label TEXT,
+        variance_severity TEXT NOT NULL DEFAULT 'none' CHECK (variance_severity IN ('none','low','medium','high','critical')),
+        supervisor_recount_required SMALLINT NOT NULL DEFAULT 0 CHECK (supervisor_recount_required IN (0, 1)),
+        supervisor_recount_threshold NUMERIC(12,3) NOT NULL DEFAULT 0,
+        supervisor_recount_at TIMESTAMPTZ,
+        supervisor_recount_by TEXT,
+        supervisor_recount_by_name TEXT,
         status TEXT NOT NULL DEFAULT 'assigned' CHECK (status IN ('assigned','counted','confirmed','recount')),
         counted_at TIMESTAMPTZ,
         confirmed_at TIMESTAMPTZ,
@@ -1382,6 +1593,15 @@ export async function ensureStockTakeSchema() {
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_tenant_status ON stock_take_items (tenant_id, status, updated_at)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_assigned ON stock_take_items (tenant_id, assigned_to, status)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_product ON stock_take_items (tenant_id, product_id)`);
+    await query(`ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS variance_reason TEXT`);
+    await query(`ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS variance_reason_label TEXT`);
+    await query(`ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS variance_severity TEXT NOT NULL DEFAULT 'none'`);
+    await query(`ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS supervisor_recount_required SMALLINT NOT NULL DEFAULT 0`);
+    await query(`ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS supervisor_recount_threshold NUMERIC(12,3) NOT NULL DEFAULT 0`);
+    await query(`ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS supervisor_recount_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS supervisor_recount_by TEXT`);
+    await query(`ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS supervisor_recount_by_name TEXT`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_take_items_supervisor_recount ON stock_take_items (tenant_id, supervisor_recount_required, status)`);
     await query(`
       CREATE TABLE IF NOT EXISTS stock_take_rules (
         id TEXT PRIMARY KEY,
@@ -1446,6 +1666,14 @@ export async function ensureStockTakeSchema() {
       assigned_to_name VARCHAR(255),
       counted_by VARCHAR(64),
       counted_by_name VARCHAR(255),
+      variance_reason VARCHAR(64),
+      variance_reason_label VARCHAR(128),
+      variance_severity ENUM('none','low','medium','high','critical') NOT NULL DEFAULT 'none',
+      supervisor_recount_required TINYINT(1) NOT NULL DEFAULT 0,
+      supervisor_recount_threshold DECIMAL(12,3) NOT NULL DEFAULT 0,
+      supervisor_recount_at DATETIME,
+      supervisor_recount_by VARCHAR(64),
+      supervisor_recount_by_name VARCHAR(255),
       status ENUM('assigned','counted','confirmed','recount') NOT NULL DEFAULT 'assigned',
       counted_at DATETIME,
       confirmed_at DATETIME,
@@ -1458,10 +1686,36 @@ export async function ensureStockTakeSchema() {
       INDEX idx_stock_take_items_tenant_status (tenant_id, status, updated_at),
       INDEX idx_stock_take_items_assigned (tenant_id, assigned_to, status),
       INDEX idx_stock_take_items_product (tenant_id, product_id),
+      INDEX idx_stock_take_items_supervisor_recount (tenant_id, supervisor_recount_required, status),
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
       FOREIGN KEY (session_id) REFERENCES stock_take_sessions(id) ON DELETE CASCADE
     )
   `);
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE stock_take_items ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key")) throw err;
+    }
+  };
+  await addColumn(`variance_reason VARCHAR(64) AFTER counted_by_name`);
+  await addColumn(`variance_reason_label VARCHAR(128) AFTER variance_reason`);
+  await addColumn(`variance_severity ENUM('none','low','medium','high','critical') NOT NULL DEFAULT 'none' AFTER variance_reason_label`);
+  await addColumn(`supervisor_recount_required TINYINT(1) NOT NULL DEFAULT 0 AFTER variance_severity`);
+  await addColumn(`supervisor_recount_threshold DECIMAL(12,3) NOT NULL DEFAULT 0 AFTER supervisor_recount_required`);
+  await addColumn(`supervisor_recount_at DATETIME AFTER supervisor_recount_threshold`);
+  await addColumn(`supervisor_recount_by VARCHAR(64) AFTER supervisor_recount_at`);
+  await addColumn(`supervisor_recount_by_name VARCHAR(255) AFTER supervisor_recount_by`);
+  await addIndex(`CREATE INDEX idx_stock_take_items_supervisor_recount ON stock_take_items (tenant_id, supervisor_recount_required, status)`);
   await query(`
     CREATE TABLE IF NOT EXISTS stock_take_rules (
       id VARCHAR(64) PRIMARY KEY,
@@ -1584,6 +1838,53 @@ export async function ensureAiSchema() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS ai_agent_runs (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL CHECK (mode IN ('invoice','low_stock','event')),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','applying','completed','failed')),
+        summary TEXT NOT NULL,
+        requires_human_approval SMALLINT DEFAULT 1 CHECK (requires_human_approval IN (0, 1)),
+        full_autopilot SMALLINT DEFAULT 0 CHECK (full_autopilot IN (0, 1)),
+        requested_by TEXT,
+        requested_by_name TEXT,
+        warnings TEXT DEFAULT '[]'::TEXT,
+        data_access TEXT DEFAULT '[]'::TEXT,
+        apply_result TEXT DEFAULT '{}'::TEXT,
+        applied_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_ai_agent_runs_tenant_created ON ai_agent_runs (tenant_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_ai_agent_runs_tenant_status ON ai_agent_runs (tenant_id, status, created_at)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS ai_agent_run_steps (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        run_id TEXT NOT NULL REFERENCES ai_agent_runs(id) ON DELETE CASCADE,
+        step_id TEXT NOT NULL,
+        step_type TEXT NOT NULL,
+        label TEXT NOT NULL,
+        risk TEXT NOT NULL CHECK (risk IN ('low','medium','high')),
+        confidence NUMERIC(5,4) DEFAULT 0,
+        approved SMALLINT DEFAULT 0 CHECK (approved IN (0, 1)),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','applied','skipped','failed')),
+        payload TEXT DEFAULT '{}'::TEXT,
+        evidence TEXT DEFAULT '[]'::TEXT,
+        result TEXT DEFAULT '{}'::TEXT,
+        skip_reason TEXT,
+        approved_by TEXT,
+        approved_by_name TEXT,
+        approved_at TIMESTAMPTZ,
+        applied_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (tenant_id, run_id, step_id)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_ai_agent_steps_run ON ai_agent_run_steps (tenant_id, run_id, status)`);
     await query(`ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS base_url TEXT`);
     await query(`ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS api_key TEXT`);
     await query(`ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS workspace_slug TEXT`);
@@ -1657,6 +1958,56 @@ export async function ensureAiSchema() {
       details JSON DEFAULT JSON_OBJECT(),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS ai_agent_runs (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      mode ENUM('invoice','low_stock','event') NOT NULL,
+      status ENUM('draft','applying','completed','failed') NOT NULL DEFAULT 'draft',
+      summary TEXT NOT NULL,
+      requires_human_approval BOOLEAN DEFAULT TRUE,
+      full_autopilot BOOLEAN DEFAULT FALSE,
+      requested_by VARCHAR(64),
+      requested_by_name VARCHAR(255),
+      warnings JSON DEFAULT JSON_ARRAY(),
+      data_access JSON DEFAULT JSON_ARRAY(),
+      apply_result JSON DEFAULT JSON_OBJECT(),
+      applied_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_ai_agent_runs_tenant_created (tenant_id, created_at),
+      INDEX idx_ai_agent_runs_tenant_status (tenant_id, status, created_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS ai_agent_run_steps (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      run_id VARCHAR(64) NOT NULL,
+      step_id VARCHAR(64) NOT NULL,
+      step_type VARCHAR(64) NOT NULL,
+      label TEXT NOT NULL,
+      risk ENUM('low','medium','high') NOT NULL,
+      confidence DECIMAL(5,4) DEFAULT 0,
+      approved BOOLEAN DEFAULT FALSE,
+      status ENUM('pending','approved','applied','skipped','failed') NOT NULL DEFAULT 'pending',
+      payload JSON DEFAULT JSON_OBJECT(),
+      evidence JSON DEFAULT JSON_ARRAY(),
+      result JSON DEFAULT JSON_OBJECT(),
+      skip_reason TEXT,
+      approved_by VARCHAR(64),
+      approved_by_name VARCHAR(255),
+      approved_at DATETIME,
+      applied_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_ai_agent_step_run_step (tenant_id, run_id, step_id),
+      INDEX idx_ai_agent_steps_run (tenant_id, run_id, status),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (run_id) REFERENCES ai_agent_runs(id) ON DELETE CASCADE
     )
   `);
 

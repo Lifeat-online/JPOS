@@ -2,6 +2,7 @@ import { getConnection, isPostgres, query } from "./db.js";
 import { applyProductStockDelta, normalizeStockMovementReasonCode, recordAuditEvent } from "./audit.js";
 import { processSaleRefund, processSaleVoid } from "./mariadb-crud.js";
 import { approveStockTakeSession } from "./stockTake.js";
+import { approveReorderRecommendation, dismissReorderRecommendation } from "./reorderRecommendations.js";
 
 type TaskPriority = "low" | "normal" | "high" | "critical";
 type TaskStatus = "open" | "in_review" | "approved" | "declined" | "done" | "dismissed";
@@ -363,7 +364,7 @@ export async function createManagerStockAdjustmentRequest(tenantId: string, inpu
 }
 
 export async function syncManagerTasksFromSignals(tenantId: string) {
-  const [cashRows, saleRows, lowStockRows, aiRows, stockTakeRows, offlineRows] = await Promise.all([
+  const [cashRows, saleRows, lowStockRows, reorderRecommendationRows, aiRows, stockTakeRows, offlineRows] = await Promise.all([
     query<any>(
       `SELECT
          id,
@@ -419,7 +420,38 @@ export async function syncManagerTasksFromSignals(tenantId: string) {
        FROM products
        WHERE tenant_id = ?
          AND COALESCE(stock, 0) <= GREATEST(1, COALESCE(min_stock, 0))
+         AND NOT EXISTS (
+           SELECT 1
+             FROM reorder_recommendations rr
+            WHERE rr.tenant_id = products.tenant_id
+              AND rr.product_id = products.id
+              AND rr.status IN ('open','in_review','approved')
+         )
        ORDER BY COALESCE(stock, 0) ASC, name ASC
+       LIMIT 50`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT
+         id,
+         product_id AS productId,
+         product_name AS productName,
+         status,
+         priority,
+         current_stock AS currentStock,
+         min_stock AS minStock,
+         target_stock AS targetStock,
+         recommended_quantity AS recommendedQuantity,
+         estimated_total_cost AS estimatedTotalCost,
+         avg_daily_sales AS avgDailySales,
+         evidence,
+         updated_at AS updatedAt
+       FROM reorder_recommendations
+       WHERE tenant_id = ?
+         AND status IN ('open','in_review')
+       ORDER BY
+         CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+         updated_at DESC
        LIMIT 50`,
       [tenantId]
     ),
@@ -556,6 +588,35 @@ export async function syncManagerTasksFromSignals(tenantId: string) {
         minStock: toNumber(product.minStock),
         category: product.category,
         section: product.section,
+      },
+    });
+  }
+
+  for (const recommendation of reorderRecommendationRows) {
+    const quantity = toNumber(recommendation.recommendedQuantity);
+    const currentStock = toNumber(recommendation.currentStock);
+    const minStock = toNumber(recommendation.minStock);
+    drafts.push({
+      tenantId,
+      taskType: "low_stock",
+      title: `Approve reorder for ${recommendation.productName}`,
+      summary: `Suggested order ${quantity} unit${quantity === 1 ? "" : "s"} to reach target stock ${toNumber(recommendation.targetStock)}. Current ${currentStock}, minimum ${minStock}.`,
+      priority: recommendation.priority || (currentStock <= 0 ? "critical" : "high"),
+      sourceType: "reorder_recommendation",
+      sourceId: recommendation.id,
+      relatedProductId: recommendation.productId,
+      details: {
+        recommendationId: recommendation.id,
+        productId: recommendation.productId,
+        productName: recommendation.productName,
+        currentStock,
+        minStock,
+        targetStock: toNumber(recommendation.targetStock),
+        recommendedQuantity: quantity,
+        estimatedTotalCost: toNumber(recommendation.estimatedTotalCost),
+        avgDailySales: toNumber(recommendation.avgDailySales),
+        evidence: parseJson(recommendation.evidence, []),
+        requiredAction: "approve_reorder_purchase_order",
       },
     });
   }
@@ -725,6 +786,23 @@ function statusForAction(action: TaskAction): TaskStatus {
 }
 
 async function applySourceDecision(tenantId: string, task: any, status: TaskStatus, input: DecisionInput) {
+  if (task.sourceType === "reorder_recommendation" && task.taskType === "low_stock") {
+    if (status === "approved" || status === "done") {
+      return approveReorderRecommendation(tenantId, task.sourceId, {
+        note: input.note || null,
+        staffId: input.staffId || null,
+        staffName: input.staffName || null,
+      });
+    }
+    if (status === "declined" || status === "dismissed") {
+      return dismissReorderRecommendation(tenantId, task.sourceId, {
+        note: input.note || null,
+        staffId: input.staffId || null,
+        staffName: input.staffName || null,
+      });
+    }
+  }
+
   if (task.sourceType === "approval_request" && status === "approved") {
     const details = task.details || {};
     const payload = details.payload || {};

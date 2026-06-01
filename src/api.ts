@@ -4,7 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
-import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, LaybyOrder, LaybyPaymentMethod, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary } from './types';
+import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, LaybyOrder, LaybyPaymentMethod, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, ReorderRecommendation, StockTakeSuggestion } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
@@ -196,6 +196,31 @@ export function sendTestPushNotification(tenantId: string) {
   return apiPost<PushSendResult>(`/api/mariadb/tenants/${tenantId}/push/test`, {});
 }
 
+export function getReorderRecommendations(tenantId: string, status = 'open,in_review,approved') {
+  return apiGet<ReorderRecommendation[]>(`/api/mariadb/tenants/${tenantId}/reorder-recommendations?status=${encodeURIComponent(status)}`);
+}
+
+export function refreshReorderRecommendations(tenantId: string, data: { daysOfCover?: number; vendorId?: string | null } = {}) {
+  return apiPost<{ created: number; updated: number; skippedApproved: number; recommendations: ReorderRecommendation[] }>(
+    `/api/mariadb/tenants/${tenantId}/reorder-recommendations/refresh`,
+    data
+  );
+}
+
+export function approveReorderRecommendation(tenantId: string, id: string, data: { note?: string | null; vendorId?: string | null; quantity?: number; expectedPrice?: number; expectedDeliveryDate?: string | null } = {}) {
+  return apiPost<{ recommendation: ReorderRecommendation | null; purchaseOrder: any; alreadyOrdered: boolean }>(
+    `/api/mariadb/tenants/${tenantId}/reorder-recommendations/${encodeURIComponent(id)}/approve`,
+    data
+  );
+}
+
+export function dismissReorderRecommendation(tenantId: string, id: string, note?: string | null) {
+  return apiPost<ReorderRecommendation>(
+    `/api/mariadb/tenants/${tenantId}/reorder-recommendations/${encodeURIComponent(id)}/dismiss`,
+    { note: note || null }
+  );
+}
+
 export function getTenantCustomers(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/customers`);
 }
@@ -355,6 +380,12 @@ export function getStockTakeRules(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules`);
 }
 
+export function getStockTakeSuggestions(tenantId: string, limit = 12) {
+  return apiGet<{ suggestions: StockTakeSuggestion[]; generatedAt: string; signalWindowDays: number; expiryWindowDays: number }>(
+    `/api/mariadb/tenants/${tenantId}/stocktakes/suggestions?limit=${encodeURIComponent(String(limit))}`
+  );
+}
+
 export function createStockTakeRule(tenantId: string, data: {
   name?: string | null;
   status?: 'active' | 'paused';
@@ -392,6 +423,18 @@ export function getStockTakeSession(tenantId: string, sessionId: string) {
   return apiGet<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}`);
 }
 
+export function getStockTakeExportPack(tenantId: string, sessionId: string) {
+  return apiGet<{
+    filename: string;
+    generatedAt: string;
+    headers: string[];
+    rows: any[][];
+    csv: string;
+    varianceReasons: Array<{ value: string; label: string; stockReasonCode: string; supervisorSensitive: boolean }>;
+    session: any;
+  }>(`/api/mariadb/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}/export-pack`);
+}
+
 export function getMyStockTakeAssignments(tenantId: string, staffId?: string | null) {
   const query = staffId ? `?staffId=${encodeURIComponent(staffId)}` : '';
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/stocktakes/my-assignments${query}`);
@@ -400,6 +443,7 @@ export function getMyStockTakeAssignments(tenantId: string, staffId?: string | n
 export function submitStockTakeCount(tenantId: string, itemId: string, data: {
   countedQuantity: number;
   note?: string | null;
+  varianceReason?: string | null;
   staffId?: string | null;
   staffName?: string | null;
 }) {
@@ -975,8 +1019,8 @@ export function generateInventoryAgentProposal(tenantId: string, data: unknown) 
   return apiPost<InventoryAgentProposal>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/proposal`, data);
 }
 
-export function applyInventoryAgentSteps(tenantId: string, steps: InventoryAgentStep[], fullAutopilot = false) {
-  return apiPost<InventoryAgentApplyResult>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/apply`, { steps, fullAutopilot });
+export function applyInventoryAgentSteps(tenantId: string, steps: InventoryAgentStep[], fullAutopilot = false, runId?: string) {
+  return apiPost<InventoryAgentApplyResult>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/apply`, { steps, fullAutopilot, runId });
 }
 
 export async function generateLicence(adminKey: string, data: GenerateLicenceRequest) {

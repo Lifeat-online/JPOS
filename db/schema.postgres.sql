@@ -523,6 +523,14 @@ CREATE TABLE IF NOT EXISTS stock_take_items (
   assigned_to_name TEXT,
   counted_by TEXT,
   counted_by_name TEXT,
+  variance_reason TEXT,
+  variance_reason_label TEXT,
+  variance_severity TEXT NOT NULL DEFAULT 'none' CHECK (variance_severity IN ('none','low','medium','high','critical')),
+  supervisor_recount_required SMALLINT NOT NULL DEFAULT 0 CHECK (supervisor_recount_required IN (0, 1)),
+  supervisor_recount_threshold NUMERIC(12,3) NOT NULL DEFAULT 0,
+  supervisor_recount_at TIMESTAMPTZ,
+  supervisor_recount_by TEXT,
+  supervisor_recount_by_name TEXT,
   status TEXT NOT NULL DEFAULT 'assigned' CHECK (status IN ('assigned','counted','confirmed','recount')),
   counted_at TIMESTAMPTZ,
   confirmed_at TIMESTAMPTZ,
@@ -537,6 +545,7 @@ CREATE TABLE IF NOT EXISTS stock_take_items (
 CREATE INDEX IF NOT EXISTS idx_stock_take_items_tenant_status ON stock_take_items (tenant_id, status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_stock_take_items_assigned ON stock_take_items (tenant_id, assigned_to, status);
 CREATE INDEX IF NOT EXISTS idx_stock_take_items_product ON stock_take_items (tenant_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_stock_take_items_supervisor_recount ON stock_take_items (tenant_id, supervisor_recount_required, status);
 
 CREATE TABLE IF NOT EXISTS stock_take_rules (
   id TEXT PRIMARY KEY,
@@ -632,9 +641,77 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   total_amount NUMERIC(12,2) DEFAULT 0,
   expected_delivery_date TIMESTAMPTZ,
   invoice_status TEXT DEFAULT 'unpaid' CHECK (invoice_status IN ('unpaid','paid')),
+  invoice_number TEXT,
+  invoice_date TIMESTAMPTZ,
+  received_at TIMESTAMPTZ,
+  received_by TEXT,
+  received_by_name TEXT,
+  receiving_note TEXT,
+  received_total_amount NUMERIC(12,2) DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS stock_batches (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  purchase_order_id TEXT,
+  vendor_id TEXT,
+  supplier_invoice_number TEXT,
+  supplier_invoice_date DATE,
+  batch_number TEXT,
+  received_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+  remaining_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+  unit_cost NUMERIC(12,2) DEFAULT 0,
+  expiry_date DATE,
+  received_at TIMESTAMPTZ DEFAULT NOW(),
+  received_by TEXT,
+  received_by_name TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','depleted','expired')),
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_batches_tenant_expiry ON stock_batches (tenant_id, status, expiry_date);
+CREATE INDEX IF NOT EXISTS idx_stock_batches_product ON stock_batches (tenant_id, product_id, status, expiry_date);
+CREATE INDEX IF NOT EXISTS idx_stock_batches_purchase_order ON stock_batches (tenant_id, purchase_order_id);
+
+CREATE TABLE IF NOT EXISTS reorder_recommendations (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_review','approved','ordered','dismissed')),
+  priority TEXT NOT NULL DEFAULT 'high' CHECK (priority IN ('low','normal','high','critical')),
+  current_stock NUMERIC(12,3) NOT NULL DEFAULT 0,
+  min_stock NUMERIC(12,3) NOT NULL DEFAULT 0,
+  target_stock NUMERIC(12,3) NOT NULL DEFAULT 0,
+  recommended_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+  estimated_unit_cost NUMERIC(12,2) DEFAULT 0,
+  estimated_total_cost NUMERIC(12,2) DEFAULT 0,
+  avg_daily_sales NUMERIC(12,3) DEFAULT 0,
+  days_of_cover INTEGER DEFAULT 14,
+  vendor_id TEXT,
+  location_id TEXT,
+  source TEXT DEFAULT 'min_stock',
+  evidence TEXT DEFAULT '[]'::TEXT,
+  purchase_order_id TEXT,
+  requested_by TEXT,
+  requested_by_name TEXT,
+  approved_by TEXT,
+  approved_by_name TEXT,
+  approved_at TIMESTAMPTZ,
+  dismissed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_reorder_recommendations_status ON reorder_recommendations (tenant_id, status, priority, updated_at);
+CREATE INDEX IF NOT EXISTS idx_reorder_recommendations_product ON reorder_recommendations (tenant_id, product_id, status);
+CREATE INDEX IF NOT EXISTS idx_reorder_recommendations_purchase_order ON reorder_recommendations (tenant_id, purchase_order_id);
 
 CREATE TABLE IF NOT EXISTS vendors (
   id TEXT PRIMARY KEY,
@@ -747,6 +824,53 @@ CREATE TABLE IF NOT EXISTS ai_audit_log (
   details TEXT DEFAULT '{}'::TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS ai_agent_runs (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL CHECK (mode IN ('invoice','low_stock','event')),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','applying','completed','failed')),
+  summary TEXT NOT NULL,
+  requires_human_approval SMALLINT DEFAULT 1 CHECK (requires_human_approval IN (0, 1)),
+  full_autopilot SMALLINT DEFAULT 0 CHECK (full_autopilot IN (0, 1)),
+  requested_by TEXT,
+  requested_by_name TEXT,
+  warnings TEXT DEFAULT '[]'::TEXT,
+  data_access TEXT DEFAULT '[]'::TEXT,
+  apply_result TEXT DEFAULT '{}'::TEXT,
+  applied_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_agent_runs_tenant_created ON ai_agent_runs (tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_agent_runs_tenant_status ON ai_agent_runs (tenant_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS ai_agent_run_steps (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  run_id TEXT NOT NULL REFERENCES ai_agent_runs(id) ON DELETE CASCADE,
+  step_id TEXT NOT NULL,
+  step_type TEXT NOT NULL,
+  label TEXT NOT NULL,
+  risk TEXT NOT NULL CHECK (risk IN ('low','medium','high')),
+  confidence NUMERIC(5,4) DEFAULT 0,
+  approved SMALLINT DEFAULT 0 CHECK (approved IN (0, 1)),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','applied','skipped','failed')),
+  payload TEXT DEFAULT '{}'::TEXT,
+  evidence TEXT DEFAULT '[]'::TEXT,
+  result TEXT DEFAULT '{}'::TEXT,
+  skip_reason TEXT,
+  approved_by TEXT,
+  approved_by_name TEXT,
+  approved_at TIMESTAMPTZ,
+  applied_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (tenant_id, run_id, step_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_agent_steps_run ON ai_agent_run_steps (tenant_id, run_id, status);
 
 INSERT INTO tenants (id, name) VALUES ('default', 'Default Tenant')
 ON CONFLICT (id) DO NOTHING;

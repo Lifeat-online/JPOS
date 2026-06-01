@@ -5,6 +5,18 @@ type StockTakeType = "full" | "cycle" | "spot_check";
 type StockTakeStatus = "draft" | "active" | "submitted" | "approved" | "cancelled";
 type StockTakeRuleStatus = "active" | "paused";
 type StockTakeProductScope = "random" | "low_stock" | "category" | "manual";
+type VarianceReason =
+  | "count_error"
+  | "shrinkage"
+  | "wastage"
+  | "damage"
+  | "expiry"
+  | "supplier_delivery"
+  | "transfer"
+  | "sale_missed"
+  | "theft_loss"
+  | "other";
+type VarianceSeverity = "none" | "low" | "medium" | "high" | "critical";
 
 type Actor = {
   staffId?: string | null;
@@ -29,6 +41,7 @@ type CreateStockTakeInput = {
 type CountInput = {
   countedQuantity: number;
   note?: string | null;
+  varianceReason?: string | null;
 };
 
 type RecountInput = {
@@ -53,6 +66,31 @@ type RunDueRulesOptions = {
   now?: Date;
 };
 
+type StockTakeSuggestionSignal = {
+  productId: string;
+  productName?: string | null;
+  quantity?: number;
+  count?: number;
+  lastSeenAt?: string | null;
+};
+
+const VARIANCE_REASONS: Record<VarianceReason, {
+  label: string;
+  stockReasonCode: "count_correction" | "shrinkage" | "wastage" | "transfer";
+  sensitive: boolean;
+}> = {
+  count_error: { label: "Count error", stockReasonCode: "count_correction", sensitive: false },
+  shrinkage: { label: "Shrinkage", stockReasonCode: "shrinkage", sensitive: true },
+  wastage: { label: "Wastage", stockReasonCode: "wastage", sensitive: true },
+  damage: { label: "Damaged stock", stockReasonCode: "wastage", sensitive: true },
+  expiry: { label: "Expired stock", stockReasonCode: "wastage", sensitive: true },
+  supplier_delivery: { label: "Supplier delivery mismatch", stockReasonCode: "count_correction", sensitive: false },
+  transfer: { label: "Transfer mismatch", stockReasonCode: "transfer", sensitive: false },
+  sale_missed: { label: "Missed sale posting", stockReasonCode: "count_correction", sensitive: false },
+  theft_loss: { label: "Theft/loss", stockReasonCode: "shrinkage", sensitive: true },
+  other: { label: "Other variance", stockReasonCode: "count_correction", sensitive: false },
+};
+
 function makeId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -69,6 +107,13 @@ function toNumber(value: unknown) {
 function nullableNumber(...values: unknown[]) {
   const value = values.find((item) => item !== undefined);
   return value === null || value === undefined ? null : toNumber(value);
+}
+
+function toBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+  return false;
 }
 
 function json(value: unknown, fallback: unknown = []) {
@@ -120,6 +165,52 @@ function normalizeRuleStatus(value: unknown): StockTakeRuleStatus {
   return String(value || "active").trim() === "paused" ? "paused" : "active";
 }
 
+function normalizeVarianceReason(value: unknown, absVariance: number): VarianceReason | null {
+  if (absVariance <= 0.0001) return null;
+  const reason = String(value || "count_error").trim().toLowerCase().replace(/[\s-]+/g, "_") as VarianceReason;
+  return VARIANCE_REASONS[reason] ? reason : "other";
+}
+
+function varianceSeverity(absVariance: number, expectedQuantity: number, reason: VarianceReason | null): VarianceSeverity {
+  if (absVariance <= 0.0001) return "none";
+  const percentage = expectedQuantity > 0 ? (absVariance / expectedQuantity) * 100 : 100;
+  const sensitive = reason ? VARIANCE_REASONS[reason]?.sensitive : false;
+  if (absVariance >= 20 || percentage >= 50 || (sensitive && absVariance >= 10)) return "critical";
+  if (absVariance >= 10 || percentage >= 25 || (sensitive && absVariance >= 1)) return "high";
+  if (absVariance >= 5 || percentage >= 10 || sensitive) return "medium";
+  return "low";
+}
+
+function supervisorRecountThreshold(expectedQuantity: number) {
+  return Number((expectedQuantity > 0 ? Math.max(5, expectedQuantity * 0.2) : 1).toFixed(3));
+}
+
+function needsSupervisorRecount(absVariance: number, expectedQuantity: number, reason: VarianceReason | null, severity: VarianceSeverity) {
+  if (absVariance <= 0.0001) return false;
+  const threshold = supervisorRecountThreshold(expectedQuantity);
+  const sensitive = reason ? VARIANCE_REASONS[reason]?.sensitive : false;
+  return absVariance >= threshold || severity === "high" || severity === "critical" || (sensitive && absVariance >= 1);
+}
+
+function stockReasonCodeForVariance(reason: unknown) {
+  const normalized = normalizeVarianceReason(reason, 1) || "count_error";
+  return VARIANCE_REASONS[normalized]?.stockReasonCode || "count_correction";
+}
+
+function csvValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function slug(value: unknown) {
+  return String(value || "stocktake")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "stocktake";
+}
+
 function normalizeProductCount(value: unknown) {
   const count = Math.round(toNumber(value));
   return Math.max(1, Math.min(100, count || 5));
@@ -167,6 +258,14 @@ function rowToItem(row: any) {
     assignedToName: row.assignedToName ?? row.assigned_to_name,
     countedBy: row.countedBy ?? row.counted_by,
     countedByName: row.countedByName ?? row.counted_by_name,
+    varianceReason: row.varianceReason ?? row.variance_reason,
+    varianceReasonLabel: row.varianceReasonLabel ?? row.variance_reason_label,
+    varianceSeverity: row.varianceSeverity ?? row.variance_severity ?? "none",
+    supervisorRecountRequired: toBoolean(row.supervisorRecountRequired ?? row.supervisor_recount_required),
+    supervisorRecountThreshold: toNumber(row.supervisorRecountThreshold ?? row.supervisor_recount_threshold),
+    supervisorRecountAt: row.supervisorRecountAt ?? row.supervisor_recount_at,
+    supervisorRecountBy: row.supervisorRecountBy ?? row.supervisor_recount_by,
+    supervisorRecountByName: row.supervisorRecountByName ?? row.supervisor_recount_by_name,
     status: row.status || "assigned",
     countedAt: row.countedAt ?? row.counted_at,
     confirmedAt: row.confirmedAt ?? row.confirmed_at,
@@ -198,6 +297,7 @@ function rowToSession(row: any) {
     itemCount: toNumber(row.itemCount ?? row.item_count),
     countedCount: toNumber(row.countedCount ?? row.counted_count),
     varianceCount: toNumber(row.varianceCount ?? row.variance_count),
+    supervisorRecountCount: toNumber(row.supervisorRecountCount ?? row.supervisor_recount_count),
   };
 }
 
@@ -221,6 +321,276 @@ function rowToRule(row: any) {
     createdByName: row.createdByName ?? row.created_by_name,
     createdAt: row.createdAt ?? row.created_at,
     updatedAt: row.updatedAt ?? row.updated_at,
+  };
+}
+
+function stockTakeRiskLevel(score: number) {
+  if (score >= 75) return "critical";
+  if (score >= 45) return "high";
+  if (score >= 20) return "medium";
+  return "low";
+}
+
+function addSignal(map: Map<string, StockTakeSuggestionSignal>, row: any, quantityKeys: string[], countKeys: string[] = []) {
+  const productId = String(row.productId ?? row.product_id ?? "");
+  if (!productId) return;
+  const signal: StockTakeSuggestionSignal = {
+    productId,
+    productName: row.productName ?? row.product_name ?? null,
+    quantity: 0,
+    count: 0,
+    lastSeenAt: row.lastSeenAt ?? row.last_seen_at ?? row.lastVarianceAt ?? row.last_variance_at ?? null,
+  };
+  for (const key of quantityKeys) {
+    signal.quantity = toNumber(row[key] ?? signal.quantity);
+    if (signal.quantity) break;
+  }
+  for (const key of countKeys) {
+    signal.count = toNumber(row[key] ?? signal.count);
+    if (signal.count) break;
+  }
+  map.set(productId, signal);
+}
+
+async function recentRows<T = any>(postgresSql: string, mariaSql: string, params: any[]) {
+  return query<T>(isPostgres() ? postgresSql : mariaSql, params);
+}
+
+export async function getStockTakeSuggestions(tenantId: string, input: { limit?: string | number } = {}) {
+  const limit = Math.min(Math.max(Math.round(toNumber(input.limit) || 12), 1), 50);
+  const [
+    products,
+    shrinkageRows,
+    wastageRows,
+    varianceRows,
+    expiryRows,
+    velocityRows,
+  ] = await Promise.all([
+    query<any>(
+      `SELECT id, name, barcode, category, section, stock, min_stock AS minStock
+         FROM products
+        WHERE tenant_id = ?
+        LIMIT 500`,
+      [tenantId]
+    ),
+    recentRows<any>(
+      `SELECT product_id AS productId,
+              MAX(item_name) AS productName,
+              SUM(ABS(quantity_delta)) AS signalQuantity,
+              COUNT(*) AS signalCount,
+              MAX(created_at) AS lastSeenAt
+         FROM stock_movements
+        WHERE tenant_id = ?
+          AND product_id IS NOT NULL
+          AND reason_code = 'shrinkage'
+          AND created_at >= NOW() - INTERVAL '90 days'
+        GROUP BY product_id`,
+      `SELECT product_id AS productId,
+              MAX(item_name) AS productName,
+              SUM(ABS(quantity_delta)) AS signalQuantity,
+              COUNT(*) AS signalCount,
+              MAX(created_at) AS lastSeenAt
+         FROM stock_movements
+        WHERE tenant_id = ?
+          AND product_id IS NOT NULL
+          AND reason_code = 'shrinkage'
+          AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+        GROUP BY product_id`,
+      [tenantId]
+    ),
+    recentRows<any>(
+      `SELECT product_id AS productId,
+              MAX(item_name) AS productName,
+              SUM(ABS(quantity_delta)) AS signalQuantity,
+              COUNT(*) AS signalCount,
+              MAX(created_at) AS lastSeenAt
+         FROM stock_movements
+        WHERE tenant_id = ?
+          AND product_id IS NOT NULL
+          AND reason_code = 'wastage'
+          AND created_at >= NOW() - INTERVAL '90 days'
+        GROUP BY product_id`,
+      `SELECT product_id AS productId,
+              MAX(item_name) AS productName,
+              SUM(ABS(quantity_delta)) AS signalQuantity,
+              COUNT(*) AS signalCount,
+              MAX(created_at) AS lastSeenAt
+         FROM stock_movements
+        WHERE tenant_id = ?
+          AND product_id IS NOT NULL
+          AND reason_code = 'wastage'
+          AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+        GROUP BY product_id`,
+      [tenantId]
+    ),
+    recentRows<any>(
+      `SELECT product_id AS productId,
+              MAX(product_name) AS productName,
+              SUM(ABS(variance_quantity)) AS varianceQuantity,
+              COUNT(*) AS varianceCount,
+              MAX(updated_at) AS lastVarianceAt
+         FROM stock_take_items
+        WHERE tenant_id = ?
+          AND variance_quantity IS NOT NULL
+          AND ABS(variance_quantity) > 0.0001
+          AND updated_at >= NOW() - INTERVAL '90 days'
+        GROUP BY product_id`,
+      `SELECT product_id AS productId,
+              MAX(product_name) AS productName,
+              SUM(ABS(variance_quantity)) AS varianceQuantity,
+              COUNT(*) AS varianceCount,
+              MAX(updated_at) AS lastVarianceAt
+         FROM stock_take_items
+        WHERE tenant_id = ?
+          AND variance_quantity IS NOT NULL
+          AND ABS(variance_quantity) > 0.0001
+          AND updated_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+        GROUP BY product_id`,
+      [tenantId]
+    ),
+    query<any>(
+      isPostgres()
+        ? `SELECT product_id AS productId,
+                  MAX(product_name) AS productName,
+                  SUM(remaining_quantity) AS expiryQuantity,
+                  MIN(expiry_date) AS nextExpiryDate
+             FROM stock_batches
+            WHERE tenant_id = ?
+              AND status = 'active'
+              AND remaining_quantity > 0
+              AND expiry_date IS NOT NULL
+              AND expiry_date <= CURRENT_DATE + INTERVAL '14 days'
+            GROUP BY product_id`
+        : `SELECT product_id AS productId,
+                  MAX(product_name) AS productName,
+                  SUM(remaining_quantity) AS expiryQuantity,
+                  MIN(expiry_date) AS nextExpiryDate
+             FROM stock_batches
+            WHERE tenant_id = ?
+              AND status = 'active'
+              AND remaining_quantity > 0
+              AND expiry_date IS NOT NULL
+              AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
+            GROUP BY product_id`,
+      [tenantId]
+    ),
+    recentRows<any>(
+      `SELECT si.product_id AS productId,
+              MAX(si.product_name) AS productName,
+              SUM(si.quantity) AS quantitySold,
+              COUNT(DISTINCT s.id) AS saleCount
+         FROM sale_items si
+         JOIN sales s ON s.id = si.sale_id
+        WHERE s.tenant_id = ?
+          AND s.status = 'completed'
+          AND s.created_at >= NOW() - INTERVAL '90 days'
+        GROUP BY si.product_id`,
+      `SELECT si.product_id AS productId,
+              MAX(si.product_name) AS productName,
+              SUM(si.quantity) AS quantitySold,
+              COUNT(DISTINCT s.id) AS saleCount
+         FROM sale_items si
+         JOIN sales s ON s.id = si.sale_id
+        WHERE s.tenant_id = ?
+          AND s.status = 'completed'
+          AND s.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+        GROUP BY si.product_id`,
+      [tenantId]
+    ),
+  ]);
+
+  const shrinkage = new Map<string, StockTakeSuggestionSignal>();
+  const wastage = new Map<string, StockTakeSuggestionSignal>();
+  const variances = new Map<string, StockTakeSuggestionSignal>();
+  const expiries = new Map<string, StockTakeSuggestionSignal>();
+  const velocity = new Map<string, StockTakeSuggestionSignal>();
+
+  for (const row of shrinkageRows) addSignal(shrinkage, row, ["signalQuantity", "signal_quantity"], ["signalCount", "signal_count"]);
+  for (const row of wastageRows) addSignal(wastage, row, ["signalQuantity", "signal_quantity"], ["signalCount", "signal_count"]);
+  for (const row of varianceRows) addSignal(variances, row, ["varianceQuantity", "variance_quantity"], ["varianceCount", "variance_count"]);
+  for (const row of expiryRows) addSignal(expiries, { ...row, lastSeenAt: row.nextExpiryDate ?? row.next_expiry_date }, ["expiryQuantity", "expiry_quantity"]);
+  for (const row of velocityRows) addSignal(velocity, row, ["quantitySold", "quantity_sold"], ["saleCount", "sale_count"]);
+
+  const suggestions = (products || []).map((product: any) => {
+    const productId = String(product.id || "");
+    const stock = toNumber(product.stock);
+    const minStock = toNumber(product.minStock ?? product.min_stock);
+    const shrinkageSignal = shrinkage.get(productId);
+    const wastageSignal = wastage.get(productId);
+    const varianceSignal = variances.get(productId);
+    const expirySignal = expiries.get(productId);
+    const velocitySignal = velocity.get(productId);
+    const quantitySold = toNumber(velocitySignal?.quantity);
+    const avgDailySales = quantitySold / 90;
+    const daysCover = avgDailySales > 0 ? stock / avgDailySales : null;
+    const reasons: string[] = [];
+    const evidence: string[] = [];
+    let score = 0;
+
+    if (stock <= Math.max(1, minStock || 0)) {
+      score += stock <= 0 ? 35 : 24;
+      reasons.push(stock <= 0 ? "out_of_stock" : "low_stock");
+      evidence.push(`Current stock ${stock} is at or below minimum ${minStock || 1}`);
+    }
+    if (shrinkageSignal?.quantity) {
+      score += 22 + Math.min(18, shrinkageSignal.quantity);
+      reasons.push("recent_shrinkage");
+      evidence.push(`${shrinkageSignal.quantity} shrinkage unit${shrinkageSignal.quantity === 1 ? "" : "s"} recorded recently`);
+    }
+    if (wastageSignal?.quantity) {
+      score += 18 + Math.min(14, wastageSignal.quantity);
+      reasons.push("recent_wastage");
+      evidence.push(`${wastageSignal.quantity} wastage/damage unit${wastageSignal.quantity === 1 ? "" : "s"} recorded recently`);
+    }
+    if (varianceSignal?.quantity) {
+      score += 24 + Math.min(20, varianceSignal.quantity);
+      reasons.push("recent_variance");
+      evidence.push(`${varianceSignal.quantity} absolute stocktake variance over ${varianceSignal.count || 1} count${varianceSignal.count === 1 ? "" : "s"}`);
+    }
+    if (expirySignal?.quantity) {
+      score += 20 + Math.min(12, expirySignal.quantity);
+      reasons.push("expiry_risk");
+      evidence.push(`${expirySignal.quantity} unit${expirySignal.quantity === 1 ? "" : "s"} expiring within 14 days`);
+    }
+    if (daysCover !== null && daysCover <= 14) {
+      score += daysCover <= 7 ? 18 : 10;
+      reasons.push("sales_velocity");
+      evidence.push(`${avgDailySales.toFixed(2)} average daily sales leaves about ${Math.max(0, daysCover).toFixed(1)} days of cover`);
+    }
+
+    return {
+      productId,
+      productName: product.name,
+      barcode: product.barcode || null,
+      category: product.category || null,
+      section: product.section || null,
+      stock,
+      minStock,
+      score: Math.round(score),
+      riskLevel: stockTakeRiskLevel(score),
+      reasons: [...new Set(reasons)],
+      evidence,
+      signals: {
+        shrinkageQuantity: toNumber(shrinkageSignal?.quantity),
+        wastageQuantity: toNumber(wastageSignal?.quantity),
+        varianceQuantity: toNumber(varianceSignal?.quantity),
+        expiryQuantity: toNumber(expirySignal?.quantity),
+        quantitySold,
+        avgDailySales: Number(avgDailySales.toFixed(3)),
+        daysCover: daysCover === null ? null : Number(daysCover.toFixed(1)),
+        lastIssueAt: shrinkageSignal?.lastSeenAt || wastageSignal?.lastSeenAt || varianceSignal?.lastSeenAt || expirySignal?.lastSeenAt || null,
+      },
+    };
+  })
+    .filter((item: any) => item.score > 0)
+    .sort((a: any, b: any) => b.score - a.score || a.productName.localeCompare(b.productName))
+    .slice(0, limit);
+
+  return {
+    suggestions,
+    generatedAt: new Date().toISOString(),
+    signalWindowDays: 90,
+    expiryWindowDays: 14,
   };
 }
 
@@ -703,7 +1073,8 @@ export async function getStockTakeSessions(tenantId: string, filters: { status?:
             s.updated_at AS updatedAt,
             COUNT(i.id) AS itemCount,
             SUM(CASE WHEN i.status IN ('counted','confirmed') THEN 1 ELSE 0 END) AS countedCount,
-            SUM(CASE WHEN i.variance_quantity IS NOT NULL AND ABS(i.variance_quantity) > 0.0001 THEN 1 ELSE 0 END) AS varianceCount
+            SUM(CASE WHEN i.variance_quantity IS NOT NULL AND ABS(i.variance_quantity) > 0.0001 THEN 1 ELSE 0 END) AS varianceCount,
+            SUM(CASE WHEN COALESCE(i.supervisor_recount_required, 0) <> 0 AND i.supervisor_recount_at IS NULL THEN 1 ELSE 0 END) AS supervisorRecountCount
        FROM stock_take_sessions s
        LEFT JOIN stock_take_items i ON i.session_id = s.id AND i.tenant_id = s.tenant_id
       WHERE ${where.join(" AND ")}
@@ -736,7 +1107,8 @@ export async function getStockTakeSession(tenantId: string, sessionId: string) {
             s.updated_at AS updatedAt,
             COUNT(i.id) AS itemCount,
             SUM(CASE WHEN i.status IN ('counted','confirmed') THEN 1 ELSE 0 END) AS countedCount,
-            SUM(CASE WHEN i.variance_quantity IS NOT NULL AND ABS(i.variance_quantity) > 0.0001 THEN 1 ELSE 0 END) AS varianceCount
+            SUM(CASE WHEN i.variance_quantity IS NOT NULL AND ABS(i.variance_quantity) > 0.0001 THEN 1 ELSE 0 END) AS varianceCount,
+            SUM(CASE WHEN COALESCE(i.supervisor_recount_required, 0) <> 0 AND i.supervisor_recount_at IS NULL THEN 1 ELSE 0 END) AS supervisorRecountCount
        FROM stock_take_sessions s
        LEFT JOIN stock_take_items i ON i.session_id = s.id AND i.tenant_id = s.tenant_id
       WHERE s.tenant_id = ? AND s.id = ?
@@ -763,6 +1135,14 @@ export async function getStockTakeSession(tenantId: string, sessionId: string) {
             assigned_to_name AS assignedToName,
             counted_by AS countedBy,
             counted_by_name AS countedByName,
+            variance_reason AS varianceReason,
+            variance_reason_label AS varianceReasonLabel,
+            variance_severity AS varianceSeverity,
+            supervisor_recount_required AS supervisorRecountRequired,
+            supervisor_recount_threshold AS supervisorRecountThreshold,
+            supervisor_recount_at AS supervisorRecountAt,
+            supervisor_recount_by AS supervisorRecountBy,
+            supervisor_recount_by_name AS supervisorRecountByName,
             status,
             counted_at AS countedAt,
             confirmed_at AS confirmedAt,
@@ -783,6 +1163,79 @@ export async function getStockTakeSession(tenantId: string, sessionId: string) {
   };
 }
 
+export async function getStockTakeExportPack(tenantId: string, sessionId: string) {
+  const session = await getStockTakeSession(tenantId, sessionId);
+  if (!session) throw new Error("Stocktake session not found.");
+
+  const headers = [
+    "Session ID",
+    "Session Name",
+    "Status",
+    "Product ID",
+    "Product",
+    "Barcode",
+    "Assigned To",
+    "Expected Quantity",
+    "Counted Quantity",
+    "Variance Quantity",
+    "Variance Reason",
+    "Variance Severity",
+    "Supervisor Recount Required",
+    "Supervisor Recount At",
+    "Counted By",
+    "Confirmed By",
+    "Line Status",
+    "Note",
+  ];
+  const rows = (session.items || []).map((item: any) => [
+    session.id,
+    session.name,
+    session.status,
+    item.productId,
+    item.productName,
+    item.barcode || "",
+    item.assignedToName || item.assignedTo || "",
+    item.expectedQuantity,
+    item.countedQuantity ?? "",
+    item.varianceQuantity ?? "",
+    item.varianceReasonLabel || "",
+    item.varianceSeverity || "none",
+    item.supervisorRecountRequired ? "yes" : "no",
+    item.supervisorRecountAt || "",
+    item.countedByName || item.countedBy || "",
+    item.confirmedByName || item.confirmedBy || "",
+    item.status,
+    item.note || "",
+  ]);
+  const csv = [headers, ...rows]
+    .map((row) => row.map(csvValue).join(","))
+    .join("\n");
+
+  return {
+    filename: `${slug(session.name)}-${session.id}-stocktake-export.csv`,
+    generatedAt: new Date().toISOString(),
+    headers,
+    rows,
+    csv,
+    varianceReasons: Object.entries(VARIANCE_REASONS).map(([value, config]) => ({
+      value,
+      label: config.label,
+      stockReasonCode: config.stockReasonCode,
+      supervisorSensitive: config.sensitive,
+    })),
+    session: {
+      id: session.id,
+      name: session.name,
+      type: session.type,
+      status: session.status,
+      itemCount: session.itemCount,
+      countedCount: session.countedCount,
+      varianceCount: session.varianceCount,
+      supervisorRecountCount: session.supervisorRecountCount,
+    },
+  };
+}
+
 export async function getMyStockTakeAssignments(tenantId: string, staffId: string) {
   const id = cleanString(staffId, 64);
   if (!id) throw new Error("Staff identity is required to load stocktake assignments.");
@@ -800,6 +1253,14 @@ export async function getMyStockTakeAssignments(tenantId: string, staffId: strin
             i.assigned_to_name AS assignedToName,
             i.counted_by AS countedBy,
             i.counted_by_name AS countedByName,
+            i.variance_reason AS varianceReason,
+            i.variance_reason_label AS varianceReasonLabel,
+            i.variance_severity AS varianceSeverity,
+            i.supervisor_recount_required AS supervisorRecountRequired,
+            i.supervisor_recount_threshold AS supervisorRecountThreshold,
+            i.supervisor_recount_at AS supervisorRecountAt,
+            i.supervisor_recount_by AS supervisorRecountBy,
+            i.supervisor_recount_by_name AS supervisorRecountByName,
             i.status,
             i.counted_at AS countedAt,
             i.confirmed_at AS confirmedAt,
@@ -843,6 +1304,7 @@ export async function submitStockTakeCount(tenantId: string, itemId: string, inp
             i.expected_quantity AS expectedQuantity,
             i.assigned_to AS assignedTo,
             i.assigned_to_name AS assignedToName,
+            i.supervisor_recount_required AS supervisorRecountRequired,
             i.status,
             s.status AS sessionStatus
        FROM stock_take_items i
@@ -864,12 +1326,27 @@ export async function submitStockTakeCount(tenantId: string, itemId: string, inp
 
   const expectedQuantity = toNumber(item.expectedQuantity ?? item.expected_quantity);
   const varianceQuantity = Number((countedQuantity - expectedQuantity).toFixed(3));
+  const absVariance = Math.abs(varianceQuantity);
+  const varianceReason = normalizeVarianceReason(input.varianceReason, absVariance);
+  const varianceReasonLabel = varianceReason ? VARIANCE_REASONS[varianceReason].label : null;
+  const severity = varianceSeverity(absVariance, expectedQuantity, varianceReason);
+  const recountThreshold = supervisorRecountThreshold(expectedQuantity);
+  const supervisorRequired = needsSupervisorRecount(absVariance, expectedQuantity, varianceReason, severity);
+  const supervisorRecountPerformed = supervisorRequired && canOverrideStockTake(actor);
   const note = cleanString(input.note, 1000);
   const sessionId = item.sessionId ?? item.session_id;
   await query(
     `UPDATE stock_take_items
         SET counted_quantity = ?,
             variance_quantity = ?,
+            variance_reason = ?,
+            variance_reason_label = ?,
+            variance_severity = ?,
+            supervisor_recount_required = ?,
+            supervisor_recount_threshold = ?,
+            supervisor_recount_at = ?,
+            supervisor_recount_by = ?,
+            supervisor_recount_by_name = ?,
             counted_by = ?,
             counted_by_name = ?,
             status = 'counted',
@@ -880,6 +1357,14 @@ export async function submitStockTakeCount(tenantId: string, itemId: string, inp
     [
       countedQuantity,
       varianceQuantity,
+      varianceReason,
+      varianceReasonLabel,
+      severity,
+      supervisorRequired ? 1 : 0,
+      supervisorRequired ? recountThreshold : 0,
+      supervisorRecountPerformed ? new Date() : null,
+      supervisorRecountPerformed ? actor.staffId || null : null,
+      supervisorRecountPerformed ? actor.staffName || null : null,
       actor.staffId || assignedTo || null,
       actor.staffName || item.assignedToName || item.assigned_to_name || null,
       note,
@@ -920,6 +1405,12 @@ export async function submitStockTakeCount(tenantId: string, itemId: string, inp
       countedQuantity,
       expectedQuantity,
       varianceQuantity,
+      varianceReason,
+      varianceReasonLabel,
+      varianceSeverity: severity,
+      supervisorRecountRequired: supervisorRequired,
+      supervisorRecountThreshold: supervisorRequired ? recountThreshold : 0,
+      supervisorRecountPerformed,
     },
   });
 
@@ -931,7 +1422,9 @@ export async function requestStockTakeRecount(tenantId: string, itemId: string, 
     `SELECT i.id,
             i.session_id AS sessionId,
             i.product_id AS productId,
-            i.product_name AS productName
+            i.product_name AS productName,
+            i.expected_quantity AS expectedQuantity,
+            i.variance_quantity AS varianceQuantity
        FROM stock_take_items i
        JOIN stock_take_sessions s ON s.id = i.session_id AND s.tenant_id = i.tenant_id
       WHERE i.tenant_id = ? AND i.id = ? AND s.status IN ('active','submitted')
@@ -940,14 +1433,20 @@ export async function requestStockTakeRecount(tenantId: string, itemId: string, 
   );
   const item = rows[0];
   if (!item) throw new Error("Stocktake item not found or not open.");
+  const expectedQuantity = toNumber(item.expectedQuantity ?? item.expected_quantity);
 
   await query(
     `UPDATE stock_take_items
         SET status = 'recount',
+            supervisor_recount_required = 1,
+            supervisor_recount_threshold = ?,
+            supervisor_recount_at = NULL,
+            supervisor_recount_by = NULL,
+            supervisor_recount_by_name = NULL,
             note = ?,
             updated_at = NOW()
       WHERE tenant_id = ? AND id = ?`,
-    [cleanString(input.note, 1000), tenantId, itemId]
+    [supervisorRecountThreshold(expectedQuantity), cleanString(input.note, 1000), tenantId, itemId]
   );
   await query(
     `UPDATE stock_take_sessions
@@ -1003,6 +1502,11 @@ export async function approveStockTakeSession(tenantId: string, sessionId: strin
               expected_quantity AS expectedQuantity,
               counted_quantity AS countedQuantity,
               variance_quantity AS varianceQuantity,
+              variance_reason AS varianceReason,
+              variance_reason_label AS varianceReasonLabel,
+              variance_severity AS varianceSeverity,
+              supervisor_recount_required AS supervisorRecountRequired,
+              supervisor_recount_at AS supervisorRecountAt,
               status
          FROM stock_take_items
         WHERE tenant_id = ? AND session_id = ?
@@ -1016,22 +1520,32 @@ export async function approveStockTakeSession(tenantId: string, sessionId: strin
     if (uncounted.length) {
       throw new Error("All assigned products must be counted or recounted before approval.");
     }
+    const pendingSupervisorRecounts = items.filter((item: any) => (
+      toBoolean(item.supervisorRecountRequired ?? item.supervisor_recount_required)
+      && !item.supervisorRecountAt
+      && Math.abs(toNumber(item.varianceQuantity ?? item.variance_quantity)) > 0.0001
+    ));
+    if (pendingSupervisorRecounts.length) {
+      throw new Error("Supervisor recount is required before approval for high-risk stocktake variances.");
+    }
 
     for (const item of items) {
       const variance = toNumber(item.varianceQuantity ?? item.variance_quantity);
       if (Math.abs(variance) > 0.0001) {
+        const varianceReason = item.varianceReason ?? item.variance_reason ?? "count_error";
+        const varianceReasonLabel = item.varianceReasonLabel ?? item.variance_reason_label ?? VARIANCE_REASONS.count_error.label;
         const result = await applyProductStockDelta(conn, {
           tenantId,
           productId: item.productId ?? item.product_id,
           itemName: item.productName ?? item.product_name,
           quantityDelta: variance,
           reason: "stock_take",
-          reasonCode: "count_correction",
+          reasonCode: stockReasonCodeForVariance(varianceReason),
           referenceType: "stock_take_session",
           referenceId: sessionId,
           staffId: actor.staffId || null,
           staffName: actor.staffName || null,
-          note: `Approved ${session.type === "spot_check" ? "spot check" : "stocktake"}: ${session.name}`,
+          note: `Approved ${session.type === "spot_check" ? "spot check" : "stocktake"}: ${session.name} (${varianceReasonLabel})`,
         });
         if (result) {
           applied.push({

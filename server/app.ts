@@ -75,8 +75,10 @@ import {
   createVendor,
   updateVendor,
   getPurchaseOrders,
+  getStockBatches,
   createPurchaseOrder,
   updatePurchaseOrder,
+  receivePurchaseOrder,
   updateProductRecipe,
   getProductRecipe,
   createModifierGroup,
@@ -146,6 +148,8 @@ import {
   createStockTakeSession,
   deleteStockTakeRule,
   getMyStockTakeAssignments,
+  getStockTakeExportPack,
+  getStockTakeSuggestions,
   getStockTakeRules,
   getStockTakeSession,
   getStockTakeSessions,
@@ -154,6 +158,12 @@ import {
   submitStockTakeCount,
   updateStockTakeRule,
 } from "./stockTake.js";
+import {
+  approveReorderRecommendation,
+  dismissReorderRecommendation,
+  listReorderRecommendations,
+  refreshReorderRecommendations,
+} from "./reorderRecommendations.js";
 import { recordOfflineSyncIssue } from "./offlineSync.js";
 import {
   addLaybyPayment,
@@ -1164,7 +1174,7 @@ export async function createApp(io: any = null) {
     requireAiRoleAccess,
     async (req, res) => {
       try {
-        res.json(await generateInventoryAgentProposal(req.params.tenantId, req.body || {}));
+        res.json(await generateInventoryAgentProposal(req.params.tenantId, req.body || {}, { actor: auditActorFromRequest(req) }));
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -1184,15 +1194,21 @@ export async function createApp(io: any = null) {
             stepCount: Array.isArray(req.body?.steps) ? req.body.steps.length : 0,
           });
         }
-        const result = await applyApprovedInventoryAgentSteps(req.params.tenantId, req.body?.steps || [], { fullAutopilot });
+        const runId = req.body?.runId || req.body?.proposalId || null;
+        const result = await applyApprovedInventoryAgentSteps(req.params.tenantId, req.body?.steps || [], {
+          fullAutopilot,
+          runId,
+          actor: auditActorFromRequest(req),
+        });
         await auditRouteEvent(req, "ai.inventory_steps_applied", "ai_agent_run", {
+          runId,
           fullAutopilot,
           requestedStepCount: Array.isArray(req.body?.steps) ? req.body.steps.length : 0,
           appliedCount: result.applied.length,
           skippedCount: result.skipped.length,
           appliedTypes: result.applied.map((step: any) => step.type),
           skippedTypes: result.skipped.map((step: any) => step.type),
-        }, null, "ai");
+        }, runId, "ai");
         res.json(result);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -1397,6 +1413,19 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/stocktakes/suggestions", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "stocktake.suggestions_view", "Manager access is required for stocktake suggestions.");
+      }
+      res.json(await getStockTakeSuggestions(req.params.tenantId, {
+        limit: typeof req.query.limit === "string" ? req.query.limit : undefined,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/mariadb/tenants/:tenantId/stocktakes/rules", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
@@ -1484,6 +1513,19 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/stocktakes/:sessionId/export-pack", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "stocktake.export_pack", "Manager access is required to export stocktake packs.", {
+          sessionId: req.params.sessionId,
+        });
+      }
+      res.json(await getStockTakeExportPack(req.params.tenantId, req.params.sessionId));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.get("/api/mariadb/tenants/:tenantId/stocktakes/:sessionId", requireAuth, async (req, res) => {
     try {
       const session = await getStockTakeSession(req.params.tenantId, req.params.sessionId);
@@ -1506,6 +1548,7 @@ export async function createApp(io: any = null) {
       res.json(await submitStockTakeCount(req.params.tenantId, req.params.itemId, {
         countedQuantity: Number(req.body?.countedQuantity),
         note: req.body?.note || null,
+        varianceReason: req.body?.varianceReason || null,
       }, {
         staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
         staffName: req.user?.name || req.body?.staffName || null,
@@ -3237,6 +3280,78 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/stock-batches", requireAuth, async (req, res) => {
+    try {
+      res.json(await getStockBatches(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/reorder-recommendations", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "reorder_recommendations.view", "Manager access is required for reorder recommendations.");
+      }
+      res.json(await listReorderRecommendations(req.params.tenantId, {
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        limit: typeof req.query.limit === "string" ? req.query.limit : undefined,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/reorder-recommendations/refresh", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "reorder_recommendations.refresh", "Manager access is required to refresh reorder recommendations.");
+      }
+      res.json(await refreshReorderRecommendations(req.params.tenantId, {
+        daysOfCover: req.body?.daysOfCover,
+        vendorId: req.body?.vendorId || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/reorder-recommendations/:id/approve", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "reorder_recommendations.approve", "Manager access is required to approve reorder recommendations.", {
+          recommendationId: req.params.id,
+        });
+      }
+      res.json(await approveReorderRecommendation(req.params.tenantId, req.params.id, {
+        ...req.body,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/reorder-recommendations/:id/dismiss", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "reorder_recommendations.dismiss", "Manager access is required to dismiss reorder recommendations.", {
+          recommendationId: req.params.id,
+        });
+      }
+      res.json(await dismissReorderRecommendation(req.params.tenantId, req.params.id, {
+        note: req.body?.note || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.post("/api/mariadb/tenants/:tenantId/purchase-orders", requireAuth, async (req, res) => {
     try {
       res.json(await createPurchaseOrder(req.params.tenantId, req.body || {}));
@@ -3247,10 +3362,36 @@ export async function createApp(io: any = null) {
 
   app.put("/api/mariadb/tenants/:tenantId/purchase-orders/:id", requireAuth, async (req, res) => {
     try {
+      if (req.body?.status === "received") {
+        if (!canManageInventory(req.user?.role)) {
+          return denyWithAudit(req, res, "purchase_order.receive", "Only managers can receive purchase orders.", {
+            purchaseOrderId: req.params.id,
+          });
+        }
+        const actor = auditActorFromRequest(req);
+        const received = await receivePurchaseOrder(req.params.tenantId, req.params.id, req.body || {}, actor);
+        res.json(received);
+        return;
+      }
       await updatePurchaseOrder(req.params.tenantId, req.params.id, req.body || {});
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/purchase-orders/:id/receive", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "purchase_order.receive", "Only managers can receive purchase orders.", {
+          purchaseOrderId: req.params.id,
+        });
+      }
+      const actor = auditActorFromRequest(req);
+      const received = await receivePurchaseOrder(req.params.tenantId, req.params.id, req.body || {}, actor);
+      res.json(received);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 

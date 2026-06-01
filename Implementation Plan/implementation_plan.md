@@ -1,6 +1,6 @@
 # Jimmy POS Master Todo
 
-Last updated: 2026-05-30
+Last updated: 2026-06-01
 
 This is the single source of truth for Jimmy POS implementation work. Add new roadmap items, blueprint gaps, security todo items, migration todo items, AI todo items, and restaurant-mode todo items here first. Older specialist planning documents are retained only as historical context or verification notes.
 
@@ -45,8 +45,10 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [x] Add manager-scheduled daily spot-check rules with assigned staff, product scope controls, one-run-per-day protection, and Action Center/manual run support.
 - [x] Add manager cash float view that shows all register floats, petty cash/payouts, wallet cash movements, manager-safe cash, and total cash in the system at any moment.
 - [x] Extend the manager action center into remaining pre-action approval requests: AI recommendation tasks, failed/offline sync items, and scheduled stocktake exceptions.
-- [ ] Expand operator-friendly audit/stock visibility with deeper device attribution, richer customer/register labels, drill-through context, and PDF/accounting export packs beyond current CSV exports.
-- [ ] Add guided stock receiving and deeper stock-count flows that explain valuation, variance reason taxonomy, count sheets, exports, and batch/location impact; current purchase-order receiving is still status-only.
+- [x] Expand operator-friendly audit/stock visibility with deeper device attribution, richer customer/register labels, drill-through context, and owner/accounting/compliance CSV report packs.
+- [ ] Add PDF export packs for audit, stock, and accounting activity beyond current CSV exports.
+- [x] Add guided purchase-order receiving that captures invoice/reference, received quantities, variance notes, and posts audited stock movements.
+- [ ] Add deeper stock-count and receiving packs that explain valuation, variance reason taxonomy, count sheets, exports, and batch/location impact.
 - [ ] Add quick-access daily actions in the POS shell: consolidate currently scattered reprint last receipt, cash drawer/no-sale, active register status, parked sales, open tabs/tables, and pending workstation items into one first-screen operator strip.
 - [ ] Add workflow-focused empty states and recovery actions for no open register, no stock, no customer selected, payment failure, offline mode, and printer readiness.
 - [ ] Add role-specific onboarding/checklists for cashier, waiter, manager, owner, kitchen/bar, and Dev users that route each role to its first daily actions and missing setup.
@@ -57,9 +59,9 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - Confirmed working surfaces: POS has active-register guarding, parked sales, table save, no-sale drawer logging, last receipt reprint, offline queue review, and wallet/account online guards; History has guided refund/void/reprint with manager approval routing; Cash Management has open/close, manager review, Z checklist, printer readiness, EOD checkpoint, cash custody, and searchable/exportable manager-cash movements.
 - Confirmed approval surfaces: refund, void, stock adjustment, stocktake variance, AI warnings, and offline sync conflicts now converge into Action Center or guarded manager routes.
 - Remaining operator friction: daily POS actions are discoverable but split across separate panels instead of a single first-screen action strip.
-- Remaining stock friction: purchase orders can be created and marked received, but receiving does not yet book stock with invoice/variance evidence, batches, valuation, or ledger review.
+- Remaining stock friction: purchase-order receiving now books audited stock with invoice/variance evidence and batches, and stocktake variance reasons/count exports now exist; deeper valuation/PDF stock packs and batch/location impact reporting remain active backlog.
 - Remaining guidance friction: empty states and role checklists are inconsistent, especially for first login, no register, no customer, no stock, payment failure, offline recovery, and printer readiness.
-- Remaining AI/approval friction: AI proposal application is guarded, but per-step persisted agent runs, one-mutation approval records, and stronger manager task conversion remain active P3/P8 gaps.
+- Remaining AI/approval friction: AI proposal application now persists per-step execution and can receive approved invoice steps through audited purchase-order receiving; stronger manager task conversion remains an active P8 gap.
 
 ## P0 - Data Integrity, Audit, and Offline Reliability
 
@@ -91,7 +93,8 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [ ] Add QR/mobile-wallet rails: SnapScan, Yoco payment links/terminal flows, and generic QR payment capture.
 - [ ] Add BNPL providers: PayJustNow, Mobicred, PayFlex, provider reconciliation, settlement status, and return/refund handling.
 - [ ] Add card-terminal pairing so card payment is confirmed by an acquiring provider instead of only recorded manually.
-- [ ] Keep offline card tender capture available as an external-hardware payment record because authorization happens on the card terminal/provider side; store only tender type, amount, provider/device reference, optional authorization/reference code, and reconciliation status.
+- [x] Keep offline external-card tender capture available in the browser-local sale queue while wallet, account, and PayFast stay online-only.
+- [ ] Add external-card provider/device reference, optional authorization/reference code, and reconciliation status fields for terminal-side authorization review.
 - [ ] Extend split bills from tender splitting into restaurant split-by-seat, split-by-person, and split-by-table workflows.
 - [ ] Add payment provider reconciliation reports without exposing card PAN/CVV data.
 - [ ] Store provider tokens/payment references only for PayFast and future Yoco, SnapScan, and BNPL integrations.
@@ -104,13 +107,15 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [x] Add `stock_take_sessions` and `stock_take_items` tables so counted stock variances can be assigned, audited, reconciled, and approved.
 - [x] Add formal stocktake, cycle-count, and spot-check workflow with staff product assignments, dedicated staff/mobile stocktake route, count entry, variance capture, manager recount, manager sign-off, and stock movement posting on approval.
 - [x] Add recurring daily spot-check rules with random, low-stock, category, and manual product scopes plus manager scheduling controls.
-- [ ] Add smarter spot-check suggestions based on shrinkage, low stock, wastage, expiry risk, sales velocity, and recent variances.
-- [ ] Add formal shrinkage/wastage/damage/expiry reason taxonomy per variance, count sheets, count export packs, and supervisor second-count thresholds.
-- [ ] Add `stock_batches` with expiry dates, supplier/invoice references, received quantities, remaining quantities, FIFO/FEFO guidance, and expiry warnings.
-- [ ] Finish audited receiving/stock booking from purchase orders and invoice intake.
-- [ ] Add min-stock recommendation storage, notification rules, reorder approvals, and purchase-order suggestions by location.
+- [x] Add smarter spot-check suggestions based on shrinkage, low stock, wastage, expiry risk, sales velocity, and recent variances.
+- [x] Add formal shrinkage/wastage/damage/expiry reason taxonomy per variance, count sheets, count export packs, and supervisor second-count thresholds.
+- [x] Add `stock_batches` with expiry dates, supplier/invoice references, received quantities, remaining quantities, FIFO/FEFO guidance, and expiry warnings.
+- [x] Finish audited receiving/stock booking from purchase orders with invoice/reference metadata, received quantities, variance tracking, and receiving stock movements.
+- [x] Connect invoice intake/Copilot receiving steps to the audited receive flow after per-step run persistence and approval records exist.
+- [x] Add min-stock recommendation storage, Action Center reorder approvals, and purchase-order creation from approved suggestions.
+- [ ] Add reorder notification rules and purchase-order suggestions by location after multi-location inventory exists.
 - [ ] Expand recipe costing with yield, waste, ingredient substitution, and gross-margin reporting.
-- [ ] Keep invoice receiving and stock booking review-only until stock movements are fully audited.
+- [x] Keep AI invoice receive/book-stock steps out of Dev full-autopilot while audited receiving is manager-approved.
 
 ## P3 - AI Inventory Copilot
 
@@ -120,12 +125,12 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [x] Add guarded apply endpoint for approved draft-safe steps.
 - [x] Add Dev-only full autopilot switch for automatic draft-safe apply.
 - [x] Add provider-specific AI extraction for invoice images and PDF/document uploads.
-- [ ] Add persisted `ai_agent_runs` table with per-step approval and audit logs.
-- [ ] Persist controlled execution runs with one mutation per explicit approval.
-- [ ] Add audited execution records for each approved Copilot step.
+- [x] Add persisted `ai_agent_runs` table with per-step approval and audit logs.
+- [x] Persist controlled execution runs with one mutation per explicit approval.
+- [x] Add audited execution records for each approved Copilot step.
 - [ ] Add full bookings/events CRUD and calendar visibility.
 - [ ] Add `event_bookings` table and bookings UI for private/public events.
-- [ ] Keep full autopilot limited to draft-safe operations until audited stock receiving is complete.
+- [x] Keep full autopilot limited to draft-safe operations; receive-invoice/book-stock steps require explicit manager approval even after audited purchase-order receipt wiring.
 
 ## P4 - Reporting, Tax, and Analytics
 
@@ -133,7 +138,7 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [ ] Add SARS-ready VAT exports, tax-period locking, and audit-friendly tax invoice summaries.
 - [ ] Add margin reports by product, category, staff member, payment method, and period.
 - [ ] Add category performance, average basket segmentation, table turnover, open-tab aging, refund/void reports, and cash variance trends.
-- [ ] Add cash position reports for current manager float, per-register expected cash, petty cash spend, wallet cash activity, cash-in-system history, and unresolved variances.
+- [x] Add cash position reports for current manager float, per-register expected cash, petty cash spend, wallet cash activity, cash-in-system history, and unresolved variances.
 - [ ] Add accounting journal export foundation for future Sage, Xero, and QuickBooks integrations.
 - [ ] Add dashboard KPIs for real-time sales, average basket size, table turnover, open tabs, cash variance, low stock, and active staff.
 
@@ -167,7 +172,8 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - [ ] Add direct hardware adapters for ESC/POS printers, kitchen printer routing, cash drawers, scales, barcode scanners, pole displays, and card terminals.
 - [ ] Add handheld/tablet flow for tableside ordering and mobile checkout.
 - [ ] Add true hybrid cloud/on-prem mode with offline-first sync.
-- [ ] Validate Nginx static serving, API reverse proxy, SSL/TLS termination, rate limits, and production deployment docs.
+- [x] Add Nginx static serving, API reverse proxy, request rate-limit config, and production deployment docs.
+- [ ] Validate production SSL/TLS termination and final deployment behavior against the target hosting environment.
 
 ## P8 - AI Manager Copilot and Differentiators
 
@@ -207,16 +213,16 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 
 - [ ] Verify production database migrations are applied consistently, including `staff.password_hash` and any later audit, stock, AI, and payment tables.
 - [ ] Create seed scripts for test tenants, users, staff passwords, sample products, sample customers, sample sales, and restaurant tables.
-- [ ] Add auth middleware tests, auth endpoint integration tests, multi-tenant isolation tests, and end-to-end UI tests for login through checkout.
+- [x] Add auth middleware tests and auth endpoint integration tests for login, logout, refresh, current-user, and protected-route handling.
+- [ ] Add multi-tenant isolation tests and end-to-end UI tests for login through checkout.
 - [ ] Add batch create products, batch update prices, customer import/export, and inventory import/export flows.
 - [ ] Add operational rollback notes for database migrations and production deploys.
 - [ ] Keep MariaDB/Nginx migration notes archived unless they are re-verified against current code and copied into this workstream.
 
 ## P12 - Messaging and Realtime
 
-- [x] Messaging currently works through REST polling.
-- [ ] Keep REST polling for the current scale unless latency or concurrent-user growth justifies WebSockets.
-- [ ] If real-time messaging becomes necessary, add Socket.IO server initialization, tenant/channel joins, message broadcasts, client subscription hooks, reconnect handling, and polling fallback.
+- [x] Messaging still has REST polling as the durable messaging path/fallback.
+- [x] Add Socket.IO server initialization, tenant/channel joins, sales/message broadcasts, client subscription hooks, reconnect handling, and polling transport fallback.
 - [ ] If scaling beyond one server instance, add Redis or another shared pub/sub layer for WebSocket fan-out.
 
 ## Implementation Order
@@ -295,3 +301,11 @@ User friendliness and easy workflow are a top priority for Jimmy POS. Every impl
 - 2026-05-30: Passed lay-by verification: `npx.cmd vitest run tests/backend/layby.test.ts tests/backend/layby-schema.test.ts`, `node --check server\layby.ts`, `npm.cmd run build`, and `npm.cmd run lint`; build still reports the existing large-chunk warning.
 - 2026-05-31: Updated AI Manager Copilot with the newer operational data model: Action Center tasks, audit/offline/device and local-receipt metadata, stock movement reason codes, stocktake workflow signals, manager cash/EOD/custody ledgers, lay-by exposure, purchase-order pipeline, split-payment/refund/void traces, and customer/payout exposure. Staff scoring now includes Action Center follow-through, stocktake variance, refund/void exceptions, no-sale traces, and offline sync issues. Passed `npx.cmd vitest run tests/backend/ai.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
 - 2026-05-31: Implemented workstation timer telemetry with backend-owned UTC/server timestamps: held/open orders do not stamp `ordered_at`, send-to-workstation stamps `ordered_at`, accept/ready/delivered stamp their own phase timestamps once, edit/re-send preserves existing timestamps, and newly added sent items get fresh sent timestamps. Added shared timing thresholds, stale/unclosed-handoff handling, live workstation phase averages/P90/stale counts, Workstation and Tables timer chips, and AI `liveTiming`/`servicePeriodTiming` intake. Passed `npx.cmd vitest run tests/backend/mariadb-crud.test.ts tests/backend/workstation-stats.test.ts tests/frontend/workstation-timing.test.ts tests/backend/ai.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-06-01: Re-audited unchecked roadmap items against current code and tests. Marked stale items complete where implementation evidence exists for offline external-card queueing, Action Center CSV report packs, draft-safe AI autopilot limits, manager cash-position reporting, Nginx/static/API/rate-limit deployment docs, auth middleware/endpoint tests, and active Socket.IO realtime with REST/polling fallback. Split partially complete items so remaining work now tracks PDF exports, card-terminal reconciliation metadata, production SSL/TLS validation, multi-tenant/e2e checkout coverage, and Redis/shared pub-sub for multi-server realtime.
+- 2026-06-01: Added audited purchase-order receiving. Purchase orders now have receiving metadata columns, a manager-only receive endpoint, transaction-locked duplicate receive protection, invoice/reference capture, received quantities/prices/variance metadata on PO lines, receiving stock movements with `reason_code = receiving`, and a `purchase_order.received` audit event. Purchase Orders UI now opens a guided receive receipt modal instead of only flipping status. Passed `npx.cmd vitest run tests/backend/mariadb-crud.test.ts tests/backend/audit-stock-ledger-schema.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-06-01: Added stock batch tracking on top of audited receiving. New `stock_batches` schema records product, purchase order, supplier invoice/date, batch/lot reference, received quantity, remaining quantity, unit cost, expiry date, receiving actor, and status. Purchase-order receiving now creates batch rows, completed sales deplete active batches in FEFO/FIFO order, and Inventory has a Batches tab with expiry risk, remaining quantities, invoice traceability, and rotation guidance. Passed `npx.cmd vitest run tests/backend/mariadb-crud.test.ts tests/backend/audit-stock-ledger-schema.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-06-01: Added persisted AI Inventory Copilot run control. New `ai_agent_runs` and `ai_agent_run_steps` schema records generated proposals, one row per step, approval actors, step status, results, skip reasons, and run apply results; generated proposals now persist a run, apply uses stored step payloads by `runId` instead of trusting browser-sent payloads, completed runs are not re-applied, and per-step outcomes are written to `ai_audit_log`. Passed `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/ai-inventory-agent.test.ts tests/backend/audit-stock-ledger-schema.test.ts`, `npm.cmd run lint`, and `npm.cmd run build`; build still reports the existing large-chunk warning.
+- 2026-06-01: Connected approved AI Inventory Copilot `receive_invoice` and `book_stock` steps to audited purchase-order receiving. Apply now reuses persisted run payloads and the PO created earlier in the same approved run, refuses unmapped `pending_` product lines before stock booking, skips duplicate receipt attempts in one run, and keeps Dev full-autopilot blocked from receive/book-stock mutations. Passed `npx.cmd vitest run tests/backend/ai.test.ts tests/backend/ai-inventory-agent.test.ts tests/backend/audit-stock-ledger-schema.test.ts`, `npx.cmd vitest run tests/backend/mariadb-crud.test.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, and `git diff --check` only reported LF-to-CRLF normalization warnings.
+- 2026-06-01: Added persisted min-stock reorder recommendations. New `reorder_recommendations` schema stores low-stock reorder targets, velocity, quantity/cost estimates, evidence, approval actors, and resulting purchase-order links; Inventory now has a Reorder tab to refresh/approve/dismiss suggestions; Action Center can approve recommendation tasks into draft purchase orders. Passed `npx.cmd vitest run tests/backend/reorder-recommendations.test.ts tests/backend/manager-tasks.test.ts tests/backend/audit-stock-ledger-schema.test.ts`, `node --check server\reorderRecommendations.ts`, and `npm.cmd run lint`.
+- 2026-06-01: Added smarter stocktake spot-check suggestions. Stocktake now ranks products using low-stock status, recent shrinkage/wastage stock movements, expiry-risk batches, completed-sale velocity, and recent stocktake variances; managers can start a one-product spot check directly from the suggested list. Passed `npx.cmd vitest run tests/backend/stock-take.test.ts`, `node --check server\stockTake.ts`, and `npm.cmd run lint`.
+- 2026-06-01: Added formal stocktake variance taxonomy and count export packs. Count lines now capture shrinkage, wastage, damage, expiry, supplier, transfer, missed-sale, theft/loss, count-error, and other variance reasons; high-risk variances require supervisor recount before approval; approved stock movements map sensitive reasons to shrinkage/wastage/transfer reason codes; managers can download stocktake CSV export packs with count-sheet, variance, severity, and recount fields. Passed `npx.cmd vitest run tests/backend/stock-take.test.ts tests/backend/audit-stock-ledger-schema.test.ts`, `node --check server\stockTake.ts`, `node --check server\app.ts`, `node --check server\init-db.ts`, `npm.cmd run lint`, `npm.cmd run build`, and `git diff --check`; build still reports the existing large-chunk warning, and `git diff --check` only reported LF-to-CRLF normalization warnings.

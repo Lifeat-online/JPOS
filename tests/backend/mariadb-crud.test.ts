@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { createCustomerPayoutRequest, createPayoutRequest, createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale, updateSaleItem } from '../../server/mariadb-crud.js';
+import { createCustomerPayoutRequest, createPayoutRequest, createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale, updateSaleItem, receivePurchaseOrder, getStockBatches } from '../../server/mariadb-crud.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
@@ -329,6 +329,201 @@ describe('mariadb-crud', () => {
       expect.stringContaining('INSERT INTO audit_events'),
       expect.arrayContaining(['tenant_1', 'sale.created', 'sale'])
     );
+  });
+
+  it('depletes stock batches in FEFO order when a sale completes', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('SELECT bulk_item_id')) return Promise.resolve([[]]);
+        if (sql.includes('SELECT id, name, stock')) return Promise.resolve([[{ id: 'prod_1', name: 'Milk', stock: 10 }]]);
+        if (sql.includes('FROM stock_batches')) {
+          return Promise.resolve([[{ id: 'batch_old', remainingQuantity: 1 }, { id: 'batch_new', remainingQuantity: 5 }]]);
+        }
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await createSale('tenant_1', {
+      staffId: 'staff_1',
+      status: 'completed',
+      total: 30,
+      subtotal: 30,
+      paymentMethod: 'cash',
+      items: [{ id: 'prod_1', name: 'Milk', price: 10, quantity: 3 } as any],
+    });
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('FROM stock_batches'),
+      ['tenant_1', 'prod_1']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE stock_batches'),
+      [0, 'depleted', 'tenant_1', 'batch_old']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE stock_batches'),
+      [3, 'active', 'tenant_1', 'batch_new']
+    );
+  });
+
+  it('receives purchase orders by booking audited stock movements once', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('FROM purchase_orders')) {
+          return Promise.resolve([[{
+            id: 'po_1',
+            vendorId: 'vendor_1',
+            status: 'sent',
+            type: 'once_off',
+            recurringFrequency: null,
+            items: JSON.stringify([{ productId: 'prod_1', productName: 'Coffee Beans', quantity: 5, expectedPrice: 40 }]),
+            totalAmount: 200,
+            expectedDeliveryDate: null,
+            invoiceStatus: 'unpaid',
+          }]]);
+        }
+        if (sql.includes('SELECT id, name, stock')) {
+          return Promise.resolve([[{ id: 'prod_1', name: 'Coffee Beans', stock: 4 }]]);
+        }
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    const result = await receivePurchaseOrder('tenant_1', 'po_1', {
+      invoiceNumber: 'INV-100',
+      invoiceDate: '2026-06-01',
+      invoiceStatus: 'paid',
+      note: 'Manager counted delivery',
+      items: [{ lineIndex: 0, productId: 'prod_1', receivedQuantity: 6, receivedPrice: 42, expiryDate: '2026-07-15', batchNumber: 'LOT-7', note: 'One extra bag delivered' }],
+    }, { staffId: 'mgr_1', staffName: 'Manager' });
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE products SET stock = ?'),
+      [10, 'tenant_1', 'prod_1']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO stock_movements'),
+      expect.arrayContaining(['tenant_1', 'product', 'prod_1', null, 'Coffee Beans', 6, 4, 10, 'purchase_order_receiving', 'receiving'])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE purchase_orders'),
+      expect.arrayContaining(['received', 'paid', expect.any(String), 'INV-100', '2026-06-01', 'mgr_1', 'Manager', 'Manager counted delivery', 252, 'tenant_1', 'po_1'])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_events'),
+      expect.arrayContaining(['tenant_1', 'purchase_order.received', 'purchase_order', 'po_1'])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO stock_batches'),
+      expect.arrayContaining(['tenant_1', 'prod_1', 'Coffee Beans', 'po_1', 'vendor_1', 'INV-100', '2026-06-01', 'LOT-7', 6, 6, 42, '2026-07-15'])
+    );
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      id: 'po_1',
+      status: 'received',
+      invoiceNumber: 'INV-100',
+      receivedTotalAmount: 252,
+    });
+    expect(result.items[0]).toMatchObject({
+      receivedQuantity: 6,
+      receivedPrice: 42,
+      varianceQuantity: 1,
+      expiryDate: '2026-07-15',
+      batchNumber: 'LOT-7',
+    });
+  });
+
+  it('rejects duplicate purchase-order receiving before stock is booked again', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockResolvedValueOnce([[{
+        id: 'po_1',
+        status: 'received',
+        items: JSON.stringify([{ productId: 'prod_1', productName: 'Coffee Beans', quantity: 5, expectedPrice: 40 }]),
+      }]]),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await expect(receivePurchaseOrder('tenant_1', 'po_1', {}, { staffId: 'mgr_1' }))
+      .rejects.toThrow('already been received');
+
+    expect(conn.query).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE products SET stock = ?'), expect.anything());
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+
+  it('serializes stock batch expiry status and FEFO rotation guidance', async () => {
+    (dbModule.query as any).mockResolvedValue([
+      {
+        id: 'batch_expired',
+        tenantId: 'tenant_1',
+        productId: 'prod_1',
+        productName: 'Milk',
+        receivedQuantity: 4,
+        remainingQuantity: 4,
+        unitCost: 12,
+        expiryDate: '2000-01-01',
+        status: 'active',
+      },
+      {
+        id: 'batch_future',
+        tenantId: 'tenant_1',
+        productId: 'prod_1',
+        productName: 'Milk',
+        receivedQuantity: 5,
+        remainingQuantity: 5,
+        unitCost: 12,
+        expiryDate: '2999-01-01',
+        status: 'active',
+      },
+      {
+        id: 'batch_depleted',
+        tenantId: 'tenant_1',
+        productId: 'prod_1',
+        productName: 'Milk',
+        receivedQuantity: 2,
+        remainingQuantity: 0,
+        unitCost: 12,
+        expiryDate: '2999-02-01',
+        status: 'depleted',
+      },
+    ]);
+
+    const batches = await getStockBatches('tenant_1');
+
+    expect(dbModule.query).toHaveBeenCalledWith(expect.stringContaining('FROM stock_batches'), ['tenant_1']);
+    expect(batches[0]).toMatchObject({
+      id: 'batch_expired',
+      expiryStatus: 'expired',
+      rotationRank: null,
+      rotationGuidance: 'Expired stock - isolate',
+    });
+    expect(batches[1]).toMatchObject({
+      id: 'batch_future',
+      expiryStatus: 'ok',
+      rotationRank: 1,
+      rotationGuidance: 'Use first (FEFO)',
+    });
+    expect(batches[2]).toMatchObject({
+      id: 'batch_depleted',
+      expiryStatus: 'depleted',
+      rotationRank: null,
+      rotationGuidance: 'Depleted',
+    });
   });
 
   it('includes offline_event_id and sync_source in the INSERT when provided', async () => {

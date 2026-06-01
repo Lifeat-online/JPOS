@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CalendarDays, CheckCircle2, ClipboardCheck, Package, Plus, RefreshCw, Search, ShieldCheck, Smartphone, Users, X } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, ClipboardCheck, Download, Package, Plus, RefreshCw, Search, ShieldCheck, Smartphone, Users, X } from 'lucide-react';
 import { Product, Staff } from '../types';
 import {
   approveStockTakeSession,
@@ -7,6 +7,8 @@ import {
   createStockTakeSession,
   deleteStockTakeRule,
   getMyStockTakeAssignments,
+  getStockTakeExportPack,
+  getStockTakeSuggestions,
   getStockTakeRules,
   getStockTakeSession,
   getStockTakeSessions,
@@ -18,6 +20,7 @@ import {
 } from '../api';
 import { usePosStore } from '../store/usePosStore';
 import { getDate } from '../utils/date';
+import type { StockTakeSuggestion } from '../types';
 
 type StockTakeMode = 'cycle' | 'full' | 'spot_check';
 type RuleScope = 'random' | 'low_stock' | 'category' | 'manual';
@@ -45,6 +48,25 @@ function toneForVariance(value: unknown) {
   return n > 0 ? 'text-emerald-600' : 'text-rose-600';
 }
 
+function suggestionTone(riskLevel: StockTakeSuggestion['riskLevel']) {
+  if (riskLevel === 'critical') return 'border-red-100 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300';
+  if (riskLevel === 'high') return 'border-amber-100 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300';
+  return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300';
+}
+
+const varianceReasonOptions = [
+  { value: 'count_error', label: 'Count error' },
+  { value: 'shrinkage', label: 'Shrinkage' },
+  { value: 'wastage', label: 'Wastage' },
+  { value: 'damage', label: 'Damaged stock' },
+  { value: 'expiry', label: 'Expired stock' },
+  { value: 'supplier_delivery', label: 'Supplier delivery mismatch' },
+  { value: 'transfer', label: 'Transfer mismatch' },
+  { value: 'sale_missed', label: 'Missed sale posting' },
+  { value: 'theft_loss', label: 'Theft/loss' },
+  { value: 'other', label: 'Other variance' },
+];
+
 export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProps) {
   const tenantId = usePosStore(state => state.tenantId);
   const currentUserStaff = usePosStore(state => state.currentUserStaff);
@@ -56,6 +78,7 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
   const [staff, setStaff] = useState<Staff[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [rules, setRules] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<StockTakeSuggestion[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [reviewSession, setReviewSession] = useState<any | null>(null);
   const [mode, setMode] = useState<StockTakeMode>(initialMode);
@@ -72,6 +95,7 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
   const [productSearch, setProductSearch] = useState('');
   const [selectedAssignees, setSelectedAssignees] = useState<Record<string, string>>({});
   const [countInputs, setCountInputs] = useState<Record<string, string>>({});
+  const [varianceReasonInputs, setVarianceReasonInputs] = useState<Record<string, string>>({});
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
   const [recountNotes, setRecountNotes] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -123,6 +147,7 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
         requests.push(getStockTakeSessions(tenantId));
         requests.push(getTenantStaff(tenantId));
         requests.push(getStockTakeRules(tenantId));
+        requests.push(getStockTakeSuggestions(tenantId));
       }
       const results = await Promise.all(requests);
       setAssignments(results[0] || []);
@@ -130,6 +155,7 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
         setSessions(results[1] || []);
         setStaff(results[2] || []);
         setRules(results[3] || []);
+        setSuggestions(results[4]?.suggestions || []);
       }
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not load stocktake work.' });
@@ -192,6 +218,36 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
       await load();
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not start stocktake.' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const startSuggestedSpotCheck = async (suggestion: StockTakeSuggestion) => {
+    if (!tenantId) return;
+    setBusyKey(`suggestion-${suggestion.productId}`);
+    setMessage(null);
+    try {
+      const defaultAssignee = activeStaff.find(member => member.role === 'cashier')?.id || currentUserStaff?.id || null;
+      const member = defaultAssignee ? staffById.get(defaultAssignee) : null;
+      const session = await createStockTakeSession(tenantId, {
+        name: `Spot check: ${suggestion.productName}`,
+        type: 'spot_check',
+        dueAt: null,
+        notes: `Suggested because: ${suggestion.evidence.join('; ')}`,
+        staffId: currentUserStaff?.id || null,
+        staffName: currentUserStaff?.name || null,
+        assignments: [{
+          productId: suggestion.productId,
+          assignedTo: defaultAssignee,
+          assignedToName: member?.name || null,
+        }],
+      });
+      setReviewSession(session);
+      setMessage({ tone: 'success', text: 'Suggested spot check assigned.' });
+      await load();
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not start suggested spot check.' });
     } finally {
       setBusyKey(null);
     }
@@ -300,14 +356,18 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
     }
     setBusyKey(item.id);
     try {
+      const expectedQuantity = Number(item.expectedQuantity || 0);
+      const varianceQuantity = Number((countedQuantity - expectedQuantity).toFixed(3));
       const session = await submitStockTakeCount(tenantId, item.id, {
         countedQuantity,
+        varianceReason: Math.abs(varianceQuantity) > 0.0001 ? (varianceReasonInputs[item.id] || 'count_error') : null,
         note: noteInputs[item.id]?.trim() || null,
         staffId: currentUserStaff?.id || null,
         staffName: currentUserStaff?.name || null,
       });
       setReviewSession(session);
       setCountInputs(current => ({ ...current, [item.id]: '' }));
+      setVarianceReasonInputs(current => ({ ...current, [item.id]: 'count_error' }));
       setNoteInputs(current => ({ ...current, [item.id]: '' }));
       setMessage({ tone: 'success', text: 'Count submitted.' });
       await load();
@@ -363,6 +423,28 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
       await load();
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not request recount.' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const downloadExportPack = async (session: any) => {
+    if (!tenantId || !session?.id) return;
+    setBusyKey(`export:${session.id}`);
+    try {
+      const pack = await getStockTakeExportPack(tenantId, session.id);
+      const blob = new Blob([pack.csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = pack.filename || `stocktake-${session.id}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setMessage({ tone: 'success', text: 'Stocktake export pack downloaded.' });
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Could not export stocktake pack.' });
     } finally {
       setBusyKey(null);
     }
@@ -451,6 +533,15 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
                     placeholder="Counted quantity"
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-black text-slate-900 outline-none transition focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white"
                   />
+                  <select
+                    value={varianceReasonInputs[item.id] || 'count_error'}
+                    onChange={event => setVarianceReasonInputs(current => ({ ...current, [item.id]: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 outline-none transition focus:border-primary dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                  >
+                    {varianceReasonOptions.map(reason => (
+                      <option key={reason.value} value={reason.value}>{reason.label}</option>
+                    ))}
+                  </select>
                   <input
                     type="text"
                     value={noteInputs[item.id] ?? ''}
@@ -475,7 +566,67 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
       </section>
 
       {isManager && (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(420px,0.9fr)]">
+        <div className="space-y-6">
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 dark:text-white">Suggested spot checks</h3>
+                  <p className="text-xs font-bold text-slate-400">Ranked by shrinkage, wastage, expiry, velocity, and variance signals</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={load}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-600 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-950"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-3 xl:grid-cols-3">
+              {suggestions.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm font-bold text-slate-400 dark:border-slate-700 xl:col-span-3">
+                  No risk-based spot-check suggestions right now.
+                </div>
+              ) : suggestions.slice(0, 6).map(suggestion => (
+                <div key={suggestion.productId} className={`rounded-2xl border p-4 ${suggestionTone(suggestion.riskLevel)}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-black text-slate-900 dark:text-white">{suggestion.productName}</p>
+                      <p className="mt-1 text-[10px] font-black uppercase tracking-widest opacity-70">
+                        Score {suggestion.score} - {suggestion.riskLevel}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-white/70 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest dark:bg-slate-900/70">
+                      Stock {formatNumber(suggestion.stock)}
+                    </span>
+                  </div>
+                  <div className="mt-3 space-y-1 text-xs font-bold leading-5">
+                    {suggestion.evidence.slice(0, 3).map((item, index) => (
+                      <p key={`${suggestion.productId}-${index}`}>{item}</p>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => startSuggestedSpotCheck(suggestion)}
+                    disabled={busyKey === `suggestion-${suggestion.productId}`}
+                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-950"
+                  >
+                    <ClipboardCheck className="h-4 w-4" />
+                    Start Spot Check
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(420px,0.9fr)]">
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="flex items-center gap-3">
@@ -647,6 +798,9 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
                     <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-slate-500">
                       <span>{session.countedCount || 0}/{session.itemCount || 0} counted</span>
                       <span>{session.varianceCount || 0} variance</span>
+                      {(session.supervisorRecountCount || 0) > 0 && (
+                        <span className="text-amber-600">{session.supervisorRecountCount} supervisor recount</span>
+                      )}
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
@@ -675,6 +829,7 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
               })}
             </div>
           </section>
+          </div>
         </div>
       )}
 
@@ -881,7 +1036,17 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
                 {reviewSession.status} - {reviewSession.countedCount || 0}/{reviewSession.itemCount || 0} counted
               </p>
             </div>
-            {['active', 'submitted'].includes(reviewSession.status) && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => downloadExportPack(reviewSession)}
+                disabled={busyKey === `export:${reviewSession.id}`}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-5 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-950"
+              >
+                <Download className="h-4 w-4" />
+                Export Pack
+              </button>
+              {['active', 'submitted'].includes(reviewSession.status) && (
               <button
                 type="button"
                 onClick={() => approveSession(reviewSession)}
@@ -891,7 +1056,8 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
                 <ShieldCheck className="h-4 w-4" />
                 Approve Session
               </button>
-            )}
+              )}
+            </div>
           </div>
 
           <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
@@ -903,6 +1069,7 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
                   <th className="px-4 py-3 text-right">Expected</th>
                   <th className="px-4 py-3 text-right">Counted</th>
                   <th className="px-4 py-3 text-right">Variance</th>
+                  <th className="px-4 py-3 text-left">Reason</th>
                   <th className="px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Action</th>
                 </tr>
@@ -918,12 +1085,72 @@ export function StockTakeView({ products, onProductsUpdated }: StockTakeViewProp
                       {item.varianceQuantity === null ? '-' : formatNumber(item.varianceQuantity)}
                     </td>
                     <td className="px-4 py-3">
+                      <div className="min-w-[170px] space-y-1">
+                        <p className="text-xs font-black text-slate-700 dark:text-slate-200">
+                          {item.varianceReasonLabel || '-'}
+                        </p>
+                        {item.varianceSeverity && item.varianceSeverity !== 'none' && (
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            {item.varianceSeverity}
+                          </p>
+                        )}
+                        {item.supervisorRecountRequired && !item.supervisorRecountAt && (
+                          <p className="rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+                            Supervisor recount due
+                          </p>
+                        )}
+                        {item.supervisorRecountAt && (
+                          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">
+                            Recounted by {item.supervisorRecountByName || 'manager'}
+                          </p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                         {item.status}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {['counted', 'confirmed'].includes(item.status) ? (
+                      {item.status === 'recount' || (item.supervisorRecountRequired && !item.supervisorRecountAt) ? (
+                        <div className="grid min-w-[280px] gap-2">
+                          <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] gap-2">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.001"
+                              value={countInputs[item.id] ?? ''}
+                              onChange={event => setCountInputs(current => ({ ...current, [item.id]: event.target.value }))}
+                              placeholder="Recount qty"
+                              className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                            />
+                            <select
+                              value={varianceReasonInputs[item.id] || item.varianceReason || 'count_error'}
+                              onChange={event => setVarianceReasonInputs(current => ({ ...current, [item.id]: event.target.value }))}
+                              className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                            >
+                              {varianceReasonOptions.map(reason => (
+                                <option key={reason.value} value={reason.value}>{reason.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <input
+                            value={noteInputs[item.id] ?? ''}
+                            onChange={event => setNoteInputs(current => ({ ...current, [item.id]: event.target.value }))}
+                            placeholder="Supervisor recount note"
+                            className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => submitCount(item)}
+                            disabled={busyKey === item.id}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            <ClipboardCheck className="h-4 w-4" />
+                            Submit Recount
+                          </button>
+                        </div>
+                      ) : ['counted', 'confirmed'].includes(item.status) ? (
                         <div className="flex min-w-[220px] gap-2">
                           <input
                             value={recountNotes[item.id] ?? ''}

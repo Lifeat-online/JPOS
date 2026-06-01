@@ -53,10 +53,62 @@ describe('audit and stock ledger schema', () => {
       expect(schema).toContain('expected_quantity');
       expect(schema).toContain('counted_quantity');
       expect(schema).toContain('variance_quantity');
+      expect(schema).toContain('variance_reason');
+      expect(schema).toContain('variance_severity');
+      expect(schema).toContain('supervisor_recount_required');
+      expect(schema).toContain('supervisor_recount_threshold');
       expect(schema).toContain('assigned_to');
       expect(schema).toContain('confirmed_by');
       expect(schema).toContain('product_scope');
       expect(schema).toContain('last_run_for_date');
+    }
+  });
+
+  it('defines audited purchase-order receiving fields in both SQL schemas', () => {
+    for (const schema of [mariaSchema, pgSchema]) {
+      expect(schema).toContain('CREATE TABLE IF NOT EXISTS purchase_orders');
+      expect(schema).toContain('invoice_number');
+      expect(schema).toContain('invoice_date');
+      expect(schema).toContain('received_at');
+      expect(schema).toContain('received_by');
+      expect(schema).toContain('receiving_note');
+      expect(schema).toContain('received_total_amount');
+    }
+  });
+
+  it('defines stock batches with expiry and supplier traceability in both SQL schemas', () => {
+    for (const schema of [mariaSchema, pgSchema]) {
+      expect(schema).toContain('CREATE TABLE IF NOT EXISTS stock_batches');
+      expect(schema).toContain('purchase_order_id');
+      expect(schema).toContain('supplier_invoice_number');
+      expect(schema).toContain('batch_number');
+      expect(schema).toContain('received_quantity');
+      expect(schema).toContain('remaining_quantity');
+      expect(schema).toContain('expiry_date');
+      expect(schema).toContain('idx_stock_batches_product');
+    }
+  });
+
+  it('defines AI inventory agent run and step persistence in both SQL schemas', () => {
+    for (const schema of [mariaSchema, pgSchema]) {
+      expect(schema).toContain('CREATE TABLE IF NOT EXISTS ai_agent_runs');
+      expect(schema).toContain('CREATE TABLE IF NOT EXISTS ai_agent_run_steps');
+      expect(schema).toContain('requires_human_approval');
+      expect(schema).toContain('full_autopilot');
+      expect(schema).toContain('step_id');
+      expect(schema).toContain('approved_by');
+      expect(schema).toContain('skip_reason');
+    }
+  });
+
+  it('defines persisted reorder recommendations in both SQL schemas', () => {
+    for (const schema of [mariaSchema, pgSchema]) {
+      expect(schema).toContain('CREATE TABLE IF NOT EXISTS reorder_recommendations');
+      expect(schema).toContain('recommended_quantity');
+      expect(schema).toContain('target_stock');
+      expect(schema).toContain('avg_daily_sales');
+      expect(schema).toContain('purchase_order_id');
+      expect(schema).toContain('idx_reorder_recommendations_product');
     }
   });
 });

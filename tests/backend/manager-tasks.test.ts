@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
 import * as crudModule from '../../server/mariadb-crud.js';
+import * as reorderModule from '../../server/reorderRecommendations.js';
 import * as stockTakeModule from '../../server/stockTake.js';
 import { createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue } from '../../server/managerTasks.js';
 
@@ -17,6 +18,11 @@ vi.mock('../../server/mariadb-crud.js', () => ({
 
 vi.mock('../../server/stockTake.js', () => ({
   approveStockTakeSession: vi.fn(),
+}));
+
+vi.mock('../../server/reorderRecommendations.js', () => ({
+  approveReorderRecommendation: vi.fn(),
+  dismissReorderRecommendation: vi.fn(),
 }));
 
 describe('manager task queue', () => {
@@ -81,6 +87,46 @@ describe('manager task queue', () => {
       taskType: 'cash_variance',
       details: { difference: -10 },
     });
+  });
+
+  it('approves reorder recommendation tasks into purchase orders', async () => {
+    (reorderModule.approveReorderRecommendation as any).mockResolvedValue({
+      recommendation: { id: 'reorder_1', status: 'ordered', purchaseOrderId: 'po_1' },
+      purchaseOrder: { id: 'po_1', status: 'draft' },
+    });
+    (dbModule.query as any).mockImplementation((sql: string) => {
+      if (sql.includes('FROM manager_tasks')) {
+        return Promise.resolve([{
+          id: 'task_reorder',
+          tenantId: 'tenant_1',
+          taskType: 'low_stock',
+          title: 'Approve reorder for Milk',
+          priority: 'high',
+          status: 'open',
+          sourceType: 'reorder_recommendation',
+          sourceId: 'reorder_1',
+          relatedProductId: 'prod_1',
+          details: '{"recommendedQuantity":6}',
+        }]);
+      }
+      if (sql.includes('UPDATE manager_tasks')) return Promise.resolve({});
+      if (sql.includes('INSERT INTO audit_events')) return Promise.resolve({});
+      return Promise.resolve([]);
+    });
+
+    const result = await decideManagerTask('tenant_1', 'task_reorder', {
+      action: 'approve',
+      note: 'Reorder before weekend trade',
+      staffId: 'mgr_1',
+      staffName: 'Manager',
+    });
+
+    expect(reorderModule.approveReorderRecommendation).toHaveBeenCalledWith('tenant_1', 'reorder_1', expect.objectContaining({
+      note: 'Reorder before weekend trade',
+      staffId: 'mgr_1',
+      staffName: 'Manager',
+    }));
+    expect((result.sourceResult as any).purchaseOrder).toMatchObject({ id: 'po_1' });
   });
 
   it('syncs stocktake exceptions and offline sync issues into manager tasks', async () => {

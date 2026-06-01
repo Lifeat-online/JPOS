@@ -4,12 +4,15 @@ import {
   approveStockTakeSession,
   createStockTakeRule,
   createStockTakeSession,
+  getStockTakeExportPack,
+  getStockTakeSuggestions,
   runDueStockTakeRules,
   submitStockTakeCount,
 } from '../../server/stockTake.js';
 
 vi.mock('../../server/db.js', () => ({
   getConnection: vi.fn(),
+  isPostgres: vi.fn(() => false),
   query: vi.fn(),
 }));
 
@@ -146,6 +149,7 @@ describe('stocktake workflow', () => {
     const result = await submitStockTakeCount('tenant_1', 'item_1', {
       countedQuantity: 8,
       note: 'Front shelf counted',
+      varianceReason: 'shrinkage',
     }, {
       staffId: 'staff_1',
       staffName: 'Jess',
@@ -154,7 +158,7 @@ describe('stocktake workflow', () => {
 
     expect(dbModule.query).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE stock_take_items'),
-      expect.arrayContaining([8, -2, 'staff_1', 'Jess', 'Front shelf counted', 'tenant_1', 'item_1'])
+      expect.arrayContaining([8, -2, 'shrinkage', 'Shrinkage', 'high', 1, 'staff_1', 'Jess', 'Front shelf counted', 'tenant_1', 'item_1'])
     );
     expect(dbModule.query).toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'submitted'"),
@@ -291,6 +295,49 @@ describe('stocktake workflow', () => {
     expect(result.generated[0].session).toMatchObject({ type: 'spot_check' });
   });
 
+  it('ranks spot-check suggestions from shrinkage, expiry, velocity, and variance signals', async () => {
+    (dbModule.isPostgres as any).mockReturnValue(false);
+    (dbModule.query as any).mockImplementation((sql: string) => {
+      if (sql.includes('FROM products')) {
+        return Promise.resolve([
+          { id: 'prod_1', name: 'Milk', barcode: '6001', category: 'Dairy', section: 'Retail', stock: '1', minStock: '5' },
+          { id: 'prod_2', name: 'Bread', barcode: '6002', category: 'Bakery', section: 'Retail', stock: '20', minStock: '5' },
+        ]);
+      }
+      if (sql.includes('FROM stock_movements') && sql.includes("reason_code = 'shrinkage'")) {
+        return Promise.resolve([{ productId: 'prod_1', productName: 'Milk', signalQuantity: '3', signalCount: '2' }]);
+      }
+      if (sql.includes('FROM stock_movements') && sql.includes("reason_code = 'wastage'")) {
+        return Promise.resolve([{ productId: 'prod_2', productName: 'Bread', signalQuantity: '1', signalCount: '1' }]);
+      }
+      if (sql.includes('FROM stock_take_items')) {
+        return Promise.resolve([{ productId: 'prod_1', productName: 'Milk', varianceQuantity: '4', varianceCount: '2' }]);
+      }
+      if (sql.includes('FROM stock_batches')) {
+        return Promise.resolve([{ productId: 'prod_2', productName: 'Bread', expiryQuantity: '6', nextExpiryDate: '2026-06-05' }]);
+      }
+      if (sql.includes('FROM sale_items')) {
+        return Promise.resolve([{ productId: 'prod_1', productName: 'Milk', quantitySold: '90', saleCount: '20' }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const result = await getStockTakeSuggestions('tenant_1', { limit: 5 });
+
+    expect(result.suggestions[0]).toMatchObject({
+      productId: 'prod_1',
+      riskLevel: 'critical',
+    });
+    expect(result.suggestions[0].reasons).toEqual(expect.arrayContaining([
+      'low_stock',
+      'recent_shrinkage',
+      'recent_variance',
+      'sales_velocity',
+    ]));
+    expect(result.suggestions.find((item: any) => item.productId === 'prod_2')?.reasons)
+      .toEqual(expect.arrayContaining(['recent_wastage', 'expiry_risk']));
+  });
+
   it('approves counted sessions through the stock movement ledger', async () => {
     const conn = mockConnection((sql: string) => {
       if (sql.includes('FROM stock_take_sessions') && sql.includes('FOR UPDATE')) {
@@ -352,5 +399,90 @@ describe('stocktake workflow', () => {
     );
     expect(conn.commit).toHaveBeenCalled();
     expect(result).toMatchObject({ id: 'session_1', status: 'approved', applied: [{ productId: 'prod_1', quantityDelta: -2 }] });
+  });
+
+  it('blocks approval when high-risk variances still need a supervisor recount', async () => {
+    const conn = mockConnection((sql: string) => {
+      if (sql.includes('FROM stock_take_sessions') && sql.includes('FOR UPDATE')) {
+        return Promise.resolve([[{ id: 'session_1', name: 'Daily spot', type: 'spot_check', status: 'submitted' }]]);
+      }
+      if (sql.includes('FROM stock_take_items') && sql.includes('FOR UPDATE')) {
+        return Promise.resolve([[{
+          id: 'item_1',
+          productId: 'prod_1',
+          productName: 'Milk',
+          expectedQuantity: 10,
+          countedQuantity: 3,
+          varianceQuantity: -7,
+          varianceReason: 'shrinkage',
+          varianceReasonLabel: 'Shrinkage',
+          supervisorRecountRequired: 1,
+          supervisorRecountAt: null,
+          status: 'counted',
+        }]]);
+      }
+      return Promise.resolve([[]]);
+    });
+
+    await expect(approveStockTakeSession('tenant_1', 'session_1', {
+      staffId: 'mgr_1',
+      staffName: 'Manager',
+      role: 'manager',
+    })).rejects.toThrow('Supervisor recount is required');
+
+    expect(conn.rollback).toHaveBeenCalled();
+    expect(conn.commit).not.toHaveBeenCalled();
+  });
+
+  it('exports stocktake count packs with variance reasons and supervisor gates', async () => {
+    (dbModule.query as any).mockImplementation((sql: string) => {
+      if (sql.includes('FROM stock_take_sessions s')) {
+        return Promise.resolve([{
+          id: 'session_1',
+          tenantId: 'tenant_1',
+          name: 'Daily spot',
+          type: 'spot_check',
+          status: 'submitted',
+          itemCount: '1',
+          countedCount: '1',
+          varianceCount: '1',
+          supervisorRecountCount: '1',
+        }]);
+      }
+      if (sql.includes('FROM stock_take_items')) {
+        return Promise.resolve([{
+          id: 'item_1',
+          tenantId: 'tenant_1',
+          sessionId: 'session_1',
+          productId: 'prod_1',
+          productName: 'Milk',
+          barcode: '6001',
+          expectedQuantity: '10',
+          countedQuantity: '3',
+          varianceQuantity: '-7',
+          varianceReason: 'shrinkage',
+          varianceReasonLabel: 'Shrinkage',
+          varianceSeverity: 'high',
+          supervisorRecountRequired: 1,
+          supervisorRecountAt: null,
+          assignedToName: 'Jess',
+          countedByName: 'Jess',
+          status: 'counted',
+          note: 'Front shelf counted',
+        }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const pack = await getStockTakeExportPack('tenant_1', 'session_1');
+
+    expect(pack.filename).toContain('daily-spot-session_1-stocktake-export.csv');
+    expect(pack.csv).toContain('Variance Reason');
+    expect(pack.csv).toContain('Shrinkage');
+    expect(pack.csv).toContain('yes');
+    expect(pack.varianceReasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'expiry', stockReasonCode: 'wastage' }),
+      expect.objectContaining({ value: 'theft_loss', stockReasonCode: 'shrinkage' }),
+    ]));
   });
 });
