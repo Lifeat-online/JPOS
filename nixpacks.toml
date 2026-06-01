@@ -1,7 +1,12 @@
 providers = ["node"]
 
+[variables]
+NODE_VERSION = "22"
+NIXPACKS_NODE_VERSION = "22"
+NPM_CONFIG_INCLUDE = "optional"
+
 [phases.install]
-cmds = ["npm ci"]
+cmds = ["npm ci --include=optional"]
 
 [phases.build]
 cmds = ["npm run build"]
