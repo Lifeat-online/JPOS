@@ -851,6 +851,9 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
               <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl lg:text-6xl">
                 See what MasePOS actually does before you book a demo.
               </h1>
+              <p className="mt-4 text-base font-black tracking-tight text-blue-700 dark:text-blue-300 sm:text-lg">
+                MasePOS: Mobile Agile Sales Engine POS.
+              </p>
               <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600 dark:text-slate-300">
                 MasePOS is for businesses that need a browser-based sales screen, stock control, staff permissions, customer accounts, restaurant workflows, cash control, mobile order-taking, and useful reports in one place.
               </p>
