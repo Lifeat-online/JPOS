@@ -141,6 +141,20 @@ type SessionDraft = {
   };
 };
 
+type AuditEventDraft = {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  relatedSaleId: string | null;
+  staffId: string | null;
+  staffName: string | null;
+  customerId: string | null;
+  source: string;
+  details: Record<string, unknown>;
+  createdAt: string;
+};
+
 const TAX_RATE = 15;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEMO_START_DAYS_AGO = 364;
@@ -645,6 +659,9 @@ async function updateDemoConfig(conn: any, tenantId: string, categories: any, is
 async function clearSeededDemoDataWithConnection(conn: any, tenantId: string, resetSettings: boolean) {
   const legacyClause = legacyWhereClause();
   const legacyValues = legacyWhereValues();
+  const auditDetailsText = isPostgres()
+    ? "LOWER(COALESCE(details, ''))"
+    : "LOWER(CAST(COALESCE(details, '{}') AS CHAR))";
 
   await conn.query(`DELETE FROM ai_agent_run_steps WHERE tenant_id = ? AND (id LIKE 'demo_%' OR run_id LIKE 'demo_%')`, [tenantId]);
   await conn.query(`DELETE FROM ai_agent_runs WHERE tenant_id = ? AND id LIKE 'demo_%'`, [tenantId]);
@@ -652,6 +669,18 @@ async function clearSeededDemoDataWithConnection(conn: any, tenantId: string, re
   await conn.query(`DELETE FROM ai_insights WHERE tenant_id = ? AND id LIKE 'demo_%'`, [tenantId]);
   await conn.query(`DELETE FROM manager_tasks WHERE tenant_id = ? AND id LIKE 'demo_%'`, [tenantId]);
   await conn.query(`DELETE FROM messages WHERE tenant_id = ? AND id LIKE 'demo_%'`, [tenantId]);
+  await conn.query(
+    `DELETE FROM audit_events
+      WHERE tenant_id = ?
+        AND action = 'permission.denied'
+        AND staff_id = 'demo-admin-001'
+        AND (
+          ${auditDetailsText} LIKE ?
+          OR ${auditDetailsText} LIKE ?
+          OR ${auditDetailsText} LIKE ?
+        )`,
+    [tenantId, "%package.feature.%", "%package.capacity.%", "%\"package\":\"free\"%"]
+  );
   await conn.query(`DELETE FROM audit_events WHERE tenant_id = ? AND id LIKE 'demo_%'`, [tenantId]);
   await conn.query(`DELETE FROM stock_movements WHERE tenant_id = ? AND id LIKE 'demo_%'`, [tenantId]);
   await conn.query(`DELETE FROM reorder_recommendations WHERE tenant_id = ? AND id LIKE 'demo_%'`, [tenantId]);
@@ -1093,13 +1122,42 @@ function buildYearData(tenantId: string, mode: DemoSeedMode, products: ProductSe
   const cashMovements: any[][] = [];
   const stockMovements: any[][] = [];
   const managerTasks: any[][] = [];
-  const auditEvents: any[][] = [];
+  const auditEvents: AuditEventDraft[] = [];
   const staffStats = new Map(staff.map((s) => [s.id, { sales: 0, revenue: 0, tips: 0, prepMs: 0, prepCount: 0 }]));
   const stock = new Map(products.map((p) => [p.id, p.stock + 600]));
   const completedSaleIds: string[] = [];
   const frontStaff = staff.filter((s) => s.role === "cashier" || s.role === "manager");
   const kitchenStaff = staff.filter((s) => s.role === "chef");
   const barStaff = staff.filter((s) => s.assignedSections.includes("Bar"));
+  const staffNames = new Map(staff.map((s) => [s.id, s.name]));
+  let auditIndex = 0;
+  const addAudit = (
+    createdAt: Date | string,
+    action: string,
+    entityType: string,
+    entityId: string | null,
+    staffId: string | null,
+    source: string,
+    details: Record<string, unknown> = {},
+    relatedSaleId: string | null = null,
+    customerId: string | null = null
+  ) => {
+    const created = sqlDateTime(createdAt);
+    if (!created) return;
+    auditEvents.push({
+      id: `demo_audit_${mode}_${auditIndex++}`,
+      action,
+      entityType,
+      entityId,
+      relatedSaleId,
+      staffId,
+      staffName: staffId ? staffNames.get(staffId) || null : null,
+      customerId,
+      source,
+      details,
+      createdAt: created,
+    });
+  };
 
   for (let dayIndex = 0; dayIndex < 365; dayIndex += 1) {
     const day = businessDay(dayIndex);
@@ -1337,6 +1395,63 @@ function buildYearData(tenantId: string, mode: DemoSeedMode, products: ProductSe
       }
 
       sales.push(sale);
+      if (status === "completed") {
+        if ((dayIndex + saleIndex) % 5 === 0 || sale.total >= (mode === "restaurant" ? 420 : 650)) {
+          addAudit(
+            sale.createdAt,
+            "sale.completed",
+            "sale",
+            sale.id,
+            staffSeed.id,
+            "pos",
+            {
+              total: sale.total,
+              paymentMethod: sale.paymentMethod,
+              itemCount: sale.items.length,
+              tableNumber: sale.tableNumber,
+              isTab: sale.isTab,
+              mode,
+            },
+            sale.id,
+            sale.customerId
+          );
+        }
+        if (sale.offlineEventId) {
+          addAudit(
+            addMinutes(new Date(`${sale.createdAt}Z`), 12),
+            "offline.sale_synced",
+            "sale",
+            sale.id,
+            staffSeed.id,
+            "offline_queue",
+            {
+              offlineEventId: sale.offlineEventId,
+              localReceiptNumber: `OFF-${mode.toUpperCase()}-${dayIndex}-${saleIndex}`,
+              deviceId: `demo-${mode}-terminal-${(dayIndex % 3) + 1}`,
+              syncBatchId: `demo_sync_${mode}_${dayIndex}`,
+              attempts: 1,
+            },
+            sale.id,
+            sale.customerId
+          );
+        }
+      } else {
+        addAudit(
+          sale.createdAt,
+          "sale.voided",
+          "sale",
+          sale.id,
+          staffSeed.id,
+          "pos",
+          {
+            reason: sale.voidReason,
+            reviewStatus: "manager_reviewed",
+            mode,
+          },
+          sale.id,
+          sale.customerId
+        );
+      }
 
       if (status === "completed" && rand() < 0.01 && dayIndex < 360) {
         const refundItem = pick(rand, sale.items);
@@ -1403,6 +1518,22 @@ function buildYearData(tenantId: string, mode: DemoSeedMode, products: ProductSe
             },
           ],
         });
+        addAudit(
+          refundDate,
+          "sale.refunded",
+          "sale",
+          refundId,
+          staffSeed.id,
+          "refund",
+          {
+            refundTotal,
+            reason: sale.refundReason,
+            parentSaleId: sale.id,
+            method: sale.paymentMethod,
+          },
+          sale.id,
+          sale.customerId
+        );
       }
     }
 
@@ -1433,6 +1564,20 @@ function buildYearData(tenantId: string, mode: DemoSeedMode, products: ProductSe
         "Demo supplier receiving",
         sqlDateTime(dateAt(day, 9, 30)),
       ]);
+      addAudit(
+        dateAt(day, 9, 35),
+        "purchase_order.received",
+        "purchase_order",
+        `demo_po_${mode}_${dayIndex}`,
+        "demo_staff_stock",
+        "inventory",
+        {
+          productId: productSeed.id,
+          productName: productSeed.name,
+          receivedQuantity: received,
+          varianceQuantity: 0,
+        }
+      );
     }
 
     if (dayIndex % 19 === 0) {
@@ -1462,11 +1607,138 @@ function buildYearData(tenantId: string, mode: DemoSeedMode, products: ProductSe
         mode === "restaurant" ? "Kitchen waste logged during demo count" : "Cycle count variance logged in demo",
         sqlDateTime(dateAt(day, 10, 15)),
       ]);
+      addAudit(
+        dateAt(day, 10, 20),
+        "stock.adjusted",
+        "product",
+        productSeed.id,
+        "demo_staff_stock",
+        "inventory",
+        {
+          productName: productSeed.name,
+          delta,
+          previousQuantity: previous,
+          newQuantity: next,
+          reason: mode === "restaurant" ? "wastage" : "shrinkage",
+          sourceSessionId: `demo_st_${mode}_${dayIndex}`,
+        }
+      );
     }
   }
 
   addOpenRestaurantOrders(mode, tenantId, products, staff, customers, sales, sessions, rand);
   finalizeSessions(mode, tenantId, sessions, cashMovements, rand);
+  sessions.forEach((session, index) => {
+    if (index % 2 === 0) {
+      addAudit(
+        session.openedAt,
+        "cash_session.opened",
+        "cash_session",
+        session.id,
+        session.staffId,
+        "cash",
+        {
+          openingFloat: session.openingFloat,
+          shift: session.note,
+          mode,
+        }
+      );
+    }
+    if (session.closedAt && (index % 2 === 0 || Math.abs(session.difference) > 0.009)) {
+      addAudit(
+        session.closedAt,
+        Math.abs(session.difference) > 0.009 ? "cash_session.variance_reviewed" : "cash_session.closed",
+        "cash_session",
+        session.id,
+        "demo_staff_mgr",
+        "cash",
+        {
+          staffId: session.staffId,
+          staffName: session.staffName,
+          expectedCash: session.expectedCash,
+          actualCash: session.actualCash,
+          difference: session.difference,
+          reviewStatus: session.reviewStatus,
+        }
+      );
+    }
+  });
+  sales
+    .filter((sale) => sale.id.startsWith("demo_open_rest_"))
+    .forEach((sale) => {
+      addAudit(
+        sale.createdAt,
+        "restaurant.order_started",
+        "sale",
+        sale.id,
+        sale.staffId,
+        "pos",
+        {
+          tableNumber: sale.tableNumber,
+          isTab: sale.isTab,
+          status: sale.status,
+          itemCount: sale.items.length,
+          timerAgeMinutes: Math.max(0, Math.round((Date.now() - new Date(`${sale.createdAt}Z`).getTime()) / 60000)),
+        },
+        sale.id,
+        sale.customerId
+      );
+    });
+  for (let month = 0; month < 12; month += 1) {
+    const monthDate = addDays(baseDate(), -month * 30 - 2);
+    addAudit(
+      dateAt(monthDate, 8, 45),
+      "auth.login",
+      "staff",
+      "demo_staff_mgr",
+      "demo_staff_mgr",
+      "auth",
+      { deviceId: `demo-office-${(month % 3) + 1}`, mode }
+    );
+    addAudit(
+      dateAt(monthDate, 17, 25),
+      "report.exported",
+      "report",
+      `demo_report_${mode}_${month}`,
+      "demo_staff_mgr",
+      "reporting",
+      {
+        reportType: month % 2 === 0 ? "sales_summary" : "cash_close",
+        range: "monthly",
+        format: "csv",
+      }
+    );
+    if (month % 4 === 1) {
+      addAudit(
+        dateAt(monthDate, 13, 10),
+        "permission.denied",
+        "security",
+        "demo_staff_cashier_a",
+        "demo_staff_cashier_a",
+        "permission",
+        {
+          attemptedAction: "manager_cash.summary_view",
+          actorRole: "cashier",
+          reason: "manager_required",
+          route: `/api/mariadb/tenants/${tenantId}/manager-cash/summary`,
+          method: "GET",
+        }
+      );
+    }
+  }
+  addAudit(
+    addMinutes(new Date(), -18),
+    "ai.insights.generated",
+    "ai_insight",
+    `demo_ai_sales_${mode}`,
+    "demo_staff_mgr",
+    "ai",
+    {
+      insightCount: mode === "restaurant" ? 6 : 5,
+      source: "demo_seed",
+      signalWindowDays: 365,
+    }
+  );
 
   return {
     sales,
@@ -1842,6 +2114,27 @@ async function persistYearData(conn: any, tenantId: string, mode: DemoSeedMode, 
     "stock_movements",
     ["id", "tenant_id", "item_type", "product_id", "bulk_item_id", "item_name", "quantity_delta", "previous_quantity", "new_quantity", "reason", "reason_code", "reference_type", "reference_id", "sale_id", "sale_item_id", "staff_id", "staff_name", "note", "created_at"],
     data.stockMovements,
+    250
+  );
+
+  await insertRows(
+    conn,
+    "audit_events",
+    ["id", "tenant_id", "action", "entity_type", "entity_id", "related_sale_id", "staff_id", "staff_name", "customer_id", "source", "details", "created_at"],
+    data.auditEvents.map((event) => [
+      event.id,
+      tenantId,
+      event.action,
+      event.entityType,
+      event.entityId,
+      event.relatedSaleId,
+      event.staffId,
+      event.staffName,
+      event.customerId,
+      event.source,
+      json(event.details),
+      event.createdAt,
+    ]),
     250
   );
 

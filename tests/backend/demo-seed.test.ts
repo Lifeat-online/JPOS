@@ -45,16 +45,18 @@ describe('demo seed data', () => {
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO sales'), expect.anything());
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO sale_items'), expect.anything());
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO cash_sessions'), expect.anything());
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO audit_events'), expect.anything());
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO layby_orders'), expect.anything());
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO ai_insights'), expect.anything());
     expect(conn.commit).toHaveBeenCalled();
   });
 
-  it('clears seeded demo rows only', async () => {
+  it('clears seeded demo rows and stale demo package denials', async () => {
     const conn = mockConn();
 
     await clearSeededDemoData('tenant_1');
 
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("action = 'permission.denied'"), expect.arrayContaining(['tenant_1', '%package.feature.%']));
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("id LIKE 'demo_prod_%'"), expect.anything());
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM sales WHERE tenant_id = ? AND id LIKE 'demo_%'"), ['tenant_1']);
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM cash_sessions WHERE tenant_id = ? AND id LIKE 'demo_%'"), ['tenant_1']);
