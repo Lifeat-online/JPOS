@@ -164,6 +164,7 @@ import {
   listReorderRecommendations,
   refreshReorderRecommendations,
 } from "./reorderRecommendations.js";
+import { getStockValuationReport } from "./stockReports.js";
 import { recordOfflineSyncIssue } from "./offlineSync.js";
 import {
   addLaybyPayment,
@@ -3283,6 +3284,24 @@ export async function createApp(io: any = null) {
   app.get("/api/mariadb/tenants/:tenantId/stock-batches", requireAuth, async (req, res) => {
     try {
       res.json(await getStockBatches(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/stock-reports/valuation", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "stock_report.valuation_export", "Manager access is required for stock valuation reports.");
+      }
+      const report = await getStockValuationReport(req.params.tenantId, req.query);
+      await auditRouteEvent(req, "stock_report.valuation_exported", "stock_report", {
+        rowCount: report.productRows.length + report.batchRows.length + report.receivingRows.length,
+        receivedValue: report.summary.receivedValue,
+        productBookValue: report.summary.productBookValue,
+        filters: req.query || {},
+      }, null, "inventory");
+      res.json(report);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

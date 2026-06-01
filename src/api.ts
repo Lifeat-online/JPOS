@@ -4,7 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
-import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, LaybyOrder, LaybyPaymentMethod, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, ReorderRecommendation, StockTakeSuggestion } from './types';
+import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, LaybyOrder, LaybyPaymentMethod, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, ReorderRecommendation, StockTakeSuggestion, StockValuationReport } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
@@ -433,6 +433,18 @@ export function getStockTakeExportPack(tenantId: string, sessionId: string) {
     varianceReasons: Array<{ value: string; label: string; stockReasonCode: string; supervisorSensitive: boolean }>;
     session: any;
   }>(`/api/mariadb/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}/export-pack`);
+}
+
+export function getStockValuationReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<StockValuationReport>(
+    `/api/mariadb/tenants/${tenantId}/stock-reports/valuation${query ? `?${query}` : ''}`
+  );
 }
 
 export function getMyStockTakeAssignments(tenantId: string, staffId?: string | null) {

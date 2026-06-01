@@ -44,6 +44,125 @@ export interface StockBatch {
   updatedAt?: any;
 }
 
+export interface StockValuationProductRow {
+  productId: string;
+  productName: string;
+  category: string;
+  productSection: string;
+  currentStock: number;
+  minStock: number;
+  unitCost: number;
+  retailPrice: number;
+  productBookValue: number;
+  batchTrackedQuantity: number;
+  batchTrackedValue: number;
+  unbatchedQuantity: number;
+  unbatchedValue: number;
+  locationId: string;
+  locationName: string;
+  marginPercent: number;
+}
+
+export interface StockValuationBatchRow {
+  id: string;
+  productId: string;
+  productName: string;
+  purchaseOrderId?: string | null;
+  vendorId?: string | null;
+  supplierInvoiceNumber?: string | null;
+  supplierInvoiceDate?: any;
+  batchNumber?: string | null;
+  receivedQuantity: number;
+  remainingQuantity: number;
+  unitCost: number;
+  receivedValue: number;
+  remainingValue: number;
+  expiryDate?: any;
+  receivedAt?: any;
+  receivedByName?: string | null;
+  status: StockBatchExpiryStatus;
+  locationId: string;
+  locationName: string;
+  note?: string | null;
+}
+
+export interface StockValuationReceivingRow {
+  purchaseOrderId: string;
+  lineIndex: number;
+  invoiceNumber?: string | null;
+  invoiceDate?: any;
+  receivedAt?: any;
+  receivedByName?: string | null;
+  productId?: string | null;
+  productName: string;
+  orderedQuantity: number;
+  receivedQuantity: number;
+  varianceQuantity: number;
+  unitCost: number;
+  receivedValue: number;
+  batchNumber?: string | null;
+  expiryDate?: any;
+  locationId: string;
+  locationName: string;
+  note?: string | null;
+}
+
+export interface StockValuationLocationRow {
+  locationId: string;
+  locationName: string;
+  currentStockQuantity: number;
+  productBookValue: number;
+  batchTrackedQuantity: number;
+  batchRemainingValue: number;
+  unbatchedQuantity: number;
+  receivedQuantity: number;
+  receivedValue: number;
+  movementQuantityIn: number;
+  movementQuantityOut: number;
+  movementValueDelta: number;
+  note: string;
+}
+
+export interface StockValuationReport {
+  filename: string;
+  pdfFilename: string;
+  mimeType: string;
+  pdfMimeType: string;
+  generatedAt: string;
+  filters: Record<string, any>;
+  summary: {
+    totalProducts: number;
+    currentStockQuantity: number;
+    productBookValue: number;
+    batchTrackedQuantity: number;
+    batchRemainingValue: number;
+    unbatchedQuantity: number;
+    unbatchedValue: number;
+    receivedQuantity: number;
+    receivedValue: number;
+    varianceQuantity: number;
+    expiredBatchValue: number;
+    expiringBatchValue: number;
+    movementValueDelta: number;
+  };
+  productRows: StockValuationProductRow[];
+  batchRows: StockValuationBatchRow[];
+  receivingRows: StockValuationReceivingRow[];
+  movementRows: Array<{
+    reasonCode: string;
+    movementCount: number;
+    quantityIn: number;
+    quantityOut: number;
+    netQuantity: number;
+    valueDelta: number;
+    locationId: string;
+    locationName: string;
+  }>;
+  locationRows: StockValuationLocationRow[];
+  csv: string;
+  pdfBase64: string;
+}
+
 export interface ReorderRecommendation {
   id: string;
   tenantId?: string;
