@@ -4,6 +4,7 @@ import { clearSeededDemoData, seedDemoData } from '../../server/demo-seed.js';
 
 vi.mock('../../server/db.js', () => ({
   getConnection: vi.fn(),
+  isPostgres: vi.fn(() => false),
 }));
 
 describe('demo seed data', () => {
@@ -28,9 +29,24 @@ describe('demo seed data', () => {
 
     await seedDemoData('tenant_1', 'restaurant');
 
+    const settingsUpdate = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('UPDATE app_settings SET business = ?'));
+    expect(settingsUpdate).toBeTruthy();
+    expect(JSON.parse(settingsUpdate?.[1]?.[0] || '{}')).toMatchObject({
+      packageTier: 'business',
+      packageName: 'Business',
+      packageStatus: 'active',
+      maxRegisters: 15,
+    });
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO staff'), expect.anything());
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO customers'), expect.anything());
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO bulk_items'), expect.anything());
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO product_recipes'), expect.anything());
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO workstations'), expect.anything());
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO sales'), expect.anything());
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO sale_items'), expect.anything());
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO cash_sessions'), expect.anything());
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO layby_orders'), expect.anything());
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO ai_insights'), expect.anything());
     expect(conn.commit).toHaveBeenCalled();
   });
 
@@ -40,6 +56,9 @@ describe('demo seed data', () => {
     await clearSeededDemoData('tenant_1');
 
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("id LIKE 'demo_prod_%'"), expect.anything());
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM sales WHERE tenant_id = ? AND id LIKE 'demo_%'"), ['tenant_1']);
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM cash_sessions WHERE tenant_id = ? AND id LIKE 'demo_%'"), ['tenant_1']);
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM customers WHERE tenant_id = ? AND id LIKE 'demo_cust_%'"), ['tenant_1']);
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("id LIKE 'demo_bulk_%'"), ['tenant_1']);
     expect(conn.query).toHaveBeenCalledWith(expect.stringContaining("id LIKE 'demo_ws_%'"), ['tenant_1']);
     expect(conn.commit).toHaveBeenCalled();

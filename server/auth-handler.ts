@@ -158,6 +158,7 @@ async function ensureDemoTenant(mode: DemoSeedMode) {
   const name = 'Demo Admin';
   const tenantName = "MasePOS Demo";
   const passwordHash = await hashPassword('DemoPass123');
+  const demoPackage = getHostedPackage('business');
 
   const conn = await getConnection();
   try {
@@ -207,6 +208,13 @@ async function ensureDemoTenant(mode: DemoSeedMode) {
       currency: 'R',
       taxRate: 15,
       isRestaurantMode: mode === 'restaurant',
+      packageTier: demoPackage.id,
+      packageName: demoPackage.name,
+      packageStatus: 'active',
+      maxRegisters: demoPackage.maxRegisters,
+      maxProducts: demoPackage.maxProducts,
+      maxStaff: demoPackage.maxStaff,
+      maxCustomers: demoPackage.maxCustomers,
       enableLoyalty: true,
       pointsEarnedPerCurrency: 1,
       pointsRequiredForDiscount: 100,
