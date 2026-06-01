@@ -49,59 +49,92 @@ const fadeUp = (delay = 0) => ({
 });
 
 const navLinks = [
+  { label: 'Why', href: '#why' },
   { label: 'Features', href: '#features' },
   { label: 'Mobile', href: '#mobile' },
   { label: 'Workstations', href: '#workstations' },
   { label: 'Workflows', href: '#workflows' },
-  { label: 'Industries', href: '#industries' },
   { label: 'Packages', href: '/packages' },
   { label: 'FAQ', href: '#faq' },
+];
+
+const soundbiteCards = [
+  {
+    icon: Clock3,
+    label: 'The problem',
+    title: 'Busy shifts get messy when every job lives in a different place.',
+    desc: 'Sales, tabs, stock, kitchen tickets, wallets, and cash-up should not depend on memory or paper notes.',
+  },
+  {
+    icon: Users,
+    label: 'We get it',
+    title: 'You need speed without losing control.',
+    desc: 'Your staff need a simple selling flow. You need the numbers, permissions, and daily checks to stay honest.',
+  },
+  {
+    icon: Store,
+    label: 'The answer',
+    title: 'Run the day from one browser-based POS.',
+    desc: 'MasePOS connects the counter, mobile devices, workstations, customers, stock, cash sessions, and reports.',
+  },
+  {
+    icon: ArrowRight,
+    label: 'What changes',
+    title: 'Orders move. Stock updates. Managers can see what happened.',
+    desc: 'The team spends less time chasing information and more time serving customers.',
+  },
+  {
+    icon: CheckCircle2,
+    label: 'End result',
+    title: 'You get a business that is easier to run at the speed of a real trading day.',
+    desc: 'Retail, restaurant, takeaway, and growing operators can sell, prepare, track, and close with fewer blind spots.',
+  },
 ];
 
 const featureCards = [
   {
     icon: ShoppingCart,
-    title: 'Fast sales screen',
-    desc: 'Ring up products, add customers, apply discounts, open tabs, and complete sales without sending staff through extra screens.',
+    title: 'Sell without detours',
+    desc: 'Scan or tap products, select customers, apply discounts, open tabs, and complete the sale from the same screen.',
   },
   {
     icon: CreditCard,
-    title: 'Cash, card, wallet, and account sales',
-    desc: 'Handle ordinary payments, customer wallets, payouts, tabs, and account activity from the same sales flow.',
+    title: 'Take the payment your customer uses',
+    desc: 'Handle cash, card, wallet, account activity, payouts, refunds, and tabs without splitting the work across tools.',
   },
   {
     icon: Package,
-    title: 'Stock and product control',
+    title: 'Keep stock honest',
     desc: 'Manage products, categories, barcodes, stock levels, low-stock warnings, cost prices, and selling prices.',
   },
   {
     icon: Users,
-    title: 'Staff access and accountability',
-    desc: 'Set roles and permissions so cashiers, managers, chefs, and admins only see the tools they need.',
+    title: 'Give each role the right tools',
+    desc: 'Cashiers, managers, chefs, and admins can work with the permissions that match their job.',
   },
   {
     icon: Utensils,
-    title: 'Restaurant, takeaway, and workstation flow',
-    desc: 'Run tables, tabs, takeaway orders, kitchen/bar workstations, ticket acceptance, ready status, and order notifications.',
+    title: 'Send food orders where they belong',
+    desc: 'Run tables, tabs, takeaways, kitchen and bar queues, ticket acceptance, ready status, and order notifications.',
   },
   {
     icon: BarChart3,
-    title: 'Reports owners can use',
+    title: 'Know what happened today',
     desc: 'See sales, stock movement, customer activity, staff performance, wallet balances, and daily operating totals.',
   },
   {
     icon: Smartphone,
-    title: 'Mobile terminals and companion devices',
-    desc: 'Use a phone or tablet as a full browser-based POS terminal for taking orders away from the main counter.',
+    title: 'Use phones when the counter is not enough',
+    desc: 'A phone or tablet can work as a full browser-based POS terminal for taking orders away from the main till.',
   },
   {
     icon: Download,
-    title: 'Installable PWA',
-    desc: 'Install MasePOS on desktop, Android, iPhone, or iPad, with fullscreen and kiosk controls for a cleaner app-like setup.',
+    title: 'Install it like an app',
+    desc: 'Install MasePOS on desktop, Android, iPhone, or iPad, with fullscreen and kiosk controls for a cleaner shop-floor setup.',
   },
   {
     icon: Globe2,
-    title: 'Works from any browser',
+    title: 'Keep your hardware options open',
     desc: 'Run the POS from a desktop, laptop, tablet, or phone browser without locking the business into one device type.',
   },
 ];
@@ -110,32 +143,32 @@ const workflows = [
   {
     icon: ReceiptText,
     title: 'Daily sales',
-    steps: ['Open the till', 'Sell products or services', 'Take payment', 'Print or reprint the receipt'],
+    steps: ['Open the register', 'Sell products or services', 'Take payment', 'Print or reprint the receipt'],
   },
   {
     icon: ChefHat,
     title: 'Food service',
-    steps: ['Open a table, tab, or takeaway order', 'Route items to the right workstation', 'Accept and mark items ready', 'Notify the team when orders are ready'],
+    steps: ['Open a table, tab, or takeaway order', 'Send items to the right station', 'Accept and mark items ready', 'Notify the team when orders are ready'],
   },
   {
     icon: WalletCards,
     title: 'Customer accounts',
-    steps: ['Create or select a customer', 'Track wallet balances', 'Process payouts or refunds', 'Let clients view activity'],
+    steps: ['Create or select a customer', 'Track wallet balances', 'Process payouts or refunds', 'Let clients view account activity'],
   },
   {
     icon: Lock,
     title: 'Management control',
-    steps: ['Assign staff roles', 'Review cash sessions', 'Check reports', 'Adjust settings when the business changes'],
+    steps: ['Assign staff roles', 'Review cash sessions', 'Check reports', 'Adjust settings as the business changes'],
   },
   {
     icon: Smartphone,
-    title: 'Mobile order-taking flow',
-    steps: ['Log in on the same account from a phone', 'Open the normal POS or workstation view', 'Take orders away from the bar', 'Send orders through the same kitchen and cash-up flow'],
+    title: 'Mobile order-taking',
+    steps: ['Log in from a phone', 'Open the normal POS or workstation view', 'Take orders away from the counter', 'Send orders through the same prep and cash-up flow'],
   },
   {
     icon: Download,
-    title: 'Install and kiosk flow',
-    steps: ['Install on desktop, Android, iPhone, or iPad', 'Enter fullscreen for the shop floor', 'Use kiosk mode where needed', 'Keep controls in the profile menu'],
+    title: 'Install and kiosk mode',
+    steps: ['Install on desktop, Android, iPhone, or iPad', 'Enter fullscreen for the shop floor', 'Use kiosk mode where needed', 'Keep device controls in the profile menu'],
   },
 ];
 
@@ -143,40 +176,40 @@ const industryCards = [
   {
     icon: Store,
     title: 'Retail stores',
-    desc: 'Useful when you need fast scanning, clear product control, stock visibility, customer history, and simple checkout.',
+    desc: 'For teams that need fast checkout, product control, stock visibility, customer history, and clear daily totals.',
   },
   {
     icon: Utensils,
     title: 'Restaurants',
-    desc: 'Useful when you need tables, open tabs, kitchen coordination, order labels, and controlled staff access.',
+    desc: 'For operators that need tables, open tabs, kitchen coordination, order labels, and controlled staff access.',
   },
   {
     icon: ChefHat,
     title: 'Takeaways',
-    desc: 'Useful when speed matters and orders need to move cleanly from counter to preparation to pickup.',
+    desc: 'For busy counters where orders need to move cleanly from sale to preparation to pickup.',
   },
   {
     icon: Building2,
     title: 'Growing operators',
-    desc: 'Useful when the owner wants one place to manage sales, staff, stock, loyalty, cash, and reports.',
+    desc: 'For owners who want one place to manage sales, staff, stock, loyalty, cash, and reports.',
   },
 ];
 
 const setupSteps = [
   {
     step: '1',
-    title: 'Add your business details',
-    desc: 'Set the name, trading setup, users, register limits, and the basic settings your team will use every day.',
+    title: 'Set up the trading basics',
+    desc: 'Add the business name, trading setup, users, register limits, and daily settings your team will rely on.',
   },
   {
     step: '2',
-    title: 'Load products and staff',
-    desc: 'Create categories, products, prices, barcodes, staff accounts, and the permissions each person should have.',
+    title: 'Load products and people',
+    desc: 'Create categories, products, prices, barcodes, staff accounts, and permissions for each role.',
   },
   {
     step: '3',
-    title: 'Start trading',
-    desc: 'Use the POS screen for sales, then review cash sessions, stock movement, wallets, customers, and reports.',
+    title: 'Trade, review, improve',
+    desc: 'Use the POS for sales, then review cash sessions, stock movement, wallets, customers, and reports.',
   },
 ];
 
@@ -199,17 +232,17 @@ const mobileFeatures = [
   {
     icon: Smartphone,
     title: 'Phone as a full POS terminal',
-    desc: 'A cashier or barman can log in from a mobile browser and use the normal POS/workstation flow to take orders away from the counter.',
+    desc: 'A cashier or barman can log in from a mobile browser and use the normal POS or workstation flow away from the counter.',
   },
   {
     icon: Globe2,
     title: 'Works in any browser',
-    desc: 'Use MasePOS from desktop, laptop, tablet, Android, iPhone, or iPad browsers, with optional PWA installation for a cleaner app feel.',
+    desc: 'Use MasePOS from desktop, laptop, tablet, Android, iPhone, or iPad browsers, with optional installation for an app-like feel.',
   },
   {
     icon: Utensils,
-    title: 'Same workstation on mobile',
-    desc: 'Open the same workstation view from a mobile device when staff need to take orders outside the bar or away from the main till.',
+    title: 'Same station queue on mobile',
+    desc: 'Open the same workstation view from a mobile device when staff need to manage orders away from the main till.',
   },
   {
     icon: ScanBarcode,
@@ -236,32 +269,32 @@ const mobileFeatures = [
 const workstationFeatures = [
   {
     icon: ChefHat,
-    title: 'Dedicated workstation views',
-    desc: 'Kitchen, bar, and production stations can each work from their own queue instead of sharing one crowded order screen.',
+    title: 'Separate queues for each station',
+    desc: 'Kitchen, bar, and production teams can each work from their own queue instead of sharing one crowded order screen.',
   },
   {
     icon: Clock3,
-    title: 'Pending and accepted tickets',
-    desc: 'Incoming station items show as pending, then staff can accept them so everyone knows the order is being prepared.',
+    title: 'Tickets move from pending to accepted',
+    desc: 'Incoming items show as pending, then staff can accept them so everyone knows the order is being prepared.',
   },
   {
     icon: CheckCircle2,
-    title: 'Ready-for-delivery status',
-    desc: 'When a station marks an item ready, the order item is updated and removed from the active prep queue.',
+    title: 'Ready status clears the queue',
+    desc: 'When a station marks an item ready, the order item updates and leaves the active prep queue.',
   },
   {
     icon: BellRing,
-    title: 'Automatic ready notifications',
-    desc: 'Ready items post a system notification into team messages with the table/tab/takeaway label, item quantity, and workstation name.',
+    title: 'Ready alerts reach the team',
+    desc: 'Ready items post a system notification with the table, tab, or takeaway label, item quantity, and station name.',
   },
   {
     icon: MessageSquare,
-    title: 'Message badges and alerts',
+    title: 'Message badges keep it visible',
     desc: 'Team messages poll for updates, unread counts appear in navigation, and ready alerts show as centered notification pills.',
   },
   {
     icon: BarChart3,
-    title: 'Live workstation queue reporting',
+    title: 'Live prep reporting',
     desc: 'The live dashboard tracks pending, accepted, ready, queue counts, oldest tickets, and prep timing by workstation.',
   },
 ];
@@ -270,39 +303,43 @@ const visualPanels = [
   {
     icon: ScanBarcode,
     title: 'Retail counter',
-    desc: 'Scan, sell, discount, take payment, and keep stock moving.',
+    desc: 'Scan, sell, discount, take payment, and keep stock current.',
     accent: 'from-emerald-500 to-blue-600',
   },
   {
     icon: ChefHat,
     title: 'Restaurant floor',
-    desc: 'Tables, tabs, kitchen tickets, and takeaway orders in one flow.',
+    desc: 'Tables, tabs, kitchen tickets, and takeaways move in one flow.',
     accent: 'from-amber-400 to-red-600',
   },
   {
     icon: ChartNoAxesCombined,
     title: 'Owner dashboard',
-    desc: 'Sales, cash sessions, wallets, staff activity, and stock reports.',
+    desc: 'Sales, cash sessions, wallets, staff activity, and stock reports stay visible.',
     accent: 'from-blue-500 to-slate-900',
   },
 ];
 
 const faqItems = [
   {
-    question: 'Is this only a till, or does it manage the business too?',
-    answer: 'It is more than a till. The POS handles sales, but the same system also manages products, stock, staff permissions, customers, wallets, cash sessions, restaurant workflows, and reports.',
+    question: 'What problem does MasePOS solve?',
+    answer: 'It keeps daily trading work in one flow: sales, products, stock, staff permissions, customers, wallets, cash sessions, restaurant workflows, and reports.',
+  },
+  {
+    question: 'Will it slow staff down?',
+    answer: 'The sales screen is built for ordinary shop-floor work: select products, choose customers, apply discounts, take payment, and print or reprint receipts without sending staff through unnecessary screens.',
   },
   {
     question: 'Can it work for restaurants and takeaways?',
-    answer: 'Yes. It includes table and tab flows, kitchen/workstation queues, takeaway handling, and staff roles for food service teams.',
+    answer: 'Yes. It includes table and tab flows, kitchen and bar workstation queues, takeaway handling, ready notifications, and staff roles for food service teams.',
+  },
+  {
+    question: 'What should I check first when deciding if it fits?',
+    answer: 'Try the retail or restaurant demo, then check the feature list, workflow section, and package limits against your daily operation.',
   },
   {
     question: 'Can customers see their own account activity?',
     answer: 'Yes. The client portal gives customers a place to review linked account activity, wallet balances, and payout requests.',
-  },
-  {
-    question: 'What should I check first when deciding if it fits?',
-    answer: 'Check the feature list, the workflow section, and the package limits. Those show what the system actually does and whether it matches your daily operation.',
   },
 ];
 
@@ -408,12 +445,12 @@ function VisualWorkflowPanels() {
     <section className="px-4 py-16 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-7xl">
         <motion.div {...fadeUp(0)} className="max-w-3xl">
-          <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Built like a flagship system</p>
+          <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">One trading day</p>
           <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
-            Visual workflows that make the platform feel alive.
+            The counter, kitchen, phone, and owner view stay connected.
           </h2>
           <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
-            The platform works as a connected operating system: counter, kitchen, mobile devices, customer views, and owner reports all moving together.
+            The point is not more software. The point is fewer gaps between selling, preparing, tracking, and closing the day.
           </p>
         </motion.div>
 
@@ -483,6 +520,37 @@ function SouthAfricanFlag() {
         <path fill="#000" d="M0 9.5 17 20 0 30.5v-21z" />
       </g>
     </svg>
+  );
+}
+
+function SoundbiteSection() {
+  return (
+    <section id="why" className="border-b border-slate-200 bg-white px-4 py-14 dark:border-slate-800 dark:bg-slate-950 sm:px-6 lg:px-10">
+      <div className="mx-auto max-w-7xl">
+        <motion.div {...fadeUp(0)} className="max-w-3xl">
+          <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">The short version</p>
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
+            You should not need five systems to run one trading day.
+          </h2>
+          <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
+            MasePOS helps you sell, prepare orders, manage stock, control staff access, track customers, and close the day from one place.
+          </p>
+        </motion.div>
+
+        <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {soundbiteCards.map((item, index) => (
+            <motion.div key={item.label} {...fadeUp(0.04 * index)} className={cardClass}>
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                <item.icon className="h-5 w-5" />
+              </div>
+              <p className="mt-5 text-xs font-black uppercase tracking-wide text-blue-700 dark:text-blue-300">{item.label}</p>
+              <h3 className="mt-2 text-lg font-black tracking-tight text-slate-950 dark:text-white">{item.title}</h3>
+              <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">{item.desc}</p>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -557,12 +625,12 @@ function MobileFeatureShowcase() {
 
         <div>
           <motion.div {...fadeUp(0.06)} className="max-w-3xl">
-            <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Mobile, browser, and PWA access</p>
+            <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Mobile and browser access</p>
             <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
-              Staff can take the same POS/workstation workflow onto a phone or tablet.
+              Take orders where the customer is.
             </h2>
             <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
-              MasePOS works from any modern browser. A cashier or barman can log in on a mobile device, open the same POS or workstation view, and take orders away from the counter when the operation needs it.
+              Staff can log in from a mobile browser, open the normal POS or workstation view, and keep orders moving away from the main counter.
             </p>
           </motion.div>
 
@@ -591,10 +659,10 @@ function WorkstationNotificationShowcase() {
           <motion.div {...fadeUp(0)} className="max-w-3xl">
             <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Workstations and ready notifications</p>
             <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
-              Orders move from POS to station to ready alert without staff chasing each other.
+              Stop asking the kitchen if the order is ready.
             </h2>
             <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
-              Products can be routed to kitchen, bar, or other workstations. Each station gets its own queue, accepts tickets, marks items ready, and automatically notifies the team when an order is ready for delivery.
+              Products route to the right station. Each station accepts tickets, marks items ready, and posts a ready alert so the team can act without shouting across the room.
             </p>
           </motion.div>
 
@@ -691,7 +759,7 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             </div>
             <div>
               <p className="text-lg font-black tracking-tight text-slate-950 dark:text-white">MasePOS</p>
-              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Point of sale and operations system</p>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Sell, prep, track, close</p>
             </div>
           </div>
 
@@ -843,49 +911,36 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
       </AnimatePresence>
 
       <main className="flex-1">
-        <section className="relative overflow-hidden border-b border-slate-200 bg-[linear-gradient(135deg,#ffffff_0%,#f8fafc_48%,#eef6ff_100%)] px-4 py-16 dark:border-slate-800 dark:bg-[linear-gradient(135deg,#020617_0%,#0f172a_58%,#082f49_100%)] sm:px-6 lg:px-10 lg:py-24">
+        <section className="relative overflow-hidden border-b border-slate-200 bg-[linear-gradient(135deg,#ffffff_0%,#f8fafc_48%,#eef6ff_100%)] px-4 py-12 dark:border-slate-800 dark:bg-[linear-gradient(135deg,#020617_0%,#0f172a_58%,#082f49_100%)] sm:px-6 lg:px-10 lg:py-10">
           <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-green-600 via-yellow-400 via-red-600 to-blue-700" />
           <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[1.05fr_0.95fr]">
             <motion.div {...fadeUp(0)} className="max-w-4xl">
-              <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Simple POS information, no fluff</p>
-              <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl lg:text-6xl">
-                See what MasePOS actually does before you book a demo.
+              <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Point of sale for busy operators</p>
+              <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
+                MasePOS keeps sales, stock, staff, and cash-up in one flow.
               </h1>
               <p className="mt-4 text-base font-black tracking-tight text-blue-700 dark:text-blue-300 sm:text-lg">
-                MasePOS: Mobile Agile Sales Engine POS.
+                Sell faster. Lose fewer details. End the day knowing what happened.
               </p>
-              <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600 dark:text-slate-300">
-                MasePOS is for businesses that need a browser-based sales screen, stock control, staff permissions, customer accounts, restaurant workflows, cash control, mobile order-taking, and useful reports in one place.
+              <p className="mt-5 max-w-3xl text-base leading-7 text-slate-600 dark:text-slate-300">
+                When the rush hits, you should not chase kitchen tickets, stock counts, wallet balances, staff permissions, and cash sessions across disconnected tools. MasePOS gives your team one browser-based system to sell, prepare, track, and report.
               </p>
-              <div className="mt-5 inline-flex max-w-full items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left dark:border-slate-800 dark:bg-slate-900">
-                <SouthAfricanFlag />
-                <p className="text-sm font-bold leading-6 text-slate-800 dark:text-slate-200">
-                  South African-built POS for retailers, restaurants, takeaways, and growing operators, with multi-currency support for broader markets.
-                </p>
-              </div>
-
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <button
                   onClick={() => onTryNow('retail')}
                   className="inline-flex items-center justify-center gap-3 rounded-lg bg-blue-600 px-7 py-3.5 text-base font-bold text-white transition hover:bg-blue-500"
                 >
                   <Store className="h-5 w-5" />
-                  Try Retail Mode
+                  Try Retail
                 </button>
                 <button
                   onClick={() => onTryNow('restaurant')}
                   className="inline-flex items-center justify-center gap-3 rounded-lg bg-amber-500 px-7 py-3.5 text-base font-bold text-slate-950 transition hover:bg-amber-400"
                 >
                   <Utensils className="h-5 w-5" />
-                  Try Restaurant Mode
+                  Try Restaurant
                   <ArrowRight className="h-5 w-5" />
                 </button>
-                <a
-                  href="#mobile"
-                  className="inline-flex items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white px-7 py-3.5 text-base font-bold text-slate-900 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
-                >
-                  View mobile tools
-                </a>
                 <button
                   onClick={onStartSetup}
                   className="inline-flex items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white px-7 py-3.5 text-base font-bold text-slate-900 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
@@ -893,21 +948,30 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
                   Start setup
                 </button>
               </div>
+
+              <div className="mt-5 inline-flex max-w-full items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left dark:border-slate-800 dark:bg-slate-900">
+                <SouthAfricanFlag />
+                <p className="text-sm font-bold leading-6 text-slate-800 dark:text-slate-200">
+                  Built in South Africa for retailers, restaurants, takeaways, and growing operators, with multi-currency support for broader markets.
+                </p>
+              </div>
             </motion.div>
 
             <PremiumPosShowcase />
           </div>
         </section>
 
+        <SoundbiteSection />
+
         <section id="features" className={sectionClass}>
           <div className="mx-auto max-w-7xl">
             <motion.div {...fadeUp(0)} className="max-w-3xl">
-              <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Core features</p>
+              <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">What it does</p>
               <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
-                The practical tools a POS buyer usually checks first.
+                The tools your team reaches for every day.
               </h2>
               <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
-                These are the everyday parts of the system, not vague promises. If your operation needs these workflows, MasePOS is built for that.
+                If these are the jobs that create pressure in your business, this is the work MasePOS is built to handle.
               </p>
             </motion.div>
 
@@ -936,10 +1000,10 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             <motion.div {...fadeUp(0)} className="max-w-3xl">
               <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Workflows</p>
               <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
-                How work moves through the POS.
+                Picture a normal trading day.
               </h2>
               <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
-                A buyer should be able to picture a normal trading day. These are the main flows staff and managers use.
+                These are the flows staff and managers use when the store is open and customers are waiting.
               </p>
             </motion.div>
 
@@ -973,10 +1037,10 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             <div>
               <p className="text-sm font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Customer portal</p>
               <h2 className="mt-3 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">
-                Customers can check account activity without calling the store.
+                Customers can check account activity without interrupting the store.
               </h2>
               <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-700 dark:text-slate-300">
-                The client login gives customers access to linked account activity, wallet balances, and payout requests connected to their customer profile.
+                The client login gives customers access to linked account activity, wallet balances, and payout requests tied to their profile.
               </p>
             </div>
             <button
@@ -996,10 +1060,10 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             <motion.div {...fadeUp(0)} className="max-w-3xl">
               <p className="text-sm font-bold uppercase tracking-wide text-blue-300">Best fit</p>
               <h2 className="mt-3 text-3xl font-black tracking-tight text-white sm:text-4xl">
-                Built for businesses that need daily operating control.
+                Best fit for operators who need control without slowing the floor.
               </h2>
               <p className="mt-4 text-base leading-7 text-slate-300">
-                The system makes the most sense when sales, stock, staff, customers, and reporting all matter to the same business owner.
+                MasePOS makes the most sense when sales, stock, staff, customers, cash, and reporting all matter to the same owner or manager.
               </p>
             </motion.div>
 
@@ -1026,8 +1090,11 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             <motion.div {...fadeUp(0)} className="max-w-3xl">
               <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Setup</p>
               <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
-                What getting started actually involves.
+                Set up the system around the way you trade.
               </h2>
+              <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">
+                Start with the essentials, then add the products, people, and controls your business needs.
+              </p>
             </motion.div>
 
             <div className="mt-10 grid gap-5 lg:grid-cols-3">
@@ -1065,7 +1132,7 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             <motion.div {...fadeUp(0)} className="max-w-3xl">
               <p className="text-sm font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">FAQ</p>
               <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
-                Straight answers for POS buyers.
+                Straight answers before you test it.
               </h2>
             </motion.div>
 
@@ -1102,10 +1169,10 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
             <div>
               <p className="text-sm font-bold uppercase tracking-wide text-blue-300">Ready to check it properly?</p>
               <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">
-                Try the POS or start setting up a real business profile.
+                Try the flow your team would use on a real shift.
               </h2>
               <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">
-                The fastest way to judge the system is to test the sales flow, product setup, staff controls, customer tools, and reports against your own operation.
+                Test retail or restaurant mode, then start setup when you are ready to shape the system around your own products, people, and controls.
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row md:flex-col">
@@ -1114,14 +1181,14 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
                 className="inline-flex items-center justify-center gap-3 rounded-lg bg-white px-7 py-3.5 text-base font-bold text-slate-950 transition hover:bg-slate-100"
               >
                 <Store className="h-5 w-5" />
-                Try Retail Mode
+                Try Retail
               </button>
               <button
                 onClick={() => onTryNow('restaurant')}
                 className="inline-flex items-center justify-center gap-3 rounded-lg border border-white/20 bg-white/10 px-7 py-3.5 text-base font-bold text-white transition hover:bg-white/15"
               >
                 <Utensils className="h-5 w-5" />
-                Try Restaurant Mode
+                Try Restaurant
                 <ArrowRight className="h-5 w-5" />
               </button>
               <button
@@ -1142,7 +1209,7 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
               </div>
               <div className="text-center sm:text-left">
                 <p className="font-black text-slate-900 dark:text-white">MasePOS</p>
-                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">South African-built, multi-currency POS for sales, stock, staff, customers, cash, and reports.</p>
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">South African-built POS for sales, stock, staff, customers, cash, and reports.</p>
               </div>
             </div>
             <button
