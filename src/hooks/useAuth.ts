@@ -314,12 +314,30 @@ export function useAuth() {
     const accessToken = localStorage.getItem(KEYS.ACCESS);
     const refreshToken = localStorage.getItem(KEYS.REFRESH);
     if (accessToken) {
-      // Best-effort server logout (fire-and-forget)
-      fetch('/api/auth/logout', {
-        method:  'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ refreshToken }),
-      }).catch(() => {});
+      // Await the server logout so the refresh-token session is
+      // actually revoked before we drop the local tokens. If the
+      // server is unreachable, fall back to local clear after 3s.
+      // Without this, a stolen refresh token stays valid for the full
+      // refresh-token window (7d) even after the user clicks "log out".
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 3000);
+        const res = await fetch('/api/auth/logout', {
+          method:  'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ refreshToken }),
+          signal:  ac.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+          // Non-fatal: log + continue. Local session is cleared below.
+          // eslint-disable-next-line no-console
+          console.warn('Server logout returned', res.status, '- clearing local session anyway');
+        }
+      } catch {
+        // Network error or timeout — clear local session anyway so
+        // the user is not stuck logged-in.
+      }
     }
     clearSession();
     setState({ user: null, authLoading: false, error: null });
