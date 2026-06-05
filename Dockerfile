@@ -1,6 +1,6 @@
 # Multi-stage build for MasePOS
 # Stage 1: Build frontend and backend
-FROM node:23-alpine AS builder
+FROM node:22.12-alpine AS builder
 
 WORKDIR /app
 
@@ -18,12 +18,12 @@ ENV VITE_BASE_PATH=$VITE_BASE_PATH
 RUN npm run build
 
 # Stage 2: Production runtime
-FROM node:23-alpine
+FROM node:22.12-alpine
 
 WORKDIR /app
 
 # Install dumb-init to handle signals properly
-RUN apk add --no-cache dumb-init git openssh-client
+RUN apk add --no-cache dumb-init
 
 # Copy package files from builder
 COPY --from=builder /app/package*.json ./

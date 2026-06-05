@@ -1,20 +1,89 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# MasePOS
 
-# Run and deploy your AI Studio app
+**MasePOS** is a cloud-native, multi-tenant Point of Sale for restaurants, cafés, and retail counters. It runs on Node.js 22, MariaDB or Postgres, and ships as a PWA that installs on Android, iOS, and desktop.
 
-This contains everything you need to run your app locally.
+> Live deployment: **https://masepos.co.za**
 
-View your app in AI Studio: https://ai.studio/apps/0ac21e09-3745-4e89-b194-009ff74c301f
+## Quick start (local Docker stack)
 
-## Run Locally
+```bash
+cp .env.docker .env.docker.local
+# edit secrets in .env.docker.local (DB password, JWT_SECRET, PayFast keys, etc.)
+docker compose up -d
+# open http://localhost
+```
 
-**Prerequisites:**  Node.js
+See **[DOCKER.md](DOCKER.md)** for the full guide, troubleshooting, backups, and production deploy notes.
 
+## Quick start (bare Node)
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install
+cp .env.example .env
+# set DB_HOST/DB_USER/DB_PASSWORD/DB_DATABASE and JWT_SECRET
+npm run db:init   # creates schema and seed (no real PII — see db/schema.sql)
+npm run dev       # http://localhost:3000
+```
+
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Start Vite + Express on port 3000 with HMR |
+| `npm run build` | Production build to `dist/` |
+| `npm start` | Run the production server |
+| `npm run lint` | TypeScript typecheck (`tsc --noEmit`) |
+| `npm test` | Run unit + API test suites |
+| `npm run test:unit` | Vitest unit tests only |
+| `npm run test:api` | Backend API tests only |
+| `npm run test:e2e` | Playwright e2e |
+| `npm run db:init` | Apply the schema to a fresh database |
+| `npm run smoke:stocktake` | Stocktake end-to-end smoke test |
+
+## Architecture
+
+- **Frontend:** React 19, Vite 6, Tailwind 4, zustand, recharts, html5-qrcode, vite-plugin-pwa
+- **Backend:** Express 4 (ESM), mysql2 / pg, JWT (jsonwebtoken), bcryptjs, zod, web-push
+- **Realtime:** socket.io (deps installed, used by pole-display / multi-terminal presence; falls back to polling if disabled)
+- **Payments:** PayFast (webhook at `POST /api/payfast/notify`), plus card terminal, BNPL, and QR providers via the `paymentProviderBoundary` shim
+- **Storage:** MariaDB 11 or Postgres 14+; schema in `db/schema.sql` and `db/schema.postgres.sql`
+
+## Project layout
+
+```
+server/          Express app, route handlers, repos, auth
+src/             React app
+shared/          Types & zod schemas shared by client and server
+db/              Schema SQL + migrations
+nginx/           nginx configs (Docker, dev, Windows)
+tests/           Vitest + Playwright
+scripts/         Dev/CI helpers (no one-off patches)
+Implementation Plan/   Active roadmap and todo (single source of truth)
+```
+
+## Security
+
+- Auth uses JWT access tokens (8h) + refresh tokens (7d, stored hashed server-side with rotation).
+- Sensitive actions (refund / void / cash movement / no-sale / discount override / stock adjustment / settings change) require a manager PIN/password re-auth.
+- All state-changing endpoints are audit-logged to `audit_events`.
+- PayFast signature verification is done over the raw form body in canonical order with `crypto.timingSafeEqual`.
+- bcrypt cost is 12 (`bcryptjs` — see `server/auth-handler.ts`); migrating to native `bcrypt` is on the roadmap.
+
+See **[Implementation Plan/implementation_plan.md](Implementation%20Plan/implementation_plan.md)** for the active security, PCI, and POPIA work, and the audit-driven hardening backlog.
+
+## Licence & hosted mode
+
+- **Self-hosted Docker** (default): free tier, all packages, no licence required.
+- **Hosted (Railway / masepos.co.za):** packages enforced via a signed licence key; admin endpoints gated on `JPOS_HOSTED=true`. See `server/licenceServer.ts` and `server/licenceMiddleware.ts`.
+- The Docker image and the Railway build both use the same `server.ts` entry point.
+
+## Contributing
+
+1. Fork / branch from `master`.
+2. Make changes; ensure `npm run lint` and `npm test` pass.
+3. Open a PR — CI runs lint, unit, API, and a Vite production build.
+4. New server modules: add a co-located test under `tests/backend/` (or `tests/frontend/` for React).
+
+## License
+
+Proprietary — © MasePOS / Lifeat Online. All rights reserved.
