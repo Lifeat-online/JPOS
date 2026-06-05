@@ -25,6 +25,7 @@ import { WelcomeView } from './components/WelcomeView';
 import { LoginModal } from './components/LoginModal';
 import { EnrollmentModal } from './components/EnrollmentModal';
 import { SensitiveActionModal } from './components/SensitiveActionModal';
+import { ToastContainer } from './components/ToastContainer';
 import { SetupWizard } from './components/SetupWizard';
 import { PointOfSaleView } from './views/PointOfSaleView';
 import { HistoryView } from './views/HistoryView';
@@ -67,6 +68,7 @@ import { SplitPaymentModal } from './components/modals/SplitPaymentModal';
 
 import { Product, Customer, Staff, Sale } from './types';
 import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage } from './constants';
+import { toast } from './utils/toast';
 import { buildPosCustomerProfiles } from './utils/customerProfiles';
 import { playRealtimeAttention } from './utils/pushNotifications';
 
@@ -943,7 +945,7 @@ export default function App() {
       } else {
         const existing = staff.find(s => s.email.toLowerCase() === data.email?.toLowerCase());
         if (existing) {
-          alert('A staff member with this email already exists!');
+          toast.error('A staff member with this email already exists!');
           setIsProcessingCrud(false);
           return;
         }
@@ -956,7 +958,7 @@ export default function App() {
           await apiPost('/api/auth/setup-password', { staffId: targetId, password: newPassword });
         } catch (err: any) {
           console.error('Failed to set password:', err);
-          alert('Staff saved, but failed to set password: ' + (err.message || 'Unknown error'));
+          toast.error('Staff saved, but failed to set password: ' + (err.message || 'Unknown error'));
         }
       }
 
@@ -1602,6 +1604,7 @@ export default function App() {
         )}
         <SensitiveActionModal />
       </AnimatePresence>
+      <ToastContainer />
     </div>
   );
 }

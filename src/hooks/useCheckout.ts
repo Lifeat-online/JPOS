@@ -9,6 +9,7 @@ import { usePosStore } from '../store/usePosStore';
 import { apiPut, createSale, getSaleById, validatePromotionCode } from '../api';
 import { useSocket } from './useSocket';
 import { getApplicablePricingDiscount } from '../utils/discounts';
+import { toast } from '../utils/toast';
 import {
   CheckoutMethod,
   dismissOfflineSale,
@@ -511,7 +512,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       }
     } catch (error) {
       console.error(error);
-      alert('Error saving order');
+      toast.error('Error saving order');
     } finally {
       setIsProcessing(false);
     }
@@ -551,7 +552,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       return saleId;
     } catch (error) {
       console.error('Failed to park sale:', error);
-      alert('Could not park this sale. Please try again.');
+      toast.error('Could not park this sale. Please try again.');
       return null;
     } finally {
       setIsProcessing(false);
@@ -605,7 +606,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       }
     } catch (err) {
       console.error('Failed to open tab:', err);
-      alert('Error saving tab');
+      toast.error('Error saving tab');
     } finally {
       setIsProcessing(false);
     }
@@ -659,7 +660,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       }
     } catch (err) {
       console.error('Failed to open table:', err);
-      alert('Error saving table');
+      toast.error('Error saving table');
     } finally {
       setIsProcessing(false);
     }
@@ -679,13 +680,13 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     if (!offlineCapability.allowed) {
       const message = offlineCapability.reason || 'This payment needs an online connection.';
       recordCheckoutRecovery(message, method);
-      alert(message);
+      toast.error(message);
       return;
     }
     if (appliedPromotion && isBrowserOffline) {
       const message = 'Coupon checkout needs an online connection so redemption limits can be verified.';
       recordCheckoutRecovery(message, method);
-      alert(message);
+      toast.error(message);
       return;
     }
 
@@ -694,13 +695,13 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       if (!selectedCustomer || walletBalance <= 0) {
         const message = 'Select a client with a positive wallet balance before using wallet payment.';
         recordCheckoutRecovery(message, method);
-        alert(message);
+        toast.error(message);
         return;
       }
       if (walletBalance < walletAmount) {
         const message = `Client wallet balance is R${walletBalance.toFixed(2)}, which is not enough for this wallet payment.`;
         recordCheckoutRecovery(message, method);
-        alert(message);
+        toast.error(message);
         return;
       }
     }
@@ -712,13 +713,13 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       if (!selectedCustomer || !selectedCustomer.accountEnabled) {
         const message = 'Select a client with an active account before using account payment.';
         recordCheckoutRecovery(message, method);
-        alert(message);
+        toast.error(message);
         return;
       }
       if (accountRemaining < accountAmount) {
         const message = `Client account remaining is R${accountRemaining.toFixed(2)}, which is not enough for this account payment.`;
         recordCheckoutRecovery(message, method);
-        alert(message);
+        toast.error(message);
         return;
       }
     }
@@ -734,7 +735,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     if (missingCardTerminal) {
       const message = 'Capture the card provider and terminal/device reference before completing a card payment.';
       recordCheckoutRecovery(message, method);
-      alert(message);
+      toast.error(message);
       return;
     }
 
@@ -833,14 +834,14 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         if (isOfflineLikeError(saleWriteError) && appliedPromotion) {
           const message = 'Coupon checkout could not be completed offline. Reconnect and try again.';
           recordCheckoutRecovery(message, method);
-          alert(message);
+          toast.error(message);
           setIsProcessing(false);
           return;
         }
         if (isOfflineLikeError(saleWriteError) && !offlineAfterFailure.allowed) {
           const message = offlineAfterFailure.reason || 'This payment needs an online connection.';
           recordCheckoutRecovery(message, method);
-          alert(message);
+          toast.error(message);
           setIsProcessing(false);
           return;
         }
@@ -892,7 +893,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       console.error('Checkout failed:', err);
       const message = err instanceof Error ? err.message : 'Checkout failed. Please try again.';
       recordCheckoutRecovery(message, method);
-      alert(message);
+      toast.error(message);
       setIsProcessing(false);
     }
   };

@@ -8,6 +8,7 @@ import { JPOS_PACKAGES } from '../../shared/packageCatalog';
 import type { AiModelOption, AiProviderName, AiRole, AiSettings } from '../types';
 import { buildReceiptPrintCss, getReceiptPaperProfile, RECEIPT_PAPER_OPTIONS, normalizeReceiptPrintSettings } from '../utils/receiptPrinting';
 import { HardwareAdaptersPanel } from './HardwareAdaptersPanel';
+import { toast } from '../utils/toast';
 
 function readSettingsFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -425,10 +426,10 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
       await apiPut(`/api/mariadb/tenants/${tenantId}/settings/app`, formData);
       setConfig(formData);
       setPackageLimits(await getTenantPackageLimits(tenantId));
-      alert("Settings saved successfully!");
+      toast.success("Settings saved successfully!");
     } catch (e) {
       console.error(e);
-      alert("Failed to save settings");
+      toast.error("Failed to save settings");
     } finally {
       setIsSaving(false);
     }
@@ -519,10 +520,10 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
       });
       setAiSettings(saved);
       setAiApiKey('');
-      alert('AI settings saved successfully!');
+      toast.success('AI settings saved successfully!');
     } catch (err) {
       console.error(err);
-      alert('Failed to save AI settings');
+      toast.error('Failed to save AI settings');
     } finally {
       setAiSaving(false);
     }
