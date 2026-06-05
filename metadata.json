@@ -1,6 +1,0 @@
-{
-  "name": "MasePOS",
-  "description": "MasePOS — A modern Point of Sale system with real-time inventory tracking and PayFast payment integration.",
-  "requestFramePermissions": ["camera"],
-  "majorCapabilities": []
-}

@@ -15,6 +15,8 @@ coverage
 .vscode
 .idea
 .kilo
+.railway
+app
 test-results
 temp
 logs
@@ -27,5 +29,11 @@ tests/
 DOCKER.md
 MIGRATION_STATUS.md
 PHASE2_*.md
+SECURITY_*.md
 Implementation\ Plan
+plans/
 scripts/
+scratch/
+test-express.js
+General
+metadata.json

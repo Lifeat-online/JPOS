@@ -19,8 +19,24 @@ firebase-export-*/
 temp/
 logs/
 test-results/
-.kilo/
 public/uploads/
 
 # Metadata
 metadata.json
+
+# AI-tool / editor cruft
+.vscode/
+.idea/
+.kilo/
+.railway/
+app/
+
+# Dev-loop scratch and one-off files
+scratch/
+test-express.js
+General
+*.local.conf
+nginx/nginx-*.local.conf
+nginx/nginx-windows.conf
+codex-*.log
+.codex-*.log
