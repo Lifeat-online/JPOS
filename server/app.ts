@@ -4483,6 +4483,15 @@ export async function createApp(io: any = null) {
           reviewStatus: updates.reviewStatus,
         });
       }
+      // tipsDelta flows into staff.wallet_balance indirectly; it must be
+      // positive-only. A negative or non-numeric value is rejected.
+      if (updates.tipsDelta !== undefined) {
+        const tipDelta = Number(updates.tipsDelta);
+        if (!Number.isFinite(tipDelta) || tipDelta < 0) {
+          return res.status(400).json({ error: "tipsDelta must be a non-negative number." });
+        }
+        updates.tipsDelta = tipDelta;
+      }
       const isSubmittingCashUp = updates.status === "closed" || updates.reviewStatus === "submitted";
       let walletTipsDelta = 0;
       let walletTipsStaffId: string | null = null;
@@ -4530,6 +4539,20 @@ export async function createApp(io: any = null) {
       if (updates.tipsDelta !== undefined) { fields.push("accumulated_tips = accumulated_tips + ?"); values.push(updates.tipsDelta); }
 
       if (fields.length > 0 || walletTipsDelta > 0) {
+        // The server-computed walletTipsDelta is always non-negative
+        // (Math.max(0, recordedTips + Math.min(0, difference))), and
+        // the client-supplied tipsDelta is now positive-only-validated
+        // above. Both feed into staff.wallet_balance, so any wallet
+        // credit must be authorised via a recent password/PIN check.
+        if (walletTipsDelta > 0 || (updates.tipsDelta !== undefined && updates.tipsDelta > 0)) {
+          const sensitiveResponse = await enforceSensitiveAction(req, res, "wallet_adjustment", {
+            cashSessionId: req.params.id,
+            walletTipsDelta,
+            walletTipsStaffId,
+            clientTipsDelta: updates.tipsDelta ?? null,
+          });
+          if (sensitiveResponse) return;
+        }
         const conn = await getConnection();
         try {
           await conn.beginTransaction();
