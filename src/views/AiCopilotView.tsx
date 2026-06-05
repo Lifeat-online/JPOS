@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BrainCircuit, RefreshCw, ShieldCheck, Sparkles, Trash2, Trophy } from 'lucide-react';
-import { deleteAiInsight, generateAiInsights, generateAiStaffScores, getAiInsights, getAiStaffScores } from '../api';
+import { BrainCircuit, ClipboardCheck, RefreshCw, ShieldCheck, Sparkles, Trash2, Trophy } from 'lucide-react';
+import { deleteAiInsight, generateAiInsights, generateAiStaffScores, getAiInsights, getAiStaffScores, syncAiInsightTasks } from '../api';
 import type { AiInsight, AiStaffScore } from '../types';
 
 const severityStyles: Record<string, string> = {
@@ -17,6 +17,8 @@ export function AiCopilotView({ tenantId }: { tenantId: string | null }) {
   const [loadingScores, setLoadingScores] = useState(false);
   const [refreshingInsights, setRefreshingInsights] = useState(false);
   const [deletingInsightId, setDeletingInsightId] = useState<string | null>(null);
+  const [syncingTasks, setSyncingTasks] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async (options?: { insightsOnly?: boolean }) => {
@@ -59,6 +61,21 @@ export function AiCopilotView({ tenantId }: { tenantId: string | null }) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setDeletingInsightId(null);
+    }
+  };
+
+  const syncTasks = async () => {
+    if (!tenantId) return;
+    setSyncingTasks(true);
+    setError(null);
+    setSyncResult(null);
+    try {
+      const result = await syncAiInsightTasks(tenantId);
+      setSyncResult(`${result.synced} task${result.synced === 1 ? '' : 's'} synced`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSyncingTasks(false);
     }
   };
 
@@ -129,8 +146,22 @@ export function AiCopilotView({ tenantId }: { tenantId: string | null }) {
               {loadingScores ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trophy className="w-4 h-4" />}
               Grade Staff
             </button>
+            <button
+              onClick={syncTasks}
+              disabled={syncingTasks || !tenantId}
+              className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-emerald-600 text-white text-xs font-black uppercase tracking-widest disabled:opacity-60"
+            >
+              {syncingTasks ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ClipboardCheck className="w-4 h-4" />}
+              Sync Tasks
+            </button>
           </div>
         </div>
+
+        {syncResult && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+            {syncResult}
+          </div>
+        )}
 
         {error && (
           <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">

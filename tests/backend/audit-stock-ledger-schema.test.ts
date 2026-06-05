@@ -111,4 +111,25 @@ describe('audit and stock ledger schema', () => {
       expect(schema).toContain('idx_reorder_recommendations_product');
     }
   });
+
+  it('defines direct hardware adapter devices and event history in both SQL schemas', () => {
+    for (const schema of [mariaSchema, pgSchema]) {
+      expect(schema).toContain('CREATE TABLE IF NOT EXISTS hardware_devices');
+      expect(schema).toContain('receipt_printer');
+      expect(schema).toContain('kitchen_printer');
+      expect(schema).toContain('cash_drawer');
+      expect(schema).toContain('scale');
+      expect(schema).toContain('barcode_scanner');
+      expect(schema).toContain('pole_display');
+      expect(schema).toContain('card_terminal');
+      expect(schema).toContain('connection_config');
+      expect(schema).toContain('last_check_status');
+      expect(schema).toContain('idx_hardware_devices_workstation');
+      expect(schema).toContain('CREATE TABLE IF NOT EXISTS hardware_device_events');
+      expect(schema).toContain('command_type');
+      expect(schema).toContain('request_payload');
+      expect(schema).toContain('response_payload');
+      expect(schema).toContain('idx_hardware_device_events_device');
+    }
+  });
 });

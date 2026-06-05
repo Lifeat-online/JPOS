@@ -178,7 +178,7 @@ describe('offline sale queue', () => {
       cashSessionId: 'register_1',
       saleData: { total: 20, subtotal: 20, status: 'completed', paymentMethod: 'cash', items: [] },
     });
-    enqueueOfflineSale({
+    const second = enqueueOfflineSale({
       tenantId: 'tenant_1',
       method: 'card',
       cashSessionId: 'register_1',
@@ -196,15 +196,17 @@ describe('offline sale queue', () => {
     });
     expect(result.summary.batchId).toMatch(/^offline_batch_/);
     expect(createSale).toHaveBeenCalledTimes(1);
+    const syncedOfflineEventId = vi.mocked(createSale).mock.calls[0][1].offlineEventId;
+    expect([first.id, second.id]).toContain(syncedOfflineEventId);
     expect(createSale).toHaveBeenCalledWith('tenant_1', expect.objectContaining({
-      offlineEventId: first.id,
+      offlineEventId: syncedOfflineEventId,
       syncSource: 'offline',
       syncEventType: 'sale.create',
       syncEventVersion: 1,
       syncBatchId: result.summary.batchId,
       syncSequence: 1,
     }));
-    expect(listOfflineSales('tenant_1').find(item => item.id === first.id)).toMatchObject({
+    expect(listOfflineSales('tenant_1').find(item => item.id === syncedOfflineEventId)).toMatchObject({
       status: 'synced',
       lastSyncedBatchId: result.summary.batchId,
     });

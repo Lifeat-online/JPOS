@@ -22,6 +22,7 @@ type Actor = {
   staffId?: string | null;
   staffName?: string | null;
   role?: string | null;
+  requestId?: string | null;
 };
 
 type StockTakeAssignment = {
@@ -42,10 +43,12 @@ type CountInput = {
   countedQuantity: number;
   note?: string | null;
   varianceReason?: string | null;
+  requestId?: string | null;
 };
 
 type RecountInput = {
   note?: string | null;
+  requestId?: string | null;
 };
 
 type StockTakeRuleInput = {
@@ -1395,6 +1398,7 @@ export async function submitStockTakeCount(tenantId: string, itemId: string, inp
     action: "stocktake.item_counted",
     entityType: "stock_take_item",
     entityId: itemId,
+    requestId: input.requestId || actor.requestId || null,
     staffId: actor.staffId || null,
     staffName: actor.staffName || null,
     source: "mobile_stocktake",
@@ -1461,6 +1465,7 @@ export async function requestStockTakeRecount(tenantId: string, itemId: string, 
     action: "stocktake.recount_requested",
     entityType: "stock_take_item",
     entityId: itemId,
+    requestId: input.requestId || actor.requestId || null,
     staffId: actor.staffId || null,
     staffName: actor.staffName || null,
     source: "manager_action_center",
@@ -1584,6 +1589,7 @@ export async function approveStockTakeSession(tenantId: string, sessionId: strin
       tenantId,
       action: "stocktake.approved",
       entityType: "stock_take_session",
+      requestId: actor.requestId || null,
       entityId: sessionId,
       staffId: actor.staffId || null,
       staffName: actor.staffName || null,

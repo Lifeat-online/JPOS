@@ -6,6 +6,7 @@ import {
   apiRateLimit,
   corsHandler,
   requestId,
+  redactSecurityLogValue,
   securityHeaders,
   sendSafeError,
   stripPoweredBy,
@@ -192,6 +193,24 @@ describe('securityHardening', () => {
         if (prev === undefined) delete process.env.TRUST_PROXY_HOPS;
         else process.env.TRUST_PROXY_HOPS = prev;
       }
+    });
+  });
+
+  describe('redactSecurityLogValue', () => {
+    it('redacts secrets, bearer tokens, OpenAI keys, and card-like PAN values', () => {
+      const redacted = redactSecurityLogValue({
+        password: 'secret-password',
+        authorization: 'Bearer abc.def.ghi',
+        apiKey: 'sk-proj_abcdefghijklmnopqrstuvwxyz',
+        note: 'card 4111 1111 1111 1111 cvv=123',
+      });
+
+      expect(redacted).not.toContain('secret-password');
+      expect(redacted).not.toContain('abc.def.ghi');
+      expect(redacted).not.toContain('sk-proj_abcdefghijklmnopqrstuvwxyz');
+      expect(redacted).not.toContain('4111 1111 1111 1111');
+      expect(redacted).not.toContain('cvv=123');
+      expect(redacted).toContain('<redacted');
     });
   });
 });

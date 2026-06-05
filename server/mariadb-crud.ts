@@ -3056,6 +3056,7 @@ export type SalePaymentProviderStatusInput = {
   providerNote?: string | null;
   staffId?: string | null;
   staffName?: string | null;
+  requestId?: string | null;
 };
 
 export async function updateSalePaymentProviderStatus(
@@ -3135,6 +3136,7 @@ export async function updateSalePaymentProviderStatus(
       staffId: input.staffId || null,
       staffName: input.staffName || null,
       customerId: payment.customerId || null,
+      requestId: input.requestId || null,
       source: "provider_reconciliation",
       details: {
         saleId,
@@ -3461,6 +3463,7 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
       staffId: input.staffId || null,
       staffName: input.staffName || null,
       customerId: original.customer_id || null,
+      requestId: (input as any).requestId || null,
       details: {
         originalSaleId: saleId,
         refundTotal,
@@ -3491,6 +3494,7 @@ export type SaleVoidInput = {
   restock?: boolean;
   staffId?: string | null;
   staffName?: string | null;
+  requestId?: string | null;
 };
 
 export async function processSaleVoid(tenantId: string, saleId: string, input: SaleVoidInput): Promise<Sale> {
@@ -3566,6 +3570,7 @@ export async function processSaleVoid(tenantId: string, saleId: string, input: S
       staffId: input.staffId || sale.staff_id || null,
       staffName: input.staffName || null,
       customerId: sale.customer_id || null,
+      requestId: input.requestId || null,
       details: {
         previousStatus: sale.status,
         previousTransactionType: sale.transaction_type,

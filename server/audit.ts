@@ -67,6 +67,7 @@ export type AuditEventInput = {
   staffName?: string | null;
   customerId?: string | null;
   source?: string | null;
+  requestId?: string | null;
   details?: unknown;
 };
 
@@ -75,8 +76,8 @@ export async function recordAuditEvent(conn: Queryable, input: AuditEventInput) 
   await conn.query(
     `INSERT INTO audit_events (
       id, tenant_id, action, entity_type, entity_id, related_sale_id,
-      staff_id, staff_name, customer_id, source, details, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      staff_id, staff_name, customer_id, source, request_id, details, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       id,
       input.tenantId,
@@ -88,6 +89,7 @@ export async function recordAuditEvent(conn: Queryable, input: AuditEventInput) 
       input.staffName || null,
       input.customerId || null,
       input.source || "server",
+      input.requestId || null,
       json(input.details),
     ]
   );
@@ -103,6 +105,21 @@ export async function recordAuditEventSafe(input: AuditEventInput) {
     console.warn("Unable to record audit event:", error);
     return null;
   }
+}
+
+/**
+ * Pulls the requestId (set by the requestId middleware in
+ * server/securityHardening.ts) off the Express request, if any,
+ * and returns it. Audit call sites can pass the result to
+ * recordAuditEvent to correlate log entries with the original
+ * inbound request — useful for cross-checking against the
+ * requestId access-log entry.
+ */
+export function requestIdFromRequest(req: unknown): string | null {
+  if (!req || typeof req !== 'object') return null;
+  const id = (req as { requestId?: unknown }).requestId;
+  if (typeof id !== 'string' || id.length === 0 || id.length > 64) return null;
+  return id;
 }
 
 export type StockMovementInput = {

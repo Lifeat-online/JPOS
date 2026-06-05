@@ -6,7 +6,7 @@ import { summarizeWorkstationTiming } from "../shared/workstationTiming.js";
 
 export type AiRole = "admin" | "manager" | "dev" | "cashier" | "chef";
 export type AiProviderName = "openai" | "ollama" | "anythingllm" | "google" | "vertex" | "openrouter";
-export type AiInsightCategory = "sales" | "stock" | "cash" | "staff" | "restaurant" | "customer" | "package";
+export type AiInsightCategory = "sales" | "stock" | "cash" | "staff" | "restaurant" | "customer" | "package" | "integration";
 export type AiSeverity = "info" | "success" | "warning" | "critical";
 
 export interface AiSettings {
@@ -91,7 +91,7 @@ const DEFAULT_SETTINGS: Omit<AiSettings, "tenantId"> = {
 };
 
 const AI_PROVIDERS: AiProviderName[] = ["openai", "ollama", "anythingllm", "google", "vertex", "openrouter"];
-const MAX_MANAGER_INSIGHTS = 10;
+const MAX_MANAGER_INSIGHTS = 18;
 const ACTIVE_MANAGER_TASK_STATUSES = new Set(["open", "in_review"]);
 
 function asBool(value: unknown, fallback = false) {
@@ -542,6 +542,18 @@ function isDueSoon(value: unknown, days = 7, now = new Date()) {
   return date.getTime() >= now.getTime() && date.getTime() <= soon;
 }
 
+function percent(value: number) {
+  return `${Math.round(value)}%`;
+}
+
+function productIdOf(row: any) {
+  return String(rowValue(row, "product_id", "productId") || "");
+}
+
+function saleIdOf(row: any) {
+  return String(rowValue(row, "sale_id", "saleId") || "");
+}
+
 function directionAmount(row: any) {
   const amount = toNumber(rowValue(row, "amount"));
   const direction = String(rowValue(row, "direction") || "").toLowerCase();
@@ -579,9 +591,13 @@ function buildBusinessMetrics(dataset: any) {
   const purchaseOrders = rowsOf(dataset.purchaseOrders);
   const companionDevices = rowsOf(dataset.companionDevices);
   const pushSubscriptions = rowsOf(dataset.pushSubscriptions);
+  const promotions = rowsOf(dataset.promotions);
+  const integrationApiKeys = rowsOf(dataset.integrationApiKeys);
+  const integrationWebhookEvents = rowsOf(dataset.integrationWebhookEvents);
 
   const now = new Date();
   const completedSales = sales.filter((sale) => rowValue(sale, "status") === "completed");
+  const completedSaleIds = new Set(completedSales.map((sale) => String(rowValue(sale, "id") || "")).filter(Boolean));
   const revenue = sumRows(completedSales, (sale) => rowValue(sale, "total"));
   const refundSales = sales.filter((sale) => (
     String(rowValue(sale, "refund_status", "refundStatus") || "none") !== "none" ||
@@ -606,6 +622,51 @@ function buildBusinessMetrics(dataset: any) {
   void paymentCountBySale;
 
   const lowStock = products.filter((product) => toNumber(rowValue(product, "stock")) <= Math.max(1, toNumber(rowValue(product, "min_stock", "minStock"))));
+  const productById = new Map(products.map((product) => [String(rowValue(product, "id") || ""), product]));
+  const soldItems = saleItems.filter((item) => completedSaleIds.size === 0 || completedSaleIds.has(saleIdOf(item)));
+  const productPerformance = soldItems.reduce<Record<string, any>>((acc, item) => {
+    const productId = productIdOf(item);
+    const product = productById.get(productId);
+    const name = String(rowValue(item, "product_name", "productName") || rowValue(product, "name") || "Unknown product");
+    const category = String(rowValue(item, "category") || rowValue(product, "category") || "Uncategorised");
+    const quantity = toNumber(rowValue(item, "quantity"));
+    const revenue = toNumber(rowValue(item, "price", "unit_price", "unitPrice")) * quantity;
+    const cost = toNumber(rowValue(product, "cost_price", "costPrice")) * quantity;
+    const current = acc[productId || name] || { productId, name, category, quantity: 0, revenue: 0, cost: 0 };
+    current.quantity += quantity;
+    current.revenue += revenue;
+    current.cost += cost;
+    acc[productId || name] = current;
+    return acc;
+  }, {});
+  const productStats = Object.values(productPerformance).map((item: any) => ({
+    ...item,
+    grossProfit: item.revenue - item.cost,
+    marginPercent: item.revenue > 0 ? ((item.revenue - item.cost) / item.revenue) * 100 : 0,
+  }));
+  const categoryStats = Object.values(productStats.reduce<Record<string, any>>((acc, item: any) => {
+    const key = item.category || "Uncategorised";
+    const current = acc[key] || { category: key, quantity: 0, revenue: 0, cost: 0, grossProfit: 0 };
+    current.quantity += item.quantity;
+    current.revenue += item.revenue;
+    current.cost += item.cost;
+    current.grossProfit += item.grossProfit;
+    acc[key] = current;
+    return acc;
+  }, {})).map((item: any) => ({
+    ...item,
+    marginPercent: item.revenue > 0 ? (item.grossProfit / item.revenue) * 100 : 0,
+  }));
+  const topMarginProducts = [...productStats]
+    .filter((item: any) => item.revenue > 0)
+    .sort((a: any, b: any) => b.grossProfit - a.grossProfit)
+    .slice(0, 3);
+  const weakMarginCategories = [...categoryStats]
+    .filter((item: any) => item.revenue > 0)
+    .sort((a: any, b: any) => a.marginPercent - b.marginPercent)
+    .slice(0, 3);
+  const topCategory = [...categoryStats].sort((a: any, b: any) => b.revenue - a.revenue)[0] || null;
+  const activePromotions = promotions.filter((promotion) => String(rowValue(promotion, "status") || "active") === "active");
   const stockReasonCounts = countByKey(stockMovements, (movement) => rowValue(movement, "reason_code", "reasonCode", "reason"));
   const shrinkageMovements = stockMovements.filter((movement) => ["shrinkage", "wastage"].includes(String(rowValue(movement, "reason_code", "reasonCode") || "")));
   const countCorrectionMovements = stockMovements.filter((movement) => String(rowValue(movement, "reason_code", "reasonCode") || "") === "count_correction");
@@ -676,6 +737,13 @@ function buildBusinessMetrics(dataset: any) {
   const servicePeriodTiming = summarizeWorkstationTiming(workstationTimingItems, { now, completedWindowSeconds: 12 * 60 * 60 });
   const activePurchaseOrders = purchaseOrders.filter((order) => ["draft", "sent"].includes(String(rowValue(order, "status") || "")));
   const overduePurchaseOrders = activePurchaseOrders.filter((order) => isPastDue(rowValue(order, "expected_delivery_date", "expectedDeliveryDate"), now));
+  const activeIntegrationKeys = integrationApiKeys.filter((key) => String(rowValue(key, "status") || "active") === "active");
+  const failedIntegrationEvents = integrationWebhookEvents.filter((event) => ["failed", "error", "rejected"].includes(String(rowValue(event, "status") || "").toLowerCase()));
+  const integrationProviderCounts = countByKey(integrationWebhookEvents, (event) => rowValue(event, "provider"));
+  const payfastPaymentCount = salePayments.filter((payment) => (
+    String(rowValue(payment, "method") || "").toLowerCase() === "payfast" ||
+    String(rowValue(payment, "provider") || "").toLowerCase() === "payfast"
+  )).length + sales.filter((sale) => Boolean(rowValue(sale, "payfast_payment_id", "payfastPaymentId"))).length;
 
   return {
     sales: {
@@ -693,6 +761,15 @@ function buildBusinessMetrics(dataset: any) {
       openOrderCount: openOrders.length,
       openTabCount: tabSales.filter((sale) => ["open", "kitchen", "pending"].includes(String(rowValue(sale, "status") || ""))).length,
       tableOrderCount: tableSales.length,
+      topCategory: topCategory ? String(topCategory.category) : null,
+    },
+    performance: {
+      categoryStats,
+      topMarginProducts,
+      weakMarginCategories,
+      activePromotionCount: activePromotions.length,
+      upsellCandidates: topMarginProducts.map((item: any) => `${item.name}: R${item.grossProfit.toFixed(2)} gross profit (${percent(item.marginPercent)} margin)`),
+      menuCandidates: weakMarginCategories.map((item: any) => `${item.category}: ${percent(item.marginPercent)} margin on R${item.revenue.toFixed(2)} revenue`),
     },
     stock: {
       productCount: products.length,
@@ -784,6 +861,14 @@ function buildBusinessMetrics(dataset: any) {
       permissionDeniedCount: countRows(auditEvents, (event) => rowValue(event, "action") === "permission.denied"),
       aiEventCount: countRows(auditEvents, (event) => String(rowValue(event, "action") || "").startsWith("ai.")),
     },
+    integration: {
+      activeApiKeyCount: activeIntegrationKeys.length,
+      webhookEventCount: integrationWebhookEvents.length,
+      failedWebhookEventCount: failedIntegrationEvents.length,
+      providerCounts: integrationProviderCounts,
+      payfastPaymentCount,
+      configuredConnectorCount: activeIntegrationKeys.length + Object.keys(integrationProviderCounts).length + (payfastPaymentCount > 0 ? 1 : 0),
+    },
   };
 }
 
@@ -815,6 +900,9 @@ async function getBusinessDataset(tenantId: string) {
     vendors,
     companionDevices,
     pushSubscriptions,
+    promotions,
+    integrationApiKeys,
+    integrationWebhookEvents,
     configRows,
     packageRows,
   ] = await Promise.all([
@@ -848,7 +936,8 @@ async function getBusinessDataset(tenantId: string) {
     query<any>(
       `SELECT
          sp.id, sp.sale_id AS saleId, sp.method, sp.amount, sp.tip_amount AS tipAmount,
-         sp.cash_out_amount AS cashOutAmount, sp.created_at AS createdAt
+         sp.cash_out_amount AS cashOutAmount, sp.provider, sp.provider_status AS providerStatus,
+         sp.created_at AS createdAt
        FROM sale_payments sp
        JOIN sales s ON s.id = sp.sale_id
        WHERE s.tenant_id = ?
@@ -899,6 +988,9 @@ async function getBusinessDataset(tenantId: string) {
     query<any>("SELECT id, name, status, created_at, updated_at FROM vendors WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 200", [tenantId]),
     query<any>("SELECT id, device_id, device_name, workstation_id, default_mode, assigned_by, created_at, updated_at FROM companion_device_assignments WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 200", [tenantId]),
     query<any>("SELECT id, staff_id, device_label, disabled_at, last_seen_at, created_at, updated_at FROM push_subscriptions WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 200", [tenantId]),
+    query<any>("SELECT id, name, code, status, discount_type, discount_value, applies_to, target_product_ids, target_categories, starts_at, ends_at, redemption_count FROM promotions WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 100", [tenantId]),
+    query<any>("SELECT id, name, status, scopes, last_used_at, created_at, updated_at FROM integration_api_keys WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 100", [tenantId]),
+    query<any>("SELECT id, provider, event_type, external_event_id, status, error_message, processed_at, created_at FROM integration_webhook_events WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 200", [tenantId]),
     query<any>("SELECT business FROM app_settings WHERE tenant_id = ? LIMIT 1", [tenantId]),
     query<any>("SELECT COUNT(*) AS active_registers FROM cash_sessions WHERE tenant_id = ? AND status = 'open'", [tenantId]),
   ]);
@@ -929,6 +1021,9 @@ async function getBusinessDataset(tenantId: string) {
     vendors,
     companionDevices,
     pushSubscriptions,
+    promotions,
+    integrationApiKeys,
+    integrationWebhookEvents,
     business: parseJson(configRows[0]?.business, {}),
     activeRegisters: toNumber(packageRows[0]?.active_registers),
   };
@@ -974,6 +1069,43 @@ export function buildDeterministicInsights(tenantId: string, dataset: any): AiIn
       `Offline-synced sales: ${metrics.sales.offlineSaleCount}`,
     ],
     84
+  ));
+
+  insights.push(makeInsight(
+    tenantId,
+    "sales",
+    metrics.performance.upsellCandidates.length > 0 ? "info" : "success",
+    "Cashier upsell prompts",
+    metrics.performance.upsellCandidates.length > 0
+      ? `Use ${metrics.performance.upsellCandidates.length} high-margin product prompt${metrics.performance.upsellCandidates.length === 1 ? "" : "s"} with cart contents, active promotions, and customer context.`
+      : "No high-confidence upsell prompt is available yet because there is not enough completed sale and margin history.",
+    metrics.performance.upsellCandidates.length > 0
+      ? "Prompt cashiers to suggest the highest-margin matching add-on only when stock is available and the recommendation fits the current cart, customer history, active promotion, and time-of-day demand."
+      : "Keep product cost prices, stock levels, promotion targets, and customer history current so cashier-facing upsells stay useful.",
+    [
+      ...metrics.performance.upsellCandidates,
+      `Active promotions: ${metrics.performance.activePromotionCount}`,
+      `Top category: ${metrics.sales.topCategory || "not enough history"}`,
+    ].slice(0, 5),
+    metrics.performance.upsellCandidates.length > 0 ? 82 : 68
+  ));
+
+  insights.push(makeInsight(
+    tenantId,
+    "restaurant",
+    metrics.performance.menuCandidates.length > 0 || metrics.stock.shrinkageOrWastageCount > 0 ? "warning" : "info",
+    "Menu/product optimization",
+    metrics.performance.menuCandidates.length > 0
+      ? `${metrics.performance.menuCandidates.length} category or product margin signal${metrics.performance.menuCandidates.length === 1 ? "" : "s"} can guide menu, shelf, and recipe decisions.`
+      : "Menu and product optimization needs more sale, cost, recipe, stock, and wastage history before ranking changes confidently.",
+    "Review low-margin categories, recipe-cost gaps, low-stock products, shrinkage/wastage, and time-of-day demand before changing menus, prices, bundles, or product placement.",
+    [
+      ...metrics.performance.menuCandidates,
+      `Low-stock products: ${metrics.stock.lowStockCount}`,
+      `Shrinkage/wastage movements: ${metrics.stock.shrinkageOrWastageCount}`,
+      `Wastage/shrinkage units: ${metrics.stock.shrinkageOrWastageQuantity.toFixed(3)}`,
+    ].slice(0, 6),
+    metrics.performance.menuCandidates.length > 0 ? 86 : 72
   ));
 
   if (metrics.tasks.openCount > 0) {
@@ -1104,6 +1236,23 @@ export function buildDeterministicInsights(tenantId: string, dataset: any): AiIn
     cashNeedsReview ? 86 : 74
   ));
 
+  insights.push(makeInsight(
+    tenantId,
+    "staff",
+    metrics.sales.refundCount > 0 || metrics.sales.voidCount > 0 || cashNeedsReview || metrics.tasks.stockVarianceCount > 0 ? "warning" : "info",
+    "Exception insight watch",
+    `Refunds, voids, cash variance, staff task exceptions, and stock variance signals are being tracked for manager review.`,
+    "Use this as an approval-first exception queue: assign a manager task before refund follow-up, cash correction, stock correction, discounting, or staff coaching changes are applied.",
+    [
+      `Refund count: ${metrics.sales.refundCount}`,
+      `Void count: ${metrics.sales.voidCount}`,
+      `Cash variance: R${(metrics.cash.cashVariance + metrics.cash.latestCheckpointVariance).toFixed(2)}`,
+      `Stock variance tasks: ${metrics.tasks.stockVarianceCount}`,
+      `Open manager tasks: ${metrics.tasks.openCount}`,
+    ],
+    metrics.sales.refundCount > 0 || metrics.sales.voidCount > 0 || cashNeedsReview ? 87 : 75
+  ));
+
   if (metrics.layby.activeCount > 0) {
     insights.push(makeInsight(
       tenantId,
@@ -1145,6 +1294,25 @@ export function buildDeterministicInsights(tenantId: string, dataset: any): AiIn
       78
     ));
   }
+
+  insights.push(makeInsight(
+    tenantId,
+    "integration",
+    metrics.integration.failedWebhookEventCount > 0 ? "warning" : "info",
+    "Integration health",
+    `${metrics.integration.configuredConnectorCount} connector signal${metrics.integration.configuredConnectorCount === 1 ? "" : "s"} are visible across payment, API-key, webhook, accounting, delivery, e-commerce, and ERP paths.`,
+    metrics.integration.failedWebhookEventCount > 0
+      ? "Resolve failed connector events before relying on external stock, delivery, accounting, e-commerce, or ERP sync decisions."
+      : "Keep PayFast, future Yoco/SnapScan/BNPL, accounting, delivery, e-commerce, and ERP connectors on the manager health checklist before launch or busy periods.",
+    [
+      `Active API keys: ${metrics.integration.activeApiKeyCount}`,
+      `Webhook events: ${metrics.integration.webhookEventCount}`,
+      `Failed webhooks: ${metrics.integration.failedWebhookEventCount}`,
+      `PayFast/provider payments: ${metrics.integration.payfastPaymentCount}`,
+      `Providers: ${Object.keys(metrics.integration.providerCounts).join(", ") || "none yet"}`,
+    ],
+    metrics.integration.failedWebhookEventCount > 0 ? 86 : 76
+  ));
 
   const customerExposure = metrics.customer.walletLiability + metrics.customer.accountOwing + metrics.customer.pendingCustomerPayoutAmount + metrics.customer.pendingStaffPayoutAmount;
   insights.push(makeInsight(

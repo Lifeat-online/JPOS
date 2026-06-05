@@ -148,6 +148,44 @@ interface RateState {
   resetAt: number;
 }
 const rateState = new Map<string, RateState>();
+const SECRET_ASSIGNMENT_PATTERN = /(["']?\b(?:password|passwd|pwd|token|refreshToken|accessToken|api[_-]?key|apikey|secret|authorization|cookie|set-cookie|jwt|cvv|cvc|security\s*code|card[_-]?number|pan|merchant[_-]?key|passphrase)\b["']?\s*[:=]\s*["']?)[^"',}\]]+/gi;
+const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
+const CARD_PAN_PATTERN = /\b(?:\d[ -]*?){13,19}\b/g;
+const OPENAI_KEY_PATTERN = /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/g;
+
+export function redactSecurityLogValue(value: unknown): string {
+  let text = typeof value === 'string'
+    ? value
+    : value instanceof Error
+      ? value.stack || value.message
+      : JSON.stringify(value);
+  if (!text) return '';
+  text = text
+    .replace(SECRET_ASSIGNMENT_PATTERN, (_match, prefix) => `${prefix}<redacted>`)
+    .replace(BEARER_PATTERN, 'Bearer <redacted>')
+    .replace(OPENAI_KEY_PATTERN, 'sk-<redacted>')
+    .replace(CARD_PAN_PATTERN, (match) => {
+      const digits = match.replace(/\D/g, '');
+      return digits.length >= 13 && digits.length <= 19 ? '<redacted-card-pan>' : match;
+    });
+  return text.slice(0, 8000);
+}
+
+export function writeSecurityLog(level: 'warn' | 'error', event: string, req: Request, details: Record<string, unknown> = {}): void {
+  const payload = {
+    level,
+    event,
+    requestId: req.requestId || null,
+    method: req.method,
+    path: req.path,
+    ip: req.ip || req.socket.remoteAddress || null,
+    staffId: (req as any)?.user?.staffId || (req as any)?.user?.uid || null,
+    details: redactSecurityLogValue(details),
+  };
+  const line = JSON.stringify(payload);
+  if (level === 'warn') console.warn(line);
+  else console.error(line);
+}
 
 /**
  * Reset the in-process rate-limit map. Test-only; exported so the
@@ -211,11 +249,13 @@ export function sendSafeError(
   err: unknown,
   req: Request,
 ): void {
-  const rid = req.requestId || '-';
-  const staffId = (req as any)?.user?.staffId || (req as any)?.user?.uid || '-';
-  console.error(`[${rid}] staff=${staffId} ${publicMessage}:`, err instanceof Error ? err.stack || err.message : err);
+  writeSecurityLog('error', 'request.error', req, {
+    publicMessage,
+    status,
+    error: redactSecurityLogValue(err),
+  });
   res.status(status).json({
     error: publicMessage,
-    requestId: rid,
+    requestId: req.requestId || null,
   });
 }

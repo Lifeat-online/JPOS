@@ -1,24 +1,26 @@
 # WebSocket Implementation Status
 
 ## Date: May 16, 2026
+## Updated: June 5, 2026
 
 ## Summary
 
-**Current State:** Socket.IO is installed but NOT actively used. The messaging system uses REST polling instead of real-time WebSockets.
+**Current State:** Socket.IO is active for tenant, workstation, table, tab, sales, and message room updates. REST polling remains the durable fallback for message history and clients that are offline or disconnected.
 
 ---
 
 ## Current Implementation
 
 ### Server-Side (Node.js/Express)
-- **Dependencies:** `socket.io` (4.7.5) installed but not used
-- **Server Setup:** No Socket.IO server initialized
-- **Endpoints:** All messaging via REST API (`/api/mariadb/tenants/:tenantId/messages`)
+- **Dependencies:** `socket.io` (4.7.5)
+- **Server Setup:** `server/app.ts` creates an HTTP server and attaches Socket.IO through `server/socket.ts`
+- **Fan-out:** single-process rooms are immediate; multi-instance deployments can set `JPOS_REALTIME_FANOUT=database` to publish room events through `realtime_pubsub_events`
+- **Endpoints:** REST endpoints still own persistence and provide fallback reads, including `/api/mariadb/tenants/:tenantId/messages`
 
 ### Client-Side (React)
-- **Dependencies:** `socket.io-client` (4.7.5) installed but not used
-- **Hook:** `useMessaging` uses REST polling every 10 seconds
-- **Real-time:** No real-time updates - relies on polling
+- **Dependencies:** `socket.io-client` (4.7.5)
+- **Hook:** `src/hooks/useSocket.ts` joins tenant/workstation/table/tab/message rooms when enabled
+- **Fallback:** REST polling remains available for message history, reconnect recovery, and non-live views
 
 ---
 
@@ -60,9 +62,9 @@ useEffect(() => {
 
 ---
 
-## WebSocket Implementation (Not Active)
+## Socket.IO Implementation
 
-### What Would Be Needed:
+### Active Server Shape:
 
 **Server:**
 ```typescript
@@ -133,27 +135,31 @@ useEffect(() => {
 ## Recommendations
 
 ### For Current Scale (10-100 concurrent users):
-**Keep REST polling** - It's sufficient and simpler to maintain.
+**Use the default in-process Socket.IO rooms plus REST fallback** - no extra shared fan-out layer is needed for a single app instance.
 
 ### For High Scale (1000+ concurrent users):
-**Consider WebSockets** - Polling becomes inefficient at scale.
+**Enable shared fan-out** - set `JPOS_REALTIME_FANOUT=database` when multiple app instances serve Socket.IO traffic against the same database.
 
 ### Hybrid Approach:
 1. Use WebSockets for real-time updates
 2. Fall back to polling if WebSocket fails
-3. Use Redis for message broadcasting across multiple server instances
+3. Use the database-backed `realtime_pubsub_events` layer for message broadcasting across multiple server instances, or replace it with Redis later if traffic demands it
 
 ---
 
 ## Files Involved
 
 ### Server:
-- `server/app.ts` - Socket.IO imported but not used
+- `server/app.ts` - creates the HTTP server and attaches Socket.IO
+- `server/socket.ts` - room joins and local broadcast helpers
+- `server/realtimePubsub.ts` - optional database-backed cross-instance fan-out
+- `server/init-db.ts` - creates/heals `realtime_pubsub_events`
 - `server/mariadb-adapter.ts` - REST endpoints for messages
 - `server/mariadb-crud.ts` - Message CRUD operations
 
 ### Client:
-- `src/hooks/useMessaging.ts` - Polling implementation
+- `src/hooks/useSocket.ts` - Socket.IO connection and room joins
+- `src/hooks/useMessaging.ts` - Polling implementation and message persistence fallback
 - `src/views/MessagingView.tsx` - Message UI
 - `src/App.tsx` - Messaging integration
 
@@ -161,4 +167,4 @@ useEffect(() => {
 
 ## Conclusion
 
-The WebSocket dependencies are installed but not actively used. The current REST polling implementation is functional and appropriate for the current scale. Consider implementing WebSockets if you need real-time updates or expect significant growth in concurrent users.
+Socket.IO is active for live room updates, while REST polling remains the safe persistence and recovery path. Multi-instance deployments should enable `JPOS_REALTIME_FANOUT=database` so sibling Node processes receive the same tenant, sales, workstation, table, tab, and message events.

@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { isPostgres, query } from "./db.js";
 import { ensureLicenceSchema } from "./licenceSchema.js";
 import { ensurePushNotificationSchema } from "./pushNotifications.js";
+import { ensureRealtimePubsubSchema } from "./realtimePubsub.js";
 
 dotenv.config();
 
@@ -602,12 +603,13 @@ export async function initDb() {
   await ensureDeliveryIntegrationSchema();
   await ensureIntegrationAccessSchema();
   await ensureHardwareDeviceSchema();
+  await ensureRealtimePubsubSchema();
   await ensureTaxPeriodSchema();
   await ensurePushNotificationSchema();
   await ensureAiSchema();
 }
 
-export { ensurePushNotificationSchema };
+export { ensurePushNotificationSchema, ensureRealtimePubsubSchema };
 
 export async function ensureDeliveryIntegrationSchema() {
   if (isPostgres()) {

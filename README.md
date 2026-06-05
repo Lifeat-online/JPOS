@@ -39,6 +39,7 @@ npm run dev       # http://localhost:3000
 | `npm run test:e2e` | Playwright e2e |
 | `npm run db:init` | Apply the schema to a fresh database |
 | `npm run smoke:stocktake` | Stocktake end-to-end smoke test |
+| `npm run ops:verify-endpoint` | Validate production HTTPS, TLS, security headers, and `/api/health` |
 
 ## Architecture
 
@@ -47,6 +48,36 @@ npm run dev       # http://localhost:3000
 - **Realtime:** socket.io (deps installed, used by pole-display / multi-terminal presence; falls back to polling if disabled)
 - **Payments:** PayFast (webhook at `POST /api/payfast/notify`), plus card terminal, BNPL, and QR providers via the `paymentProviderBoundary` shim
 - **Storage:** MariaDB 11 or Postgres 14+; schema in `db/schema.sql` and `db/schema.postgres.sql`
+
+## Mobile/API clients
+
+The browser app defaults to same-origin `/api` calls, but mobile shells and
+separate frontends can point at a hosted backend with:
+
+```env
+VITE_DEPLOYMENT_MODE="cloud"
+VITE_API_BASE_URL="https://masepos.co.za"
+VITE_SOCKET_URL="https://masepos.co.za"
+CORS_ORIGINS="https://masepos.co.za,capacitor://localhost,ionic://localhost"
+```
+
+Hybrid cloud/on-prem deployments can set a local store server and cloud backend:
+
+```env
+VITE_DEPLOYMENT_MODE="hybrid"
+VITE_ON_PREM_API_BASE_URL="http://pos-box.local:8080"
+VITE_CLOUD_API_BASE_URL="https://masepos.co.za"
+VITE_SOCKET_URL=""
+```
+
+In hybrid mode, safe reads use the selected Settings > Connection target first
+and fail over for transient target outages. Mutations stay on the selected
+primary target so cash/card sales can enter the offline queue instead of being
+silently written to a different environment.
+
+See **[docs/mobile-app-api.md](docs/mobile-app-api.md)** for the API contract,
+auth flow, Socket.IO events, offline-sale replay model, and implementation
+checklist for a mobile coding agent.
 
 ## Project layout
 

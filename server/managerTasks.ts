@@ -29,7 +29,9 @@ type TaskDraft = {
   sourceId?: string | null;
   relatedSaleId?: string | null;
   relatedProductId?: string | null;
+  assignedTo?: string | null;
   requestedBy?: string | null;
+  dueAt?: string | null;
   details?: unknown;
 };
 
@@ -99,6 +101,12 @@ function parseJson(value: unknown, fallback: any) {
   }
 }
 
+function futureIso(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
 function rowToTask(row: any) {
   return {
     id: row.id,
@@ -137,8 +145,10 @@ async function upsertTask(draft: TaskDraft) {
     draft.sourceId || null,
     draft.relatedSaleId || null,
     draft.relatedProductId || null,
+    draft.assignedTo || null,
     draft.requestedBy || null,
     json(draft.details),
+    draft.dueAt || null,
   ];
 
   if (isPostgres()) {
@@ -146,14 +156,16 @@ async function upsertTask(draft: TaskDraft) {
       `INSERT INTO manager_tasks (
          id, tenant_id, task_type, title, summary, priority, status,
          source_type, source_id, related_sale_id, related_product_id,
-         requested_by, details, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+         assigned_to, requested_by, details, due_at, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
        ON CONFLICT (tenant_id, task_type, source_type, source_id)
        DO UPDATE SET
          title = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.title ELSE manager_tasks.title END,
          summary = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.summary ELSE manager_tasks.summary END,
          priority = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.priority ELSE manager_tasks.priority END,
+         assigned_to = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.assigned_to ELSE manager_tasks.assigned_to END,
          details = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.details ELSE manager_tasks.details END,
+         due_at = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.due_at ELSE manager_tasks.due_at END,
          updated_at = CASE WHEN manager_tasks.status IN ('open','in_review') THEN NOW() ELSE manager_tasks.updated_at END`,
       values
     );
@@ -164,13 +176,15 @@ async function upsertTask(draft: TaskDraft) {
     `INSERT INTO manager_tasks (
        id, tenant_id, task_type, title, summary, priority, status,
        source_type, source_id, related_sale_id, related_product_id,
-       requested_by, details, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+       assigned_to, requested_by, details, due_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
      ON DUPLICATE KEY UPDATE
        title = IF(status IN ('open','in_review'), VALUES(title), title),
        summary = IF(status IN ('open','in_review'), VALUES(summary), summary),
        priority = IF(status IN ('open','in_review'), VALUES(priority), priority),
+       assigned_to = IF(status IN ('open','in_review'), VALUES(assigned_to), assigned_to),
        details = IF(status IN ('open','in_review'), VALUES(details), details),
+       due_at = IF(status IN ('open','in_review'), VALUES(due_at), due_at),
        updated_at = IF(status IN ('open','in_review'), NOW(), updated_at)`,
     values
   );
@@ -631,12 +645,22 @@ export async function syncManagerTasksFromSignals(tenantId: string) {
       priority: insight.severity === "critical" ? "critical" : "high",
       sourceType: "ai_insight",
       sourceId: insight.id,
+      dueAt: futureIso(insight.severity === "critical" ? 1 : 3),
       details: {
         category: insight.category,
         severity: insight.severity,
         summary: insight.summary,
         recommendation: insight.recommendation,
         confidence: toNumber(insight.confidence),
+        requiredAction: "manager_approval",
+        approvalFirst: true,
+        forbiddenAutoActions: [
+          "auto_discount",
+          "auto_order",
+          "stock_change",
+          "permission_change",
+          "settings_change",
+        ],
       },
     });
   }

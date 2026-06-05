@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { createApp, setupRoutes } from '../../server/app.js';
+import { generateAccessToken } from '../../server/auth-middleware.js';
 
 let app: any;
 
@@ -58,6 +59,33 @@ describe('api routes', () => {
 
   it('returns unauthorized for protected endpoint without token', async () => {
     const response = await request(app).get('/api/mariadb/tenants/tenant_1/products');
+    expect(response.status).toBe(401);
+    expect(response.body).toHaveProperty('error');
+  });
+
+  it('blocks a valid staff token from accessing a different tenant route', async () => {
+    const token = generateAccessToken({
+      uid: 'staff_a',
+      staffId: 'staff_a',
+      email: 'cashier@tenant-a.test',
+      name: 'Tenant A Cashier',
+      role: 'cashier',
+      tenantId: 'tenant_a',
+    });
+
+    const response = await request(app)
+      .get('/api/mariadb/tenants/tenant_b/products')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toMatch(/cannot access the requested tenant/i);
+  });
+
+  it('exposes PayFast form generation as an authenticated API route', async () => {
+    const response = await request(app)
+      .post('/api/payfast/generate')
+      .send({ amount: 100, item_name: 'Test purchase' });
+
     expect(response.status).toBe(401);
     expect(response.body).toHaveProperty('error');
   });

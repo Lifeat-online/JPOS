@@ -5,7 +5,10 @@ describe('AI manager insights', () => {
   it('uses the newer operations data points added after the V1 copilot', () => {
     const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
     const insights = buildDeterministicInsights('tenant_1', {
-      products: [{ id: 'prod_1', name: 'Milk', stock: 1, min_stock: 5 }],
+      products: [
+        { id: 'prod_1', name: 'Milk', category: 'Dairy', stock: 1, min_stock: 5, price: 20, cost_price: 12 },
+        { id: 'prod_margin', name: 'Cake Slice', category: 'Dessert', stock: 12, min_stock: 2, price: 55, cost_price: 15 },
+      ],
       staff: [{ id: 'staff_1', name: 'Jess', status: 'active' }],
       sales: [
         { id: 'sale_1', staff_id: 'staff_1', status: 'completed', total: 240, tip_amount: 10, offline_event_id: 'offline_1', sync_source: 'offline' },
@@ -16,6 +19,7 @@ describe('AI manager insights', () => {
         { saleId: 'sale_1', method: 'wallet', amount: 140 },
       ],
       saleItems: [
+        { saleId: 'sale_1', productId: 'prod_margin', productName: 'Cake Slice', price: 55, quantity: 3, status: 'delivered' },
         { saleId: 'sale_2', status: 'pending', quantity: 1, workstationId: 'ws_kitchen', orderedAt: minutesAgo(25) },
         {
           saleId: 'sale_3',
@@ -54,6 +58,9 @@ describe('AI manager insights', () => {
       purchaseOrders: [{ status: 'sent', expected_delivery_date: '2026-05-01T08:00:00Z' }],
       companionDevices: [{ device_id: 'phone_1' }],
       pushSubscriptions: [{ id: 'push_1', disabled_at: null }],
+      promotions: [{ id: 'promo_1', name: 'Dessert push', status: 'active', discount_type: 'percent', discount_value: 5 }],
+      integrationApiKeys: [{ id: 'key_1', status: 'active', scopes: '["stock:write"]' }],
+      integrationWebhookEvents: [{ id: 'webhook_1', provider: 'erp', status: 'failed', event_type: 'stock_snapshot' }],
       business: { isRestaurantMode: true },
       activeRegisters: 1,
     });
@@ -66,7 +73,21 @@ describe('AI manager insights', () => {
       'Stocktake variance watch',
       'Lay-by exposure',
       'Cash control',
+      'Cashier upsell prompts',
+      'Menu/product optimization',
+      'Exception insight watch',
+      'Integration health',
     ]));
+    expect(insights.find((insight) => insight.title === 'Cashier upsell prompts')?.recommendation)
+      .toContain('cashiers');
+    expect(insights.find((insight) => insight.title === 'Menu/product optimization')?.recommendation)
+      .toContain('low-margin categories');
+    expect(insights.find((insight) => insight.title === 'Exception insight watch')?.recommendation)
+      .toContain('approval-first exception queue');
+    expect(insights.find((insight) => insight.title === 'Integration health')?.category)
+      .toBe('integration');
+    expect(insights.find((insight) => insight.title === 'Integration health')?.evidence)
+      .toEqual(expect.arrayContaining(['Failed webhooks: 1']));
     expect(insights.find((insight) => insight.title === 'Offline sync health')?.evidence)
       .toEqual(expect.arrayContaining(['Devices in audit details: 1']));
     expect(insights.find((insight) => insight.title === 'Lay-by exposure')?.summary)

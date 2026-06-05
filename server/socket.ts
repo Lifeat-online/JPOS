@@ -1,6 +1,7 @@
 import { Server as SocketIOServer } from "socket.io";
 import { query } from "./db.js";
 import { isPostgres } from "./db.js";
+import { publishRealtimeEventIfEnabled, startRealtimePubsubPoller } from "./realtimePubsub.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -61,6 +62,13 @@ export function setupSocketIO(httpServer: any) {
     pingTimeout: 60000,
     pingInterval: 25000,
   });
+
+  const stopRealtimeFanout = startRealtimePubsubPoller({
+    emitLocal(event) {
+      io.to(event.channel).emit(event.eventName, event.payload);
+    },
+  });
+  (io as any).stopRealtimeFanout = stopRealtimeFanout;
 
   // ── Middleware: Authenticate socket connections ─────────────────────────────
 
@@ -283,35 +291,42 @@ export function setupSocketIO(httpServer: any) {
  * Broadcast to all clients in a workstation (only active when register is open)
  */
 export function broadcastToWorkstation(io: any, workstationId: string, data: any) {
-  io.to(`workstation:${workstationId}`).emit("workstation_update", data);
+  emitRealtimeRoom(io, `workstation:${workstationId}`, "workstation_update", data);
 }
 
 /**
  * Broadcast to all clients in a table (only active when table is in use)
  */
 export function broadcastToTable(io: any, tableId: string, data: any) {
-  io.to(`table:${tableId}`).emit("table_update", data);
+  emitRealtimeRoom(io, `table:${tableId}`, "table_update", data);
 }
 
 /**
  * Broadcast to all clients in a tab (only active when tab is open)
  */
 export function broadcastToTab(io: any, tabId: string, data: any) {
-  io.to(`tab:${tabId}`).emit("tab_update", data);
+  emitRealtimeRoom(io, `tab:${tabId}`, "tab_update", data);
 }
 
 /**
  * Broadcast to all clients in a tenant
  */
 export function broadcastToTenant(io: any, tenantId: string, event: string, data: any) {
-  io.to(`tenant:${tenantId}`).emit(event, data);
+  emitRealtimeRoom(io, `tenant:${tenantId}`, event, data);
 }
 
 /**
  * Broadcast to all clients in a tenant's messages channel
  */
 export function broadcastToMessages(io: any, tenantId: string, data: any) {
-  io.to(`tenant:${tenantId}:messages`).emit("messages_update", data);
+  emitRealtimeRoom(io, `tenant:${tenantId}:messages`, "messages_update", data);
+}
+
+function emitRealtimeRoom(io: any, channel: string, eventName: string, data: any) {
+  io.to(channel).emit(eventName, data);
+  void publishRealtimeEventIfEnabled({ channel, eventName, payload: data }).catch((err) => {
+    console.warn("Failed to publish realtime fan-out event:", err);
+  });
 }
 
 // ── Workstation Status Broadcasting ───────────────────────────────────────────

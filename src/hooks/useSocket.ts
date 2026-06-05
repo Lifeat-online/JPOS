@@ -4,6 +4,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { getSocketBaseUrl } from '../apiConfig';
 import { JwtUser } from './useAuth';
 
 interface UseSocketOptions {
@@ -49,7 +50,7 @@ export function useSocket({ user, tenantId, enabled = true, workstationId, table
     const token = getAccessToken();
     if (!token) return;
 
-    const socketUrl = window.location.origin;
+    const socketUrl = getSocketBaseUrl();
     
     const newSocket = io(socketUrl, {
       auth: {

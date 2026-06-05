@@ -139,7 +139,7 @@ import {
   sendPushNotification,
 } from "./pushNotifications.js";
 import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistory, getManagerAuditReport } from "./actionCenter.js";
-import { applyStockAdjustment, createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue } from "./managerTasks.js";
+import { applyStockAdjustment, createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue, syncManagerTasksFromSignals } from "./managerTasks.js";
 import {
   cancelCashCustodyTransfer,
   confirmCashCustodyTransfer,
@@ -259,6 +259,14 @@ import {
   updateLoyaltyRewardRule,
   updateLoyaltyTier,
 } from "./loyalty.js";
+import {
+  batchCreateProducts,
+  batchUpdateProductPrices,
+  exportCustomersCsv,
+  exportInventoryCsv,
+  importCustomers,
+  importInventory,
+} from "./batchOperations.js";
 
 dotenv.config();
 
@@ -395,6 +403,18 @@ function denyWithAudit(
     ...details,
   }, auditActorFromRequest(req).staffId, "permission");
   return res.status(403).json({ error: message });
+}
+
+function requireTenantRouteAccess(req: Request, res: Response, next: NextFunction) {
+  const routeTenantId = String(req.params.tenantId || "").trim();
+  const tokenTenantId = String(req.user?.tenantId || "").trim();
+  if (!routeTenantId || !tokenTenantId || routeTenantId === tokenTenantId) {
+    return next();
+  }
+  return denyWithAudit(req, res, "tenant.cross_access", "This user cannot access the requested tenant.", {
+    routeTenantId,
+    tokenTenantId,
+  });
 }
 
 async function enforceSensitiveAction(
@@ -708,6 +728,21 @@ function generatePayFastSignature(data: any, passphrase?: string) {
   return crypto.createHash("md5").update(queryString).digest("hex");
 }
 
+function getPublicBaseUrl(req: Request) {
+  const configured = String(process.env.PUBLIC_APP_URL || process.env.APP_URL || "").trim().replace(/\/+$/, "");
+  if (configured) return configured;
+
+  const forwardedProto = String(req.get("x-forwarded-proto") || "").split(",")[0]?.trim();
+  const protocol = forwardedProto || req.protocol || "https";
+  const host = req.get("host");
+  return host ? `${protocol}://${host}` : "";
+}
+
+function safePayFastText(value: unknown, fallback: string, maxLength = 100) {
+  const text = String(value || "").trim();
+  return (text || fallback).slice(0, maxLength);
+}
+
 export async function createApp(io: any = null) {
   const app = express();
   if (io) app.set("io", io);
@@ -955,6 +990,10 @@ export async function createApp(io: any = null) {
     parsePositiveEnvNumber(process.env.INTEGRATION_WEBHOOK_RATE_LIMIT_WINDOW_MS, 60 * 1000),
     parsePositiveEnvNumber(process.env.INTEGRATION_WEBHOOK_RATE_LIMIT_MAX, isProduction ? 120 : 500)
   );
+  const sensitiveRouteRateLimit = createAuthRateLimit(
+    parsePositiveEnvNumber(process.env.SENSITIVE_ROUTE_RATE_LIMIT_WINDOW_MS, 60 * 1000),
+    parsePositiveEnvNumber(process.env.SENSITIVE_ROUTE_RATE_LIMIT_MAX, isProduction ? 30 : 300)
+  );
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -1023,11 +1062,13 @@ export async function createApp(io: any = null) {
   app.post("/api/auth/refresh", authRateLimit, handleRefreshToken);
   app.post("/api/auth/refresh-tokens/revoke", requireAuth, handleRevokeRefreshTokens);
   app.get("/api/auth/me", requireAuth, handleGetMe);
-  app.post("/api/auth/setup-password", requireAuth, validateSchema(PasswordSetupSchema), handleSetupPassword);
+  app.post("/api/auth/setup-password", sensitiveRouteRateLimit, requireAuth, validateSchema(PasswordSetupSchema), handleSetupPassword);
   app.get("/api/auth/2fa", requireAuth, handleTwoFactorStatus);
-  app.post("/api/auth/2fa/setup", requireAuth, handleTwoFactorSetup);
-  app.post("/api/auth/2fa/confirm", requireAuth, handleTwoFactorConfirm);
-  app.post("/api/auth/2fa/disable", requireAuth, handleTwoFactorDisable);
+  app.post("/api/auth/2fa/setup", sensitiveRouteRateLimit, requireAuth, handleTwoFactorSetup);
+  app.post("/api/auth/2fa/confirm", sensitiveRouteRateLimit, requireAuth, handleTwoFactorConfirm);
+  app.post("/api/auth/2fa/disable", sensitiveRouteRateLimit, requireAuth, handleTwoFactorDisable);
+
+  app.use("/api/mariadb/tenants/:tenantId", requireAuth, requireTenantRouteAccess);
 
   // Authenticated lookups: these expose email/name/role for cross-tenant
   // user resolution. Previously they were optionalAuth (i.e. unauthenticated
@@ -1066,6 +1107,78 @@ export async function createApp(io: any = null) {
     } catch (err: any) {
       const status = String(err?.message || "").includes("not assigned") ? 403 : 500;
       res.status(status).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/batch/products/create", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "batch.products_create", "Manager access is required for batch product creation.");
+      }
+      const result = await batchCreateProducts(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
+      await auditRouteEvent(req, "batch.products_created", "product", {
+        dryRun: result.dryRun,
+        created: result.created,
+        skipped: result.skipped,
+        errorCount: result.errors.length,
+      }, null, "inventory_batch");
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/batch/products/prices", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "batch.product_prices_update", "Manager access is required for batch price updates.");
+      }
+      const result = await batchUpdateProductPrices(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
+      await auditRouteEvent(req, "batch.product_prices_updated", "product", {
+        dryRun: result.dryRun,
+        updated: result.updated,
+        skipped: result.skipped,
+        errorCount: result.errors.length,
+      }, null, "inventory_batch");
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/batch/inventory/export", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "batch.inventory_export", "Manager access is required for inventory exports.");
+      }
+      const pack = await exportInventoryCsv(req.params.tenantId, {
+        locationId: typeof req.query.locationId === "string" ? req.query.locationId : null,
+      });
+      await auditRouteEvent(req, "batch.inventory_exported", "inventory", {
+        count: pack.count,
+        locationId: typeof req.query.locationId === "string" ? req.query.locationId : null,
+      }, null, "inventory_batch");
+      res.json(pack);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/batch/inventory/import", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "batch.inventory_import", "Manager access is required for inventory imports.");
+      }
+      const result = await importInventory(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
+      await auditRouteEvent(req, "batch.inventory_imported", "inventory", {
+        dryRun: result.dryRun,
+        updated: result.updated,
+        skipped: result.skipped,
+        errorCount: result.errors.length,
+      }, null, "inventory_batch");
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -1114,7 +1227,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/inventory-location-stock", requireAuth, async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/inventory-location-stock", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
     try {
       if (!canManageInventory(req.user?.role)) {
         return denyWithAudit(req, res, "inventory_location_stock.update", "Manager access is required to adjust location stock.");
@@ -1143,7 +1256,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/stock-transfers", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/stock-transfers", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
     try {
       if (!canManageInventory(req.user?.role)) {
         return denyWithAudit(req, res, "stock_transfers.create", "Manager access is required to create stock transfers.");
@@ -1158,7 +1271,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/stock-transfers/:transferId/complete", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/stock-transfers/:transferId/complete", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
     try {
       if (!canManageInventory(req.user?.role)) {
         return denyWithAudit(req, res, "stock_transfers.complete", "Manager access is required to complete stock transfers.", {
@@ -1502,6 +1615,7 @@ export async function createApp(io: any = null) {
 
   app.post(
     "/api/mariadb/tenants/:tenantId/ai/test",
+    sensitiveRouteRateLimit,
     requireAuth,
     requireAiPackageAccess,
     async (req, res) => {
@@ -1560,6 +1674,28 @@ export async function createApp(io: any = null) {
     async (req, res) => {
       try {
         res.json(await generateInsights(req.params.tenantId, req.user?.staffId || null));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/mariadb/tenants/:tenantId/ai/insights/sync-tasks",
+    requireAuth,
+    requireAiPackageAccess,
+    requireAiRoleAccess,
+    async (req, res) => {
+      try {
+        if (!canManageAi(req.user?.role)) {
+          return denyWithAudit(req, res, "ai.insights_sync_tasks", "Only managers, admins, and devs can sync AI recommendation tasks");
+        }
+        const result = await syncManagerTasksFromSignals(req.params.tenantId);
+        await auditRouteEvent(req, "ai.insights_synced_to_tasks", "manager_task", {
+          synced: result.synced,
+          approvalFirst: true,
+        }, req.params.tenantId, "ai");
+        res.json(result);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -2305,7 +2441,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/stocktakes/items/:itemId/count", requireAuth, async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/stocktakes/items/:itemId/count", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
     try {
       const sensitiveResponse = await enforceSensitiveAction(req, res, "stock_adjustment", {
         itemId: req.params.itemId,
@@ -2316,6 +2452,7 @@ export async function createApp(io: any = null) {
         countedQuantity: Number(req.body?.countedQuantity),
         note: req.body?.note || null,
         varianceReason: req.body?.varianceReason || null,
+        requestId: req.requestId || null,
       }, {
         staffId: req.user?.staffId || req.user?.uid || null,
         staffName: req.user?.name || null,
@@ -2340,6 +2477,7 @@ export async function createApp(io: any = null) {
       if (sensitiveResponse) return;
       res.json(await requestStockTakeRecount(req.params.tenantId, req.params.itemId, {
         note: req.body?.note || null,
+        requestId: req.requestId || null,
       }, {
         staffId: req.user?.staffId || req.user?.uid || null,
         staffName: req.user?.name || null,
@@ -2350,7 +2488,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/stocktakes/:sessionId/approve", requireAuth, async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/stocktakes/:sessionId/approve", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
         return denyWithAudit(req, res, "stocktake.approve", "Manager access is required to approve a stocktake.", {
@@ -2366,6 +2504,7 @@ export async function createApp(io: any = null) {
         staffId: req.user?.staffId || req.user?.uid || null,
         staffName: req.user?.name || null,
         role: req.user?.role || null,
+        requestId: req.requestId || null,
       }));
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -2378,6 +2517,40 @@ export async function createApp(io: any = null) {
       res.json(customers);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/batch/customers/export", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "batch.customers_export", "Manager access is required for customer exports.");
+      }
+      const pack = await exportCustomersCsv(req.params.tenantId);
+      await auditRouteEvent(req, "batch.customers_exported", "customer", {
+        count: pack.count,
+      }, null, "customer_batch");
+      res.json(pack);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/batch/customers/import", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "batch.customers_import", "Manager access is required for customer imports.");
+      }
+      const result = await importCustomers(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
+      await auditRouteEvent(req, "batch.customers_imported", "customer", {
+        dryRun: result.dryRun,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        errorCount: result.errors.length,
+      }, null, "customer_batch");
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -2954,7 +3127,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/sales", requireAuth, validateSchema(SaleSchema), async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/sales", sensitiveRouteRateLimit, requireAuth, validateSchema(SaleSchema), async (req, res) => {
     try {
       const saleInput = stripSensitiveVerification(req.body || {});
       const sensitiveAction = saleMutationSensitiveAction(saleInput);
@@ -3001,7 +3174,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/sales/:saleId", requireAuth, async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/sales/:saleId", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
     try {
       const hasPayload = req.body && typeof req.body === "object" && Object.keys(req.body).length > 0;
       if (!hasPayload) {
@@ -3034,7 +3207,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.put("/api/mariadb/tenants/:tenantId/sales/:saleId/payments/:paymentId/provider-status", requireAuth, validateSchema(PaymentProviderStatusSchema), async (req, res) => {
+  app.put("/api/mariadb/tenants/:tenantId/sales/:saleId/payments/:paymentId/provider-status", sensitiveRouteRateLimit, requireAuth, validateSchema(PaymentProviderStatusSchema), async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
         return denyWithAudit(req, res, "payment.provider_reconcile", "Manager access is required to reconcile provider payments.", {
@@ -3046,6 +3219,7 @@ export async function createApp(io: any = null) {
         ...req.body,
         staffId: req.user?.staffId || null,
         staffName: req.user?.name || null,
+        requestId: req.requestId || null,
       });
       const liveIo = realtimeIo();
       if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, sale.id);
@@ -3055,7 +3229,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/sales/:saleId/refund", requireAuth, validateSchema(SaleRefundSchema), async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/sales/:saleId/refund", sensitiveRouteRateLimit, requireAuth, validateSchema(SaleRefundSchema), async (req, res) => {
     try {
       const refundInput = stripSensitiveVerification(req.body || {});
       const role = String(req.user?.role || "").toLowerCase();
@@ -3090,6 +3264,7 @@ export async function createApp(io: any = null) {
         ...refundInput,
         staffId: (refundInput as any).staffId || req.user?.staffId || null,
         staffName: (refundInput as any).staffName || req.user?.name || null,
+        requestId: req.requestId || null,
       });
       const liveIo = realtimeIo();
       if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, refund.id);
@@ -3099,7 +3274,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/sales/:saleId/void", requireAuth, validateSchema(SaleVoidSchema), async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/sales/:saleId/void", sensitiveRouteRateLimit, requireAuth, validateSchema(SaleVoidSchema), async (req, res) => {
     try {
       const voidInput = stripSensitiveVerification(req.body || {});
       const role = String(req.user?.role || "").toLowerCase();
@@ -3133,6 +3308,7 @@ export async function createApp(io: any = null) {
         ...voidInput,
         staffId: (voidInput as any).staffId || req.user?.staffId || null,
         staffName: (voidInput as any).staffName || req.user?.name || null,
+        requestId: req.requestId || null,
       });
       const liveIo = realtimeIo();
       if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, voided.id);
@@ -3648,7 +3824,7 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/mariadb/tenants/:tenantId/products/:id/stock-adjustments", requireAuth, async (req, res) => {
+  app.post("/api/mariadb/tenants/:tenantId/products/:id/stock-adjustments", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
     try {
       const stockInput = stripSensitiveVerification(req.body || {});
       const delta = Number((stockInput as any)?.delta);
@@ -4299,6 +4475,7 @@ export async function createApp(io: any = null) {
         staffId: req.user?.staffId,
         staffName: req.user?.name,
         role: req.user?.role,
+        requestId: req.requestId || null,
       });
       res.status(201).json(result);
     } catch (err: any) {
@@ -5017,7 +5194,45 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/payfast/notify", async (req, res) => {
+  app.post("/api/payfast/generate", requireAuth, async (req, res) => {
+    try {
+      const amount = Number(req.body?.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        res.status(400).json({ error: "Valid amount is required" });
+        return;
+      }
+
+      const config = await getAppConfig(req.user!.tenantId);
+      if (!config.merchant_id || !config.merchant_key) {
+        res.status(400).json({ error: "PayFast credentials are not configured" });
+        return;
+      }
+
+      const publicBaseUrl = getPublicBaseUrl(req);
+      const fields: Record<string, string> = {
+        merchant_id: String(config.merchant_id),
+        merchant_key: String(config.merchant_key),
+        amount: amount.toFixed(2),
+        item_name: safePayFastText(req.body?.item_name || req.body?.itemName, "MasePOS Purchase"),
+      };
+
+      const saleId = safePayFastText(req.body?.sale_id || req.body?.saleId, "", 64);
+      if (saleId) fields.m_payment_id = saleId;
+      if (req.body?.return_url) fields.return_url = String(req.body.return_url);
+      if (req.body?.cancel_url) fields.cancel_url = String(req.body.cancel_url);
+      if (publicBaseUrl) fields.notify_url = `${publicBaseUrl}/api/payfast/notify`;
+
+      fields.signature = generatePayFastSignature(fields, config.passphrase);
+      res.json({
+        url: config.sandbox ? "https://sandbox.payfast.co.za/eng/process" : "https://www.payfast.co.za/eng/process",
+        fields,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/payfast/notify", sensitiveRouteRateLimit, async (req, res) => {
     try {
       const { m_payment_id, pf_payment_id, payment_status, signature, ...otherData } = req.body;
       const calculatedSignature = generatePayFastSignature({ m_payment_id, pf_payment_id, payment_status, ...otherData }, PAYFAST_PASSPHRASE);

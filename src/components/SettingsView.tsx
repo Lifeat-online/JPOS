@@ -1,13 +1,14 @@
 import { usePosStore } from '../store/usePosStore';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppConfig, Workstation, TableSection, RestaurantTable, Promotion, LoyaltyTier, LoyaltyRewardRule, RetentionPolicy, RetentionPreview } from '../types';
-import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send, Smartphone, Printer, Eye, RotateCcw, Upload, Clock, ShieldCheck } from 'lucide-react';
+import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send, Smartphone, Printer, Eye, RotateCcw, Upload, Clock, ShieldCheck, Wifi } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
 import { apiGet, apiPut, apiPost, apiDelete, assignCompanionDevice, applyRetentionPolicy, createLoyaltyRewardRule, createLoyaltyTier, createPromotion, getCompanionDeviceAssignments, getLoyaltyRewardRules, getLoyaltyTiers, getPromotions, getRetentionPolicy, getTenantPackageLimits, getAiSettings, listAiModels, previewRetentionPolicy, revokeCompanionDeviceAssignment, testAiProvider, updateAiSettings, updateLoyaltyRewardRule, updateLoyaltyTier, updatePromotion, updateRetentionPolicy, uploadTenantLogo, type TenantPackageLimitsResponse } from '../api';
 import { JPOS_PACKAGES } from '../../shared/packageCatalog';
 import type { AiModelOption, AiProviderName, AiRole, AiSettings } from '../types';
 import { buildReceiptPrintCss, getReceiptPaperProfile, RECEIPT_PAPER_OPTIONS, normalizeReceiptPrintSettings } from '../utils/receiptPrinting';
 import { HardwareAdaptersPanel } from './HardwareAdaptersPanel';
+import { ConnectionTargetPanel } from './ConnectionTargetPanel';
 import { toast } from '../utils/toast';
 
 function readSettingsFileAsDataUrl(file: File) {
@@ -160,7 +161,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     categories: config.categories || DEFAULT_CATEGORY_TREE
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'business' | 'package' | 'ai' | 'payment' | 'categories' | 'features' | 'printing' | 'hardware' | 'tax' | 'loyalty' | 'discounts' | 'retention' | 'workstations' | 'tables'>('business');
+  const [activeTab, setActiveTab] = useState<'business' | 'connection' | 'package' | 'ai' | 'payment' | 'categories' | 'features' | 'printing' | 'hardware' | 'tax' | 'loyalty' | 'discounts' | 'retention' | 'workstations' | 'tables'>('business');
   const [packageLimits, setPackageLimits] = useState<TenantPackageLimitsResponse | null>(null);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [promotionDraft, setPromotionDraft] = useState<PromotionDraft>(() => newPromotionDraft());
@@ -1041,6 +1042,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           >
             <Settings2 className="w-4 h-4" />
             Features
+          </button>
+          <button
+            onClick={() => setActiveTab('connection')}
+            className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'connection' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
+          >
+            <Wifi className="w-4 h-4" />
+            Connection
           </button>
           <button
             onClick={() => setActiveTab('package')}
@@ -2714,6 +2722,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
             </div>
           )}
 
+          {activeTab === 'connection' && <ConnectionTargetPanel />}
+
           {activeTab === 'hardware' && (
             <HardwareAdaptersPanel tenantId={tenantId} workstations={workstations} />
           )}
@@ -3131,7 +3141,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           )}
 
           {/* Save button — hidden on workstations tab (it has its own save) */}
-          {activeTab !== 'workstations' && activeTab !== 'tables' && activeTab !== 'ai' && activeTab !== 'retention' && activeTab !== 'hardware' && (
+          {activeTab !== 'workstations' && activeTab !== 'tables' && activeTab !== 'ai' && activeTab !== 'retention' && activeTab !== 'hardware' && activeTab !== 'connection' && (
           <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
             <button
               onClick={handleSave}

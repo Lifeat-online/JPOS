@@ -81,6 +81,23 @@ describe('manager task queue', () => {
       expect.stringContaining('INSERT INTO manager_tasks'),
       expect.arrayContaining(['tenant_1', 'ai_recommendation'])
     );
+    const aiInsertCall = (dbModule.query as any).mock.calls.find((call: any[]) => {
+      return String(call[0]).includes('INSERT INTO manager_tasks') && call[1]?.includes('ai_recommendation');
+    });
+    expect(aiInsertCall).toBeTruthy();
+    const aiDetails = JSON.parse(aiInsertCall[1][13]);
+    expect(aiDetails).toMatchObject({
+      requiredAction: 'manager_approval',
+      approvalFirst: true,
+    });
+    expect(aiDetails.forbiddenAutoActions).toEqual(expect.arrayContaining([
+      'auto_discount',
+      'auto_order',
+      'stock_change',
+      'permission_change',
+      'settings_change',
+    ]));
+    expect(aiInsertCall[1][14]).toMatch(/T/);
     expect(result.counts).toMatchObject({ open: 1, inReview: 0, total: 1 });
     expect(result.tasks[0]).toMatchObject({
       id: 'task_1',

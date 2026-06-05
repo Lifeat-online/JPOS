@@ -11,6 +11,7 @@ import { StockBatchesView } from '../components/StockBatchesView';
 import { ReorderRecommendationsView } from '../components/ReorderRecommendationsView';
 import { RecipeCostingView } from '../components/RecipeCostingView';
 import { InventoryLocationsView } from '../components/InventoryLocationsView';
+import { BatchOperationsView } from '../components/BatchOperationsView';
 import { StockTakeView } from './StockTakeView';
 
 interface InventoryViewProps {
@@ -44,7 +45,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 }) => {
   const tenantId = usePosStore(state => state.tenantId);
   const currentUserStaff = usePosStore(state => state.currentUserStaff);
-  const [tab, setTab] = useState<'products' | 'channels' | 'vendors' | 'purchaseOrders' | 'bulk' | 'copilot' | 'stocktake' | 'batches' | 'reorder' | 'recipeCosting' | 'locations'>(() => {
+  const [tab, setTab] = useState<'products' | 'channels' | 'vendors' | 'purchaseOrders' | 'bulk' | 'batchOps' | 'copilot' | 'stocktake' | 'batches' | 'reorder' | 'recipeCosting' | 'locations'>(() => {
     const queryTab = new URLSearchParams(window.location.search).get('tab');
     return queryTab === 'stocktake' ? 'stocktake' : queryTab === 'locations' ? 'locations' : queryTab === 'recipeCosting' ? 'recipeCosting' : queryTab === 'channels' ? 'channels' : 'products';
   });
@@ -263,13 +264,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       <div className="max-w-[1600px] mx-auto flex flex-col gap-8">
         {/* Sub-Tabs */}
         <div className="flex border-b border-slate-200 dark:border-slate-800 gap-6">
-          {(['products', 'channels', 'stocktake', 'locations', 'batches', 'reorder', 'recipeCosting', 'bulk', 'vendors', 'purchaseOrders', 'copilot'] as const).map(t => (
+          {(['products', 'channels', 'stocktake', 'locations', 'batches', 'reorder', 'recipeCosting', 'batchOps', 'bulk', 'vendors', 'purchaseOrders', 'copilot'] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`pb-4 px-2 text-sm font-bold transition-all capitalize ${tab === t ? 'border-b-2 border-primary text-primary' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
-              {t === 'purchaseOrders' ? 'Purchase Orders' : t === 'bulk' ? 'Bulk Inventory' : t === 'copilot' ? 'Copilot Agent' : t === 'stocktake' ? 'Stocktake' : t === 'batches' ? 'Batches' : t === 'reorder' ? 'Reorder' : t === 'recipeCosting' ? 'Recipe Costing' : t === 'locations' ? 'Locations' : t === 'channels' ? 'Channels' : t.charAt(0).toUpperCase() + t.slice(1)}
+              {t === 'purchaseOrders' ? 'Purchase Orders' : t === 'batchOps' ? 'Batch Ops' : t === 'bulk' ? 'Bulk Inventory' : t === 'copilot' ? 'Copilot Agent' : t === 'stocktake' ? 'Stocktake' : t === 'batches' ? 'Batches' : t === 'reorder' ? 'Reorder' : t === 'recipeCosting' ? 'Recipe Costing' : t === 'locations' ? 'Locations' : t === 'channels' ? 'Channels' : t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
         </div>
@@ -554,6 +555,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           <RecipeCostingView />
         ) : tab === 'purchaseOrders' ? (
           <PurchaseOrdersView />
+        ) : tab === 'batchOps' ? (
+          <BatchOperationsView onProductsUpdated={onProductsUpdated} />
         ) : tab === 'bulk' ? (
           <BulkInventoryView />
         ) : tab === 'copilot' ? (

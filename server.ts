@@ -14,6 +14,7 @@ const {
   ensurePersonDiscountSchema,
   ensurePurchaseOrderReceivingSchema,
   ensurePushNotificationSchema,
+  ensureRealtimePubsubSchema,
   ensureReorderRecommendationSchema,
   ensureRefundSchema,
   ensureSalePaymentsTable,
@@ -61,6 +62,9 @@ await ensureHardwareDeviceSchema().catch((err: unknown) => {
 });
 await ensurePushNotificationSchema().catch((err: unknown) => {
   console.warn("Failed to ensure push notification schema:", err);
+});
+await ensureRealtimePubsubSchema().catch((err: unknown) => {
+  console.warn("Failed to ensure realtime pub/sub schema:", err);
 });
 await ensureBulkInventorySchema().catch((err: unknown) => {
   console.warn("Failed to ensure bulk inventory schema:", err);

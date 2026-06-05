@@ -5,7 +5,8 @@
  */
 import { getAccessToken } from './hooks/useAuth';
 import { promptSensitiveCredential } from './api-sensitive-action';
-import type { AccountingJournalReport, AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, CustomerCampaignExport, CustomerConsentMap, CustomerDataExport, DeliveryOrder, DeliveryOrderStatus, EcommerceMarketplaceExport, EventBooking, HardwareDevice, HardwareDeviceEvent, IntegrationApiKey, IntegrationWebhookEvent, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, InventoryLocation, LaybyOrder, LaybyPaymentMethod, LoyaltyAwardResult, LoyaltyRewardRule, LoyaltyTier, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, MarginReport, OperationalReport, ProductLocationStock, Promotion, PromotionValidationResult, RecipeCostingReport, ReorderNotificationRule, ReorderRecommendation, RetentionApplyResult, RetentionPolicy, RetentionPreview, StaffAttendance, StaffAttendanceStatus, StaffCoachingNote, StaffPerformanceReport, StaffShift, StaffTimesheetReport, StockTakeSuggestion, StockTransferOrder, StockValuationReport, TaxPeriod, TipPoolReport, TipPoolRule, VatTaxReport } from './types';
+import { apiUrl, apiUrls } from './apiConfig';
+import type { AccountingJournalReport, AiInsight, AiModelOption, AiSettings, AiStaffScore, BatchExportResult, BatchMutationResult, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, CustomerCampaignExport, CustomerConsentMap, CustomerDataExport, DeliveryOrder, DeliveryOrderStatus, EcommerceMarketplaceExport, EventBooking, HardwareDevice, HardwareDeviceEvent, IntegrationApiKey, IntegrationWebhookEvent, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, InventoryLocation, LaybyOrder, LaybyPaymentMethod, LoyaltyAwardResult, LoyaltyRewardRule, LoyaltyTier, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, MarginReport, OperationalReport, ProductLocationStock, Promotion, PromotionValidationResult, RecipeCostingReport, ReorderNotificationRule, ReorderRecommendation, RetentionApplyResult, RetentionPolicy, RetentionPreview, StaffAttendance, StaffAttendanceStatus, StaffCoachingNote, StaffPerformanceReport, StaffShift, StaffTimesheetReport, StockTakeSuggestion, StockTransferOrder, StockValuationReport, TaxPeriod, TipPoolReport, TipPoolRule, VatTaxReport } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
@@ -34,7 +35,7 @@ async function tryRefresh(): Promise<boolean> {
 
   refreshPromise = (async () => {
     try {
-      const res = await fetch('/api/auth/refresh', {
+      const res = await fetch(apiUrl('/api/auth/refresh'), {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ refreshToken }),
@@ -93,6 +94,22 @@ function isJsonMutation(init: RequestInit) {
     && contentType.toLowerCase().includes('application/json');
 }
 
+function isSafeRequest(init: RequestInit) {
+  const method = String(init.method || 'GET').toUpperCase();
+  return method === 'GET' || method === 'HEAD';
+}
+
+function isTransientTargetFailure(status: number) {
+  return status === 408
+    || status === 502
+    || status === 503
+    || status === 504
+    || status === 521
+    || status === 522
+    || status === 523
+    || status === 524;
+}
+
 function withSensitiveVerification(init: RequestInit, credential: string, actionType?: string | null): RequestInit | null {
   if (!isJsonMutation(init)) return null;
   try {
@@ -123,12 +140,30 @@ async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<
     throw new Error('Session expired. Please sign in again.');
   }
 
-  const doRequest = (requestInit: RequestInit) => fetch(input, {
-    ...requestInit,
-    headers: {
-      ...authHeaders(requestInit.headers as Record<string, string>),
-    },
-  });
+  const doRequest = async (requestInit: RequestInit) => {
+    const safeRequest = isSafeRequest(requestInit);
+    const candidates = safeRequest ? apiUrls(input) : [apiUrl(input)];
+    let lastError: unknown = null;
+    for (const [index, candidate] of candidates.entries()) {
+      try {
+        const response = await fetch(candidate, {
+          ...requestInit,
+          headers: {
+            ...authHeaders(requestInit.headers as Record<string, string>),
+          },
+        });
+        if (safeRequest && index < candidates.length - 1 && isTransientTargetFailure(response.status)) {
+          lastError = new Error(`API target unavailable [${response.status}]`);
+          continue;
+        }
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (!safeRequest) throw error;
+      }
+    }
+    throw lastError || new Error('API request failed');
+  };
 
   let currentInit = init;
   let res = await doRequest(currentInit);
@@ -206,7 +241,7 @@ export function apiDelete<T>(path: string, data?: unknown): Promise<T> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function apiLogin(email: string, password: string, tenantId?: string) {
-  return fetch('/api/auth/login', {
+  return fetch(apiUrl('/api/auth/login'), {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ email, password, tenantId }),
@@ -240,6 +275,23 @@ export function revokeRefreshTokens(staffId?: string, reason = 'suspected_compro
 export function getTenantProducts(tenantId: string, locationId?: string | null) {
   const query = locationId ? `?locationId=${encodeURIComponent(locationId)}` : '';
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/products${query}`);
+}
+
+export function batchCreateProducts(tenantId: string, data: { csv?: string; rows?: Record<string, unknown>[]; dryRun?: boolean }) {
+  return apiPost<BatchMutationResult>(`/api/mariadb/tenants/${tenantId}/batch/products/create`, data);
+}
+
+export function batchUpdateProductPrices(tenantId: string, data: { csv?: string; rows?: Record<string, unknown>[]; dryRun?: boolean }) {
+  return apiPost<BatchMutationResult>(`/api/mariadb/tenants/${tenantId}/batch/products/prices`, data);
+}
+
+export function exportInventoryBatchCsv(tenantId: string, filters: { locationId?: string | null } = {}) {
+  const query = filters.locationId ? `?locationId=${encodeURIComponent(filters.locationId)}` : '';
+  return apiGet<BatchExportResult>(`/api/mariadb/tenants/${tenantId}/batch/inventory/export${query}`);
+}
+
+export function importInventoryBatch(tenantId: string, data: { csv?: string; rows?: Record<string, unknown>[]; dryRun?: boolean; locationId?: string | null }) {
+  return apiPost<BatchMutationResult>(`/api/mariadb/tenants/${tenantId}/batch/inventory/import`, data);
 }
 
 export function getInventoryLocations(tenantId: string) {
@@ -472,6 +524,14 @@ export function dismissReorderRecommendation(tenantId: string, id: string, note?
 
 export function getTenantCustomers(tenantId: string) {
   return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/customers`);
+}
+
+export function exportCustomersBatchCsv(tenantId: string) {
+  return apiGet<BatchExportResult>(`/api/mariadb/tenants/${tenantId}/batch/customers/export`);
+}
+
+export function importCustomersBatch(tenantId: string, data: { csv?: string; rows?: Record<string, unknown>[]; dryRun?: boolean }) {
+  return apiPost<BatchMutationResult>(`/api/mariadb/tenants/${tenantId}/batch/customers/import`, data);
 }
 
 export function getTenantStaff(tenantId: string) {
@@ -1595,6 +1655,10 @@ export function deleteAiInsight(tenantId: string, insightId: string) {
   return apiDelete<{ deleted: number }>(`/api/mariadb/tenants/${tenantId}/ai/insights/${insightId}`);
 }
 
+export function syncAiInsightTasks(tenantId: string) {
+  return apiPost<{ synced: number }>(`/api/mariadb/tenants/${tenantId}/ai/insights/sync-tasks`, {});
+}
+
 export function getAiStaffScores(tenantId: string) {
   return apiGet<AiStaffScore[]>(`/api/mariadb/tenants/${tenantId}/ai/staff-scores`);
 }
@@ -1612,7 +1676,7 @@ export function applyInventoryAgentSteps(tenantId: string, steps: InventoryAgent
 }
 
 export async function generateLicence(adminKey: string, data: GenerateLicenceRequest) {
-  const res = await fetch('/api/admin/licence/generate', {
+  const res = await fetch(apiUrl('/api/admin/licence/generate'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1628,7 +1692,7 @@ export async function generateLicence(adminKey: string, data: GenerateLicenceReq
 }
 
 export async function revokeLicence(adminKey: string, licenceId: string, reason?: string) {
-  const res = await fetch('/api/admin/licence/revoke', {
+  const res = await fetch(apiUrl('/api/admin/licence/revoke'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

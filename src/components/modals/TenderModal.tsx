@@ -40,6 +40,7 @@ export const TenderModal: React.FC<TenderModalProps> = ({
   const overage = Math.max(0, tendered - cartTotal);
   const cardTerminalReady = method !== 'card' || (cardProvider.trim().length > 0 && providerDeviceId.trim().length > 0);
   const canConfirm = tendered >= cartTotal && cardTerminalReady;
+  const tenderedAmountInputId = `${method}-tendered-amount`;
 
   const confirm = () => {
     if (method !== 'card') {
@@ -81,10 +82,11 @@ export const TenderModal: React.FC<TenderModalProps> = ({
           </div>
 
           <div>
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 px-1 mb-1 block">
+            <label htmlFor={tenderedAmountInputId} className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 px-1 mb-1 block">
               {method === 'cash' ? 'Amount Tendered' : 'Charge Amount'}
             </label>
             <input
+              id={tenderedAmountInputId}
               type="number" step="0.01" min="0" autoFocus required
               value={tenderedAmount}
               onChange={e => onTenderedChange(e.target.value)}

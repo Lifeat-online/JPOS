@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { JwtUser } from './useAuth';
 import { Customer, Staff, AppConfig, Promotion } from '../types';
 import { usePosStore } from '../store/usePosStore';
-import { apiPut, createSale, getSaleById, validatePromotionCode } from '../api';
+import { apiPost, apiPut, createSale, getSaleById, validatePromotionCode } from '../api';
 import { useSocket } from './useSocket';
 import { getApplicablePricingDiscount } from '../utils/discounts';
 import { toast } from '../utils/toast';
@@ -864,18 +864,13 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         }
       } else {
         // PayFast redirect (PayFast currently doesn't support being part of a split in this implementation)
-        const response = await fetch('/api/payfast/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            amount: cartTotalAfterDiscount,
-            item_name: `POS Purchase - ${saleId}`,
-            sale_id: saleId,
-            return_url: window.location.href + '?payment=success',
-            cancel_url: window.location.href + '?payment=cancel',
-          }),
+        const { url, fields } = await apiPost<{ url: string; fields: Record<string, string> }>('/api/payfast/generate', {
+          amount: cartTotalAfterDiscount,
+          item_name: `POS Purchase - ${saleId}`,
+          sale_id: saleId,
+          return_url: window.location.href + '?payment=success',
+          cancel_url: window.location.href + '?payment=cancel',
         });
-        const { url, fields } = await response.json();
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = url;

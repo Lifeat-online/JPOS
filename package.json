@@ -21,7 +21,11 @@
     "test:e2e": "cross-env NODE_ENV=test playwright test",
     "test": "npm run test:unit && npm run test:api",
     "test:watch": "cross-env NODE_ENV=test vitest",
-    "smoke:stocktake": "tsx scripts/stocktake-smoke.ts"
+    "smoke:stocktake": "tsx scripts/stocktake-smoke.ts",
+    "ops:verify-endpoint": "tsx scripts/verify-production-endpoint.ts",
+    "ops:verify-schema": "tsx scripts/verify-production-schema.ts",
+    "seed:test-tenant": "tsx scripts/seed-test-tenant.ts",
+    "security:scan": "npm audit --omit=dev"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

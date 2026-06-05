@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
   ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Printer, ReceiptText,
-  AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronLeft, LayoutGrid, PanelLeft, CheckCircle2, RefreshCw, ListChecks, PackageCheck
+  AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronLeft, LayoutGrid, PanelLeft, CheckCircle2, RefreshCw, ListChecks, PackageCheck, Sparkles
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -248,6 +248,62 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     () => selectedCustomerId ? customers.find(c => c.id === selectedCustomerId) || null : null,
     [customers, selectedCustomerId]
   );
+  const cashierUpsellPrompt = useMemo(() => {
+    if (cart.length === 0 || products.length === 0) return null;
+
+    const cartProductIds = new Set(cart.map(item => String((item as any).productId || item.id)));
+    const cartCategories = new Set(cart.map(item => String(item.category || '').toLowerCase()).filter(Boolean));
+    const cartSections = new Set(cart.map(item => String((item as any).section || '').toLowerCase()).filter(Boolean));
+    const hour = new Date().getHours();
+    const demandWindow = hour < 11
+      ? 'morning demand'
+      : hour < 15
+        ? 'lunch demand'
+        : hour < 18
+          ? 'afternoon add-on'
+          : 'evening basket';
+
+    const ranked = products
+      .filter(product => {
+        if (cartProductIds.has(product.id)) return false;
+        const inCart = cart.reduce((sum, item) => (
+          item.id === product.id || (item as any).productId === product.id ? sum + Number(item.quantity || 0) : sum
+        ), 0);
+        return Number(product.stock || 0) - inCart > 0;
+      })
+      .map(product => {
+        const price = Number(product.price || 0);
+        const cost = Number(product.costPrice ?? price * 0.6);
+        const margin = Math.max(0, price - cost);
+        const stock = Number(product.stock || 0);
+        const minStock = Number(product.minStock ?? 0);
+        const categoryMatch = cartCategories.has(String(product.category || '').toLowerCase());
+        const sectionMatch = cartSections.has(String(product.section || '').toLowerCase());
+        const customerPoints = Number(selectedCustomer?.loyaltyPoints ?? selectedCustomer?.points ?? 0);
+        const isHealthyStock = stock > Math.max(minStock, 0);
+        const score =
+          margin +
+          (categoryMatch ? 30 : 0) +
+          (sectionMatch ? 12 : 0) +
+          (isHealthyStock ? 10 : 0) +
+          (selectedCustomer ? 6 : 0) +
+          (customerPoints > 0 ? 4 : 0) +
+          ((appliedPromotion || promotionDiscount > 0) ? 5 : 0);
+        const reasons = [
+          categoryMatch ? `${product.category} add-on` : sectionMatch ? `${product.section || 'Basket'} companion` : 'basket builder',
+          margin > 0 ? `R${margin.toFixed(2)} margin` : null,
+          `${stock} in stock`,
+          selectedCustomer ? (customerPoints > 0 ? `${customerPoints} loyalty pts` : 'customer on file') : null,
+          (appliedPromotion || promotionDiscount > 0) ? 'promo active' : null,
+          demandWindow,
+        ].filter(Boolean) as string[];
+
+        return { product, margin, stock, score, reasons: reasons.slice(0, 4) };
+      })
+      .sort((a, b) => b.score - a.score || b.margin - a.margin || b.stock - a.stock);
+
+    return ranked[0] || null;
+  }, [appliedPromotion, cart, products, promotionDiscount, selectedCustomer]);
   const selectedCustomerWalletBalance = Number(selectedCustomer?.walletBalance || 0);
   const canPayWithCustomerWallet = Boolean(selectedCustomer && selectedCustomerWalletBalance > 0);
   const walletOnlineRequired = offlineStatus.isOffline;
@@ -1892,6 +1948,39 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                       </div>
                     </div>
                   </div>
+                )}
+                {cashierUpsellPrompt && (
+                  <section
+                    role="group"
+                    aria-label="Cashier AI upsell prompt"
+                    className="mb-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-3 dark:border-indigo-900/50 dark:bg-indigo-950/30"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-indigo-600 shadow-sm dark:bg-slate-900 dark:text-indigo-300">
+                        <Sparkles className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-300">Suggested add-on</p>
+                        <p className="mt-1 truncate text-sm font-black text-slate-900 dark:text-white">{cashierUpsellPrompt.product.name}</p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {cashierUpsellPrompt.reasons.map(reason => (
+                            <span key={reason} className="rounded-lg bg-white px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-500 shadow-sm dark:bg-slate-900 dark:text-slate-300">
+                              {reason}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleAddToCart(cashierUpsellPrompt.product)}
+                        className="flex h-9 shrink-0 items-center gap-1 rounded-xl bg-indigo-600 px-3 text-[10px] font-black uppercase tracking-widest text-white shadow-sm shadow-indigo-600/20 transition active:scale-95"
+                        aria-label={`Add suggested ${cashierUpsellPrompt.product.name}`}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add
+                      </button>
+                    </div>
+                  </section>
                 )}
                 <form
                   className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-[#0B1120]"

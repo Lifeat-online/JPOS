@@ -894,13 +894,17 @@ CREATE TABLE IF NOT EXISTS audit_events (
   staff_name TEXT,
   customer_id TEXT,
   source TEXT DEFAULT 'server',
+  request_id TEXT,
   details TEXT DEFAULT '{}'::TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Idempotent column adds for existing deployments.
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS request_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_created ON audit_events (tenant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events (tenant_id, entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_events_staff ON audit_events (tenant_id, staff_id);
+CREATE INDEX IF NOT EXISTS idx_audit_events_request ON audit_events (tenant_id, request_id);
 
 CREATE TABLE IF NOT EXISTS stock_movements (
   id TEXT PRIMARY KEY,
@@ -1536,3 +1540,16 @@ CREATE TABLE IF NOT EXISTS modifier_options (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS realtime_pubsub_events (
+  id TEXT PRIMARY KEY,
+  instance_id TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_realtime_pubsub_poll ON realtime_pubsub_events (created_at, id);
+CREATE INDEX IF NOT EXISTS idx_realtime_pubsub_expiry ON realtime_pubsub_events (expires_at);

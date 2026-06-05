@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { renderWithRouter } from './test-utils.tsx';
 import { PointOfSaleView } from '../../src/views/PointOfSaleView.tsx';
 import { usePosStore } from '../../src/store/usePosStore.ts';
@@ -45,11 +45,24 @@ const products: Product[] = [
   },
 ];
 
+const dessertProduct: Product = {
+  id: 'prod_2',
+  name: 'Cake Slice',
+  price: 40,
+  costPrice: 12,
+  category: 'Meals',
+  section: 'Food',
+  stock: 12,
+  minStock: 3,
+  workstationId: 'ws_1',
+};
+
 const customers: Customer[] = [
   {
     id: 'cust_1',
     name: 'Regular Customer',
     email: 'regular@example.com',
+    loyaltyPoints: 160,
   },
 ];
 
@@ -108,6 +121,9 @@ function renderPos(options: {
   activeSession?: any;
   checkoutRecovery?: { message: string; method?: any; createdAt?: string } | null;
   offlineStatus?: any;
+  selectedCustomerId?: string | null;
+  appliedPromotion?: any;
+  promotionDiscount?: number;
 } = {}) {
   const viewProducts = options.products || products;
   const activeSession = Object.prototype.hasOwnProperty.call(options, 'activeSession')
@@ -129,7 +145,7 @@ function renderPos(options: {
     activeSection: 'All',
     activeCategory: 'All',
     searchQuery: '',
-    selectedCustomerId: null,
+    selectedCustomerId: options.selectedCustomerId ?? null,
     activeTableNumber: null,
     activeOrderId: null,
     isCartOpen: false,
@@ -164,8 +180,8 @@ function renderPos(options: {
       totalDiscount={0}
       promotionCode=""
       setPromotionCode={vi.fn()}
-      appliedPromotion={null}
-      promotionDiscount={0}
+      appliedPromotion={options.appliedPromotion || null}
+      promotionDiscount={options.promotionDiscount ?? 0}
       promotionError={null}
       promotionLoading={false}
       onApplyPromotionCode={vi.fn(() => Promise.resolve())}
@@ -246,5 +262,40 @@ describe('PointOfSaleView daily action strip', () => {
 
     expect(screen.getByText(/Register Closed/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Open Register/i })).toBeInTheDocument();
+  });
+
+  it('shows a cashier-facing AI upsell prompt from cart, customer, stock, margin, and promotions', () => {
+    renderPos({
+      products: [products[0], dessertProduct],
+      cart: [{ ...products[0], quantity: 1 }],
+      selectedCustomerId: 'cust_1',
+      appliedPromotion: {
+        id: 'promo_1',
+        code: 'LUNCH',
+        name: 'Lunch add-on',
+        status: 'active',
+        discountType: 'fixed',
+        discountValue: 5,
+        minSubtotal: 0,
+        appliesTo: 'cart',
+        targetProductIds: [],
+        targetCategories: [],
+        customerScope: 'all',
+        targetCustomerIds: [],
+        redemptionCount: 0,
+      },
+      promotionDiscount: 5,
+    });
+
+    const prompt = within(screen.getByRole('group', { name: /cashier ai upsell prompt/i }));
+    expect(prompt.getByText(/Suggested add-on/i)).toBeInTheDocument();
+    expect(prompt.getByText(/Cake Slice/i)).toBeInTheDocument();
+    expect(prompt.getByText(/R28\.00 margin/i)).toBeInTheDocument();
+    expect(prompt.getByText(/12 in stock/i)).toBeInTheDocument();
+    expect(prompt.getByText(/160 loyalty pts/i)).toBeInTheDocument();
+
+    fireEvent.click(prompt.getByRole('button', { name: /Add suggested Cake Slice/i }));
+
+    expect(usePosStore.getState().cart.some(item => item.name === 'Cake Slice')).toBe(true);
   });
 });

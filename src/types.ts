@@ -52,6 +52,29 @@ export interface ProductLocationStock {
   updatedAt?: any;
 }
 
+export interface BatchRowError {
+  row: number;
+  message: string;
+  data?: Record<string, unknown>;
+}
+
+export interface BatchMutationResult {
+  dryRun: boolean;
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: BatchRowError[];
+  rows: Record<string, unknown>[];
+}
+
+export interface BatchExportResult {
+  rows: Record<string, unknown>[];
+  csv: string;
+  filename: string;
+  mimeType: string;
+  count: number;
+}
+
 export interface StockTransferItem {
   id?: string;
   transferId?: string;
@@ -2059,7 +2082,7 @@ export interface LiveTenantStats {
 // ── Inventory Expansion ────────────────────────────────────────────────────────
 
 export type AiRole = 'admin' | 'manager' | 'dev' | 'cashier' | 'chef';
-export type AiInsightCategory = 'sales' | 'stock' | 'cash' | 'staff' | 'restaurant' | 'customer' | 'package';
+export type AiInsightCategory = 'sales' | 'stock' | 'cash' | 'staff' | 'restaurant' | 'customer' | 'package' | 'integration';
 export type AiInsightSeverity = 'info' | 'success' | 'warning' | 'critical';
 
 export type AiProviderName = 'openai' | 'ollama' | 'anythingllm' | 'google' | 'vertex' | 'openrouter';

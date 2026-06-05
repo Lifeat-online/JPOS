@@ -8,6 +8,7 @@
  *   masepos_user           — serialised user object
  */
 import { useState, useEffect, useCallback } from 'react';
+import { apiUrl } from '../apiConfig';
 import { DEV_EMAIL, DEV_TENANT_ID, isDevEmail } from '../utils/devMode';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -120,7 +121,7 @@ async function refreshAccessToken(): Promise<boolean> {
 
   refreshPromise = (async () => {
     try {
-      const res = await fetch('/api/auth/refresh', {
+      const res = await fetch(apiUrl('/api/auth/refresh'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
@@ -244,7 +245,7 @@ export function useAuth() {
     setState(s => ({ ...s, authLoading: true, error: null }));
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(credentials),
@@ -269,7 +270,7 @@ export function useAuth() {
   const startDemo = useCallback(async (mode: DemoMode = 'restaurant'): Promise<boolean> => {
     setState(s => ({ ...s, authLoading: true, error: null }));
     try {
-      const res = await fetch('/api/demo/start', {
+      const res = await fetch(apiUrl('/api/demo/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode }),
@@ -290,7 +291,7 @@ export function useAuth() {
   const enroll = useCallback(async (details: EnrollmentDetails): Promise<boolean> => {
     setState(s => ({ ...s, authLoading: true, error: null }));
     try {
-      const res = await fetch('/api/enroll', {
+      const res = await fetch(apiUrl('/api/enroll'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(details),
@@ -322,7 +323,7 @@ export function useAuth() {
       try {
         const ac = new AbortController();
         const timer = setTimeout(() => ac.abort(), 3000);
-        const res = await fetch('/api/auth/logout', {
+        const res = await fetch(apiUrl('/api/auth/logout'), {
           method:  'POST',
           headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
           body:    JSON.stringify({ refreshToken }),

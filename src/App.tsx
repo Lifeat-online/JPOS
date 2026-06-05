@@ -53,6 +53,7 @@ import { PublicPackagesPage } from './views/PublicPackagesPage';
 import { AiCopilotView } from './views/AiCopilotView';
 import { useClientPortal } from './hooks/useClientPortal';
 import { TabsView } from './views/TabsView';
+import { HandheldView } from './views/HandheldView';
 import { BarcodeScanner } from './components/BarcodeScanner';
 import { Receipt } from './components/Receipt';
 import { PrinterReadinessPanel } from './components/PrinterReadinessPanel';
@@ -600,6 +601,7 @@ export default function App() {
   } = useAppData(authLoading ? null : user);
 
   const { cart, setCart, setActiveCategory, setSelectedCustomerId, setActiveTableNumber, setActiveOrderId, selectedCustomerId, activeTableNumber } = usePosStore();
+  const setIsCartOpen = usePosStore(s => s.setIsCartOpen);
   const storeActiveSession = usePosStore(s => s.activeSession);
   const addToCart = usePosStore(s => s.addToCart);
   const tenantId = usePosStore(s => s.tenantId);
@@ -1372,6 +1374,36 @@ export default function App() {
                 setCart([]);
               }
               navigate('/');
+            }}
+          />
+        )}
+        {view === 'handheld' && (
+          <HandheldView
+            sales={sales}
+            customers={posCustomerProfiles}
+            tableSections={tableSections}
+            restaurantTables={restaurantTables}
+            onOpenTable={(table, order, intent) => {
+              setActiveTableNumber(table);
+              if (order) {
+                setActiveOrderId(order.id);
+                setSelectedCustomerId(order.customerId || null);
+                setCart(order.items);
+              } else {
+                setActiveOrderId(null);
+                setSelectedCustomerId(null);
+                setCart([]);
+              }
+              setIsCartOpen(intent === 'checkout');
+              navigate('/pos');
+            }}
+            onResumeTab={(sale, intent) => {
+              setActiveTableNumber(null);
+              setActiveOrderId(sale.id);
+              setSelectedCustomerId(sale.customerId || null);
+              setCart(sale.items);
+              setIsCartOpen(intent === 'checkout');
+              navigate('/pos');
             }}
           />
         )}

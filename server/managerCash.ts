@@ -5,6 +5,7 @@ type Actor = {
   staffId?: string | null;
   staffName?: string | null;
   role?: string | null;
+  requestId?: string | null;
 };
 
 type ManagerCashMovementInput = {
@@ -815,6 +816,7 @@ export async function recordWalletCashMovement(tenantId: string, input: WalletCa
     await recordAuditEvent(conn, {
       tenantId,
       action: `wallet_cash.${direction}`,
+      requestId: actor.requestId || null,
       entityType: `${ownerType}_wallet`,
       entityId: owner.id,
       staffId: actor.staffId || null,
@@ -948,6 +950,7 @@ export async function recordRegisterWalletCashMovement(tenantId: string, input: 
       action: "cash_movement.recorded",
       entityType: "cash_movement",
       entityId: cashMovementId,
+      requestId: actor.requestId || null,
       staffId: actor.staffId || null,
       staffName: actor.staffName || null,
       customerId: customer.id,

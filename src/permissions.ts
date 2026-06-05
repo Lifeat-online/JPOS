@@ -27,6 +27,7 @@ import type { Staff, StaffPermissions } from './types';
 export type StaffRole = Staff['role'];
 export type AppView =
   | 'pos'
+  | 'handheld'
   | 'tables'
   | 'tabs'
   | 'workstation'
@@ -67,29 +68,30 @@ type AccessOptions = {
 
 const ROLE_VIEWS: Record<StaffRole, AppView[]> = {
   admin: [
-    'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
+    'pos', 'handheld', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
     'actions', 'delivery', 'stocktake',
     'inventory', 'customers', 'accounts', 'bookings', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile',
     'ai', 'packages',
   ],
   dev: [
-    'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
+    'pos', 'handheld', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
     'actions', 'delivery', 'stocktake',
     'inventory', 'customers', 'accounts', 'bookings', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile', 'dev',
     'ai', 'packages',
   ],
   manager: [
-    'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
+    'pos', 'handheld', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
     'actions', 'delivery', 'stocktake',
     'inventory', 'customers', 'accounts', 'bookings', 'staff', 'leaderboard', 'reports', 'ai', 'profile',
     'packages',
   ],
-  cashier: ['pos', 'history', 'messages', 'stocktake', 'cash', 'profile'],
+  cashier: ['pos', 'handheld', 'history', 'messages', 'stocktake', 'cash', 'profile'],
   chef: ['workstation', 'stocktake', 'profile'],
 };
 
 const VIEW_META: Record<AppView, NavItem> = {
   pos: { id: 'pos', icon: LayoutGrid, label: 'Terminal' },
+  handheld: { id: 'handheld', icon: TabletSmartphone, label: 'Handheld' },
   tables: { id: 'tables', icon: Utensils, label: 'Tables' },
   tabs: { id: 'tabs', icon: TabletSmartphone, label: 'Tabs' },
   workstation: { id: 'workstation', icon: ChefHat, label: 'Kitchen' },
@@ -115,10 +117,11 @@ const VIEW_META: Record<AppView, NavItem> = {
   dev: { id: 'dev', icon: Code2, label: 'Dev' },
 };
 
-const PRIMARY_VIEWS: AppView[] = ['pos', 'tables', 'tabs', 'workstation', 'history', 'messages'];
+const PRIMARY_VIEWS: AppView[] = ['pos', 'handheld', 'tables', 'tabs', 'workstation', 'history', 'messages'];
 
 const PERMISSION_VIEW_MAP: Array<[keyof StaffPermissions, AppView]> = [
   ['canSell', 'pos'],
+  ['canSell', 'handheld'],
   ['canManageCash', 'cash'],
   ['canViewHistory', 'history'],
   ['canMessage', 'messages'],
@@ -154,6 +157,7 @@ export function getAllowedViews(role: StaffRole | null, options: AccessOptions =
   const hasActiveRestaurantTerminal = Boolean(options.isRestaurant && options.hasOpenTerminal);
 
   if (role === 'cashier' && hasActiveRestaurantTerminal) {
+    allowed.add('handheld');
     allowed.add('tables');
     allowed.add('tabs');
   }
@@ -169,12 +173,14 @@ export function getAllowedViews(role: StaffRole | null, options: AccessOptions =
 
   if (!hasActiveRestaurantTerminal) {
     allowed.delete('tables');
+    allowed.delete('handheld');
     allowed.delete('tabs');
     allowed.delete('workstation');
   }
 
   if (!options.isRestaurant) {
     allowed.delete('tables');
+    allowed.delete('handheld');
     allowed.delete('tabs');
     allowed.delete('leaderboard');
     allowed.delete('workstation');

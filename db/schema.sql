@@ -931,13 +931,19 @@ CREATE TABLE IF NOT EXISTS audit_events (
   staff_name VARCHAR(255),
   customer_id VARCHAR(64),
   source VARCHAR(32) DEFAULT 'server',
+  request_id VARCHAR(64),
   details JSON DEFAULT JSON_OBJECT(),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_audit_events_tenant_created (tenant_id, created_at),
   INDEX idx_audit_events_entity (tenant_id, entity_type, entity_id),
   INDEX idx_audit_events_staff (tenant_id, staff_id),
+  INDEX idx_audit_events_request (tenant_id, request_id),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
+
+-- Idempotent column + index adds for existing deployments.
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS request_id VARCHAR(64);
+ALTER TABLE audit_events ADD INDEX IF NOT EXISTS idx_audit_events_request (tenant_id, request_id);
 
 CREATE TABLE IF NOT EXISTS stock_movements (
   id VARCHAR(64) PRIMARY KEY,
@@ -1586,4 +1592,16 @@ CREATE TABLE IF NOT EXISTS modifier_options (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (modifier_id) REFERENCES product_modifiers(id) ON DELETE CASCADE,
   FOREIGN KEY (bulk_item_id) REFERENCES bulk_items(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS realtime_pubsub_events (
+  id VARCHAR(64) PRIMARY KEY,
+  instance_id VARCHAR(128) NOT NULL,
+  channel VARCHAR(255) NOT NULL,
+  event_name VARCHAR(128) NOT NULL,
+  payload LONGTEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME,
+  INDEX idx_realtime_pubsub_poll (created_at, id),
+  INDEX idx_realtime_pubsub_expiry (expires_at)
 );

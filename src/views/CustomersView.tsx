@@ -2,6 +2,7 @@ import React from 'react';
 import { UserPlus, Edit, TabletSmartphone, ReceiptText, Download, RefreshCw, Megaphone, ShieldCheck, UserX } from 'lucide-react';
 import { deleteCustomer, getCustomerCampaignExport, getCustomerDataExport } from '../api';
 import { Customer, CustomerCampaignExport, CustomerConsentStatus, Sale } from '../types';
+import { CustomerBatchPanel } from '../components/CustomerBatchPanel';
 
 interface CustomersViewProps {
   tenantId?: string | null;
@@ -131,6 +132,8 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             New Customer
           </button>
         </div>
+
+        <CustomerBatchPanel tenantId={tenantId} onCustomersUpdated={onCustomersUpdated} />
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

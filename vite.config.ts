@@ -75,6 +75,11 @@ export default defineConfig(({mode}) => {
           url: `${base}tables`,
           description: 'View Restaurant Tables',
         },
+        {
+          name: 'Handheld',
+          url: `${base}handheld`,
+          description: 'Open tableside ordering',
+        },
       ],
     },
     workbox: {
