@@ -350,8 +350,8 @@ export async function saveAiSettings(tenantId: string, input: Partial<AiSettings
   const current = await getAiSettings(tenantId);
   const provider = input.provider || current.provider;
   const providerKeys = parseProviderKeyStore(current.apiKey, current.provider);
-  if (input.apiKey !== undefined && input.apiKey.trim()) {
-    providerKeys[provider] = normalizeProviderApiKey(input.apiKey);
+  if (input.apiKey !== undefined && input.apiKey !== null && input.apiKey.trim()) {
+    providerKeys[provider] = normalizeProviderApiKey(input.apiKey.trim());
   }
   const next: AiSettings = {
     ...current,

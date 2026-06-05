@@ -31,9 +31,9 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
     >
       {/* Header */}
       <div className="text-center mb-4">
-        {showLogo && (
+        {showLogo && config?.business?.logoUrl && (
           <img
-            src={config.business!.logoUrl}
+            src={config.business.logoUrl}
             alt="Business logo"
             className="mx-auto mb-2 object-contain"
             style={{ maxHeight: printProfile.logoMaxHeight, maxWidth: '80%' }}
@@ -115,19 +115,19 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
                   <span className="uppercase">{p.method} Tendered</span>
                   <span>{currency}{Number(p.tenderedAmount || p.amount).toFixed(2)}</span>
                 </div>
-                {p.changeAmount > 0 && (
+                {(p.changeAmount ?? 0) > 0 && (
                   <div className="flex justify-between text-[11px] pl-2">
                     <span>- Change</span>
                     <span>{currency}{Number(p.changeAmount).toFixed(2)}</span>
                   </div>
                 )}
-                {p.tipAmount > 0 && (
+                {(p.tipAmount ?? 0) > 0 && (
                   <div className="flex justify-between text-[11px] pl-2">
                     <span>+ Tip</span>
                     <span>{currency}{Number(p.tipAmount).toFixed(2)}</span>
                   </div>
                 )}
-                {p.cashOutAmount > 0 && (
+                {(p.cashOutAmount ?? 0) > 0 && (
                   <div className="flex justify-between text-[11px] pl-2">
                     <span>- Cashout</span>
                     <span>{currency}{Number(p.cashOutAmount).toFixed(2)}</span>

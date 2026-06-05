@@ -30,9 +30,9 @@ export const BillPrint: React.FC<BillPrintProps> = ({ cart, customer, config, su
       style={{ width: printProfile.contentWidth, maxWidth: printProfile.maxWidth, fontSize: printProfile.fontSizePx }}
     >
       <div className="text-center mb-4">
-        {showLogo && (
+        {showLogo && config?.business?.logoUrl && (
           <img
-            src={config.business!.logoUrl}
+            src={config.business.logoUrl}
             alt="Business logo"
             className="mx-auto mb-2 object-contain"
             style={{ maxHeight: printProfile.logoMaxHeight, maxWidth: '80%' }}

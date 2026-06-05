@@ -81,7 +81,7 @@ export function useAppData(user: User | null) {
   }), [config.business?.isRestaurantMode, activeSession, storeActiveSession, currentUserStaff?.permissions]);
 
   const loadSales = useCallback(async () => {
-    if (!canLoadTenantData || !canLoadDataset(currentUserRole, 'sales', tableAccessOptions)) {
+    if (!canLoadTenantData || !tenantId || !canLoadDataset(currentUserRole, 'sales', tableAccessOptions)) {
       setSales([]);
       return;
     }

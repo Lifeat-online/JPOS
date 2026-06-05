@@ -134,7 +134,7 @@ function normalizeOrderInput(input: DeliveryOrderInput) {
   if (!externalOrderId) throw new Error("External delivery order ID is required");
 
   const items = normalizeItems(input, raw);
-  const itemSubtotal = money(items.reduce((sum, item) => sum + item.quantity * item.price, 0));
+  const itemSubtotal = money(items.reduce((sum: number, item: { quantity: number; price: number }) => sum + item.quantity * item.price, 0));
   const subtotal = money(input.subtotal ?? readPath(raw, ["subtotal", "totals.subtotal", "cart.subtotal"]) ?? itemSubtotal);
   const deliveryFee = money(input.deliveryFee ?? readPath(raw, ["deliveryFee", "delivery_fee", "totals.delivery_fee"]));
   const tipAmount = money(input.tipAmount ?? readPath(raw, ["tipAmount", "tip_amount", "totals.tip"]));

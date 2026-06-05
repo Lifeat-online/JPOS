@@ -1333,7 +1333,7 @@ export default function App() {
             onViewOrders={(id) => { setFilterCustomerId(id); navigate('/history'); }}
           />
         )}
-        {view === 'bookings' && <EventBookingsView tenantId={tenantId} customers={customers} restaurantTables={restaurantTables} />}
+        {view === 'bookings' && tenantId && <EventBookingsView tenantId={tenantId} customers={customers} restaurantTables={restaurantTables} />}
         {view === 'delivery' && <DeliveryOrdersView tenantId={tenantId} />}
         {view === 'actions' && <ManagerActionCenterView tenantId={tenantId} />}
         {view === 'live' && <LiveView tenantId={tenantId} />}

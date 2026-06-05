@@ -24,6 +24,13 @@ export function useBusinessPage(slug: string | undefined): BusinessPageData {
     }
 
     async function resolveTenant() {
+      if (!slug) {
+        if (isMounted) {
+          setNotFound(true);
+          setLoading(false);
+        }
+        return;
+      }
       try {
         const slugResult = await getTenantIdBySlug(slug.toLowerCase());
         const tid = slugResult.tenantId;

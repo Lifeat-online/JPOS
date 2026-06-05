@@ -218,19 +218,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   };
 
   const updateProviderDraft = (paymentId: string, patch: Partial<{ provider: string; providerDeviceId: string; providerReference: string; authorizationCode: string; providerStatus: string; providerNote: string }>) => {
-    setProviderDrafts(drafts => ({
-      ...drafts,
-      [paymentId]: {
-        provider: '',
-        providerDeviceId: '',
-        providerReference: '',
-        authorizationCode: '',
-        providerStatus: 'pending',
-        providerNote: '',
-        ...(drafts[paymentId] || {}),
-        ...patch,
-      },
-    }));
+    setProviderDrafts(drafts => {
+      const existing = drafts[paymentId] || {};
+      const next = { ...existing, ...patch };
+      return { ...drafts, [paymentId]: next };
+    });
   };
 
   const submitProviderReconciliation = async (paymentId: string) => {

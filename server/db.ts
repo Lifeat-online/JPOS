@@ -1,4 +1,5 @@
 import mysql from "mysql2/promise";
+// @ts-expect-error - @types/pg is not installed; the runtime is fine
 import { Pool } from "pg";
 
 export type DbConnection = {
