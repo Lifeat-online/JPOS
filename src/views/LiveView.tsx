@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Banknote, ChefHat, Power, RefreshCw, Timer, Users, Utensils } from 'lucide-react';
+import { Activity, Banknote, ChefHat, Package, Power, ReceiptText, RefreshCw, Timer, Users, Utensils } from 'lucide-react';
 import { getTenantLiveStats } from '../api';
 import { LiveTenantStats } from '../types';
 import { getDate } from '../utils/date';
@@ -91,6 +91,13 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
     if (m <= 0) return `${r}s`;
     return `${m}m ${String(r).padStart(2, '0')}s`;
   };
+  const fmtMinutes = (value: number) => {
+    const minutes = Math.max(0, Math.round(value || 0));
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+  };
 
   const summary = useMemo(() => {
     const openRegisters = data?.retail.openRegisterCount ?? 0;
@@ -111,6 +118,7 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
       openTables,
     };
   }, [data]);
+  const kpis = data?.dashboardKpis;
 
   return (
     <div className="flex-1 p-4 lg:p-10 overflow-y-auto bg-slate-50 dark:bg-[#0B1120]">
@@ -173,6 +181,71 @@ export function LiveView({ tenantId }: { tenantId: string | null }) {
             <div className="mt-2 text-sm text-slate-600 dark:text-slate-300 break-words">{error}</div>
           </div>
         )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-black uppercase tracking-widest text-slate-400">Real-Time Sales</div>
+              <Activity className="w-5 h-5 text-blue-500" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">{fmtMoney(kpis?.realTimeSales.todayRevenue ?? data?.totals.today.completedRevenue ?? 0)}</div>
+            <div className="text-xs font-bold text-slate-400 mt-1">{kpis?.realTimeSales.todayCount ?? data?.totals.today.completedCount ?? 0} today - {kpis?.realTimeSales.lastHourCount ?? data?.totals.lastHour.completedCount ?? 0} last hour</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-black uppercase tracking-widest text-slate-400">Average Basket</div>
+              <ReceiptText className="w-5 h-5 text-emerald-500" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">{fmtMoney(kpis?.averageBasket.todayAverage ?? 0)}</div>
+            <div className="text-xs font-bold text-slate-400 mt-1">Last hour {fmtMoney(kpis?.averageBasket.lastHourAverage ?? 0)}</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-black uppercase tracking-widest text-slate-400">Table Turnover</div>
+              <Utensils className="w-5 h-5 text-amber-500" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">{(kpis?.tableTurnover.turnoverPerTable ?? 0).toFixed(2)}</div>
+            <div className="text-xs font-bold text-slate-400 mt-1">{kpis?.tableTurnover.tableSaleCount ?? 0} turns - {kpis?.tableTurnover.activeTableCount ?? 0} active tables</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-black uppercase tracking-widest text-slate-400">Open Tabs</div>
+              <Timer className="w-5 h-5 text-purple-500" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">{kpis?.openTabs.count ?? summary.openTabs}</div>
+            <div className="text-xs font-bold text-slate-400 mt-1">{fmtMoney(kpis?.openTabs.totalValue ?? 0)} open - oldest {fmtMinutes(kpis?.openTabs.oldestAgeMinutes ?? 0)}</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-black uppercase tracking-widest text-slate-400">Cash Variance</div>
+              <Banknote className="w-5 h-5 text-rose-500" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">{fmtMoney(kpis?.cashVariance.absoluteVariance ?? 0)}</div>
+            <div className="text-xs font-bold text-slate-400 mt-1">{kpis?.cashVariance.unresolvedCount ?? 0} unresolved - net {fmtMoney(kpis?.cashVariance.netVariance ?? 0)}</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-black uppercase tracking-widest text-slate-400">Low Stock</div>
+              <Package className="w-5 h-5 text-orange-500" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">{kpis?.lowStock.count ?? 0}</div>
+            <div className="text-xs font-bold text-slate-400 mt-1">{kpis?.lowStock.criticalCount ?? 0} critical{kpis?.lowStock.rows?.[0] ? ` - ${kpis.lowStock.rows[0].productName}` : ''}</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm md:col-span-2 xl:col-span-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-black uppercase tracking-widest text-slate-400">Active Staff</div>
+              <Users className="w-5 h-5 text-cyan-500" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">{kpis?.activeStaff.activeCount ?? 0}</div>
+            <div className="text-xs font-bold text-slate-400 mt-1">{kpis?.activeStaff.openRegisterCount ?? summary.openRegisters} on registers - {kpis?.activeStaff.activeOrderStaffCount ?? 0} with active orders</div>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <div className="bg-white dark:bg-slate-900 p-6 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">

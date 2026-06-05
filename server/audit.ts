@@ -123,6 +123,9 @@ export type StockMovementInput = {
   staffId?: string | null;
   staffName?: string | null;
   note?: string | null;
+  locationId?: string | null;
+  fromLocationId?: string | null;
+  toLocationId?: string | null;
 };
 
 export async function recordStockMovement(conn: Queryable, input: StockMovementInput) {
@@ -133,8 +136,8 @@ export async function recordStockMovement(conn: Queryable, input: StockMovementI
       id, tenant_id, item_type, product_id, bulk_item_id, item_name,
       quantity_delta, previous_quantity, new_quantity, reason, reason_code,
       reference_type, reference_id, sale_id, sale_item_id,
-      staff_id, staff_name, note, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      staff_id, staff_name, note, location_id, from_location_id, to_location_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       id,
       input.tenantId,
@@ -154,6 +157,9 @@ export async function recordStockMovement(conn: Queryable, input: StockMovementI
       input.staffId || null,
       input.staffName || null,
       input.note || null,
+      input.locationId || null,
+      input.fromLocationId || null,
+      input.toLocationId || null,
     ]
   );
   return id;
@@ -180,11 +186,65 @@ export async function applyProductStockDelta(
   const rawNewQuantity = previousQuantity + Number(input.quantityDelta || 0);
   const newQuantity = Math.max(0, Number(rawNewQuantity.toFixed(3)));
   const appliedDelta = Number((newQuantity - previousQuantity).toFixed(3));
+  const locationId = String(input.locationId || "main").trim() || "main";
 
   await conn.query(
     `UPDATE products SET stock = ?, updated_at = NOW() WHERE tenant_id = ? AND id = ?`,
     [newQuantity, input.tenantId, input.productId]
   );
+
+  try {
+    const [locationRows] = await conn.query<any>(
+      `SELECT quantity
+         FROM product_location_stock
+        WHERE tenant_id = ? AND product_id = ? AND location_id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [input.tenantId, input.productId, locationId]
+    );
+    const locationStock = (locationRows as any[])[0];
+    const locationPreviousQuantity = locationStock
+      ? Number(locationStock.quantity || 0)
+      : previousQuantity;
+    const locationNewQuantity = Math.max(0, Number((locationPreviousQuantity + appliedDelta).toFixed(3)));
+
+    if (locationStock) {
+      await conn.query(
+        `UPDATE product_location_stock
+            SET quantity = ?,
+                updated_by = ?,
+                updated_by_name = ?,
+                updated_at = NOW()
+          WHERE tenant_id = ? AND product_id = ? AND location_id = ?`,
+        [
+          locationNewQuantity,
+          input.staffId || null,
+          input.staffName || null,
+          input.tenantId,
+          input.productId,
+          locationId,
+        ]
+      );
+    } else {
+      await conn.query(
+        `INSERT INTO product_location_stock (
+           tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold,
+           updated_by, updated_by_name, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 0, 0, ?, ?, NOW(), NOW())`,
+        [
+          input.tenantId,
+          input.productId,
+          locationId,
+          locationNewQuantity,
+          input.staffId || null,
+          input.staffName || null,
+        ]
+      );
+    }
+  } catch (error: any) {
+    const message = String(error?.message || "");
+    if (!message.includes("product_location_stock")) throw error;
+  }
 
   await recordStockMovement(conn, {
     ...input,
@@ -193,6 +253,7 @@ export async function applyProductStockDelta(
     quantityDelta: appliedDelta,
     previousQuantity,
     newQuantity,
+    locationId,
   });
 
   return { previousQuantity, newQuantity, quantityDelta: appliedDelta };

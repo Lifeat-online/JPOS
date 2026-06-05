@@ -5,6 +5,19 @@ import { seedDemoData, type DemoSeedMode } from './demo-seed.js';
 import { ensureBulkInventorySchema } from './init-db.js';
 import { getHostedPackage } from '../shared/packageCatalog.js';
 import { recordAuditEventSafe } from './audit.js';
+import {
+  buildTotpUri,
+  generateTotpSecret,
+  isPrivilegedTwoFactorRole,
+  verifyTotpCode,
+} from './twoFactor.js';
+import {
+  expiryFromJwtPayload,
+  revokeRefreshToken,
+  revokeStaffRefreshTokens,
+  storeRefreshTokenSession,
+  verifyStoredRefreshToken,
+} from './refreshTokenSessions.js';
 import { 
   generateAccessToken, 
   generateRefreshToken, 
@@ -36,6 +49,9 @@ type StaffAuthRow = {
   role: string;
   email: string;
   password_hash?: string | null;
+  two_factor_enabled?: number | boolean | string | null;
+  two_factor_secret?: string | null;
+  two_factor_confirmed_at?: string | null;
   status?: string;
 };
 
@@ -83,6 +99,7 @@ function buildAuthResponse(staff: {
   name: string;
   role: string;
   email: string;
+  two_factor_enabled?: number | boolean | string | null;
 }) {
   const payload: AuthTokenPayload = {
     uid: staff.id,
@@ -103,8 +120,40 @@ function buildAuthResponse(staff: {
       role: staff.role,
       tenantId: staff.tenant_id,
       tenantName: staff.tenant_name,
+      twoFactorEnabled: truthy(staff.two_factor_enabled),
+      twoFactorEligible: isPrivilegedTwoFactorRole(staff.role),
     },
   };
+}
+
+async function issueAuthResponse(
+  req: Request,
+  staff: {
+    id: string;
+    tenant_id: string;
+    tenant_name?: string;
+    name: string;
+    role: string;
+    email: string;
+    two_factor_enabled?: number | boolean | string | null;
+  },
+  replacedToken?: string | null
+) {
+  const response = buildAuthResponse(staff);
+  const refreshPayload = verifyToken(response.refreshToken) as (AuthTokenPayload & { exp?: number }) | null;
+  await storeRefreshTokenSession(req, {
+    token: response.refreshToken,
+    tenantId: staff.tenant_id,
+    staffId: staff.id,
+    staffName: staff.name,
+    expiresAt: expiryFromJwtPayload(refreshPayload),
+    replacedToken: replacedToken || null,
+  });
+  return response;
+}
+
+function truthy(value: unknown) {
+  return value === true || value === 1 || value === '1';
 }
 
 function requestAuditDetails(req: Request, extra: Record<string, unknown> = {}) {
@@ -263,7 +312,7 @@ export async function handleStartDemo(req: Request, res: Response) {
   try {
     const mode = parseDemoMode(req.body?.mode);
     const staff = await ensureDemoTenant(mode);
-    res.json({ ...buildAuthResponse(staff), seeded: true, mode });
+    res.json({ ...(await issueAuthResponse(req, staff)), seeded: true, mode });
   } catch (error) {
     console.error('Demo start error:', error);
     res.status(500).json({ error: 'Unable to start demo workspace' });
@@ -340,7 +389,7 @@ export async function handleEnrollment(req: Request, res: Response) {
       conn.release();
     }
 
-    res.status(201).json(buildAuthResponse({
+    res.status(201).json(await issueAuthResponse(req, {
       id: staffId,
       tenant_id: tenantId,
       tenant_name: businessName,
@@ -368,7 +417,8 @@ export async function handleLogin(req: Request, res: Response) {
     // Find staff by email - if tenantId provided, scope to that tenant
     let sql = `
       SELECT 
-        s.id, s.tenant_id, s.name, s.role, s.email, s.password_hash, s.status,
+        s.id, s.tenant_id, s.name, s.role, s.email, s.password_hash,
+        s.two_factor_enabled, s.two_factor_secret, s.two_factor_confirmed_at, s.status,
         t.name as tenant_name
       FROM staff s
       JOIN tenants t ON s.tenant_id = t.id
@@ -436,6 +486,30 @@ export async function handleLogin(req: Request, res: Response) {
     }
 
     const authStaff = isDev ? await normalizeDevStaff(staff) : staff;
+    if (isPrivilegedTwoFactorRole(authStaff.role) && truthy(authStaff.two_factor_enabled)) {
+      const twoFactorCode = String(req.body?.twoFactorCode || req.body?.totpCode || '').trim();
+      if (!verifyTotpCode(authStaff.two_factor_secret, twoFactorCode)) {
+        await recordAuditEventSafe({
+          tenantId: authStaff.tenant_id,
+          action: twoFactorCode ? 'auth.two_factor_failed' : 'auth.two_factor_required',
+          entityType: 'security',
+          entityId: authStaff.id,
+          staffId: authStaff.id,
+          staffName: authStaff.name,
+          source: 'auth',
+          details: requestAuditDetails(req, {
+            email: authStaff.email,
+            role: authStaff.role,
+          }),
+        });
+        return res.status(401).json({
+          error: twoFactorCode ? 'Invalid two-factor code' : 'Two-factor code required',
+          twoFactorRequired: true,
+          role: authStaff.role,
+        });
+      }
+    }
+
     await recordAuditEventSafe({
       tenantId: authStaff.tenant_id,
       action: 'auth.login_succeeded',
@@ -449,7 +523,7 @@ export async function handleLogin(req: Request, res: Response) {
         role: authStaff.role,
       }),
     });
-    res.json(buildAuthResponse(authStaff));
+    res.json(await issueAuthResponse(req, authStaff));
 
   } catch (error) {
     console.error('Login error:', error);
@@ -460,6 +534,10 @@ export async function handleLogin(req: Request, res: Response) {
 // Logout endpoint handler
 export async function handleLogout(req: Request, res: Response) {
   const user = resolveAuthUser(req);
+  const refreshToken = typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : null;
+
+  await revokeRefreshToken(req, refreshToken, 'logout');
+
   if (user?.tenantId) {
     await recordAuditEventSafe({
       tenantId: user.tenantId,
@@ -472,13 +550,11 @@ export async function handleLogout(req: Request, res: Response) {
       details: requestAuditDetails(req, {
         email: user.email,
         role: user.role,
+        refreshTokenRevoked: Boolean(refreshToken),
       }),
     });
   }
 
-  // In a stateless JWT setup, the client simply discards the token
-  // For enhanced security, you could maintain a token blacklist
-  // or store refresh tokens and revoke them here
   res.json({ message: 'Logged out successfully' });
 }
 
@@ -496,6 +572,27 @@ export async function handleRefreshToken(req: Request, res: Response) {
       return res.status(401).json({ error: 'Invalid or expired refresh token' });
     }
 
+    const stored = await verifyStoredRefreshToken(refreshToken);
+    if (!stored.valid) {
+      await recordAuditEventSafe({
+        tenantId: payload.tenantId,
+        action: 'auth.refresh_token_rejected',
+        entityType: 'security',
+        entityId: payload.staffId || payload.uid || null,
+        staffId: payload.staffId || payload.uid || null,
+        staffName: payload.name || null,
+        source: 'auth',
+        details: requestAuditDetails(req, {
+          reason: stored.reason,
+        }),
+      });
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+    const storedRow = stored.row as { tenantId?: string; tenant_id?: string; staffId?: string; staff_id?: string } | undefined;
+    if (storedRow && ((storedRow.tenantId ?? storedRow.tenant_id) !== payload.tenantId || (storedRow.staffId ?? storedRow.staff_id) !== (payload.staffId || payload.uid))) {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+
     // Create clean payload without exp property for new tokens
     const cleanPayload: AuthTokenPayload = normalizeAuthTokenPayload({
       uid: payload.uid,
@@ -509,6 +606,27 @@ export async function handleRefreshToken(req: Request, res: Response) {
     // Generate new access token
     const newAccessToken = generateAccessToken(cleanPayload);
     const newRefreshToken = generateRefreshToken(cleanPayload);
+    const newRefreshPayload = verifyToken(newRefreshToken) as (AuthTokenPayload & { exp?: number }) | null;
+
+    await storeRefreshTokenSession(req, {
+      token: newRefreshToken,
+      tenantId: cleanPayload.tenantId,
+      staffId: cleanPayload.staffId || cleanPayload.uid,
+      staffName: cleanPayload.name,
+      expiresAt: expiryFromJwtPayload(newRefreshPayload),
+      replacedToken: refreshToken,
+    });
+
+    await recordAuditEventSafe({
+      tenantId: cleanPayload.tenantId,
+      action: 'auth.refresh_token_rotated',
+      entityType: 'security',
+      entityId: cleanPayload.staffId || cleanPayload.uid || null,
+      staffId: cleanPayload.staffId || cleanPayload.uid || null,
+      staffName: cleanPayload.name || null,
+      source: 'auth',
+      details: requestAuditDetails(req, {}),
+    });
 
     res.json({
       accessToken: newAccessToken,
@@ -521,11 +639,62 @@ export async function handleRefreshToken(req: Request, res: Response) {
   }
 }
 
+export async function handleRevokeRefreshTokens(req: Request, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const actorStaffId = req.user.staffId || req.user.uid;
+    const targetStaffId = String(req.body?.staffId || actorStaffId || '').trim();
+    const isSelf = targetStaffId === actorStaffId;
+    const canRevokeOthers = req.user.role === 'admin' || req.user.role === 'dev';
+
+    if (!targetStaffId) {
+      return res.status(400).json({ error: 'Staff ID required' });
+    }
+
+    if (!isSelf && !canRevokeOthers) {
+      await recordAuditEventSafe({
+        tenantId: req.user.tenantId,
+        action: 'permission.denied',
+        entityType: 'security',
+        entityId: actorStaffId || null,
+        staffId: actorStaffId || null,
+        staffName: req.user.name || null,
+        source: 'permission',
+        details: requestAuditDetails(req, {
+          attemptedAction: 'auth.refresh_tokens.revoke',
+          targetStaffId,
+          role: req.user.role,
+        }),
+      });
+      return res.status(403).json({ error: 'Admin access required to revoke another staff member sessions' });
+    }
+
+    const reason = String(req.body?.reason || (isSelf ? 'self_service' : 'suspected_compromise')).trim().slice(0, 255) || 'suspected_compromise';
+    await revokeStaffRefreshTokens(req, req.user.tenantId, targetStaffId, reason);
+    res.json({ revoked: true, staffId: targetStaffId });
+  } catch (error) {
+    console.error('Refresh token revoke error:', error);
+    res.status(500).json({ error: 'Unable to revoke refresh sessions' });
+  }
+}
+
 // Get current user info from token
 export async function handleGetMe(req: Request, res: Response) {
   if (!req.user) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+
+  const rows = await query<any>(
+    `SELECT two_factor_enabled AS twoFactorEnabled, two_factor_confirmed_at AS twoFactorConfirmedAt
+       FROM staff
+      WHERE tenant_id = ? AND id = ?
+      LIMIT 1`,
+    [req.user.tenantId, req.user.staffId || req.user.uid]
+  );
+  const twoFactor = rows[0] || {};
 
   res.json({
     user: {
@@ -533,9 +702,168 @@ export async function handleGetMe(req: Request, res: Response) {
       email: req.user.email,
       name: req.user.name,
       role: req.user.role,
-      tenantId: req.user.tenantId
+      tenantId: req.user.tenantId,
+      twoFactorEnabled: truthy(twoFactor.twoFactorEnabled ?? twoFactor.two_factor_enabled),
+      twoFactorEligible: isPrivilegedTwoFactorRole(req.user.role),
+      twoFactorConfirmedAt: twoFactor.twoFactorConfirmedAt ?? twoFactor.two_factor_confirmed_at ?? null,
     }
   });
+}
+
+function requireTwoFactorEligibleUser(req: Request, res: Response) {
+  if (!req.user) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return false;
+  }
+  if (!isPrivilegedTwoFactorRole(req.user.role)) {
+    res.status(403).json({ error: '2FA is available for admin, manager, and dev accounts.' });
+    return false;
+  }
+  return true;
+}
+
+async function loadCurrentStaffSecurity(req: Request) {
+  const rows = await query<any>(
+    `SELECT id, name, role, email, password_hash AS passwordHash,
+            two_factor_enabled AS twoFactorEnabled,
+            two_factor_secret AS twoFactorSecret,
+            two_factor_confirmed_at AS twoFactorConfirmedAt
+       FROM staff
+      WHERE tenant_id = ? AND id = ?
+      LIMIT 1`,
+    [req.user?.tenantId, req.user?.staffId || req.user?.uid]
+  );
+  return rows[0] || null;
+}
+
+export async function handleTwoFactorStatus(req: Request, res: Response) {
+  try {
+    if (!requireTwoFactorEligibleUser(req, res)) return;
+    const staff = await loadCurrentStaffSecurity(req);
+    res.json({
+      eligible: true,
+      enabled: truthy(staff?.twoFactorEnabled ?? staff?.two_factor_enabled),
+      confirmedAt: staff?.twoFactorConfirmedAt ?? staff?.two_factor_confirmed_at ?? null,
+    });
+  } catch (error) {
+    console.error('2FA status error:', error);
+    res.status(500).json({ error: 'Unable to load 2FA status' });
+  }
+}
+
+export async function handleTwoFactorSetup(req: Request, res: Response) {
+  try {
+    if (!requireTwoFactorEligibleUser(req, res)) return;
+    const secret = generateTotpSecret();
+    await query(
+      `UPDATE staff
+          SET two_factor_secret = ?,
+              two_factor_enabled = 0,
+              two_factor_confirmed_at = NULL,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [secret, req.user!.tenantId, req.user!.staffId || req.user!.uid]
+    );
+
+    await recordAuditEventSafe({
+      tenantId: req.user!.tenantId,
+      action: 'auth.two_factor_setup_started',
+      entityType: 'security',
+      entityId: req.user!.staffId || req.user!.uid || null,
+      staffId: req.user!.staffId || req.user!.uid || null,
+      staffName: req.user!.name || null,
+      source: 'auth',
+      details: requestAuditDetails(req, { role: req.user!.role }),
+    });
+
+    res.json({
+      secret,
+      otpauthUri: buildTotpUri({
+        accountName: req.user!.email || req.user!.name || 'staff',
+        secret,
+      }),
+    });
+  } catch (error) {
+    console.error('2FA setup error:', error);
+    res.status(500).json({ error: 'Unable to start 2FA setup' });
+  }
+}
+
+export async function handleTwoFactorConfirm(req: Request, res: Response) {
+  try {
+    if (!requireTwoFactorEligibleUser(req, res)) return;
+    const code = String(req.body?.code || req.body?.twoFactorCode || '').trim();
+    const staff = await loadCurrentStaffSecurity(req);
+    if (!staff?.twoFactorSecret && !staff?.two_factor_secret) {
+      return res.status(400).json({ error: 'Start 2FA setup before confirming.' });
+    }
+    if (!verifyTotpCode(staff.twoFactorSecret ?? staff.two_factor_secret, code)) {
+      return res.status(400).json({ error: 'Invalid two-factor code' });
+    }
+
+    await query(
+      `UPDATE staff
+          SET two_factor_enabled = 1,
+              two_factor_confirmed_at = NOW(),
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [req.user!.tenantId, req.user!.staffId || req.user!.uid]
+    );
+    await recordAuditEventSafe({
+      tenantId: req.user!.tenantId,
+      action: 'auth.two_factor_enabled',
+      entityType: 'security',
+      entityId: req.user!.staffId || req.user!.uid || null,
+      staffId: req.user!.staffId || req.user!.uid || null,
+      staffName: req.user!.name || null,
+      source: 'auth',
+      details: requestAuditDetails(req, { role: req.user!.role }),
+    });
+    res.json({ enabled: true });
+  } catch (error) {
+    console.error('2FA confirm error:', error);
+    res.status(500).json({ error: 'Unable to confirm 2FA setup' });
+  }
+}
+
+export async function handleTwoFactorDisable(req: Request, res: Response) {
+  try {
+    if (!requireTwoFactorEligibleUser(req, res)) return;
+    const password = String(req.body?.password || '');
+    const code = String(req.body?.code || req.body?.twoFactorCode || '').trim();
+    const staff = await loadCurrentStaffSecurity(req);
+    const passwordHash = staff?.passwordHash ?? staff?.password_hash ?? null;
+    if (!password || !passwordHash || !await verifyPassword(password, passwordHash)) {
+      return res.status(403).json({ error: 'Current password is required to disable 2FA.' });
+    }
+    if (truthy(staff?.twoFactorEnabled ?? staff?.two_factor_enabled) && !verifyTotpCode(staff?.twoFactorSecret ?? staff?.two_factor_secret, code)) {
+      return res.status(403).json({ error: 'Valid two-factor code is required to disable 2FA.' });
+    }
+
+    await query(
+      `UPDATE staff
+          SET two_factor_enabled = 0,
+              two_factor_secret = NULL,
+              two_factor_confirmed_at = NULL,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [req.user!.tenantId, req.user!.staffId || req.user!.uid]
+    );
+    await recordAuditEventSafe({
+      tenantId: req.user!.tenantId,
+      action: 'auth.two_factor_disabled',
+      entityType: 'security',
+      entityId: req.user!.staffId || req.user!.uid || null,
+      staffId: req.user!.staffId || req.user!.uid || null,
+      staffName: req.user!.name || null,
+      source: 'auth',
+      details: requestAuditDetails(req, { role: req.user!.role }),
+    });
+    res.json({ enabled: false });
+  } catch (error) {
+    console.error('2FA disable error:', error);
+    res.status(500).json({ error: 'Unable to disable 2FA' });
+  }
 }
 
 // Setup password for staff (admin/dev only)

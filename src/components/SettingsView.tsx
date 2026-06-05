@@ -1,12 +1,13 @@
 import { usePosStore } from '../store/usePosStore';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { AppConfig, Workstation, TableSection, RestaurantTable } from '../types';
-import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send, Smartphone, Printer, Eye, RotateCcw, Upload, Clock } from 'lucide-react';
+import { AppConfig, Workstation, TableSection, RestaurantTable, Promotion, LoyaltyTier, LoyaltyRewardRule, RetentionPolicy, RetentionPreview } from '../types';
+import { Save, Store, CreditCard, Layers, Plus, Trash2, X, Receipt, Calculator, Award, Settings2, ChefHat, Loader2, PackageCheck, BrainCircuit, Paperclip, Send, Smartphone, Printer, Eye, RotateCcw, Upload, Clock, ShieldCheck } from 'lucide-react';
 import { DEFAULT_CATEGORY_TREE } from '../constants';
-import { apiGet, apiPut, apiPost, apiDelete, assignCompanionDevice, getCompanionDeviceAssignments, getTenantPackageLimits, getAiSettings, listAiModels, revokeCompanionDeviceAssignment, testAiProvider, updateAiSettings, uploadTenantLogo, type TenantPackageLimitsResponse } from '../api';
+import { apiGet, apiPut, apiPost, apiDelete, assignCompanionDevice, applyRetentionPolicy, createLoyaltyRewardRule, createLoyaltyTier, createPromotion, getCompanionDeviceAssignments, getLoyaltyRewardRules, getLoyaltyTiers, getPromotions, getRetentionPolicy, getTenantPackageLimits, getAiSettings, listAiModels, previewRetentionPolicy, revokeCompanionDeviceAssignment, testAiProvider, updateAiSettings, updateLoyaltyRewardRule, updateLoyaltyTier, updatePromotion, updateRetentionPolicy, uploadTenantLogo, type TenantPackageLimitsResponse } from '../api';
 import { JPOS_PACKAGES } from '../../shared/packageCatalog';
 import type { AiModelOption, AiProviderName, AiRole, AiSettings } from '../types';
 import { buildReceiptPrintCss, getReceiptPaperProfile, RECEIPT_PAPER_OPTIONS, normalizeReceiptPrintSettings } from '../utils/receiptPrinting';
+import { HardwareAdaptersPanel } from './HardwareAdaptersPanel';
 
 function readSettingsFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -17,6 +18,139 @@ function readSettingsFileAsDataUrl(file: File) {
   });
 }
 
+type PromotionDraft = Partial<Promotion> & {
+  targetProductIdsText: string;
+  targetCategoriesText: string;
+  targetCustomerIdsText: string;
+};
+
+type LoyaltyRuleDraft = Partial<LoyaltyRewardRule> & {
+  targetProductIdsText: string;
+  targetCategoriesText: string;
+  daysOfWeekText: string;
+};
+
+function newPromotionDraft(): PromotionDraft {
+  return {
+    code: '',
+    name: '',
+    status: 'active',
+    discountType: 'percent',
+    discountValue: 10,
+    startsAt: '',
+    endsAt: '',
+    minSubtotal: 0,
+    maxDiscountAmount: null,
+    appliesTo: 'cart',
+    customerScope: 'all',
+    totalRedemptionLimit: null,
+    perCustomerLimit: null,
+    targetProductIds: [],
+    targetCategories: [],
+    targetCustomerIds: [],
+    targetProductIdsText: '',
+    targetCategoriesText: '',
+    targetCustomerIdsText: '',
+  };
+}
+
+function promotionToDraft(promotion: Promotion): PromotionDraft {
+  return {
+    ...promotion,
+    startsAt: promotion.startsAt ? String(promotion.startsAt).slice(0, 16) : '',
+    endsAt: promotion.endsAt ? String(promotion.endsAt).slice(0, 16) : '',
+    targetProductIdsText: (promotion.targetProductIds || []).join(', '),
+    targetCategoriesText: (promotion.targetCategories || []).join(', '),
+    targetCustomerIdsText: (promotion.targetCustomerIds || []).join(', '),
+  };
+}
+
+function splitPromotionTargets(value: string) {
+  return value.split(',').map(item => item.trim()).filter(Boolean);
+}
+
+function newLoyaltyTierDraft(): Partial<LoyaltyTier> {
+  return { name: '', status: 'active', minPoints: 0, earnMultiplier: 1 };
+}
+
+function newLoyaltyRuleDraft(): LoyaltyRuleDraft {
+  return {
+    name: '',
+    status: 'active',
+    ruleType: 'base',
+    pointsPerCurrency: 10,
+    multiplier: 1,
+    bonusPoints: 0,
+    minSubtotal: 0,
+    startsAt: '',
+    endsAt: '',
+    targetProductIds: [],
+    targetCategories: [],
+    daysOfWeek: [],
+    targetProductIdsText: '',
+    targetCategoriesText: '',
+    daysOfWeekText: '',
+  };
+}
+
+function loyaltyRuleToDraft(rule: LoyaltyRewardRule): LoyaltyRuleDraft {
+  return {
+    ...rule,
+    startsAt: rule.startsAt ? String(rule.startsAt).slice(0, 16) : '',
+    endsAt: rule.endsAt ? String(rule.endsAt).slice(0, 16) : '',
+    targetProductIdsText: (rule.targetProductIds || []).join(', '),
+    targetCategoriesText: (rule.targetCategories || []).join(', '),
+    daysOfWeekText: (rule.daysOfWeek || []).join(', '),
+  };
+}
+
+const DEFAULT_RETENTION_POLICY_UI: RetentionPolicy = {
+  customerNotesDays: 365,
+  messagesDays: 180,
+  deviceMetadataDays: 90,
+  auditLogsDays: 2555,
+  lastAppliedAt: null,
+  lastAppliedBy: null,
+  lastAppliedByName: null,
+  lastResult: null,
+};
+
+const RETENTION_EMPTY_SUMMARY = {
+  customerNotesToClear: 0,
+  messagesToDelete: 0,
+  deviceMetadataRowsToDelete: 0,
+  auditLogsToDelete: 0,
+};
+
+type RetentionDayField = 'customerNotesDays' | 'messagesDays' | 'deviceMetadataDays' | 'auditLogsDays';
+
+function normalizeRetentionPolicyForUi(input?: Partial<RetentionPolicy> | null): RetentionPolicy {
+  const raw = input || {};
+  const clamp = (value: unknown, fallback: number, min = 7, max = 3650) => {
+    const parsed = Math.floor(Number(value));
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, parsed));
+  };
+
+  return {
+    customerNotesDays: clamp(raw.customerNotesDays, DEFAULT_RETENTION_POLICY_UI.customerNotesDays),
+    messagesDays: clamp(raw.messagesDays, DEFAULT_RETENTION_POLICY_UI.messagesDays),
+    deviceMetadataDays: clamp(raw.deviceMetadataDays, DEFAULT_RETENTION_POLICY_UI.deviceMetadataDays),
+    auditLogsDays: clamp(raw.auditLogsDays, DEFAULT_RETENTION_POLICY_UI.auditLogsDays, 30),
+    lastAppliedAt: raw.lastAppliedAt || null,
+    lastAppliedBy: raw.lastAppliedBy || null,
+    lastAppliedByName: raw.lastAppliedByName || null,
+    lastResult: raw.lastResult || null,
+  };
+}
+
+function formatRetentionDate(value?: any) {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
 export function SettingsView({ config, setConfig }: { config: AppConfig, setConfig: (c: AppConfig) => void }) {
   const tenantId = usePosStore(state => state.tenantId);
   const currentUserStaff = usePosStore(state => state.currentUserStaff);
@@ -25,8 +159,18 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     categories: config.categories || DEFAULT_CATEGORY_TREE
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'business' | 'package' | 'ai' | 'payment' | 'categories' | 'features' | 'printing' | 'tax' | 'loyalty' | 'discounts' | 'workstations' | 'tables'>('business');
+  const [activeTab, setActiveTab] = useState<'business' | 'package' | 'ai' | 'payment' | 'categories' | 'features' | 'printing' | 'hardware' | 'tax' | 'loyalty' | 'discounts' | 'retention' | 'workstations' | 'tables'>('business');
   const [packageLimits, setPackageLimits] = useState<TenantPackageLimitsResponse | null>(null);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [promotionDraft, setPromotionDraft] = useState<PromotionDraft>(() => newPromotionDraft());
+  const [promotionSaving, setPromotionSaving] = useState(false);
+  const [promotionError, setPromotionError] = useState<string | null>(null);
+  const [loyaltyTiers, setLoyaltyTiers] = useState<LoyaltyTier[]>([]);
+  const [loyaltyRules, setLoyaltyRules] = useState<LoyaltyRewardRule[]>([]);
+  const [loyaltyTierDraft, setLoyaltyTierDraft] = useState<Partial<LoyaltyTier>>(() => newLoyaltyTierDraft());
+  const [loyaltyRuleDraft, setLoyaltyRuleDraft] = useState<LoyaltyRuleDraft>(() => newLoyaltyRuleDraft());
+  const [loyaltySaving, setLoyaltySaving] = useState(false);
+  const [loyaltyError, setLoyaltyError] = useState<string | null>(null);
   const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
   const [aiSaving, setAiSaving] = useState(false);
   const [aiApiKey, setAiApiKey] = useState('');
@@ -40,6 +184,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const [printingReceiptTest, setPrintingReceiptTest] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
+  const [retentionPolicy, setRetentionPolicy] = useState<RetentionPolicy>(() => normalizeRetentionPolicyForUi(config.retentionPolicy));
+  const [retentionPreview, setRetentionPreview] = useState<RetentionPreview | null>(null);
+  const [retentionPreviewing, setRetentionPreviewing] = useState(false);
+  const [retentionSaving, setRetentionSaving] = useState(false);
+  const [retentionApplying, setRetentionApplying] = useState(false);
+  const [retentionError, setRetentionError] = useState<string | null>(null);
+  const [retentionNotice, setRetentionNotice] = useState<string | null>(null);
   const activeTabRef = useRef(activeTab);
   const aiSettingsRef = useRef<AiSettings | null>(aiSettings);
 
@@ -90,12 +241,16 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const fetchData = useCallback(async () => {
     if (!tenantId) return;
     try {
-      const [ws, assignments, sects, tabs, limits] = await Promise.all([
+      const [ws, assignments, sects, tabs, limits, promoRows, tierRows, ruleRows, retentionConfig] = await Promise.all([
         apiGet<Workstation[]>(`/api/mariadb/tenants/${tenantId}/workstations`),
         getCompanionDeviceAssignments(tenantId).catch(() => []),
         apiGet<TableSection[]>(`/api/mariadb/tenants/${tenantId}/table-sections`),
         apiGet<RestaurantTable[]>(`/api/mariadb/tenants/${tenantId}/restaurant-tables`),
         getTenantPackageLimits(tenantId),
+        getPromotions(tenantId).catch(() => []),
+        getLoyaltyTiers(tenantId).catch(() => []),
+        getLoyaltyRewardRules(tenantId).catch(() => []),
+        getRetentionPolicy(tenantId).catch(() => null),
       ]);
       setWorkstations(ws || []);
       setCompanionAssignments(assignments || []);
@@ -103,6 +258,15 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
       setSections(sects || []);
       setTables(tabs || []);
       setPackageLimits(limits);
+      setPromotions(promoRows || []);
+      setLoyaltyTiers(tierRows || []);
+      setLoyaltyRules(ruleRows || []);
+      const nextRetentionPolicy = normalizeRetentionPolicyForUi(retentionConfig || config.retentionPolicy);
+      if (activeTabRef.current !== 'retention') {
+        setRetentionPolicy(nextRetentionPolicy);
+        setRetentionPreview(null);
+        setFormData(current => ({ ...current, retentionPolicy: nextRetentionPolicy }));
+      }
       try {
         const latestAiSettings = await getAiSettings(tenantId);
         if (activeTabRef.current !== 'ai' || !aiSettingsRef.current) {
@@ -116,7 +280,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     } catch (err) {
       console.error('Settings data fetch error:', err);
     }
-  }, [tenantId, companionWorkstationId]);
+  }, [tenantId, companionWorkstationId, config.retentionPolicy]);
 
   const companionDeviceId = React.useMemo(() => {
     const key = `companion-device-id:${tenantId || 'local'}:${currentUserStaff?.id || 'staff'}`;
@@ -267,6 +431,74 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
       alert("Failed to save settings");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const updateRetentionDays = (field: RetentionDayField, value: string) => {
+    const min = field === 'auditLogsDays' ? 30 : 7;
+    const parsed = Math.floor(Number(value));
+    const nextValue = Number.isFinite(parsed) ? Math.max(min, Math.min(3650, parsed)) : min;
+    setRetentionPolicy(current => ({ ...current, [field]: nextValue }));
+    setRetentionPreview(null);
+    setRetentionNotice(null);
+    setRetentionError(null);
+  };
+
+  const refreshRetentionPreview = async (policyOverride: RetentionPolicy = retentionPolicy) => {
+    if (!tenantId) return null;
+    setRetentionPreviewing(true);
+    setRetentionError(null);
+    try {
+      const preview = await previewRetentionPolicy(tenantId, policyOverride);
+      setRetentionPreview(preview);
+      return preview;
+    } catch (err: any) {
+      setRetentionError(err?.message || 'Retention preview failed.');
+      return null;
+    } finally {
+      setRetentionPreviewing(false);
+    }
+  };
+
+  const saveRetentionPolicySettings = async () => {
+    if (!tenantId) return;
+    setRetentionSaving(true);
+    setRetentionError(null);
+    setRetentionNotice(null);
+    try {
+      const saved = normalizeRetentionPolicyForUi(await updateRetentionPolicy(tenantId, retentionPolicy));
+      const nextConfig = { ...formData, retentionPolicy: saved } as AppConfig;
+      setRetentionPolicy(saved);
+      setFormData(nextConfig);
+      setConfig(nextConfig);
+      setRetentionNotice('Retention policy saved.');
+      await refreshRetentionPreview(saved);
+    } catch (err: any) {
+      setRetentionError(err?.message || 'Retention policy save failed.');
+    } finally {
+      setRetentionSaving(false);
+    }
+  };
+
+  const applyRetentionCleanup = async () => {
+    if (!tenantId) return;
+    if (!confirm('Apply retention cleanup now? Records older than these windows will be cleared or deleted.')) return;
+    setRetentionApplying(true);
+    setRetentionError(null);
+    setRetentionNotice(null);
+    try {
+      const result = await applyRetentionPolicy(tenantId, retentionPolicy);
+      const saved = normalizeRetentionPolicyForUi(result.policy);
+      const nextConfig = { ...formData, retentionPolicy: saved } as AppConfig;
+      setRetentionPolicy(saved);
+      setRetentionPreview(result);
+      setFormData(nextConfig);
+      setConfig(nextConfig);
+      setRetentionNotice('Retention cleanup applied.');
+    } catch (err: any) {
+      setRetentionError(err?.message || 'Retention cleanup failed.');
+    } finally {
+      setRetentionApplying(false);
     }
   };
 
@@ -562,6 +794,19 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     { id: 'admin', label: 'Administrators' },
     { id: 'dev', label: 'Developers' },
   ] as const;
+  const retentionControls: Array<{ field: RetentionDayField; label: string; min: number }> = [
+    { field: 'customerNotesDays', label: 'Customer notes', min: 7 },
+    { field: 'messagesDays', label: 'Messages', min: 7 },
+    { field: 'deviceMetadataDays', label: 'Device metadata', min: 7 },
+    { field: 'auditLogsDays', label: 'Audit logs', min: 30 },
+  ];
+  const retentionSummary = retentionPreview?.summary || retentionPolicy.lastResult || RETENTION_EMPTY_SUMMARY;
+  const retentionStats = [
+    { label: 'Notes to clear', value: retentionSummary.customerNotesToClear },
+    { label: 'Messages to delete', value: retentionSummary.messagesToDelete },
+    { label: 'Device rows to delete', value: retentionSummary.deviceMetadataRowsToDelete },
+    { label: 'Audit logs to delete', value: retentionSummary.auditLogsToDelete },
+  ];
   const dayOptions = [
     { id: 0, label: 'Sun' },
     { id: 1, label: 'Mon' },
@@ -624,6 +869,154 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
       },
     } as AppConfig);
   };
+  const savePromotionDraft = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId) return;
+    setPromotionSaving(true);
+    setPromotionError(null);
+    try {
+      const payload: Partial<Promotion> = {
+        ...promotionDraft,
+        code: String(promotionDraft.code || '').trim().toUpperCase(),
+        name: String(promotionDraft.name || '').trim(),
+        status: promotionDraft.status === 'inactive' ? 'inactive' : 'active',
+        discountType: promotionDraft.discountType === 'fixed' ? 'fixed' : 'percent',
+        discountValue: Number(promotionDraft.discountValue || 0),
+        startsAt: promotionDraft.startsAt || null,
+        endsAt: promotionDraft.endsAt || null,
+        minSubtotal: Number(promotionDraft.minSubtotal || 0),
+        maxDiscountAmount: promotionDraft.maxDiscountAmount ? Number(promotionDraft.maxDiscountAmount) : null,
+        appliesTo: promotionDraft.appliesTo === 'products' || promotionDraft.appliesTo === 'categories' ? promotionDraft.appliesTo : 'cart',
+        targetProductIds: splitPromotionTargets(promotionDraft.targetProductIdsText),
+        targetCategories: splitPromotionTargets(promotionDraft.targetCategoriesText),
+        customerScope: promotionDraft.customerScope === 'selected' || promotionDraft.customerScope === 'no_customer' ? promotionDraft.customerScope : 'all',
+        targetCustomerIds: splitPromotionTargets(promotionDraft.targetCustomerIdsText),
+        totalRedemptionLimit: promotionDraft.totalRedemptionLimit ? Number(promotionDraft.totalRedemptionLimit) : null,
+        perCustomerLimit: promotionDraft.perCustomerLimit ? Number(promotionDraft.perCustomerLimit) : null,
+      };
+      if (!payload.code || !payload.name || !payload.discountValue) {
+        throw new Error('Code, name, and discount value are required.');
+      }
+      if (promotionDraft.id) {
+        await updatePromotion(tenantId, promotionDraft.id, payload);
+      } else {
+        await createPromotion(tenantId, payload);
+      }
+      setPromotionDraft(newPromotionDraft());
+      setPromotions(await getPromotions(tenantId));
+    } catch (err) {
+      setPromotionError(err instanceof Error ? err.message : 'Could not save promotion.');
+    } finally {
+      setPromotionSaving(false);
+    }
+  };
+
+  const togglePromotionStatus = async (promotion: Promotion) => {
+    if (!tenantId) return;
+    setPromotionSaving(true);
+    setPromotionError(null);
+    try {
+      await updatePromotion(tenantId, promotion.id, {
+        ...promotion,
+        status: promotion.status === 'active' ? 'inactive' : 'active',
+      });
+      setPromotions(await getPromotions(tenantId));
+    } catch (err) {
+      setPromotionError(err instanceof Error ? err.message : 'Could not update promotion.');
+    } finally {
+      setPromotionSaving(false);
+    }
+  };
+
+  const saveLoyaltyTierDraft = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId) return;
+    setLoyaltySaving(true);
+    setLoyaltyError(null);
+    try {
+      const payload: Partial<LoyaltyTier> = {
+        ...loyaltyTierDraft,
+        name: String(loyaltyTierDraft.name || '').trim(),
+        status: loyaltyTierDraft.status === 'inactive' ? 'inactive' : 'active',
+        minPoints: Number(loyaltyTierDraft.minPoints || 0),
+        earnMultiplier: Number(loyaltyTierDraft.earnMultiplier || 1),
+      };
+      if (!payload.name) throw new Error('Tier name is required.');
+      if (loyaltyTierDraft.id) {
+        await updateLoyaltyTier(tenantId, loyaltyTierDraft.id, payload);
+      } else {
+        await createLoyaltyTier(tenantId, payload);
+      }
+      setLoyaltyTierDraft(newLoyaltyTierDraft());
+      setLoyaltyTiers(await getLoyaltyTiers(tenantId));
+    } catch (err) {
+      setLoyaltyError(err instanceof Error ? err.message : 'Could not save loyalty tier.');
+    } finally {
+      setLoyaltySaving(false);
+    }
+  };
+
+  const saveLoyaltyRuleDraft = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId) return;
+    setLoyaltySaving(true);
+    setLoyaltyError(null);
+    try {
+      const payload: Partial<LoyaltyRewardRule> = {
+        ...loyaltyRuleDraft,
+        name: String(loyaltyRuleDraft.name || '').trim(),
+        status: loyaltyRuleDraft.status === 'inactive' ? 'inactive' : 'active',
+        ruleType: loyaltyRuleDraft.ruleType || 'base',
+        pointsPerCurrency: Number(loyaltyRuleDraft.pointsPerCurrency || 0),
+        multiplier: Number(loyaltyRuleDraft.multiplier || 1),
+        bonusPoints: Number(loyaltyRuleDraft.bonusPoints || 0),
+        minSubtotal: Number(loyaltyRuleDraft.minSubtotal || 0),
+        startsAt: loyaltyRuleDraft.startsAt || null,
+        endsAt: loyaltyRuleDraft.endsAt || null,
+        targetProductIds: splitPromotionTargets(loyaltyRuleDraft.targetProductIdsText),
+        targetCategories: splitPromotionTargets(loyaltyRuleDraft.targetCategoriesText),
+        daysOfWeek: splitPromotionTargets(loyaltyRuleDraft.daysOfWeekText).map(Number).filter(day => Number.isFinite(day) && day >= 0 && day <= 6),
+      };
+      if (!payload.name) throw new Error('Reward rule name is required.');
+      if (loyaltyRuleDraft.id) {
+        await updateLoyaltyRewardRule(tenantId, loyaltyRuleDraft.id, payload);
+      } else {
+        await createLoyaltyRewardRule(tenantId, payload);
+      }
+      setLoyaltyRuleDraft(newLoyaltyRuleDraft());
+      setLoyaltyRules(await getLoyaltyRewardRules(tenantId));
+    } catch (err) {
+      setLoyaltyError(err instanceof Error ? err.message : 'Could not save loyalty reward rule.');
+    } finally {
+      setLoyaltySaving(false);
+    }
+  };
+
+  const toggleLoyaltyTierStatus = async (tier: LoyaltyTier) => {
+    if (!tenantId) return;
+    setLoyaltySaving(true);
+    try {
+      await updateLoyaltyTier(tenantId, tier.id, { ...tier, status: tier.status === 'active' ? 'inactive' : 'active' });
+      setLoyaltyTiers(await getLoyaltyTiers(tenantId));
+    } catch (err) {
+      setLoyaltyError(err instanceof Error ? err.message : 'Could not update loyalty tier.');
+    } finally {
+      setLoyaltySaving(false);
+    }
+  };
+
+  const toggleLoyaltyRuleStatus = async (rule: LoyaltyRewardRule) => {
+    if (!tenantId) return;
+    setLoyaltySaving(true);
+    try {
+      await updateLoyaltyRewardRule(tenantId, rule.id, { ...rule, status: rule.status === 'active' ? 'inactive' : 'active' });
+      setLoyaltyRules(await getLoyaltyRewardRules(tenantId));
+    } catch (err) {
+      setLoyaltyError(err instanceof Error ? err.message : 'Could not update loyalty reward rule.');
+    } finally {
+      setLoyaltySaving(false);
+    }
+  };
 
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50 dark:bg-slate-950">
@@ -684,6 +1077,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
             Receipts
           </button>
           <button
+            onClick={() => setActiveTab('hardware')}
+            className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'hardware' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
+          >
+            <Printer className="w-4 h-4" />
+            Hardware
+          </button>
+          <button
             onClick={() => setActiveTab('loyalty')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'loyalty' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
@@ -696,6 +1096,13 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           >
             <Clock className="w-4 h-4" />
             Discounts
+          </button>
+          <button
+            onClick={() => setActiveTab('retention')}
+            className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'retention' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            Retention
           </button>
           <button
             onClick={() => setActiveTab('categories')}
@@ -1675,6 +2082,208 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                       <span className="text-sm font-bold text-slate-500">{formData.business?.currency || 'USD'}.</span>
                     </div>
                   </div>
+
+                  {loyaltyError && (
+                    <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700 dark:border-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
+                      {loyaltyError}
+                    </div>
+                  )}
+
+                  <form onSubmit={saveLoyaltyTierDraft} className="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h4 className="text-sm font-black uppercase tracking-widest text-slate-500">Member tiers</h4>
+                        <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">Tiers are selected from the member's point balance unless a customer profile is assigned to one.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setLoyaltyTierDraft(newLoyaltyTierDraft())}
+                        className="rounded-xl bg-slate-100 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      >
+                        New tier
+                      </button>
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-3">
+                      <input
+                        value={loyaltyTierDraft.name || ''}
+                        onChange={e => setLoyaltyTierDraft({ ...loyaltyTierDraft, name: e.target.value })}
+                        className="md:col-span-2 px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Gold"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        value={loyaltyTierDraft.minPoints ?? ''}
+                        onChange={e => setLoyaltyTierDraft({ ...loyaltyTierDraft, minPoints: Number(e.target.value || 0) })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Min points"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={loyaltyTierDraft.earnMultiplier ?? ''}
+                        onChange={e => setLoyaltyTierDraft({ ...loyaltyTierDraft, earnMultiplier: Number(e.target.value || 1) })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Multiplier"
+                      />
+                      <button
+                        type="submit"
+                        disabled={loyaltySaving}
+                        className="rounded-xl bg-primary px-4 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                      >
+                        Save tier
+                      </button>
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {loyaltyTiers.length === 0 && (
+                        <div className="rounded-xl border border-dashed border-slate-300 p-4 text-sm font-bold text-slate-400 dark:border-slate-700">No tiers configured.</div>
+                      )}
+                      {loyaltyTiers.map(tier => (
+                        <div key={tier.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/50">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-black text-slate-900 dark:text-white">{tier.name}</p>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{tier.minPoints} pts / {tier.earnMultiplier}x earn</p>
+                            </div>
+                            <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${tier.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{tier.status}</span>
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <button type="button" onClick={() => setLoyaltyTierDraft(tier)} className="flex-1 rounded-lg bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-slate-900 dark:text-slate-300">Edit</button>
+                            <button type="button" onClick={() => void toggleLoyaltyTierStatus(tier)} className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white dark:bg-white dark:text-slate-900">{tier.status === 'active' ? 'Pause' : 'Activate'}</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </form>
+
+                  <form onSubmit={saveLoyaltyRuleDraft} className="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h4 className="text-sm font-black uppercase tracking-widest text-slate-500">Reward rules</h4>
+                        <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">Rules can adjust base earning, or add targeted bonuses by product, category, or time window.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setLoyaltyRuleDraft(newLoyaltyRuleDraft())}
+                        className="rounded-xl bg-slate-100 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      >
+                        New rule
+                      </button>
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 md:grid-cols-6 gap-3">
+                      <input
+                        value={loyaltyRuleDraft.name || ''}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, name: e.target.value })}
+                        className="md:col-span-2 px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Double coffee points"
+                      />
+                      <select
+                        value={loyaltyRuleDraft.ruleType || 'base'}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, ruleType: e.target.value as LoyaltyRewardRule['ruleType'] })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      >
+                        <option value="base">Base</option>
+                        <option value="category">Category</option>
+                        <option value="product">Product</option>
+                        <option value="time_window">Time window</option>
+                      </select>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={loyaltyRuleDraft.pointsPerCurrency ?? ''}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, pointsPerCurrency: Number(e.target.value || 0) })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Currency/pt"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={loyaltyRuleDraft.multiplier ?? ''}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, multiplier: Number(e.target.value || 1) })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Multiplier"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        value={loyaltyRuleDraft.bonusPoints ?? ''}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, bonusPoints: Number(e.target.value || 0) })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Bonus"
+                      />
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-6 gap-3">
+                      <input
+                        value={loyaltyRuleDraft.targetProductIdsText}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, targetProductIdsText: e.target.value })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Product IDs"
+                      />
+                      <input
+                        value={loyaltyRuleDraft.targetCategoriesText}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, targetCategoriesText: e.target.value })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Categories"
+                      />
+                      <input
+                        value={loyaltyRuleDraft.daysOfWeekText}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, daysOfWeekText: e.target.value })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Days 0-6"
+                      />
+                      <input
+                        type="datetime-local"
+                        value={loyaltyRuleDraft.startsAt ? String(loyaltyRuleDraft.startsAt) : ''}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, startsAt: e.target.value })}
+                        className="px-3 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      />
+                      <input
+                        type="datetime-local"
+                        value={loyaltyRuleDraft.endsAt ? String(loyaltyRuleDraft.endsAt) : ''}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, endsAt: e.target.value })}
+                        className="px-3 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={loyaltyRuleDraft.minSubtotal ?? ''}
+                        onChange={e => setLoyaltyRuleDraft({ ...loyaltyRuleDraft, minSubtotal: Number(e.target.value || 0) })}
+                        className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                        placeholder="Min spend"
+                      />
+                      <button
+                        type="submit"
+                        disabled={loyaltySaving}
+                        className="rounded-xl bg-primary px-4 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                      >
+                        Save rule
+                      </button>
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {loyaltyRules.length === 0 && (
+                        <div className="rounded-xl border border-dashed border-slate-300 p-4 text-sm font-bold text-slate-400 dark:border-slate-700">No reward rules configured.</div>
+                      )}
+                      {loyaltyRules.map(rule => (
+                        <div key={rule.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/50">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-black text-slate-900 dark:text-white">{rule.name}</p>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{rule.ruleType} / {rule.pointsPerCurrency || 'base'} currency/pt / {rule.multiplier}x / +{rule.bonusPoints} pts</p>
+                            </div>
+                            <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${rule.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{rule.status}</span>
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <button type="button" onClick={() => setLoyaltyRuleDraft(loyaltyRuleToDraft(rule))} className="flex-1 rounded-lg bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-slate-900 dark:text-slate-300">Edit</button>
+                            <button type="button" onClick={() => void toggleLoyaltyRuleStatus(rule)} className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white dark:bg-white dark:text-slate-900">{rule.status === 'active' ? 'Pause' : 'Activate'}</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </form>
                 </div>
               ) : (
                 <div className="text-center p-12 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
@@ -1700,6 +2309,263 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   The POS applies the best active discount for the selected buyer. Individual customer and staff discounts are set on their profiles.
                 </p>
               </div>
+
+              <form onSubmit={savePromotionDraft} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h4 className="text-sm font-black uppercase tracking-widest text-slate-500">Promotions and coupons</h4>
+                    <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">Codes are validated at checkout before redemption is recorded.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setPromotionDraft(newPromotionDraft()); setPromotionError(null); }}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    New code
+                  </button>
+                </div>
+
+                {promotionError && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700 dark:border-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
+                    {promotionError}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Code</label>
+                    <input
+                      value={promotionDraft.code || ''}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, code: e.target.value.toUpperCase() })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      placeholder="LUNCH10"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Name</label>
+                    <input
+                      value={promotionDraft.name || ''}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, name: e.target.value })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      placeholder="Lunch combo promo"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Status</label>
+                    <select
+                      value={promotionDraft.status || 'active'}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, status: e.target.value as Promotion['status'] })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Type</label>
+                    <select
+                      value={promotionDraft.discountType || 'percent'}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, discountType: e.target.value as Promotion['discountType'] })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                    >
+                      <option value="percent">Percent</option>
+                      <option value="fixed">Fixed</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Value</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={promotionDraft.discountValue ?? ''}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, discountValue: Number(e.target.value || 0) })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Min subtotal</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={promotionDraft.minSubtotal ?? ''}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, minSubtotal: Number(e.target.value || 0) })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Max discount</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={promotionDraft.maxDiscountAmount ?? ''}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, maxDiscountAmount: e.target.value ? Number(e.target.value) : null })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      placeholder="No cap"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Applies to</label>
+                    <select
+                      value={promotionDraft.appliesTo || 'cart'}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, appliesTo: e.target.value as Promotion['appliesTo'] })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                    >
+                      <option value="cart">Whole cart</option>
+                      <option value="products">Products</option>
+                      <option value="categories">Categories</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Starts</label>
+                    <input
+                      type="datetime-local"
+                      value={promotionDraft.startsAt ? String(promotionDraft.startsAt) : ''}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, startsAt: e.target.value })}
+                      className="mt-2 w-full px-3 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Ends</label>
+                    <input
+                      type="datetime-local"
+                      value={promotionDraft.endsAt ? String(promotionDraft.endsAt) : ''}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, endsAt: e.target.value })}
+                      className="mt-2 w-full px-3 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Total limit</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={promotionDraft.totalRedemptionLimit ?? ''}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, totalRedemptionLimit: e.target.value ? Number(e.target.value) : null })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      placeholder="Unlimited"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Per customer</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={promotionDraft.perCustomerLimit ?? ''}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, perCustomerLimit: e.target.value ? Number(e.target.value) : null })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      placeholder="Unlimited"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Product IDs</label>
+                    <input
+                      value={promotionDraft.targetProductIdsText}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, targetProductIdsText: e.target.value })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      placeholder="prod_1, prod_2"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Categories</label>
+                    <input
+                      value={promotionDraft.targetCategoriesText}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, targetCategoriesText: e.target.value })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                      placeholder="Coffee, Bakery"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">Customer scope</label>
+                    <select
+                      value={promotionDraft.customerScope || 'all'}
+                      onChange={e => setPromotionDraft({ ...promotionDraft, customerScope: e.target.value as Promotion['customerScope'] })}
+                      className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                    >
+                      <option value="all">All customers</option>
+                      <option value="selected">Selected IDs</option>
+                      <option value="no_customer">No customer</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-500">Selected customer IDs</label>
+                  <input
+                    value={promotionDraft.targetCustomerIdsText}
+                    onChange={e => setPromotionDraft({ ...promotionDraft, targetCustomerIdsText: e.target.value })}
+                    className="mt-2 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm font-bold dark:text-white outline-none"
+                    placeholder="cust_1, cust_2"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    {promotionDraft.id ? 'Editing an existing coupon.' : 'Creating a new coupon.'}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={promotionSaving}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                  >
+                    {promotionSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save coupon
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {promotions.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-bold text-slate-400 dark:border-slate-700">
+                      No coupons configured yet.
+                    </div>
+                  )}
+                  {promotions.map(promotion => (
+                    <div key={promotion.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-black text-slate-900 dark:text-white">{promotion.code}</p>
+                          <p className="truncate text-xs font-bold text-slate-500 dark:text-slate-400">{promotion.name}</p>
+                        </div>
+                        <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-widest ${promotion.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-300'}`}>
+                          {promotion.status}
+                        </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        <span>{promotion.discountType === 'percent' ? `${promotion.discountValue}%` : `R${Number(promotion.discountValue || 0).toFixed(2)}`}</span>
+                        <span>{promotion.appliesTo}</span>
+                        <span>{promotion.redemptionCount || 0}{promotion.totalRedemptionLimit ? `/${promotion.totalRedemptionLimit}` : ''} used</span>
+                      </div>
+                      <div className="mt-4 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setPromotionDraft(promotionToDraft(promotion)); setPromotionError(null); }}
+                          className="flex-1 rounded-xl bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 shadow-sm dark:bg-slate-900 dark:text-slate-300"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void togglePromotionStatus(promotion)}
+                          disabled={promotionSaving}
+                          className="flex-1 rounded-xl bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                        >
+                          {promotion.status === 'active' ? 'Pause' : 'Activate'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </form>
 
               <div className="space-y-4">
                 <div>
@@ -1843,6 +2709,106 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'hardware' && (
+            <HardwareAdaptersPanel tenantId={tenantId} workstations={workstations} />
+          )}
+
+          {activeTab === 'retention' && (
+            <div className="space-y-6">
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-800/50 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white">Retention Policy</h3>
+                  <p className="mt-1 text-xs font-black uppercase tracking-widest text-slate-400">
+                    Last applied: {formatRetentionDate(retentionPolicy.lastAppliedAt)}
+                  </p>
+                </div>
+                <span className="inline-flex w-fit items-center rounded-full bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 shadow-sm dark:bg-slate-900 dark:text-slate-300">
+                  {retentionPolicy.lastAppliedByName || retentionPolicy.lastAppliedBy || 'Not applied'}
+                </span>
+              </div>
+
+              {retentionError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700 dark:border-rose-900 dark:bg-rose-900/20 dark:text-rose-200">
+                  {retentionError}
+                </div>
+              )}
+              {retentionNotice && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-200">
+                  {retentionNotice}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                {retentionControls.map(control => (
+                  <div key={control.field} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-500">{control.label}</label>
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={control.min}
+                        max={3650}
+                        value={retentionPolicy[control.field]}
+                        onChange={event => updateRetentionDays(control.field, event.target.value)}
+                        className="w-full rounded-xl border-none bg-slate-50 px-4 py-3 text-sm font-black text-slate-900 outline-none focus:ring-2 ring-primary/20 dark:bg-slate-800 dark:text-white"
+                      />
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-400">days</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                {retentionStats.map(stat => (
+                  <div key={stat.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{stat.label}</p>
+                    <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{Number(stat.value || 0).toLocaleString()}</p>
+                  </div>
+                ))}
+              </div>
+
+              {retentionPreview && (
+                <div className="grid grid-cols-1 gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-xs font-bold text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 md:grid-cols-2">
+                  <span>Customer notes before {retentionPreview.customerNotes.cutoff}</span>
+                  <span>Messages before {retentionPreview.messages.cutoff}</span>
+                  <span>Device metadata before {retentionPreview.stalePushSubscriptions.cutoff}</span>
+                  <span>Audit logs before {retentionPreview.auditLogs.cutoff}</span>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3 border-t border-slate-100 pt-6 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  type="button"
+                  onClick={() => void refreshRetentionPreview()}
+                  disabled={retentionPreviewing || retentionSaving || retentionApplying}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-600 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  {retentionPreviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+                  Preview
+                </button>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => void saveRetentionPolicySettings()}
+                    disabled={retentionSaving || retentionApplying}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                  >
+                    {retentionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save policy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void applyRetentionCleanup()}
+                    disabled={retentionApplying || retentionSaving}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                  >
+                    {retentionApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    Apply cleanup
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -2164,7 +3130,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           )}
 
           {/* Save button — hidden on workstations tab (it has its own save) */}
-          {activeTab !== 'workstations' && activeTab !== 'tables' && activeTab !== 'ai' && (
+          {activeTab !== 'workstations' && activeTab !== 'tables' && activeTab !== 'ai' && activeTab !== 'retention' && activeTab !== 'hardware' && (
           <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
             <button
               onClick={handleSave}

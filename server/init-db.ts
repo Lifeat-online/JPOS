@@ -30,6 +30,21 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS refresh_token_sessions (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  staff_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  ip_address TEXT,
+  user_agent TEXT,
+  expires_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  revoked_reason TEXT,
+  replaced_by_token_hash TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  last_used_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
   tenant_id TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
   payfast_merchant_id TEXT DEFAULT '10000100',
@@ -87,6 +102,10 @@ CREATE TABLE IF NOT EXISTS staff (
   role TEXT DEFAULT 'cashier' CHECK (role IN ('admin','cashier','manager','chef','dev')),
   email TEXT NOT NULL,
   password_hash TEXT,
+  security_pin_hash TEXT,
+  two_factor_enabled SMALLINT DEFAULT 0 CHECK (two_factor_enabled IN (0, 1)),
+  two_factor_secret TEXT,
+  two_factor_confirmed_at TIMESTAMPTZ,
   phone TEXT,
   status TEXT DEFAULT 'active' CHECK (status IN ('active','inactive')),
   permissions TEXT DEFAULT '{}'::TEXT,
@@ -138,7 +157,7 @@ CREATE TABLE IF NOT EXISTS sales (
   tax_amount NUMERIC(12,2) DEFAULT 0,
   tax_rate NUMERIC(5,2) DEFAULT 0,
   tax_inclusive SMALLINT DEFAULT 0 CHECK (tax_inclusive IN (0, 1)),
-  payment_method TEXT DEFAULT 'pending' CHECK (payment_method IN ('cash','payfast','card','wallet','account','pending')),
+  payment_method TEXT DEFAULT 'pending' CHECK (payment_method IN ('cash','payfast','card','wallet','account','qr','bnpl','pending')),
   tendered_amount NUMERIC(12,2) DEFAULT 0,
   change_amount NUMERIC(12,2) DEFAULT 0,
   tip_amount NUMERIC(12,2) DEFAULT 0,
@@ -172,6 +191,51 @@ CREATE TABLE IF NOT EXISTS sale_items (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS delivery_orders (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL CHECK (provider IN ('uber_eats','mr_d')),
+  external_order_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','accepted','preparing','ready','dispatched','completed','cancelled')),
+  customer_name TEXT,
+  customer_phone TEXT,
+  delivery_address TEXT,
+  subtotal NUMERIC(12,2) DEFAULT 0,
+  delivery_fee NUMERIC(12,2) DEFAULT 0,
+  tip_amount NUMERIC(12,2) DEFAULT 0,
+  discount_amount NUMERIC(12,2) DEFAULT 0,
+  total NUMERIC(12,2) DEFAULT 0,
+  currency TEXT DEFAULT 'ZAR',
+  placed_at TIMESTAMPTZ,
+  accepted_at TIMESTAMPTZ,
+  due_at TIMESTAMPTZ,
+  sale_id TEXT REFERENCES sales(id) ON DELETE SET NULL,
+  raw_payload TEXT DEFAULT '{}'::TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (tenant_id, provider, external_order_id)
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_orders_status
+  ON delivery_orders (tenant_id, status, placed_at);
+CREATE INDEX IF NOT EXISTS idx_delivery_orders_provider
+  ON delivery_orders (tenant_id, provider, placed_at);
+
+CREATE TABLE IF NOT EXISTS delivery_order_items (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  delivery_order_id TEXT NOT NULL REFERENCES delivery_orders(id) ON DELETE CASCADE,
+  external_item_id TEXT,
+  product_id TEXT,
+  product_name TEXT NOT NULL,
+  quantity NUMERIC(12,3) DEFAULT 1,
+  price NUMERIC(12,2) DEFAULT 0,
+  note TEXT,
+  modifiers TEXT DEFAULT '[]'::TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_order_items_order
+  ON delivery_order_items (tenant_id, delivery_order_id);
 
 CREATE TABLE IF NOT EXISTS cash_sessions (
   id TEXT PRIMARY KEY,
@@ -432,12 +496,19 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
 CREATE TABLE IF NOT EXISTS sale_payments (
   id TEXT PRIMARY KEY,
   sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
-  method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet','account')),
+  method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet','account','qr','bnpl')),
   amount NUMERIC(12,2) NOT NULL DEFAULT 0,
   tendered_amount NUMERIC(12,2) DEFAULT 0,
   change_amount NUMERIC(12,2) DEFAULT 0,
   tip_amount NUMERIC(12,2) DEFAULT 0,
   cash_out_amount NUMERIC(12,2) DEFAULT 0,
+  provider TEXT,
+  provider_device_id TEXT,
+  provider_reference TEXT,
+  authorization_code TEXT,
+  provider_status TEXT DEFAULT 'confirmed',
+  provider_note TEXT,
+  qr_payload TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -499,10 +570,21 @@ export async function initDb() {
   }
 
   await ensureStaffPermissionsSchema();
+  await ensureRefreshTokenSessionSchema();
+  await ensureSensitiveActionSchema();
+  await ensureTwoFactorSchema();
+  await ensureStaffSchedulingSchema();
+  await ensureTipPoolingSchema();
+  await ensureStaffPerformanceSchema();
   await ensureLicenceSchema();
+  await ensureRetentionPolicySchema();
   await ensureSalePaymentsTable();
   await ensureCustomerAccountSchema();
   await ensurePersonDiscountSchema();
+  await ensureCustomerPrivacySchema();
+  await ensureCustomerConsentSchema();
+  await ensureLoyaltySchema();
+  await ensurePromotionSchema();
   await ensureCashManagementSchema();
   await ensureRefundSchema();
   await ensureOfflineSaleSyncSchema();
@@ -512,13 +594,427 @@ export async function initDb() {
   await ensureStockTakeSchema();
   await ensureBulkInventorySchema();
   await ensurePurchaseOrderReceivingSchema();
+  await ensureEventBookingSchema();
   await ensureStockBatchSchema();
   await ensureReorderRecommendationSchema();
+  await ensureMultiLocationInventorySchema();
+  await ensureReorderNotificationRuleSchema();
+  await ensureDeliveryIntegrationSchema();
+  await ensureIntegrationAccessSchema();
+  await ensureHardwareDeviceSchema();
+  await ensureTaxPeriodSchema();
   await ensurePushNotificationSchema();
   await ensureAiSchema();
 }
 
 export { ensurePushNotificationSchema };
+
+export async function ensureDeliveryIntegrationSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS delivery_orders (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL CHECK (provider IN ('uber_eats','mr_d')),
+        external_order_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','accepted','preparing','ready','dispatched','completed','cancelled')),
+        customer_name TEXT,
+        customer_phone TEXT,
+        delivery_address TEXT,
+        subtotal NUMERIC(12,2) DEFAULT 0,
+        delivery_fee NUMERIC(12,2) DEFAULT 0,
+        tip_amount NUMERIC(12,2) DEFAULT 0,
+        discount_amount NUMERIC(12,2) DEFAULT 0,
+        total NUMERIC(12,2) DEFAULT 0,
+        currency TEXT DEFAULT 'ZAR',
+        placed_at TIMESTAMPTZ,
+        accepted_at TIMESTAMPTZ,
+        due_at TIMESTAMPTZ,
+        sale_id TEXT REFERENCES sales(id) ON DELETE SET NULL,
+        raw_payload TEXT DEFAULT '{}'::TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (tenant_id, provider, external_order_id)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_delivery_orders_status ON delivery_orders (tenant_id, status, placed_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_delivery_orders_provider ON delivery_orders (tenant_id, provider, placed_at)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS delivery_order_items (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        delivery_order_id TEXT NOT NULL REFERENCES delivery_orders(id) ON DELETE CASCADE,
+        external_item_id TEXT,
+        product_id TEXT,
+        product_name TEXT NOT NULL,
+        quantity NUMERIC(12,3) DEFAULT 1,
+        price NUMERIC(12,2) DEFAULT 0,
+        note TEXT,
+        modifiers TEXT DEFAULT '[]'::TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_delivery_order_items_order ON delivery_order_items (tenant_id, delivery_order_id)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS delivery_orders (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      provider ENUM('uber_eats','mr_d') NOT NULL,
+      external_order_id VARCHAR(128) NOT NULL,
+      status ENUM('new','accepted','preparing','ready','dispatched','completed','cancelled') NOT NULL DEFAULT 'new',
+      customer_name VARCHAR(255),
+      customer_phone VARCHAR(64),
+      delivery_address TEXT,
+      subtotal DECIMAL(12,2) DEFAULT 0,
+      delivery_fee DECIMAL(12,2) DEFAULT 0,
+      tip_amount DECIMAL(12,2) DEFAULT 0,
+      discount_amount DECIMAL(12,2) DEFAULT 0,
+      total DECIMAL(12,2) DEFAULT 0,
+      currency VARCHAR(8) DEFAULT 'ZAR',
+      placed_at DATETIME,
+      accepted_at DATETIME,
+      due_at DATETIME,
+      sale_id VARCHAR(64),
+      raw_payload JSON DEFAULT JSON_OBJECT(),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_delivery_orders_external (tenant_id, provider, external_order_id),
+      INDEX idx_delivery_orders_status (tenant_id, status, placed_at),
+      INDEX idx_delivery_orders_provider (tenant_id, provider, placed_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE SET NULL
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS delivery_order_items (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      delivery_order_id VARCHAR(64) NOT NULL,
+      external_item_id VARCHAR(128),
+      product_id VARCHAR(64),
+      product_name VARCHAR(255) NOT NULL,
+      quantity DECIMAL(12,3) DEFAULT 1,
+      price DECIMAL(12,2) DEFAULT 0,
+      note TEXT,
+      modifiers JSON DEFAULT JSON_ARRAY(),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_delivery_order_items_order (tenant_id, delivery_order_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (delivery_order_id) REFERENCES delivery_orders(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+export async function ensureIntegrationAccessSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS integration_api_keys (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        key_hash TEXT NOT NULL UNIQUE,
+        key_prefix TEXT NOT NULL,
+        scopes TEXT DEFAULT '[]'::TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
+        last_used_at TIMESTAMPTZ,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        revoked_at TIMESTAMPTZ,
+        revoked_by TEXT,
+        revoked_by_name TEXT
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_integration_api_keys_tenant ON integration_api_keys (tenant_id, status, created_at)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS integration_webhook_events (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        api_key_id TEXT REFERENCES integration_api_keys(id) ON DELETE SET NULL,
+        source TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'received' CHECK (status IN ('received','applied','failed','duplicate')),
+        entity_type TEXT,
+        entity_id TEXT,
+        payload TEXT DEFAULT '{}'::TEXT,
+        result TEXT DEFAULT '{}'::TEXT,
+        error_message TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        processed_at TIMESTAMPTZ,
+        UNIQUE (tenant_id, source, idempotency_key)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_integration_webhook_events_tenant ON integration_webhook_events (tenant_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_integration_webhook_events_status ON integration_webhook_events (tenant_id, status, created_at)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS integration_api_keys (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      name VARCHAR(160) NOT NULL,
+      key_hash CHAR(64) NOT NULL,
+      key_prefix VARCHAR(32) NOT NULL,
+      scopes JSON DEFAULT JSON_ARRAY(),
+      status ENUM('active','revoked') NOT NULL DEFAULT 'active',
+      last_used_at DATETIME,
+      created_by VARCHAR(64),
+      created_by_name VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      revoked_at DATETIME,
+      revoked_by VARCHAR(64),
+      revoked_by_name VARCHAR(255),
+      UNIQUE KEY uniq_integration_api_keys_hash (key_hash),
+      INDEX idx_integration_api_keys_tenant (tenant_id, status, created_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS integration_webhook_events (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      api_key_id VARCHAR(64),
+      source VARCHAR(80) NOT NULL,
+      event_type VARCHAR(80) NOT NULL,
+      idempotency_key VARCHAR(160) NOT NULL,
+      status ENUM('received','applied','failed','duplicate') NOT NULL DEFAULT 'received',
+      entity_type VARCHAR(80),
+      entity_id VARCHAR(64),
+      payload JSON DEFAULT JSON_OBJECT(),
+      result JSON DEFAULT JSON_OBJECT(),
+      error_message TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      processed_at DATETIME,
+      UNIQUE KEY uniq_integration_webhook_events_idempotency (tenant_id, source, idempotency_key),
+      INDEX idx_integration_webhook_events_tenant (tenant_id, created_at),
+      INDEX idx_integration_webhook_events_status (tenant_id, status, created_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (api_key_id) REFERENCES integration_api_keys(id) ON DELETE SET NULL
+    )
+  `);
+}
+
+export async function ensureRefreshTokenSessionSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS refresh_token_sessions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        staff_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        ip_address TEXT,
+        user_agent TEXT,
+        expires_at TIMESTAMPTZ,
+        revoked_at TIMESTAMPTZ,
+        revoked_reason TEXT,
+        replaced_by_token_hash TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        last_used_at TIMESTAMPTZ
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_staff ON refresh_token_sessions (tenant_id, staff_id, revoked_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_token_hash ON refresh_token_sessions (token_hash)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS refresh_token_sessions (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      staff_id VARCHAR(64) NOT NULL,
+      token_hash CHAR(64) NOT NULL UNIQUE,
+      ip_address VARCHAR(128),
+      user_agent TEXT,
+      expires_at DATETIME,
+      revoked_at DATETIME,
+      revoked_reason VARCHAR(255),
+      replaced_by_token_hash CHAR(64),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_used_at DATETIME,
+      INDEX idx_refresh_token_sessions_staff (tenant_id, staff_id, revoked_at),
+      INDEX idx_refresh_token_sessions_token_hash (token_hash),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+export async function ensureSensitiveActionSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS security_pin_hash TEXT`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE staff ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+
+  await addColumn(`security_pin_hash VARCHAR(255) AFTER password_hash`);
+}
+
+export async function ensureTwoFactorSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS two_factor_enabled SMALLINT DEFAULT 0`);
+    await query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS two_factor_secret TEXT`);
+    await query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS two_factor_confirmed_at TIMESTAMPTZ`);
+    await query(`UPDATE staff SET two_factor_enabled = COALESCE(two_factor_enabled, 0)`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE staff ADD COLUMN ${definition}`);
+  } catch (err: any) {
+    const message = String(err?.message || "");
+    if (!message.includes("Duplicate column")) throw err;
+  }
+  };
+
+  await addColumn(`two_factor_enabled TINYINT(1) DEFAULT 0 AFTER security_pin_hash`);
+  await addColumn(`two_factor_secret VARCHAR(255) AFTER two_factor_enabled`);
+  await addColumn(`two_factor_confirmed_at DATETIME AFTER two_factor_secret`);
+  await query(`UPDATE staff SET two_factor_enabled = COALESCE(two_factor_enabled, 0)`);
+}
+
+export async function ensureRetentionPolicySchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS retention_policy TEXT DEFAULT '{}'::TEXT`);
+    await query(`UPDATE app_settings SET retention_policy = COALESCE(retention_policy, '{}'::TEXT)`);
+    return;
+  }
+
+  try {
+    await query(`ALTER TABLE app_settings ADD COLUMN retention_policy JSON DEFAULT JSON_OBJECT() AFTER categories`);
+  } catch (err: any) {
+    const message = String(err?.message || "");
+    if (!message.includes("Duplicate column")) throw err;
+  }
+  await query(`UPDATE app_settings SET retention_policy = COALESCE(retention_policy, JSON_OBJECT())`);
+}
+
+export async function ensureCustomerPrivacySchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_anonymized SMALLINT DEFAULT 0`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS anonymized_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS anonymized_by TEXT`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS anonymized_by_name TEXT`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS anonymization_reason TEXT`);
+    await query(`UPDATE customers SET is_anonymized = COALESCE(is_anonymized, 0)`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE customers ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+
+  await addColumn(`is_anonymized TINYINT(1) DEFAULT 0 AFTER uid`);
+  await addColumn(`anonymized_at DATETIME AFTER is_anonymized`);
+  await addColumn(`anonymized_by VARCHAR(64) AFTER anonymized_at`);
+  await addColumn(`anonymized_by_name VARCHAR(255) AFTER anonymized_by`);
+  await addColumn(`anonymization_reason TEXT AFTER anonymized_by_name`);
+  await query(`UPDATE customers SET is_anonymized = COALESCE(is_anonymized, 0)`);
+}
+
+export async function ensureCustomerConsentSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS customer_consents (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        consent_type TEXT NOT NULL CHECK (consent_type IN ('loyalty','marketing','customer_portal','stored_contact_details','promotions','ai_recommendations')),
+        status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('unknown','granted','denied','revoked')),
+        source TEXT,
+        note TEXT,
+        captured_by TEXT,
+        captured_by_name TEXT,
+        captured_at TIMESTAMPTZ DEFAULT NOW(),
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (tenant_id, customer_id, consent_type)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_customer_consents_customer ON customer_consents (tenant_id, customer_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_customer_consents_status ON customer_consents (tenant_id, consent_type, status)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS customer_consent_events (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        consent_type TEXT NOT NULL CHECK (consent_type IN ('loyalty','marketing','customer_portal','stored_contact_details','promotions','ai_recommendations')),
+        previous_status TEXT DEFAULT 'unknown' CHECK (previous_status IN ('unknown','granted','denied','revoked')),
+        status TEXT NOT NULL CHECK (status IN ('unknown','granted','denied','revoked')),
+        source TEXT,
+        note TEXT,
+        captured_by TEXT,
+        captured_by_name TEXT,
+        captured_at TIMESTAMPTZ DEFAULT NOW(),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_customer_consent_events_customer ON customer_consent_events (tenant_id, customer_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_customer_consent_events_type ON customer_consent_events (tenant_id, consent_type, created_at)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS customer_consents (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      customer_id VARCHAR(64) NOT NULL,
+      consent_type ENUM('loyalty','marketing','customer_portal','stored_contact_details','promotions','ai_recommendations') NOT NULL,
+      status ENUM('unknown','granted','denied','revoked') NOT NULL DEFAULT 'unknown',
+      source VARCHAR(80),
+      note TEXT,
+      captured_by VARCHAR(64),
+      captured_by_name VARCHAR(255),
+      captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_customer_consents_type (tenant_id, customer_id, consent_type),
+      INDEX idx_customer_consents_customer (tenant_id, customer_id),
+      INDEX idx_customer_consents_status (tenant_id, consent_type, status),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS customer_consent_events (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      customer_id VARCHAR(64) NOT NULL,
+      consent_type ENUM('loyalty','marketing','customer_portal','stored_contact_details','promotions','ai_recommendations') NOT NULL,
+      previous_status ENUM('unknown','granted','denied','revoked') DEFAULT 'unknown',
+      status ENUM('unknown','granted','denied','revoked') NOT NULL,
+      source VARCHAR(80),
+      note TEXT,
+      captured_by VARCHAR(64),
+      captured_by_name VARCHAR(255),
+      captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_customer_consent_events_customer (tenant_id, customer_id, created_at),
+      INDEX idx_customer_consent_events_type (tenant_id, consent_type, created_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    )
+  `);
+}
 
 export async function ensurePurchaseOrderReceivingSchema() {
   if (isPostgres()) {
@@ -552,6 +1048,125 @@ export async function ensurePurchaseOrderReceivingSchema() {
   await query(`UPDATE purchase_orders SET received_total_amount = COALESCE(received_total_amount, 0)`);
 }
 
+export async function ensureEventBookingSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS event_bookings (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        customer_id TEXT,
+        customer_name TEXT,
+        contact_phone TEXT,
+        contact_email TEXT,
+        title TEXT NOT NULL,
+        event_type TEXT NOT NULL DEFAULT 'private' CHECK (event_type IN ('private','public','restaurant','catering','other')),
+        status TEXT NOT NULL DEFAULT 'inquiry' CHECK (status IN ('inquiry','confirmed','in_progress','completed','cancelled')),
+        start_at TIMESTAMPTZ NOT NULL,
+        end_at TIMESTAMPTZ,
+        guest_count INTEGER DEFAULT 0,
+        table_numbers TEXT DEFAULT '[]'::TEXT,
+        table_ids TEXT DEFAULT '[]'::TEXT,
+        deposit_amount NUMERIC(12,2) DEFAULT 0,
+        deposit_status TEXT DEFAULT 'none' CHECK (deposit_status IN ('none','unpaid','paid','refunded')),
+        deposit_due_at TIMESTAMPTZ,
+        deposit_paid_at TIMESTAMPTZ,
+        deposit_reference TEXT,
+        menu_notes TEXT,
+        internal_notes TEXT,
+        reminder_at TIMESTAMPTZ,
+        reminder_status TEXT DEFAULT 'none' CHECK (reminder_status IN ('none','pending','sent','failed','skipped')),
+        reminder_sent_at TIMESTAMPTZ,
+        reminder_note TEXT,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS table_ids TEXT DEFAULT '[]'::TEXT`);
+    await query(`ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS deposit_due_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS deposit_reference TEXT`);
+    await query(`ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS reminder_status TEXT DEFAULT 'none'`);
+    await query(`ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS reminder_note TEXT`);
+    await query(`UPDATE event_bookings SET table_ids = COALESCE(table_ids, '[]'::TEXT), reminder_status = COALESCE(reminder_status, 'none')`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_event_bookings_calendar ON event_bookings (tenant_id, start_at, status)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_event_bookings_customer ON event_bookings (tenant_id, customer_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_event_bookings_deposits ON event_bookings (tenant_id, deposit_status, deposit_due_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_event_bookings_reminders ON event_bookings (tenant_id, reminder_status, reminder_at)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS event_bookings (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      customer_id VARCHAR(64),
+      customer_name VARCHAR(255),
+      contact_phone VARCHAR(64),
+      contact_email VARCHAR(255),
+      title VARCHAR(255) NOT NULL,
+      event_type ENUM('private','public','restaurant','catering','other') NOT NULL DEFAULT 'private',
+      status ENUM('inquiry','confirmed','in_progress','completed','cancelled') NOT NULL DEFAULT 'inquiry',
+      start_at DATETIME NOT NULL,
+      end_at DATETIME,
+      guest_count INT DEFAULT 0,
+      table_numbers JSON DEFAULT JSON_ARRAY(),
+      table_ids JSON DEFAULT JSON_ARRAY(),
+      deposit_amount DECIMAL(12,2) DEFAULT 0,
+      deposit_status ENUM('none','unpaid','paid','refunded') DEFAULT 'none',
+      deposit_due_at DATETIME,
+      deposit_paid_at DATETIME,
+      deposit_reference VARCHAR(128),
+      menu_notes TEXT,
+      internal_notes TEXT,
+      reminder_at DATETIME,
+      reminder_status ENUM('none','pending','sent','failed','skipped') DEFAULT 'none',
+      reminder_sent_at DATETIME,
+      reminder_note TEXT,
+      created_by VARCHAR(64),
+      created_by_name VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_event_bookings_calendar (tenant_id, start_at, status),
+      INDEX idx_event_bookings_customer (tenant_id, customer_id),
+      INDEX idx_event_bookings_deposits (tenant_id, deposit_status, deposit_due_at),
+      INDEX idx_event_bookings_reminders (tenant_id, reminder_status, reminder_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE event_bookings ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key name")) throw err;
+    }
+  };
+  await addColumn(`table_ids JSON DEFAULT JSON_ARRAY() AFTER table_numbers`);
+  await addColumn(`deposit_due_at DATETIME AFTER deposit_status`);
+  await addColumn(`deposit_paid_at DATETIME AFTER deposit_due_at`);
+  await addColumn(`deposit_reference VARCHAR(128) AFTER deposit_paid_at`);
+  await addColumn(`reminder_at DATETIME AFTER internal_notes`);
+  await addColumn(`reminder_status ENUM('none','pending','sent','failed','skipped') DEFAULT 'none' AFTER reminder_at`);
+  await addColumn(`reminder_sent_at DATETIME AFTER reminder_status`);
+  await addColumn(`reminder_note TEXT AFTER reminder_sent_at`);
+  await query(`UPDATE event_bookings SET table_ids = COALESCE(table_ids, JSON_ARRAY()), reminder_status = COALESCE(reminder_status, 'none')`);
+  await addIndex(`CREATE INDEX idx_event_bookings_deposits ON event_bookings (tenant_id, deposit_status, deposit_due_at)`);
+  await addIndex(`CREATE INDEX idx_event_bookings_reminders ON event_bookings (tenant_id, reminder_status, reminder_at)`);
+}
+
 export async function ensureStockBatchSchema() {
   if (isPostgres()) {
     await query(`
@@ -572,6 +1187,7 @@ export async function ensureStockBatchSchema() {
         received_at TIMESTAMPTZ DEFAULT NOW(),
         received_by TEXT,
         received_by_name TEXT,
+        location_id TEXT,
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','depleted','expired')),
         note TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -581,6 +1197,8 @@ export async function ensureStockBatchSchema() {
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_batches_tenant_expiry ON stock_batches (tenant_id, status, expiry_date)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_batches_product ON stock_batches (tenant_id, product_id, status, expiry_date)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_stock_batches_purchase_order ON stock_batches (tenant_id, purchase_order_id)`);
+    await query(`ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS location_id TEXT`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_batches_location ON stock_batches (tenant_id, location_id, status, expiry_date)`);
     return;
   }
 
@@ -602,16 +1220,36 @@ export async function ensureStockBatchSchema() {
       received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       received_by VARCHAR(64),
       received_by_name VARCHAR(255),
+      location_id VARCHAR(64),
       status ENUM('active','depleted','expired') NOT NULL DEFAULT 'active',
       note TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_stock_batches_tenant_expiry (tenant_id, status, expiry_date),
       INDEX idx_stock_batches_product (tenant_id, product_id, status, expiry_date),
+      INDEX idx_stock_batches_location (tenant_id, location_id, status, expiry_date),
       INDEX idx_stock_batches_purchase_order (tenant_id, purchase_order_id),
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     )
   `);
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE stock_batches ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key name")) throw err;
+    }
+  };
+  await addColumn(`location_id VARCHAR(64) AFTER received_by_name`);
+  await addIndex(`CREATE INDEX idx_stock_batches_location ON stock_batches (tenant_id, location_id, status, expiry_date)`);
 }
 
 export async function ensureReorderRecommendationSchema() {
@@ -690,6 +1328,367 @@ export async function ensureReorderRecommendationSchema() {
   `);
 }
 
+export async function ensureReorderNotificationRuleSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS reorder_notification_rules (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
+        location_id TEXT,
+        trigger_type TEXT NOT NULL DEFAULT 'below_threshold' CHECK (trigger_type IN ('below_threshold','critical_only','days_cover')),
+        priority TEXT NOT NULL DEFAULT 'high' CHECK (priority IN ('normal','high','critical')),
+        days_of_cover INTEGER DEFAULT 14,
+        vendor_id TEXT,
+        notify_roles TEXT DEFAULT '[]'::TEXT,
+        last_run_at TIMESTAMPTZ,
+        last_result TEXT DEFAULT '{}'::TEXT,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_reorder_notification_rules_status ON reorder_notification_rules (tenant_id, status, location_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_reorder_notification_rules_location ON reorder_notification_rules (tenant_id, location_id)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS reorder_notification_rules (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+      location_id VARCHAR(64),
+      trigger_type ENUM('below_threshold','critical_only','days_cover') NOT NULL DEFAULT 'below_threshold',
+      priority ENUM('normal','high','critical') NOT NULL DEFAULT 'high',
+      days_of_cover INT DEFAULT 14,
+      vendor_id VARCHAR(64),
+      notify_roles JSON DEFAULT JSON_ARRAY(),
+      last_run_at DATETIME,
+      last_result JSON DEFAULT JSON_OBJECT(),
+      created_by VARCHAR(64),
+      created_by_name VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_reorder_notification_rules_status (tenant_id, status, location_id),
+      INDEX idx_reorder_notification_rules_location (tenant_id, location_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+export async function ensureTaxPeriodSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS tax_periods (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        period_start TIMESTAMPTZ NOT NULL,
+        period_end TIMESTAMPTZ NOT NULL,
+        status TEXT DEFAULT 'locked' CHECK (status IN ('locked')),
+        locked_at TIMESTAMPTZ DEFAULT NOW(),
+        locked_by TEXT,
+        locked_by_name TEXT,
+        lock_note TEXT,
+        currency TEXT DEFAULT 'ZAR',
+        standard_rate NUMERIC(5,2) DEFAULT 15,
+        gross_sales NUMERIC(12,2) DEFAULT 0,
+        taxable_sales NUMERIC(12,2) DEFAULT 0,
+        zero_rated_sales NUMERIC(12,2) DEFAULT 0,
+        exempt_sales NUMERIC(12,2) DEFAULT 0,
+        output_tax NUMERIC(12,2) DEFAULT 0,
+        input_tax NUMERIC(12,2) DEFAULT 0,
+        net_vat_payable NUMERIC(12,2) DEFAULT 0,
+        invoice_count INTEGER DEFAULT 0,
+        refund_count INTEGER DEFAULT 0,
+        summary_snapshot TEXT,
+        report_snapshot TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (tenant_id, period_start, period_end)
+      )
+    `);
+    await query(`ALTER TABLE tax_periods ADD COLUMN IF NOT EXISTS summary_snapshot TEXT`);
+    await query(`ALTER TABLE tax_periods ADD COLUMN IF NOT EXISTS report_snapshot TEXT`);
+    await query(`ALTER TABLE tax_periods ADD COLUMN IF NOT EXISTS input_tax NUMERIC(12,2) DEFAULT 0`);
+    await query(`ALTER TABLE tax_periods ADD COLUMN IF NOT EXISTS net_vat_payable NUMERIC(12,2) DEFAULT 0`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_tax_periods_range ON tax_periods (tenant_id, period_start, period_end)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS tax_periods (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      period_start DATETIME NOT NULL,
+      period_end DATETIME NOT NULL,
+      status ENUM('locked') DEFAULT 'locked',
+      locked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      locked_by VARCHAR(64),
+      locked_by_name VARCHAR(255),
+      lock_note TEXT,
+      currency VARCHAR(8) DEFAULT 'ZAR',
+      standard_rate DECIMAL(5,2) DEFAULT 15,
+      gross_sales DECIMAL(12,2) DEFAULT 0,
+      taxable_sales DECIMAL(12,2) DEFAULT 0,
+      zero_rated_sales DECIMAL(12,2) DEFAULT 0,
+      exempt_sales DECIMAL(12,2) DEFAULT 0,
+      output_tax DECIMAL(12,2) DEFAULT 0,
+      input_tax DECIMAL(12,2) DEFAULT 0,
+      net_vat_payable DECIMAL(12,2) DEFAULT 0,
+      invoice_count INT DEFAULT 0,
+      refund_count INT DEFAULT 0,
+      summary_snapshot LONGTEXT,
+      report_snapshot LONGTEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_tax_periods_tenant_range (tenant_id, period_start, period_end),
+      KEY idx_tax_periods_range (tenant_id, period_start, period_end),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE tax_periods ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key name")) throw err;
+    }
+  };
+  await addColumn(`summary_snapshot LONGTEXT`);
+  await addColumn(`report_snapshot LONGTEXT`);
+  await addColumn(`input_tax DECIMAL(12,2) DEFAULT 0 AFTER output_tax`);
+  await addColumn(`net_vat_payable DECIMAL(12,2) DEFAULT 0 AFTER input_tax`);
+  await addIndex(`CREATE INDEX idx_tax_periods_range ON tax_periods (tenant_id, period_start, period_end)`);
+}
+
+export async function ensureMultiLocationInventorySchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS inventory_locations (
+        id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'branch' CHECK (type IN ('branch','warehouse','register','kitchen','other')),
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
+        is_default SMALLINT DEFAULT 0 CHECK (is_default IN (0, 1)),
+        address TEXT,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (tenant_id, id)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_inventory_locations_status ON inventory_locations (tenant_id, status)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS product_location_stock (
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+        min_stock NUMERIC(12,3) NOT NULL DEFAULT 0,
+        reorder_threshold NUMERIC(12,3) NOT NULL DEFAULT 0,
+        updated_by TEXT,
+        updated_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (tenant_id, product_id, location_id)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_product_location_stock_location ON product_location_stock (tenant_id, location_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_product_location_stock_reorder ON product_location_stock (tenant_id, location_id, reorder_threshold)`);
+    await query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS default_location_id TEXT`);
+    await query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS assigned_location_ids TEXT DEFAULT '[]'::TEXT`);
+    await query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS location_id TEXT`);
+    await query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS from_location_id TEXT`);
+    await query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS to_location_id TEXT`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_location ON stock_movements (tenant_id, location_id, created_at)`);
+    await query(`ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS location_id TEXT`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_batches_location ON stock_batches (tenant_id, location_id, status, expiry_date)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS stock_transfer_orders (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        from_location_id TEXT NOT NULL,
+        to_location_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('draft','requested','approved','in_transit','completed','cancelled')),
+        requested_by TEXT,
+        requested_by_name TEXT,
+        approved_by TEXT,
+        approved_by_name TEXT,
+        completed_by TEXT,
+        completed_by_name TEXT,
+        notes TEXT,
+        completed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_transfer_orders_status ON stock_transfer_orders (tenant_id, status, updated_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_transfer_orders_locations ON stock_transfer_orders (tenant_id, from_location_id, to_location_id)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS stock_transfer_items (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        transfer_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+        from_previous_quantity NUMERIC(12,3) DEFAULT 0,
+        from_new_quantity NUMERIC(12,3) DEFAULT 0,
+        to_previous_quantity NUMERIC(12,3) DEFAULT 0,
+        to_new_quantity NUMERIC(12,3) DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_transfer ON stock_transfer_items (tenant_id, transfer_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_product ON stock_transfer_items (tenant_id, product_id)`);
+    await query(`
+      INSERT INTO inventory_locations (id, tenant_id, name, type, status, is_default, created_at, updated_at)
+      SELECT 'main', id, 'Primary stock pool', 'branch', 'active', 1, NOW(), NOW()
+        FROM tenants
+      ON CONFLICT (tenant_id, id) DO NOTHING
+    `);
+    await query(`
+      INSERT INTO product_location_stock (
+        tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold, created_at, updated_at
+      )
+      SELECT tenant_id, id, 'main', COALESCE(stock, 0), COALESCE(min_stock, 0), COALESCE(min_stock, 0), NOW(), NOW()
+        FROM products
+      ON CONFLICT (tenant_id, product_id, location_id) DO NOTHING
+    `);
+    await query(`UPDATE reorder_recommendations SET location_id = COALESCE(location_id, 'main')`);
+    return;
+  }
+
+  const addColumn = async (table: string, definition: string) => {
+    try {
+      await query(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key name")) throw err;
+    }
+  };
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS inventory_locations (
+      id VARCHAR(64) NOT NULL,
+      tenant_id VARCHAR(64) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      type ENUM('branch','warehouse','register','kitchen','other') NOT NULL DEFAULT 'branch',
+      status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+      is_default BOOLEAN DEFAULT FALSE,
+      address TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (tenant_id, id),
+      INDEX idx_inventory_locations_status (tenant_id, status),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS product_location_stock (
+      tenant_id VARCHAR(64) NOT NULL,
+      product_id VARCHAR(64) NOT NULL,
+      location_id VARCHAR(64) NOT NULL,
+      quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+      min_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
+      reorder_threshold DECIMAL(12,3) NOT NULL DEFAULT 0,
+      updated_by VARCHAR(64),
+      updated_by_name VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (tenant_id, product_id, location_id),
+      INDEX idx_product_location_stock_location (tenant_id, location_id),
+      INDEX idx_product_location_stock_reorder (tenant_id, location_id, reorder_threshold),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await addColumn("staff", `default_location_id VARCHAR(64) AFTER discount_percent`);
+  await addColumn("staff", `assigned_location_ids JSON DEFAULT JSON_ARRAY() AFTER default_location_id`);
+  await addColumn("stock_movements", `location_id VARCHAR(64) AFTER note`);
+  await addColumn("stock_movements", `from_location_id VARCHAR(64) AFTER location_id`);
+  await addColumn("stock_movements", `to_location_id VARCHAR(64) AFTER from_location_id`);
+  await addIndex(`CREATE INDEX idx_stock_movements_location ON stock_movements (tenant_id, location_id, created_at)`);
+  await addColumn("stock_batches", `location_id VARCHAR(64) AFTER received_by_name`);
+  await addIndex(`CREATE INDEX idx_stock_batches_location ON stock_batches (tenant_id, location_id, status, expiry_date)`);
+  await query(`
+    CREATE TABLE IF NOT EXISTS stock_transfer_orders (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      from_location_id VARCHAR(64) NOT NULL,
+      to_location_id VARCHAR(64) NOT NULL,
+      status ENUM('draft','requested','approved','in_transit','completed','cancelled') NOT NULL DEFAULT 'requested',
+      requested_by VARCHAR(64),
+      requested_by_name VARCHAR(255),
+      approved_by VARCHAR(64),
+      approved_by_name VARCHAR(255),
+      completed_by VARCHAR(64),
+      completed_by_name VARCHAR(255),
+      notes TEXT,
+      completed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_stock_transfer_orders_status (tenant_id, status, updated_at),
+      INDEX idx_stock_transfer_orders_locations (tenant_id, from_location_id, to_location_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS stock_transfer_items (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      transfer_id VARCHAR(64) NOT NULL,
+      product_id VARCHAR(64) NOT NULL,
+      product_name VARCHAR(255) NOT NULL,
+      quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+      from_previous_quantity DECIMAL(12,3) DEFAULT 0,
+      from_new_quantity DECIMAL(12,3) DEFAULT 0,
+      to_previous_quantity DECIMAL(12,3) DEFAULT 0,
+      to_new_quantity DECIMAL(12,3) DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_stock_transfer_items_transfer (tenant_id, transfer_id),
+      INDEX idx_stock_transfer_items_product (tenant_id, product_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    INSERT IGNORE INTO inventory_locations (id, tenant_id, name, type, status, is_default, created_at, updated_at)
+    SELECT 'main', id, 'Primary stock pool', 'branch', 'active', 1, NOW(), NOW()
+      FROM tenants
+  `);
+  await query(`
+    INSERT IGNORE INTO product_location_stock (
+      tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold, created_at, updated_at
+    )
+    SELECT tenant_id, id, 'main', COALESCE(stock, 0), COALESCE(min_stock, 0), COALESCE(min_stock, 0), NOW(), NOW()
+      FROM products
+  `);
+  await query(`UPDATE reorder_recommendations SET location_id = COALESCE(location_id, 'main')`);
+}
+
 export async function ensurePersonDiscountSchema() {
   if (isPostgres()) {
     await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS discount_percent NUMERIC(5,2) DEFAULT 0`);
@@ -712,6 +1711,246 @@ export async function ensurePersonDiscountSchema() {
   await addColumn('staff', `discount_percent DECIMAL(5,2) DEFAULT 0 AFTER wallet_balance`);
   await query(`UPDATE customers SET discount_percent = COALESCE(discount_percent, 0)`);
   await query(`UPDATE staff SET discount_percent = COALESCE(discount_percent, 0)`);
+}
+
+export async function ensureLoyaltySchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS loyalty_member_status TEXT DEFAULT 'active'`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS loyalty_tier_id TEXT`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS membership_card_id TEXT`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS membership_barcode TEXT`);
+    await query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS membership_started_at TIMESTAMPTZ`);
+    await query(`UPDATE customers SET loyalty_member_status = COALESCE(loyalty_member_status, 'active')`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS loyalty_tiers (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        status TEXT DEFAULT 'active' CHECK (status IN ('active','inactive')),
+        min_points INTEGER DEFAULT 0,
+        earn_multiplier NUMERIC(8,3) DEFAULT 1,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_loyalty_tiers_threshold ON loyalty_tiers (tenant_id, status, min_points)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS loyalty_reward_rules (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        status TEXT DEFAULT 'active' CHECK (status IN ('active','inactive')),
+        rule_type TEXT DEFAULT 'base' CHECK (rule_type IN ('base','category','product','time_window')),
+        points_per_currency NUMERIC(12,4) DEFAULT 0,
+        multiplier NUMERIC(8,3) DEFAULT 1,
+        bonus_points INTEGER DEFAULT 0,
+        min_subtotal NUMERIC(12,2) DEFAULT 0,
+        starts_at TIMESTAMPTZ,
+        ends_at TIMESTAMPTZ,
+        target_product_ids TEXT DEFAULT '[]'::TEXT,
+        target_categories TEXT DEFAULT '[]'::TEXT,
+        days_of_week TEXT DEFAULT '[]'::TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_loyalty_reward_rules_status ON loyalty_reward_rules (tenant_id, status, rule_type)`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE customers ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key name")) throw err;
+    }
+  };
+
+  await addColumn(`loyalty_member_status ENUM('active','paused','opted_out') DEFAULT 'active' AFTER loyalty_points`);
+  await addColumn(`loyalty_tier_id VARCHAR(64) AFTER loyalty_member_status`);
+  await addColumn(`membership_card_id VARCHAR(128) AFTER loyalty_tier_id`);
+  await addColumn(`membership_barcode VARCHAR(128) AFTER membership_card_id`);
+  await addColumn(`membership_started_at DATETIME AFTER membership_barcode`);
+  await query(`UPDATE customers SET loyalty_member_status = COALESCE(loyalty_member_status, 'active')`);
+  await query(`
+    CREATE TABLE IF NOT EXISTS loyalty_tiers (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      name VARCHAR(160) NOT NULL,
+      status ENUM('active','inactive') DEFAULT 'active',
+      min_points INT DEFAULT 0,
+      earn_multiplier DECIMAL(8,3) DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_loyalty_tiers_threshold (tenant_id, status, min_points),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS loyalty_reward_rules (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      name VARCHAR(160) NOT NULL,
+      status ENUM('active','inactive') DEFAULT 'active',
+      rule_type ENUM('base','category','product','time_window') DEFAULT 'base',
+      points_per_currency DECIMAL(12,4) DEFAULT 0,
+      multiplier DECIMAL(8,3) DEFAULT 1,
+      bonus_points INT DEFAULT 0,
+      min_subtotal DECIMAL(12,2) DEFAULT 0,
+      starts_at DATETIME,
+      ends_at DATETIME,
+      target_product_ids JSON DEFAULT JSON_ARRAY(),
+      target_categories JSON DEFAULT JSON_ARRAY(),
+      days_of_week JSON DEFAULT JSON_ARRAY(),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_loyalty_reward_rules_status (tenant_id, status, rule_type),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await addIndex(`CREATE INDEX idx_loyalty_tiers_threshold ON loyalty_tiers (tenant_id, status, min_points)`);
+  await addIndex(`CREATE INDEX idx_loyalty_reward_rules_status ON loyalty_reward_rules (tenant_id, status, rule_type)`);
+}
+
+export async function ensurePromotionSchema() {
+  if (isPostgres()) {
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS promotion_id TEXT`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS promotion_code TEXT`);
+    await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS promotion_discount NUMERIC(12,2) DEFAULT 0`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS promotions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        status TEXT DEFAULT 'active' CHECK (status IN ('active','inactive')),
+        discount_type TEXT DEFAULT 'percent' CHECK (discount_type IN ('percent','fixed')),
+        discount_value NUMERIC(12,2) NOT NULL DEFAULT 0,
+        starts_at TIMESTAMPTZ,
+        ends_at TIMESTAMPTZ,
+        min_subtotal NUMERIC(12,2) DEFAULT 0,
+        max_discount_amount NUMERIC(12,2),
+        applies_to TEXT DEFAULT 'cart' CHECK (applies_to IN ('cart','products','categories')),
+        target_product_ids TEXT DEFAULT '[]'::TEXT,
+        target_categories TEXT DEFAULT '[]'::TEXT,
+        customer_scope TEXT DEFAULT 'all' CHECK (customer_scope IN ('all','selected','no_customer')),
+        target_customer_ids TEXT DEFAULT '[]'::TEXT,
+        total_redemption_limit INTEGER,
+        per_customer_limit INTEGER,
+        redemption_count INTEGER DEFAULT 0,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (tenant_id, code)
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_promotions_status_window ON promotions (tenant_id, status, starts_at, ends_at)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS promotion_redemptions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        promotion_id TEXT NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+        promotion_code TEXT NOT NULL,
+        sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+        customer_id TEXT,
+        staff_id TEXT,
+        discount_amount NUMERIC(12,2) DEFAULT 0,
+        subtotal NUMERIC(12,2) DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_promotion_redemptions_promotion ON promotion_redemptions (tenant_id, promotion_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_promotion_redemptions_customer ON promotion_redemptions (tenant_id, promotion_id, customer_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_promotion_redemptions_sale ON promotion_redemptions (tenant_id, sale_id)`);
+    return;
+  }
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE sales ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key name")) throw err;
+    }
+  };
+
+  await addColumn(`promotion_id VARCHAR(64) AFTER points_discount`);
+  await addColumn(`promotion_code VARCHAR(64) AFTER promotion_id`);
+  await addColumn(`promotion_discount DECIMAL(12,2) DEFAULT 0 AFTER promotion_code`);
+  await query(`
+    CREATE TABLE IF NOT EXISTS promotions (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      code VARCHAR(64) NOT NULL,
+      name VARCHAR(160) NOT NULL,
+      description TEXT,
+      status ENUM('active','inactive') DEFAULT 'active',
+      discount_type ENUM('percent','fixed') DEFAULT 'percent',
+      discount_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+      starts_at DATETIME,
+      ends_at DATETIME,
+      min_subtotal DECIMAL(12,2) DEFAULT 0,
+      max_discount_amount DECIMAL(12,2),
+      applies_to ENUM('cart','products','categories') DEFAULT 'cart',
+      target_product_ids JSON DEFAULT JSON_ARRAY(),
+      target_categories JSON DEFAULT JSON_ARRAY(),
+      customer_scope ENUM('all','selected','no_customer') DEFAULT 'all',
+      target_customer_ids JSON DEFAULT JSON_ARRAY(),
+      total_redemption_limit INT,
+      per_customer_limit INT,
+      redemption_count INT DEFAULT 0,
+      created_by VARCHAR(64),
+      created_by_name VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_promotions_tenant_code (tenant_id, code),
+      KEY idx_promotions_status_window (tenant_id, status, starts_at, ends_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS promotion_redemptions (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      promotion_id VARCHAR(64) NOT NULL,
+      promotion_code VARCHAR(64) NOT NULL,
+      sale_id VARCHAR(64) NOT NULL,
+      customer_id VARCHAR(64),
+      staff_id VARCHAR(64),
+      discount_amount DECIMAL(12,2) DEFAULT 0,
+      subtotal DECIMAL(12,2) DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_promotion_redemptions_promotion (tenant_id, promotion_id, created_at),
+      KEY idx_promotion_redemptions_customer (tenant_id, promotion_id, customer_id),
+      KEY idx_promotion_redemptions_sale (tenant_id, sale_id),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE CASCADE,
+      FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
+    )
+  `);
+  await addIndex(`CREATE INDEX idx_promotions_status_window ON promotions (tenant_id, status, starts_at, ends_at)`);
+  await addIndex(`CREATE INDEX idx_promotion_redemptions_promotion ON promotion_redemptions (tenant_id, promotion_id, created_at)`);
+  await addIndex(`CREATE INDEX idx_promotion_redemptions_customer ON promotion_redemptions (tenant_id, promotion_id, customer_id)`);
+  await addIndex(`CREATE INDEX idx_promotion_redemptions_sale ON promotion_redemptions (tenant_id, sale_id)`);
 }
 
 export async function ensureCustomerAccountSchema() {
@@ -740,7 +1979,7 @@ export async function ensureCustomerAccountSchema() {
 
         ALTER TABLE sales
           ADD CONSTRAINT sales_payment_method_check
-          CHECK (payment_method IN ('cash','payfast','card','wallet','account','pending'));
+          CHECK (payment_method IN ('cash','payfast','card','wallet','account','qr','bnpl','pending'));
       END $$;
     `);
     await query(`
@@ -763,7 +2002,7 @@ export async function ensureCustomerAccountSchema() {
 
         ALTER TABLE sale_payments
           ADD CONSTRAINT sale_payments_method_check
-          CHECK (method IN ('cash','payfast','card','wallet','account'));
+          CHECK (method IN ('cash','payfast','card','wallet','account','qr','bnpl'));
       END $$;
     `);
     return;
@@ -782,8 +2021,8 @@ export async function ensureCustomerAccountSchema() {
   await addColumn(`account_limit DECIMAL(12,2) DEFAULT 0 AFTER account_enabled`);
   await addColumn(`account_balance DECIMAL(12,2) DEFAULT 0 AFTER account_limit`);
   await query(`UPDATE customers SET account_enabled = COALESCE(account_enabled, 0), account_limit = COALESCE(account_limit, 0), account_balance = COALESCE(account_balance, 0)`);
-  await query(`ALTER TABLE sales MODIFY payment_method ENUM('cash','payfast','card','wallet','account','pending') DEFAULT 'pending'`);
-  await query(`ALTER TABLE sale_payments MODIFY method ENUM('cash','payfast','card','wallet','account') NOT NULL`);
+  await query(`ALTER TABLE sales MODIFY payment_method ENUM('cash','payfast','card','wallet','account','qr','bnpl','pending') DEFAULT 'pending'`);
+  await query(`ALTER TABLE sale_payments MODIFY method ENUM('cash','payfast','card','wallet','account','qr','bnpl') NOT NULL`);
 }
 
 export async function ensureStaffPermissionsSchema() {
@@ -798,6 +2037,255 @@ export async function ensureStaffPermissionsSchema() {
     const message = String(err?.message || "");
     if (!message.includes("Duplicate column")) throw err;
   }
+}
+
+export async function ensureStaffSchedulingSchema() {
+  if (isPostgres()) {
+    await query(`CREATE TABLE IF NOT EXISTS staff_shifts (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      staff_id TEXT NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+      staff_name TEXT NOT NULL,
+      role TEXT,
+      shift_date DATE NOT NULL,
+      start_at TIMESTAMPTZ NOT NULL,
+      end_at TIMESTAMPTZ NOT NULL,
+      status TEXT DEFAULT 'draft' CHECK (status IN ('draft','published','cancelled','completed')),
+      location_id TEXT,
+      break_minutes_planned INTEGER DEFAULT 0,
+      notes TEXT,
+      published_at TIMESTAMPTZ,
+      published_by TEXT,
+      published_by_name TEXT,
+      created_by TEXT,
+      created_by_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_staff_shifts_roster ON staff_shifts (tenant_id, shift_date, status)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_staff_shifts_staff ON staff_shifts (tenant_id, staff_id, shift_date)`);
+    await query(`CREATE TABLE IF NOT EXISTS staff_attendance (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      staff_id TEXT NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+      staff_name TEXT NOT NULL,
+      shift_id TEXT REFERENCES staff_shifts(id) ON DELETE SET NULL,
+      status TEXT DEFAULT 'open' CHECK (status IN ('open','closed')),
+      clock_in_at TIMESTAMPTZ NOT NULL,
+      clock_out_at TIMESTAMPTZ,
+      break_started_at TIMESTAMPTZ,
+      break_minutes INTEGER DEFAULT 0,
+      scheduled_minutes INTEGER DEFAULT 0,
+      worked_minutes INTEGER DEFAULT 0,
+      regular_minutes INTEGER DEFAULT 0,
+      overtime_minutes INTEGER DEFAULT 0,
+      pay_rate NUMERIC(12,2) DEFAULT 0,
+      pay_type TEXT DEFAULT 'hourly' CHECK (pay_type IN ('hourly','salary')),
+      payroll_amount NUMERIC(12,2) DEFAULT 0,
+      note TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_staff_attendance_staff ON staff_attendance (tenant_id, staff_id, clock_in_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_staff_attendance_status ON staff_attendance (tenant_id, status)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_staff_attendance_shift ON staff_attendance (tenant_id, shift_id)`);
+    return;
+  }
+
+  await query(`CREATE TABLE IF NOT EXISTS staff_shifts (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    staff_id VARCHAR(64) NOT NULL,
+    staff_name VARCHAR(255) NOT NULL,
+    role VARCHAR(32),
+    shift_date DATE NOT NULL,
+    start_at DATETIME NOT NULL,
+    end_at DATETIME NOT NULL,
+    status ENUM('draft','published','cancelled','completed') DEFAULT 'draft',
+    location_id VARCHAR(64),
+    break_minutes_planned INT DEFAULT 0,
+    notes TEXT,
+    published_at DATETIME,
+    published_by VARCHAR(64),
+    published_by_name VARCHAR(255),
+    created_by VARCHAR(64),
+    created_by_name VARCHAR(255),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_staff_shifts_roster (tenant_id, shift_date, status),
+    KEY idx_staff_shifts_staff (tenant_id, staff_id, shift_date),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  )`);
+  await query(`CREATE TABLE IF NOT EXISTS staff_attendance (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    staff_id VARCHAR(64) NOT NULL,
+    staff_name VARCHAR(255) NOT NULL,
+    shift_id VARCHAR(64),
+    status ENUM('open','closed') DEFAULT 'open',
+    clock_in_at DATETIME NOT NULL,
+    clock_out_at DATETIME,
+    break_started_at DATETIME,
+    break_minutes INT DEFAULT 0,
+    scheduled_minutes INT DEFAULT 0,
+    worked_minutes INT DEFAULT 0,
+    regular_minutes INT DEFAULT 0,
+    overtime_minutes INT DEFAULT 0,
+    pay_rate DECIMAL(12,2) DEFAULT 0,
+    pay_type ENUM('hourly','salary') DEFAULT 'hourly',
+    payroll_amount DECIMAL(12,2) DEFAULT 0,
+    note TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_staff_attendance_staff (tenant_id, staff_id, clock_in_at),
+    KEY idx_staff_attendance_status (tenant_id, status),
+    KEY idx_staff_attendance_shift (tenant_id, shift_id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+    FOREIGN KEY (shift_id) REFERENCES staff_shifts(id) ON DELETE SET NULL
+  )`);
+}
+
+export async function ensureTipPoolingSchema() {
+  if (isPostgres()) {
+    await query(`CREATE TABLE IF NOT EXISTS tip_pool_rules (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active','inactive')),
+      distribution_method TEXT DEFAULT 'worked_hours' CHECK (distribution_method IN ('worked_hours','equal_shift','role_weighted')),
+      source TEXT DEFAULT 'sale_tips' CHECK (source IN ('sale_tips')),
+      included_roles TEXT DEFAULT '[]'::TEXT,
+      role_weights TEXT DEFAULT '{}'::TEXT,
+      created_by TEXT,
+      created_by_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_tip_pool_rules_status ON tip_pool_rules (tenant_id, status)`);
+    await query(`CREATE TABLE IF NOT EXISTS tip_pool_payouts (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      rule_id TEXT NOT NULL REFERENCES tip_pool_rules(id) ON DELETE CASCADE,
+      period_start DATE NOT NULL,
+      period_end DATE NOT NULL,
+      staff_id TEXT NOT NULL,
+      staff_name TEXT NOT NULL,
+      attendance_id TEXT REFERENCES staff_attendance(id) ON DELETE SET NULL,
+      shift_id TEXT REFERENCES staff_shifts(id) ON DELETE SET NULL,
+      shift_date DATE,
+      worked_minutes INTEGER DEFAULT 0,
+      weight NUMERIC(12,4) DEFAULT 0,
+      tip_pool_amount NUMERIC(12,2) DEFAULT 0,
+      payout_amount NUMERIC(12,2) DEFAULT 0,
+      status TEXT DEFAULT 'draft' CHECK (status IN ('draft','approved','paid','void')),
+      generated_at TIMESTAMPTZ DEFAULT NOW(),
+      generated_by TEXT,
+      generated_by_name TEXT,
+      approved_at TIMESTAMPTZ,
+      approved_by TEXT,
+      approved_by_name TEXT,
+      paid_at TIMESTAMPTZ,
+      paid_by TEXT,
+      paid_by_name TEXT,
+      notes TEXT
+    )`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_tip_pool_payouts_period ON tip_pool_payouts (tenant_id, period_start, period_end, status)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_tip_pool_payouts_staff ON tip_pool_payouts (tenant_id, staff_id, shift_date)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_tip_pool_payouts_rule ON tip_pool_payouts (tenant_id, rule_id, period_start, period_end)`);
+    return;
+  }
+
+  await query(`CREATE TABLE IF NOT EXISTS tip_pool_rules (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    status ENUM('active','inactive') DEFAULT 'active',
+    distribution_method ENUM('worked_hours','equal_shift','role_weighted') DEFAULT 'worked_hours',
+    source ENUM('sale_tips') DEFAULT 'sale_tips',
+    included_roles JSON DEFAULT JSON_ARRAY(),
+    role_weights JSON DEFAULT JSON_OBJECT(),
+    created_by VARCHAR(64),
+    created_by_name VARCHAR(255),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_tip_pool_rules_status (tenant_id, status),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+  )`);
+  await query(`CREATE TABLE IF NOT EXISTS tip_pool_payouts (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    rule_id VARCHAR(64) NOT NULL,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    staff_id VARCHAR(64) NOT NULL,
+    staff_name VARCHAR(255) NOT NULL,
+    attendance_id VARCHAR(64),
+    shift_id VARCHAR(64),
+    shift_date DATE,
+    worked_minutes INT DEFAULT 0,
+    weight DECIMAL(12,4) DEFAULT 0,
+    tip_pool_amount DECIMAL(12,2) DEFAULT 0,
+    payout_amount DECIMAL(12,2) DEFAULT 0,
+    status ENUM('draft','approved','paid','void') DEFAULT 'draft',
+    generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    generated_by VARCHAR(64),
+    generated_by_name VARCHAR(255),
+    approved_at DATETIME,
+    approved_by VARCHAR(64),
+    approved_by_name VARCHAR(255),
+    paid_at DATETIME,
+    paid_by VARCHAR(64),
+    paid_by_name VARCHAR(255),
+    notes TEXT,
+    KEY idx_tip_pool_payouts_period (tenant_id, period_start, period_end, status),
+    KEY idx_tip_pool_payouts_staff (tenant_id, staff_id, shift_date),
+    KEY idx_tip_pool_payouts_rule (tenant_id, rule_id, period_start, period_end),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (rule_id) REFERENCES tip_pool_rules(id) ON DELETE CASCADE,
+    FOREIGN KEY (attendance_id) REFERENCES staff_attendance(id) ON DELETE SET NULL,
+    FOREIGN KEY (shift_id) REFERENCES staff_shifts(id) ON DELETE SET NULL
+  )`);
+}
+
+export async function ensureStaffPerformanceSchema() {
+  if (isPostgres()) {
+    await query(`CREATE TABLE IF NOT EXISTS staff_coaching_notes (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      staff_id TEXT NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+      staff_name TEXT NOT NULL,
+      note_type TEXT DEFAULT 'coaching' CHECK (note_type IN ('coaching','recognition','warning','follow_up')),
+      title TEXT NOT NULL,
+      note TEXT NOT NULL,
+      source TEXT DEFAULT 'manager' CHECK (source IN ('manager','ai','performance')),
+      created_by TEXT,
+      created_by_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_staff_coaching_notes_staff ON staff_coaching_notes (tenant_id, staff_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_staff_coaching_notes_type ON staff_coaching_notes (tenant_id, note_type, created_at)`);
+    return;
+  }
+
+  await query(`CREATE TABLE IF NOT EXISTS staff_coaching_notes (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    staff_id VARCHAR(64) NOT NULL,
+    staff_name VARCHAR(255) NOT NULL,
+    note_type ENUM('coaching','recognition','warning','follow_up') DEFAULT 'coaching',
+    title VARCHAR(255) NOT NULL,
+    note TEXT NOT NULL,
+    source ENUM('manager','ai','performance') DEFAULT 'manager',
+    created_by VARCHAR(64),
+    created_by_name VARCHAR(255),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_staff_coaching_notes_staff (tenant_id, staff_id, created_at),
+    KEY idx_staff_coaching_notes_type (tenant_id, note_type, created_at),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  )`);
 }
 
 export async function ensureCashManagementSchema() {
@@ -1498,6 +2986,7 @@ export async function ensureManagerTaskSchema() {
           CHECK (task_type IN ('cash_variance','sale_exception','refund_request','void_request','stock_adjustment_request','low_stock','ai_recommendation','stock_variance','offline_sync'));
       END $$;
     `);
+    await ensureManagerOverrideSchema();
     return;
   }
 
@@ -1531,6 +3020,61 @@ export async function ensureManagerTaskSchema() {
     )
   `);
   await query(`ALTER TABLE manager_tasks MODIFY task_type ENUM('cash_variance','sale_exception','refund_request','void_request','stock_adjustment_request','low_stock','ai_recommendation','stock_variance','offline_sync') NOT NULL`);
+  await ensureManagerOverrideSchema();
+}
+
+export async function ensureManagerOverrideSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS manager_overrides (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        override_type TEXT NOT NULL DEFAULT 'manager_task',
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        status TEXT,
+        reason TEXT NOT NULL,
+        requested_by TEXT,
+        approved_by TEXT,
+        approved_by_name TEXT,
+        related_sale_id TEXT,
+        related_product_id TEXT,
+        source TEXT DEFAULT 'manager_action_center',
+        details TEXT DEFAULT '{}'::TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_manager_overrides_tenant_created ON manager_overrides (tenant_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_manager_overrides_target ON manager_overrides (tenant_id, target_type, target_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_manager_overrides_approved_by ON manager_overrides (tenant_id, approved_by, created_at)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS manager_overrides (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      override_type VARCHAR(64) NOT NULL DEFAULT 'manager_task',
+      target_type VARCHAR(64) NOT NULL,
+      target_id VARCHAR(128) NOT NULL,
+      action VARCHAR(64) NOT NULL,
+      status VARCHAR(64),
+      reason TEXT NOT NULL,
+      requested_by VARCHAR(64),
+      approved_by VARCHAR(64),
+      approved_by_name VARCHAR(255),
+      related_sale_id VARCHAR(64),
+      related_product_id VARCHAR(64),
+      source VARCHAR(64) DEFAULT 'manager_action_center',
+      details JSON DEFAULT JSON_OBJECT(),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_manager_overrides_tenant_created (tenant_id, created_at),
+      INDEX idx_manager_overrides_target (tenant_id, target_type, target_id),
+      INDEX idx_manager_overrides_approved_by (tenant_id, approved_by, created_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    )
+  `);
 }
 
 export async function ensureStockTakeSchema() {
@@ -2061,6 +3605,99 @@ export async function ensureCompanionDeviceAssignmentsSchema() {
   `);
 }
 
+export async function ensureHardwareDeviceSchema() {
+  if (isPostgres()) {
+    await query(`
+      CREATE TABLE IF NOT EXISTS hardware_devices (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        device_type TEXT NOT NULL CHECK (device_type IN ('receipt_printer','kitchen_printer','cash_drawer','scale','barcode_scanner','pole_display','card_terminal')),
+        connection_type TEXT NOT NULL CHECK (connection_type IN ('browser_print','escpos_network','escpos_usb','serial','webserial','webhid','keyboard_wedge','local_bridge','payment_provider')),
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
+        workstation_id TEXT REFERENCES workstations(id) ON DELETE SET NULL,
+        is_default SMALLINT DEFAULT 0 CHECK (is_default IN (0, 1)),
+        connection_config TEXT DEFAULT '{}'::TEXT,
+        capabilities TEXT DEFAULT '[]'::TEXT,
+        last_check_status TEXT,
+        last_check_message TEXT,
+        last_checked_at TIMESTAMPTZ,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_hardware_devices_tenant_type ON hardware_devices (tenant_id, device_type, status)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_hardware_devices_workstation ON hardware_devices (tenant_id, workstation_id, device_type)`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS hardware_device_events (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        device_id TEXT REFERENCES hardware_devices(id) ON DELETE SET NULL,
+        event_type TEXT NOT NULL,
+        command_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','sent','failed','skipped')),
+        request_payload TEXT DEFAULT '{}'::TEXT,
+        response_payload TEXT DEFAULT '{}'::TEXT,
+        error_message TEXT,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_hardware_device_events_tenant ON hardware_device_events (tenant_id, created_at)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_hardware_device_events_device ON hardware_device_events (tenant_id, device_id, created_at)`);
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS hardware_devices (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      name VARCHAR(160) NOT NULL,
+      device_type ENUM('receipt_printer','kitchen_printer','cash_drawer','scale','barcode_scanner','pole_display','card_terminal') NOT NULL,
+      connection_type ENUM('browser_print','escpos_network','escpos_usb','serial','webserial','webhid','keyboard_wedge','local_bridge','payment_provider') NOT NULL,
+      status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+      workstation_id VARCHAR(64),
+      is_default BOOLEAN DEFAULT FALSE,
+      connection_config JSON DEFAULT JSON_OBJECT(),
+      capabilities JSON DEFAULT JSON_ARRAY(),
+      last_check_status VARCHAR(32),
+      last_check_message TEXT,
+      last_checked_at DATETIME,
+      created_by VARCHAR(64),
+      created_by_name VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_hardware_devices_tenant_type (tenant_id, device_type, status),
+      INDEX idx_hardware_devices_workstation (tenant_id, workstation_id, device_type),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (workstation_id) REFERENCES workstations(id) ON DELETE SET NULL
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS hardware_device_events (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL,
+      device_id VARCHAR(64),
+      event_type VARCHAR(64) NOT NULL,
+      command_type VARCHAR(64) NOT NULL,
+      status ENUM('queued','sent','failed','skipped') NOT NULL DEFAULT 'queued',
+      request_payload JSON DEFAULT JSON_OBJECT(),
+      response_payload JSON DEFAULT JSON_OBJECT(),
+      error_message TEXT,
+      created_by VARCHAR(64),
+      created_by_name VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_hardware_device_events_tenant (tenant_id, created_at),
+      INDEX idx_hardware_device_events_device (tenant_id, device_id, created_at),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (device_id) REFERENCES hardware_devices(id) ON DELETE SET NULL
+    )
+  `);
+}
+
 export async function ensureRestaurantInventoryTables() {
   if (isPostgres()) {
     await query(`
@@ -2086,6 +3723,11 @@ export async function ensureRestaurantInventoryTables() {
         product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
         bulk_item_id TEXT NOT NULL REFERENCES bulk_items(id) ON DELETE CASCADE,
         quantity NUMERIC(12,3) NOT NULL,
+        yield_quantity NUMERIC(12,3) DEFAULT 1,
+        waste_percent NUMERIC(5,2) DEFAULT 0,
+        substitute_group TEXT,
+        substitute_rank INTEGER DEFAULT 0,
+        is_optional SMALLINT DEFAULT 0,
         PRIMARY KEY (product_id, bulk_item_id)
       )
     `);
@@ -2114,6 +3756,13 @@ export async function ensureRestaurantInventoryTables() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    await query(`ALTER TABLE product_recipes ADD COLUMN IF NOT EXISTS yield_quantity NUMERIC(12,3) DEFAULT 1`);
+    await query(`ALTER TABLE product_recipes ADD COLUMN IF NOT EXISTS waste_percent NUMERIC(5,2) DEFAULT 0`);
+    await query(`ALTER TABLE product_recipes ADD COLUMN IF NOT EXISTS substitute_group TEXT`);
+    await query(`ALTER TABLE product_recipes ADD COLUMN IF NOT EXISTS substitute_rank INTEGER DEFAULT 0`);
+    await query(`ALTER TABLE product_recipes ADD COLUMN IF NOT EXISTS is_optional SMALLINT DEFAULT 0`);
+    await query(`UPDATE product_recipes SET yield_quantity = COALESCE(NULLIF(yield_quantity, 0), 1), waste_percent = COALESCE(waste_percent, 0), substitute_rank = COALESCE(substitute_rank, 0), is_optional = COALESCE(is_optional, 0)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_product_recipes_substitute_group ON product_recipes (product_id, substitute_group, substitute_rank)`);
     return;
   }
 
@@ -2141,7 +3790,13 @@ export async function ensureRestaurantInventoryTables() {
       product_id VARCHAR(64) NOT NULL,
       bulk_item_id VARCHAR(64) NOT NULL,
       quantity DECIMAL(12,3) NOT NULL,
+      yield_quantity DECIMAL(12,3) DEFAULT 1,
+      waste_percent DECIMAL(5,2) DEFAULT 0,
+      substitute_group VARCHAR(64),
+      substitute_rank INT DEFAULT 0,
+      is_optional BOOLEAN DEFAULT FALSE,
       PRIMARY KEY (product_id, bulk_item_id),
+      INDEX idx_product_recipes_substitute_group (product_id, substitute_group, substitute_rank),
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
       FOREIGN KEY (bulk_item_id) REFERENCES bulk_items(id) ON DELETE CASCADE
     )
@@ -2174,6 +3829,30 @@ export async function ensureRestaurantInventoryTables() {
       FOREIGN KEY (bulk_item_id) REFERENCES bulk_items(id) ON DELETE SET NULL
     )
   `);
+
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE product_recipes ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  const addIndex = async (statement: string) => {
+    try {
+      await query(statement);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate key name")) throw err;
+    }
+  };
+  await addColumn(`yield_quantity DECIMAL(12,3) DEFAULT 1 AFTER quantity`);
+  await addColumn(`waste_percent DECIMAL(5,2) DEFAULT 0 AFTER yield_quantity`);
+  await addColumn(`substitute_group VARCHAR(64) AFTER waste_percent`);
+  await addColumn(`substitute_rank INT DEFAULT 0 AFTER substitute_group`);
+  await addColumn(`is_optional BOOLEAN DEFAULT FALSE AFTER substitute_rank`);
+  await query(`UPDATE product_recipes SET yield_quantity = COALESCE(NULLIF(yield_quantity, 0), 1), waste_percent = COALESCE(waste_percent, 0), substitute_rank = COALESCE(substitute_rank, 0), is_optional = COALESCE(is_optional, 0)`);
+  await addIndex(`CREATE INDEX idx_product_recipes_substitute_group ON product_recipes (product_id, substitute_group, substitute_rank)`);
 }
 
 export async function ensureSalePaymentsTable() {
@@ -2182,16 +3861,30 @@ export async function ensureSalePaymentsTable() {
       CREATE TABLE IF NOT EXISTS sale_payments (
         id TEXT PRIMARY KEY,
         sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
-        method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet','account')),
+        method TEXT NOT NULL CHECK (method IN ('cash','payfast','card','wallet','account','qr','bnpl')),
         amount NUMERIC(12,2) NOT NULL DEFAULT 0,
         tendered_amount NUMERIC(12,2) DEFAULT 0,
         change_amount NUMERIC(12,2) DEFAULT 0,
         tip_amount NUMERIC(12,2) DEFAULT 0,
         cash_out_amount NUMERIC(12,2) DEFAULT 0,
+        provider TEXT,
+        provider_device_id TEXT,
+        provider_reference TEXT,
+        authorization_code TEXT,
+        provider_status TEXT DEFAULT 'confirmed',
+        provider_note TEXT,
+        qr_payload TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    await query(`ALTER TABLE sale_payments ADD COLUMN IF NOT EXISTS provider TEXT`);
+    await query(`ALTER TABLE sale_payments ADD COLUMN IF NOT EXISTS provider_device_id TEXT`);
+    await query(`ALTER TABLE sale_payments ADD COLUMN IF NOT EXISTS provider_reference TEXT`);
+    await query(`ALTER TABLE sale_payments ADD COLUMN IF NOT EXISTS authorization_code TEXT`);
+    await query(`ALTER TABLE sale_payments ADD COLUMN IF NOT EXISTS provider_status TEXT DEFAULT 'confirmed'`);
+    await query(`ALTER TABLE sale_payments ADD COLUMN IF NOT EXISTS provider_note TEXT`);
+    await query(`ALTER TABLE sale_payments ADD COLUMN IF NOT EXISTS qr_payload TEXT`);
     return;
   }
 
@@ -2199,17 +3892,40 @@ export async function ensureSalePaymentsTable() {
     CREATE TABLE IF NOT EXISTS sale_payments (
       id VARCHAR(64) PRIMARY KEY,
       sale_id VARCHAR(64) NOT NULL,
-      method ENUM('cash','payfast','card','wallet','account') NOT NULL,
+      method ENUM('cash','payfast','card','wallet','account','qr','bnpl') NOT NULL,
       amount DECIMAL(12,2) NOT NULL DEFAULT 0,
       tendered_amount DECIMAL(12,2) DEFAULT 0,
       change_amount DECIMAL(12,2) DEFAULT 0,
       tip_amount DECIMAL(12,2) DEFAULT 0,
       cash_out_amount DECIMAL(12,2) DEFAULT 0,
+      provider VARCHAR(64),
+      provider_device_id VARCHAR(128),
+      provider_reference VARCHAR(255),
+      authorization_code VARCHAR(128),
+      provider_status VARCHAR(32) DEFAULT 'confirmed',
+      provider_note TEXT,
+      qr_payload TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
     )
   `);
+  const addColumn = async (definition: string) => {
+    try {
+      await query(`ALTER TABLE sale_payments ADD COLUMN ${definition}`);
+    } catch (err: any) {
+      const message = String(err?.message || "");
+      if (!message.includes("Duplicate column")) throw err;
+    }
+  };
+  await addColumn(`provider VARCHAR(64) AFTER cash_out_amount`);
+  await addColumn(`provider_device_id VARCHAR(128) AFTER provider`);
+  await addColumn(`provider_reference VARCHAR(255) AFTER provider_device_id`);
+  await addColumn(`authorization_code VARCHAR(128) AFTER provider_reference`);
+  await addColumn(`provider_status VARCHAR(32) DEFAULT 'confirmed' AFTER authorization_code`);
+  await addColumn(`provider_note TEXT AFTER provider_status`);
+  await addColumn(`qr_payload TEXT AFTER provider_note`);
+  await query(`ALTER TABLE sale_payments MODIFY method ENUM('cash','payfast','card','wallet','account','qr','bnpl') NOT NULL`);
 }
 
 export async function ensureStaffRoleSupportsChef() {

@@ -54,6 +54,9 @@ export type AuthTokenPayload = {
   tenantId: string;
   role: string;
   staffId: string;
+  jti?: string;
+  iat?: number;
+  exp?: number;
 }
 
 export function normalizeEmail(value: unknown): string {
@@ -84,7 +87,7 @@ export function generateAccessToken(payload: AuthTokenPayload): string {
 
 export function generateRefreshToken(payload: AuthTokenPayload): string {
   const options: SignOptions = { expiresIn: REFRESH_TOKEN_EXPIRES_IN };
-  return jwt.sign(payload, JWT_SECRET, options);
+  return jwt.sign({ ...payload, jti: crypto.randomUUID() }, JWT_SECRET, options);
 }
 
 export function verifyToken(token: string): AuthTokenPayload | null {

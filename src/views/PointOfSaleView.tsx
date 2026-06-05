@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
   ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
-  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Printer,
+  ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Printer, ReceiptText,
   AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronLeft, LayoutGrid, PanelLeft, CheckCircle2, RefreshCw, ListChecks, PackageCheck
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Customer, Sale, Workstation, RestaurantTable, LaybyOrder } from '../types';
+import { Product, Customer, Sale, Workstation, RestaurantTable, LaybyOrder, Promotion } from '../types';
 import { CustomerSelector } from '../components/CustomerSelector';
 import { usePosStore } from '../store/usePosStore';
 import { WorkstationQueuePanel } from '../components/WorkstationQueuePanel';
@@ -15,9 +15,14 @@ import { BarcodeScanner } from '../components/BarcodeScanner';
 import { LaybyCreateModal } from '../components/LaybyCreateModal';
 import { LaybyManagerModal } from '../components/LaybyManagerModal';
 import { LaybyReceipt } from '../components/LaybyReceipt';
+import { PrinterReadinessPanel } from '../components/PrinterReadinessPanel';
+import { BnplPaymentModal } from '../components/modals/BnplPaymentModal';
+import { QrPaymentModal } from '../components/modals/QrPaymentModal';
 import { getCompanionDeviceAssignment, recordCashMovement, recordRegisterWalletCashMovement } from '../api';
 import { useSocket } from '../hooks/useSocket';
+import { useNavigate } from 'react-router-dom';
 import { JwtUser } from '../hooks/useAuth';
+import { usePrinterReadiness } from '../hooks/usePrinterReadiness';
 import type { AppliedDiscount } from '../utils/discounts';
 import type { CheckoutMethod, OfflineSaleQueueItem, OfflineSyncBatchSummary } from '../utils/offlineSales';
 import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../utils/offlineGuards';
@@ -32,7 +37,7 @@ interface PointOfSaleViewProps {
   setIsProcessing: (val: boolean) => void;
   handleSaveOrder: (sendToKitchen: boolean) => Promise<void>;
   handleParkSale: (label?: string) => Promise<string | null>;
-  handleCheckout: (method: CheckoutMethod) => Promise<void>;
+  handleCheckout: (method: CheckoutMethod, splitPayments?: any[], paymentDetails?: any) => Promise<void>;
   handleWalletCheckout: () => Promise<void>;
   handleAccountCheckout: () => Promise<void>;
   handleOpenTab: (tabName?: string) => Promise<void>;
@@ -48,6 +53,14 @@ interface PointOfSaleViewProps {
   pointsDiscount: number;
   pricingDiscount: AppliedDiscount;
   totalDiscount: number;
+  promotionCode: string;
+  setPromotionCode: (code: string) => void;
+  appliedPromotion: Promotion | null;
+  promotionDiscount: number;
+  promotionError?: string | null;
+  promotionLoading?: boolean;
+  onApplyPromotionCode: () => Promise<void>;
+  onClearPromotion: (message?: string | null) => void;
   onRedeemPoints: (customerId: string, points: number) => void;
   onClearPointsDiscount: () => void;
   restaurantTables: RestaurantTable[];
@@ -57,6 +70,12 @@ interface PointOfSaleViewProps {
   lastReceiptSale?: Sale | null;
   onPrintLastReceipt?: () => void;
   suppressBillPrint?: boolean;
+  checkoutRecovery?: {
+    message: string;
+    method?: CheckoutMethod;
+    createdAt?: string;
+  } | null;
+  onDismissCheckoutRecovery?: () => void;
   offlineStatus?: {
     isOffline: boolean;
     pendingCount: number;
@@ -92,10 +111,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   products, user, customers, sales, workstations, isProcessing, setIsProcessing, handleSaveOrder,
   handleParkSale, handleCheckout, handleWalletCheckout, handleAccountCheckout, handleOpenTab, handleOpenTable, setTenderModal, setTenderedAmount, setSplitPaymentModal,
   categoryTree, CATEGORIES, getCategoryIcon, getProductImage, openCashDrawer,
-  pointsDiscount, pricingDiscount, totalDiscount, onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated, onCustomersUpdated,
+  pointsDiscount, pricingDiscount, totalDiscount,
+  promotionCode, setPromotionCode, appliedPromotion, promotionDiscount, promotionError, promotionLoading = false, onApplyPromotionCode, onClearPromotion,
+  onRedeemPoints, onClearPointsDiscount, restaurantTables, onSalesUpdated, onCustomersUpdated,
   onProductsUpdated, lastReceiptSale, onPrintLastReceipt, suppressBillPrint = false,
+  checkoutRecovery = null,
+  onDismissCheckoutRecovery,
   offlineStatus = { isOffline: false, pendingCount: 0, syncStatus: 'idle', lastError: null },
 }) => {
+  const navigate = useNavigate();
   const { 
     cart, addToCart, updateQuantity, clearCart, 
     activeSession, activeSection, setActiveSection, activeCategory, setActiveCategory,
@@ -106,6 +130,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     isCartOpen, setIsCartOpen,
     tenantId,
   } = usePosStore();
+  const printerReadiness = usePrinterReadiness(tenantId);
 
   const [isScanning, setIsScanning] = useState(false);
   const [modifyingProduct, setModifyingProduct] = useState<Product | null>(null);
@@ -125,6 +150,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [walletCashNote, setWalletCashNote] = useState('');
   const [walletCashError, setWalletCashError] = useState('');
   const [walletCashSuccess, setWalletCashSuccess] = useState('');
+  const [qrPaymentOpen, setQrPaymentOpen] = useState(false);
+  const [bnplPaymentOpen, setBnplPaymentOpen] = useState(false);
   const [isRecordingWalletCash, setIsRecordingWalletCash] = useState(false);
   const [terminalCategoryLayout, setTerminalCategoryLayout] = useState<'sidebar' | 'grid'>(() => {
     if (typeof window === 'undefined') return 'sidebar';
@@ -284,6 +311,27 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       s.transactionType !== 'void'
     ))
     .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()), [sales, activeOrderId]);
+  const openTableCount = useMemo(() => {
+    const tableIds = new Set(
+      sales
+        .filter(s => Boolean(s.tableNumber) && (s.status === 'open' || s.status === 'kitchen'))
+        .map(s => String(s.tableNumber))
+    );
+    return tableIds.size;
+  }, [sales]);
+  const openTabsCount = useMemo(
+    () => sales.filter(s => s.isTab && (s.status === 'open' || s.status === 'kitchen')).length,
+    [sales]
+  );
+  const pendingWorkstationItems = useMemo(() => {
+    return sales.reduce((count, sale) => {
+      if (sale.status !== 'kitchen' && sale.status !== 'open') return count;
+      return count + sale.items.filter(item => {
+        const orderItem = item as any;
+        return orderItem.workstationId && (orderItem.status === 'pending' || orderItem.status === 'accepted');
+      }).length;
+    }, 0);
+  }, [sales]);
   const blockingStockIssues = useMemo(() => cart
     .map(item => {
       const productId = (item as any).productId || item.id;
@@ -835,6 +883,61 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     });
   }, [products, activeSection, activeCategory, searchQuery, currentUserStaff]);
 
+  const quickActionBase = "min-h-[76px] rounded-2xl border bg-white p-3 text-left shadow-sm transition-all active:scale-[0.98] disabled:opacity-45 dark:bg-slate-900";
+  const activeRegisterName = activeSession?.staffName || currentUserStaff?.name || 'Open register';
+  const activeRegisterExpectedCash = Number(activeSession?.expectedCash || 0);
+  const noSellableProducts = products.length === 0 || products.every(product => Number(product.stock || 0) <= 0);
+  const needsCustomerSelection = cart.length > 0 && !selectedCustomer;
+  const hasOfflineRecovery = offlineStatus.isOffline || offlineStatus.pendingCount > 0 || offlineStatus.syncStatus === 'error' || Boolean(offlineStatus.lastError);
+  const needsPrinterRecovery = !printerReadiness.isReadyToday || printerReadiness.needsAttention;
+  const hasRecoveryWork = noSellableProducts || needsCustomerSelection || hasOfflineRecovery || Boolean(checkoutRecovery) || needsPrinterRecovery;
+
+  const openParkedQuickAction = () => {
+    if (cart.length > 0) {
+      openParkModal();
+      return;
+    }
+    if (parkedSales[0]) {
+      resumeParkedSale(parkedSales[0]);
+    }
+  };
+
+  const openTablesQuickAction = () => {
+    if (cart.length > 0 && config?.business?.isRestaurantMode) {
+      const defaultTable = activeTableNumber || selectedTableForOrder || activeRestaurantTables[0]?.id || '';
+      setSelectedTableForOrder(defaultTable);
+      setTablePickerOpen(true);
+      return;
+    }
+    navigate('/tables');
+  };
+
+  const openWorkstationQuickAction = () => {
+    if (attachedWorkstation) {
+      setSidePanelMode('queue');
+      setIsCartOpen(true);
+      return;
+    }
+    navigate('/workstation');
+  };
+
+  const openCustomerRecovery = () => {
+    const selector = document.querySelector<HTMLButtonElement>('[data-pos-customer-selector]');
+    selector?.click();
+  };
+
+  const retryCheckoutRecovery = () => {
+    if (checkoutRecovery?.method === 'cash' || checkoutRecovery?.method === 'card') {
+      setTenderModal({ isOpen: true, method: checkoutRecovery.method });
+      return;
+    }
+    if (checkoutRecovery?.method === 'split') {
+      setSplitPaymentModal(true);
+      return;
+    }
+    setIsCartOpen(true);
+  };
+
   if (!activeSession) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50 dark:bg-slate-950">
@@ -992,6 +1095,225 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             </div>
           )}
         </div>
+
+        <div role="group" aria-label="Daily POS actions" className="mx-4 lg:mx-6 mb-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-7">
+          <button
+            type="button"
+            onClick={openCashDrawer}
+            className={`${quickActionBase} border-emerald-100 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}
+          >
+            <span className="flex items-center justify-between gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Register</span>
+            </span>
+            <span className="mt-2 block truncate text-sm font-black text-slate-900 dark:text-white">{activeRegisterName}</span>
+            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Expected R{activeRegisterExpectedCash.toFixed(2)}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!lastReceiptSale || !onPrintLastReceipt}
+            onClick={onPrintLastReceipt}
+            className={`${quickActionBase} border-slate-200 text-slate-600 hover:border-primary/40 hover:bg-primary/5 dark:border-slate-800 dark:text-slate-300`}
+          >
+            <span className="flex items-center justify-between gap-2">
+              <Printer className="h-4 w-4 shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Receipt</span>
+            </span>
+            <span className="mt-2 block truncate text-sm font-black text-slate-900 dark:text-white">
+              {lastReceiptSale ? `#${lastReceiptSale.id.slice(-8).toUpperCase()}` : 'No receipt'}
+            </span>
+            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Reprint last</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={openDrawerModal}
+            className={`${quickActionBase} border-emerald-100 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}
+          >
+            <span className="flex items-center justify-between gap-2">
+              <Banknote className="h-4 w-4 shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Drawer</span>
+            </span>
+            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">No sale</span>
+            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Record reason</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={cart.length === 0 && parkedSales.length === 0}
+            onClick={openParkedQuickAction}
+            className={`${quickActionBase} border-indigo-100 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-300 dark:hover:bg-indigo-950/30`}
+          >
+            <span className="flex items-center justify-between gap-2">
+              <PauseCircle className="h-4 w-4 shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Parked</span>
+            </span>
+            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{parkedSales.length} waiting</span>
+            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{cart.length > 0 ? 'Park current' : 'Resume latest'}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!config?.business?.isRestaurantMode}
+            onClick={openTablesQuickAction}
+            className={`${quickActionBase} border-orange-100 text-orange-700 hover:border-orange-300 hover:bg-orange-50 dark:border-orange-900/50 dark:text-orange-300 dark:hover:bg-orange-950/30`}
+          >
+            <span className="flex items-center justify-between gap-2">
+              <Utensils className="h-4 w-4 shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Tables</span>
+            </span>
+            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{openTableCount} open</span>
+            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{cart.length > 0 ? 'Save to table' : 'Floor view'}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!config?.business?.isRestaurantMode}
+            onClick={() => navigate('/tabs')}
+            className={`${quickActionBase} border-indigo-100 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-300 dark:hover:bg-indigo-950/30`}
+          >
+            <span className="flex items-center justify-between gap-2">
+              <TabletSmartphone className="h-4 w-4 shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Tabs</span>
+            </span>
+            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{openTabsCount} open</span>
+            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Review tabs</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!config?.business?.isRestaurantMode || activeWorkstations.length === 0}
+            onClick={openWorkstationQuickAction}
+            className={`${quickActionBase} border-amber-100 text-amber-700 hover:border-amber-300 hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30`}
+          >
+            <span className="flex items-center justify-between gap-2">
+              <ChefHat className="h-4 w-4 shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Queue</span>
+            </span>
+            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{pendingWorkstationItems} pending</span>
+            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{attachedWorkstation ? attachedWorkstation.name : 'Workstations'}</span>
+          </button>
+        </div>
+
+        {hasRecoveryWork && (
+          <section aria-label="POS recovery actions" className="mx-4 lg:mx-6 mb-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <ListChecks className="h-4 w-4 shrink-0 text-primary" />
+                <p className="truncate text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Recovery actions</p>
+              </div>
+              <span className="text-[10px] font-bold text-slate-400">Before checkout</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {noSellableProducts && (
+                <article className="rounded-xl border border-rose-100 bg-rose-50 p-3 dark:border-rose-900/40 dark:bg-rose-950/20">
+                  <div className="flex items-start gap-3">
+                    <PackageCheck className="mt-0.5 h-5 w-5 shrink-0 text-rose-600 dark:text-rose-300" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-black text-rose-800 dark:text-rose-200">No sellable stock</p>
+                      <p className="mt-0.5 text-xs font-semibold text-rose-700/80 dark:text-rose-300/70">
+                        {products.length === 0 ? 'No products are loaded for this tenant.' : 'All loaded products are at zero stock.'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/inventory')}
+                    className="mt-3 h-10 w-full rounded-xl bg-white text-xs font-black uppercase tracking-widest text-rose-700 shadow-sm dark:bg-slate-900 dark:text-rose-300"
+                  >
+                    Open inventory
+                  </button>
+                </article>
+              )}
+
+              {needsCustomerSelection && (
+                <article className="rounded-xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-950/20">
+                  <div className="flex items-start gap-3">
+                    <Users className="mt-0.5 h-5 w-5 shrink-0 text-blue-600 dark:text-blue-300" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-black text-blue-800 dark:text-blue-200">Customer not selected</p>
+                      <p className="mt-0.5 text-xs font-semibold text-blue-700/80 dark:text-blue-300/70">Wallet, account, and loyalty flows need a linked profile.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openCustomerRecovery}
+                    className="mt-3 h-10 w-full rounded-xl bg-white text-xs font-black uppercase tracking-widest text-blue-700 shadow-sm dark:bg-slate-900 dark:text-blue-300"
+                  >
+                    Choose customer
+                  </button>
+                </article>
+              )}
+
+              {checkoutRecovery && (
+                <article className="rounded-xl border border-amber-100 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/20">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-300" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-black text-amber-800 dark:text-amber-200">Payment needs attention</p>
+                      <p className="mt-0.5 text-xs font-semibold text-amber-700/80 dark:text-amber-300/70">{checkoutRecovery.message}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={retryCheckoutRecovery}
+                      className="h-10 rounded-xl bg-amber-600 text-xs font-black uppercase tracking-widest text-white shadow-sm"
+                    >
+                      Retry
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onDismissCheckoutRecovery}
+                      className="h-10 rounded-xl bg-white text-xs font-black uppercase tracking-widest text-amber-700 shadow-sm dark:bg-slate-900 dark:text-amber-300"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </article>
+              )}
+
+              {hasOfflineRecovery && (
+                <article className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
+                  <div className="flex items-start gap-3">
+                    <RefreshCw className={`mt-0.5 h-5 w-5 shrink-0 text-slate-600 dark:text-slate-300 ${offlineStatus.syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-black text-slate-800 dark:text-slate-100">
+                        {offlineStatus.syncStatus === 'error' ? 'Sync needs review' : offlineStatus.isOffline ? 'Offline mode' : 'Offline queue'}
+                      </p>
+                      <p className="mt-0.5 text-xs font-semibold text-slate-500">
+                        {offlineStatus.lastError || `${offlineStatus.pendingCount || 0} queued sale${offlineStatus.pendingCount === 1 ? '' : 's'}`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOfflineReviewOpen(true)}
+                      disabled={!offlineStatus.queueItems?.length}
+                      className="h-10 rounded-xl bg-white text-xs font-black uppercase tracking-widest text-slate-700 shadow-sm disabled:opacity-50 dark:bg-slate-900 dark:text-slate-300"
+                    >
+                      Review
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void offlineStatus.syncNow?.()}
+                      disabled={offlineStatus.isOffline || offlineStatus.syncStatus === 'syncing' || !offlineStatus.pendingCount}
+                      className="h-10 rounded-xl bg-slate-900 text-xs font-black uppercase tracking-widest text-white shadow-sm disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                    >
+                      Sync
+                    </button>
+                  </div>
+                </article>
+              )}
+
+              {needsPrinterRecovery && (
+                <PrinterReadinessPanel tenantId={tenantId} compact readiness={printerReadiness} />
+              )}
+            </div>
+          </section>
+        )}
 
         {assignedCompanionMode === 'pole_display' && (
           <div className="fixed inset-0 z-[120] bg-slate-950 text-white flex flex-col">
@@ -1360,7 +1682,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                         </p>
                         <p className="mt-1 leading-snug">
                           {offlineStatus.isOffline
-                            ? `Cash and external-card sales are saved on this device. Wallets, accounts, and PayFast stay online-only. ${offlineStatus.pendingCount > 0 ? `${offlineStatus.pendingCount} sale${offlineStatus.pendingCount === 1 ? '' : 's'} waiting to sync.` : ''}`
+                            ? `Cash and external-card sales are saved on this device. Wallets, accounts, QR, BNPL, and PayFast stay online-only. ${offlineStatus.pendingCount > 0 ? `${offlineStatus.pendingCount} sale${offlineStatus.pendingCount === 1 ? '' : 's'} waiting to sync.` : ''}`
                             : offlineStatus.syncStatus === 'syncing'
                               ? `${offlineStatus.pendingCount} queued sale${offlineStatus.pendingCount === 1 ? '' : 's'} syncing in the background.`
                               : offlineStatus.syncStatus === 'error'
@@ -1571,13 +1893,62 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     </div>
                   </div>
                 )}
+                <form
+                  className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-[#0B1120]"
+                  onSubmit={e => {
+                    e.preventDefault();
+                    void onApplyPromotionCode();
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <ReceiptText className="h-4 w-4 shrink-0 text-primary" />
+                    <input
+                      value={promotionCode}
+                      onChange={e => setPromotionCode(e.target.value.toUpperCase())}
+                      placeholder="Coupon code"
+                      disabled={promotionLoading || Boolean(appliedPromotion)}
+                      className="min-w-0 flex-1 bg-transparent text-sm font-black uppercase tracking-widest text-slate-900 outline-none placeholder:text-slate-400 dark:text-white"
+                    />
+                    {appliedPromotion ? (
+                      <button
+                        type="button"
+                        onClick={() => onClearPromotion(null)}
+                        className="rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                      >
+                        Clear
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={promotionLoading || cart.length === 0 || !promotionCode.trim() || offlineStatus.isOffline}
+                        className="rounded-xl bg-primary px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40"
+                      >
+                        {promotionLoading ? 'Checking' : 'Apply'}
+                      </button>
+                    )}
+                  </div>
+                  {appliedPromotion && (
+                    <div className="mt-2 flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-300">
+                      <span className="min-w-0 truncate">{appliedPromotion.name || appliedPromotion.code}</span>
+                      <span className="shrink-0">-R{Number(promotionDiscount || 0).toFixed(2)}</span>
+                    </div>
+                  )}
+                  {promotionError && (
+                    <p className="mt-2 text-[10px] font-bold text-amber-600 dark:text-amber-300">{promotionError}</p>
+                  )}
+                  {offlineStatus.isOffline && !appliedPromotion && (
+                    <p className="mt-2 text-[10px] font-bold text-slate-400">Coupons need an online check.</p>
+                  )}
+                </form>
                 <div className="flex justify-between items-center mb-6">
                   <div>
                     <span className="font-bold text-slate-400 dark:text-slate-500 text-xs uppercase tracking-widest block">Grand Total</span>
                     {selectedCustomerId && (() => {
                       const customer = customers.find(c => c.id === selectedCustomerId);
                       const pts = customer?.loyaltyPoints || customer?.points || 0;
+                      const activeLoyaltyMember = (customer?.loyaltyMemberStatus || 'active') === 'active';
                       const canRedeem = config?.business?.enableLoyalty &&
+                        activeLoyaltyMember &&
                         config?.business?.pointsRequiredForDiscount &&
                         pts >= config.business.pointsRequiredForDiscount;
                       return pts > 0 ? (
@@ -1615,6 +1986,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                       <div className="text-[10px] font-bold text-emerald-500">
                         -R{Number(totalDiscount).toFixed(2)} discount applied
                         {pricingDiscount.amount > 0 ? ` (${pricingDiscount.label})` : ''}
+                        {appliedPromotion ? ` (${appliedPromotion.code})` : ''}
                       </div>
                     )}
                   </div>
@@ -1649,7 +2021,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   </button>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="grid grid-cols-2 gap-3 mb-4">
                   <button 
                     disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
                     onClick={() => { setTenderModal({ isOpen: true, method: 'cash' }); setTenderedAmount(''); }}
@@ -1665,6 +2037,24 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   >
                     <CreditCard className="w-5 h-5" />
                     <span className="text-[9px] uppercase tracking-widest">CARD</span>
+                  </button>
+                  <button
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || offlineStatus.isOffline}
+                    onClick={() => setQrPaymentOpen(true)}
+                    title={offlineStatus.isOffline ? 'QR payments require online provider confirmation' : 'Capture QR or mobile-wallet payment'}
+                    className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-cyan-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-cyan-600/30"
+                  >
+                    <QrCode className="w-5 h-5" />
+                    <span className="text-[9px] uppercase tracking-widest">QR PAY</span>
+                  </button>
+                  <button
+                    disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || offlineStatus.isOffline}
+                    onClick={() => setBnplPaymentOpen(true)}
+                    title={offlineStatus.isOffline ? 'BNPL payments require online provider approval' : 'Capture PayJustNow, Mobicred, or PayFlex payment'}
+                    className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-fuchsia-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-fuchsia-600/30"
+                  >
+                    <ReceiptText className="w-5 h-5" />
+                    <span className="text-[9px] uppercase tracking-widest">BNPL</span>
                   </button>
                   <button 
                     disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || offlineStatus.isOffline}
@@ -2373,6 +2763,30 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       />
 
       {laybyReceiptOrder && <LaybyReceipt order={laybyReceiptOrder} config={config} />}
+
+      <QrPaymentModal
+        isOpen={qrPaymentOpen}
+        cartTotal={amountDue}
+        isProcessing={isProcessing}
+        offlineMode={offlineStatus.isOffline}
+        onClose={() => setQrPaymentOpen(false)}
+        onConfirm={async (details) => {
+          await handleCheckout('qr', undefined, details);
+          setQrPaymentOpen(false);
+        }}
+      />
+
+      <BnplPaymentModal
+        isOpen={bnplPaymentOpen}
+        cartTotal={amountDue}
+        isProcessing={isProcessing}
+        offlineMode={offlineStatus.isOffline}
+        onClose={() => setBnplPaymentOpen(false)}
+        onConfirm={async (details) => {
+          await handleCheckout('bnpl', undefined, details);
+          setBnplPaymentOpen(false);
+        }}
+      />
 
       {modifyingProduct && (
         <ModifierSelectionModal

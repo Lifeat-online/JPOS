@@ -24,7 +24,9 @@ export function CustomerSelector({ customers, selectedId, onSelect, onAddNew }: 
     c.name.toLowerCase().includes(normalizedSearch) ||
     (c.profileType === 'staff' && 'staff'.includes(normalizedSearch)) ||
     (c.phone && c.phone.includes(search)) ||
-    (c.email && c.email.toLowerCase().includes(normalizedSearch))
+    (c.email && c.email.toLowerCase().includes(normalizedSearch)) ||
+    (c.membershipCardId && c.membershipCardId.toLowerCase().includes(normalizedSearch)) ||
+    (c.membershipBarcode && c.membershipBarcode.toLowerCase().includes(normalizedSearch))
   ).slice(0, 8); // Limit results for performance/UI
 
   useEffect(() => {
@@ -74,6 +76,8 @@ export function CustomerSelector({ customers, selectedId, onSelect, onAddNew }: 
   return (
     <div className="relative w-full" ref={containerRef}>
       <button
+        type="button"
+        data-pos-customer-selector
         onClick={() => setIsOpen(!isOpen)}
         className={`w-full h-[44px] lg:h-[50px] px-4 rounded-xl border flex items-center justify-between transition-all font-medium text-sm shadow-sm ${
           selectedCustomer 
@@ -169,9 +173,14 @@ export function CustomerSelector({ customers, selectedId, onSelect, onAddNew }: 
                             Staff
                           </span>
                         )}
+                        {customer.profileType !== 'staff' && customer.loyaltyMemberStatus && customer.loyaltyMemberStatus !== 'active' && (
+                          <span className="shrink-0 rounded-full bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
+                            {customer.loyaltyMemberStatus.replace('_', ' ')}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[10px] text-slate-400 font-bold tracking-tight truncate">
-                        {customer.phone || customer.email || 'No contact info'}
+                        {customer.membershipCardId || customer.membershipBarcode || customer.phone || customer.email || 'No contact info'}
                       </div>
                     </div>
                   </div>

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { createCustomerPayoutRequest, createPayoutRequest, createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale, updateSaleItem, receivePurchaseOrder, getStockBatches } from '../../server/mariadb-crud.js';
+import { createCustomerPayoutRequest, createPayoutRequest, createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale, updateSaleItem, receivePurchaseOrder, getStockBatches, processSaleRefund, updateSalePaymentProviderStatus, updateProductRecipe, getProductRecipe, getRecipeCostingReport } from '../../server/mariadb-crud.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
@@ -113,6 +113,71 @@ describe('mariadb-crud', () => {
     );
   });
 
+  it('validates and records promotion redemptions when creating a completed sale', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('FROM promotions')) {
+          return Promise.resolve([[
+            {
+              id: 'promo_1',
+              tenant_id: 'tenant_1',
+              code: 'SAVE10',
+              name: 'Save ten',
+              status: 'active',
+              discount_type: 'percent',
+              discount_value: 10,
+              starts_at: '2026-01-01T00:00:00.000Z',
+              ends_at: '2026-12-31T23:59:59.000Z',
+              min_subtotal: 0,
+              applies_to: 'cart',
+              target_product_ids: '[]',
+              target_categories: '[]',
+              customer_scope: 'all',
+              target_customer_ids: '[]',
+              redemption_count: 0,
+            },
+          ]]);
+        }
+        if (sql.includes('SELECT bulk_item_id')) return Promise.resolve([[]]);
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await createSale('tenant_1', {
+      customerId: 'cust_1',
+      staffId: 'staff_1',
+      status: 'completed',
+      total: 90,
+      subtotal: 100,
+      paymentMethod: 'cash',
+      promotionCode: 'SAVE10',
+      promotionDiscount: 10,
+      items: [{ id: 'prod_1', name: 'Coffee', category: 'Coffee', price: 100, quantity: 1 } as any],
+    } as any);
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('SELECT * FROM promotions'),
+      expect.arrayContaining(['tenant_1', 'SAVE10'])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO sales'),
+      expect.arrayContaining(['promo_1', 'SAVE10', 10])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO promotion_redemptions'),
+      expect.arrayContaining(['tenant_1', 'promo_1', 'SAVE10', expect.any(String), 'cust_1', 'staff_1', 10])
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE promotions SET redemption_count = redemption_count + 1'),
+      ['tenant_1', 'promo_1']
+    );
+  });
+
   it('does not stamp ordered_at for held workstation items', async () => {
     const conn = {
       beginTransaction: vi.fn().mockResolvedValue(undefined),
@@ -190,11 +255,11 @@ describe('mariadb-crud', () => {
     expect(conn.beginTransaction).toHaveBeenCalled();
     expect(conn.commit).toHaveBeenCalled();
     expect(conn.query).toHaveBeenNthCalledWith(1, expect.stringContaining('SELECT status, transaction_type, staff_id, customer_id, offline_event_id FROM sales'), ['tenant_1', 'sale_1']);
-    expect(conn.query).toHaveBeenNthCalledWith(2, expect.stringContaining('UPDATE sales SET'), [25, 'kitchen', 'tenant_1', 'sale_1']);
-    expect(conn.query).toHaveBeenNthCalledWith(3, expect.stringContaining('SELECT * FROM sale_items WHERE sale_id = ?'), ['sale_1']);
-    expect(conn.query).toHaveBeenNthCalledWith(4, expect.stringContaining('DELETE FROM sale_items WHERE sale_id = ?'), ['sale_1']);
-    expect(conn.query).toHaveBeenNthCalledWith(
-      5,
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('tax_periods tp'), ['tenant_1', 'sale_1']);
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('UPDATE sales SET'), [25, 'kitchen', 'tenant_1', 'sale_1']);
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('SELECT * FROM sale_items WHERE sale_id = ?'), ['sale_1']);
+    expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM sale_items WHERE sale_id = ?'), ['sale_1']);
+    expect(conn.query).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO sale_items'),
       expect.arrayContaining(['sale_1', 'prod_1', 'Burger', 25, 1, 'pending'])
     );
@@ -560,6 +625,141 @@ describe('mariadb-crud', () => {
     );
   });
 
+  it('persists recipe yield, waste, and substitution metadata', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockResolvedValue([[]]),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await updateProductRecipe('prod_1', [{
+      bulkItemId: 'bulk_1',
+      quantity: 2,
+      yieldQuantity: 4,
+      wastePercent: 10,
+      substituteGroup: 'milk',
+      substituteRank: 1,
+      isOptional: true,
+    }]);
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('yield_quantity'),
+      ['prod_1', 'bulk_1', 2, 4, 10, 'milk', 1, 1]
+    );
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('returns recipe lines with effective quantity and line cost', async () => {
+    (dbModule.query as any).mockResolvedValue([
+      {
+        bulkItemId: 'bulk_1',
+        quantity: '2',
+        yieldQuantity: '4',
+        wastePercent: '10',
+        substituteGroup: 'milk',
+        substituteRank: '1',
+        isOptional: 0,
+        bulkItemName: 'Milk',
+        unit: 'L',
+        costPerUnit: '3',
+        availableStock: '20',
+      },
+    ]);
+
+    const recipe = await getProductRecipe('prod_1');
+
+    expect(recipe[0]).toMatchObject({
+      bulkItemId: 'bulk_1',
+      yieldQuantity: 4,
+      wastePercent: 10,
+      substituteGroup: 'milk',
+      effectiveQuantity: 0.55,
+      lineCost: 1.65,
+    });
+  });
+
+  it('deducts recipe stock with yield waste and ranked substitutions', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('FROM product_recipes r')) {
+          return Promise.resolve([[
+            { bulk_item_id: 'bulk_primary', quantity: '2', yield_quantity: '4', waste_percent: '10', substitute_group: null, substitute_rank: 0, stock: '100' },
+            { bulk_item_id: 'bulk_oat', quantity: '1', yield_quantity: '1', waste_percent: '0', substitute_group: 'milk', substitute_rank: 0, stock: '0' },
+            { bulk_item_id: 'bulk_almond', quantity: '1.2', yield_quantity: '1', waste_percent: '0', substitute_group: 'milk', substitute_rank: 1, stock: '9' },
+          ]]);
+        }
+        if (sql.includes('SELECT bulk_item_id')) return Promise.resolve([[]]);
+        return Promise.resolve([[]]);
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    (dbModule.getConnection as any).mockResolvedValue(conn);
+
+    await createSale('tenant_1', {
+      staffId: 'staff_1',
+      status: 'completed',
+      total: 100,
+      subtotal: 100,
+      paymentMethod: 'cash',
+      items: [{ id: 'prod_1', name: 'Latte', price: 50, quantity: 2 } as any],
+    } as any);
+
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE bulk_items SET stock = stock - ?'),
+      [1.1, 'bulk_primary']
+    );
+    expect(conn.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE bulk_items SET stock = stock - ?'),
+      [2.4, 'bulk_almond']
+    );
+    expect(conn.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE bulk_items SET stock = stock - ?'),
+      expect.arrayContaining(['bulk_oat'])
+    );
+  });
+
+  it('builds recipe gross-margin reports from yield waste and substitutions', async () => {
+    (dbModule.query as any).mockImplementation((sql: string) => {
+      if (sql.includes('INNER JOIN product_recipes')) {
+        return Promise.resolve([
+          { productId: 'prod_1', bulkItemId: 'bun', quantity: '2', yieldQuantity: '2', wastePercent: '10', substituteGroup: null, substituteRank: 0, isOptional: 0, bulkItemName: 'Bun', unit: 'each', costPerUnit: '5', availableStock: '20' },
+          { productId: 'prod_1', bulkItemId: 'beef', quantity: '1', yieldQuantity: '1', wastePercent: '0', substituteGroup: 'protein', substituteRank: 0, isOptional: 0, bulkItemName: 'Beef', unit: 'portion', costPerUnit: '20', availableStock: '0' },
+          { productId: 'prod_1', bulkItemId: 'chicken', quantity: '1.1', yieldQuantity: '1', wastePercent: '0', substituteGroup: 'protein', substituteRank: 1, isOptional: 0, bulkItemName: 'Chicken', unit: 'portion', costPerUnit: '12', availableStock: '10' },
+        ]);
+      }
+      if (sql.includes('FROM products')) {
+        return Promise.resolve([
+          { productId: 'prod_1', productName: 'Burger', category: 'Food', section: 'Restaurant', sellingPrice: '100', productCost: '40' },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const report = await getRecipeCostingReport('tenant_1');
+
+    expect(report.summary).toMatchObject({
+      productCount: 1,
+      recipeProductCount: 1,
+      substitutionGroupCount: 1,
+    });
+    expect(report.rows[0]).toMatchObject({
+      productName: 'Burger',
+      recipeCost: 18.7,
+      expectedUnitCost: 18.7,
+      grossProfit: 81.3,
+      grossMarginPercent: 81.3,
+      substituteGroupCount: 1,
+    });
+    expect(report.rows[0].lines.find(line => line.bulkItemId === 'chicken')).toMatchObject({ costed: true });
+    expect(report.csv).toContain('Burger');
+  });
+
   it('records manager-review conflicts when an offline sync would oversell stock', async () => {
     const conn = {
       beginTransaction: vi.fn().mockResolvedValue(undefined),
@@ -703,6 +903,282 @@ describe('mariadb-crud', () => {
       payments: [{ method: 'cash', amount: 50, tenderedAmount: 50, changeAmount: 0, tipAmount: 0, cashOutAmount: 0 }],
     };
 
+    it('persists QR provider reference metadata on sale payments', async () => {
+      const conn = makeConn();
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      await createSale('tenant_1', {
+        ...baseSale,
+        paymentMethod: 'qr',
+        payments: [{
+          method: 'qr',
+          amount: 50,
+          tenderedAmount: 50,
+          provider: 'snapscan',
+          providerReference: 'SS-REF-123',
+          providerStatus: 'confirmed',
+          providerNote: 'Customer phone confirmation',
+          qrPayload: 'snapscan://merchant/reference',
+        }],
+      } as any);
+
+      const paymentInsert = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO sale_payments'));
+      expect(paymentInsert?.[0]).toContain('provider_reference');
+      expect(paymentInsert?.[1]).toEqual(expect.arrayContaining([
+        'qr',
+        'snapscan',
+        'SS-REF-123',
+        'confirmed',
+        'Customer phone confirmation',
+        'snapscan://merchant/reference',
+      ]));
+    });
+
+    it('persists BNPL payment approval metadata on sale payments', async () => {
+      const conn = makeConn();
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      await createSale('tenant_1', {
+        ...baseSale,
+        paymentMethod: 'bnpl',
+        payments: [{
+          method: 'bnpl',
+          amount: 50,
+          tenderedAmount: 50,
+          provider: 'payflex',
+          providerReference: 'PF-ORDER-123',
+          providerStatus: 'approved',
+          providerNote: 'Approved in PayFlex portal',
+        }],
+      } as any);
+
+      const paymentInsert = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO sale_payments'));
+      expect(paymentInsert?.[0]).toContain('provider_status');
+      expect(paymentInsert?.[1]).toEqual(expect.arrayContaining([
+        'bnpl',
+        'payflex',
+        'PF-ORDER-123',
+        'approved',
+        'Approved in PayFlex portal',
+      ]));
+    });
+
+    it('persists external card terminal approval metadata on sale payments', async () => {
+      const conn = makeConn();
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      await createSale('tenant_1', {
+        ...baseSale,
+        paymentMethod: 'card',
+        payments: [{
+          method: 'card',
+          amount: 50,
+          tenderedAmount: 50,
+          provider: 'yoco',
+          providerDeviceId: 'Yoco-Front-01',
+          providerReference: 'YOCO-RECEIPT-123',
+          authorizationCode: 'AUTH-123',
+          providerStatus: 'approved',
+          providerNote: 'Approved on front counter terminal',
+        }],
+      } as any);
+
+      const paymentInsert = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO sale_payments'));
+      expect(paymentInsert?.[0]).toContain('provider_device_id');
+      expect(paymentInsert?.[0]).toContain('authorization_code');
+      expect(paymentInsert?.[1]).toEqual(expect.arrayContaining([
+        'card',
+        'yoco',
+        'Yoco-Front-01',
+        'YOCO-RECEIPT-123',
+        'AUTH-123',
+        'approved',
+        'Approved on front counter terminal',
+      ]));
+    });
+
+    it('rejects raw card PAN provider references before inserting sale payments', async () => {
+      const conn = makeConn();
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      await expect(createSale('tenant_1', {
+        ...baseSale,
+        paymentMethod: 'card',
+        payments: [{
+          method: 'card',
+          amount: 50,
+          tenderedAmount: 50,
+          provider: 'yoco',
+          providerDeviceId: 'Yoco-Front-01',
+          providerReference: '4111 1111 1111 1111',
+          providerStatus: 'approved',
+        }],
+      } as any)).rejects.toThrow(/card PAN/i);
+
+      const paymentInsert = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO sale_payments'));
+      expect(paymentInsert).toBeUndefined();
+      expect(conn.rollback).toHaveBeenCalled();
+      expect(conn.commit).not.toHaveBeenCalled();
+    });
+
+    it('records BNPL refund references and marks the original payment refunded', async () => {
+      const conn = makeConn();
+      conn.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM sales') && sql.includes('WHERE tenant_id = ? AND id = ?')) {
+          return Promise.resolve([[{
+            id: 'sale_bnpl_1',
+            tenant_id: 'tenant_1',
+            customer_id: 'cust_1',
+            user_id: 'user_1',
+            staff_id: 'staff_1',
+            total: 100,
+            subtotal: 100,
+            tax_amount: 0,
+            tax_rate: 0,
+            tax_inclusive: 1,
+            payment_method: 'bnpl',
+            status: 'completed',
+            transaction_type: 'sale',
+            refund_status: 'none',
+            refunded_amount: 0,
+          }]]);
+        }
+        if (sql.includes('FROM sale_payments')) {
+          return Promise.resolve([[{
+            id: 'pay_bnpl_1',
+            method: 'bnpl',
+            provider: 'mobicred',
+            providerReference: 'MOBI-ORIG-1',
+            providerStatus: 'settled',
+          }]]);
+        }
+        if (sql.includes('FROM sale_items')) {
+          return Promise.resolve([[{ id: 'item_1', productId: 'prod_1', name: 'Sneakers', price: 100, quantity: 1 }]]);
+        }
+        if (sql.includes('INNER JOIN sale_items')) return Promise.resolve([[]]);
+        return Promise.resolve([[]]);
+      });
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+      (dbModule.query as any)
+        .mockResolvedValueOnce([{
+          id: 'refund_1',
+          items: [],
+          total: -100,
+          paymentMethod: 'bnpl',
+          status: 'completed',
+          transactionType: 'refund',
+          createdAt: '2026-06-04',
+        }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await processSaleRefund('tenant_1', 'sale_bnpl_1', {
+        items: [{ saleItemId: 'item_1', quantity: 1 }],
+        reason: 'Customer return',
+        method: 'bnpl',
+        restock: true,
+        staffId: 'staff_1',
+        provider: 'mobicred',
+        providerReference: 'MOBI-REFUND-1',
+        providerNote: 'Refund approved in Mobicred portal',
+      });
+
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO sale_payments'),
+        expect.arrayContaining(['bnpl', -100, -100, 'mobicred', 'MOBI-REFUND-1', 'refunded'])
+      );
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE sale_payments'),
+        expect.arrayContaining(['refunded', 'Refund approved in Mobicred portal', 'sale_bnpl_1'])
+      );
+      expect(conn.commit).toHaveBeenCalled();
+    });
+
+    it('updates sale payment provider reconciliation status with an audit event', async () => {
+      const conn = makeConn();
+      conn.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM sale_payments sp')) {
+          return Promise.resolve([[{
+            id: 'pay_bnpl_1',
+            method: 'bnpl',
+            provider: 'payjustnow',
+            providerReference: 'PJN-1',
+            providerStatus: 'approved',
+            customerId: 'cust_1',
+          }]]);
+        }
+        return Promise.resolve([[]]);
+      });
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+      (dbModule.query as any)
+        .mockResolvedValueOnce([{
+          id: 'sale_bnpl_1',
+          items: [],
+          total: 50,
+          paymentMethod: 'bnpl',
+          status: 'completed',
+          createdAt: '2026-06-04',
+        }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await updateSalePaymentProviderStatus('tenant_1', 'sale_bnpl_1', 'pay_bnpl_1', {
+        provider: 'payjustnow',
+        providerDeviceId: 'PJN-Portal',
+        providerReference: 'PJN-SETTLED-1',
+        authorizationCode: 'AUTH-SETTLED-1',
+        providerStatus: 'settled',
+        providerNote: 'Settled in provider portal',
+        staffId: 'manager_1',
+      });
+
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE sale_payments'),
+        expect.arrayContaining(['payjustnow', 'PJN-Portal', 'PJN-SETTLED-1', 'AUTH-SETTLED-1', 'settled', 'Settled in provider portal', 'sale_bnpl_1', 'pay_bnpl_1'])
+      );
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO audit_events'),
+        expect.arrayContaining(['tenant_1', 'payment.provider_reconciled', 'sale_payment'])
+      );
+      expect(conn.commit).toHaveBeenCalled();
+    });
+
+    it('rejects sensitive provider reconciliation evidence before updating payment rows', async () => {
+      const conn = makeConn();
+      conn.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM sale_payments sp')) {
+          return Promise.resolve([[{
+            id: 'pay_card_1',
+            method: 'card',
+            provider: 'yoco',
+            providerDeviceId: 'Yoco-Front-01',
+            providerReference: 'YOCO-RECEIPT-1',
+            providerStatus: 'approved',
+            customerId: 'cust_1',
+          }]]);
+        }
+        return Promise.resolve([[]]);
+      });
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      await expect(updateSalePaymentProviderStatus('tenant_1', 'sale_card_1', 'pay_card_1', {
+        provider: 'yoco',
+        providerDeviceId: 'Yoco-Front-01',
+        providerReference: 'YOCO-RECEIPT-1',
+        authorizationCode: 'AUTH-1',
+        providerStatus: 'settled',
+        providerNote: 'Matched terminal batch cvv 123',
+        staffId: 'manager_1',
+      })).rejects.toThrow(/CVV\/CVC/i);
+
+      expect(conn.query).not.toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE sale_payments'),
+        expect.anything()
+      );
+      expect(conn.rollback).toHaveBeenCalled();
+      expect(conn.commit).not.toHaveBeenCalled();
+    });
+
     it('applies loyalty points, cash session, staff metrics and account balance atomically within the sale transaction', async () => {
       const conn = makeConn();
       (dbModule.getConnection as any).mockResolvedValue(conn);
@@ -743,6 +1219,53 @@ describe('mariadb-crud', () => {
       );
 
       // Verify commit was called (not rollback)
+      expect(conn.commit).toHaveBeenCalled();
+      expect(conn.rollback).not.toHaveBeenCalled();
+    });
+
+    it('calculates earned loyalty points from active tiers before updating the customer balance', async () => {
+      const conn = makeConn();
+      conn.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT business FROM app_settings')) {
+          return Promise.resolve([[{ business: JSON.stringify({ enableLoyalty: true, pointsEarnedPerCurrency: 10 }) }]]);
+        }
+        if (sql.includes('FROM customers') && sql.includes('FOR UPDATE')) {
+          return Promise.resolve([[{
+            id: 'cust_1',
+            loyalty_points: 100,
+            loyalty_member_status: 'active',
+            loyalty_tier_id: null,
+          }]]);
+        }
+        if (sql.includes('FROM loyalty_tiers')) {
+          return Promise.resolve([[
+            { id: 'tier_gold', name: 'Gold', status: 'active', min_points: 100, earn_multiplier: 2 },
+            { id: 'tier_base', name: 'Base', status: 'active', min_points: 0, earn_multiplier: 1 },
+          ]]);
+        }
+        if (sql.includes('FROM loyalty_reward_rules')) {
+          return Promise.resolve([[]]);
+        }
+        if (sql.includes('SELECT bulk_item_id') || sql.includes('FROM products')) {
+          return Promise.resolve([[]]);
+        }
+        return Promise.resolve([[]]);
+      });
+      (dbModule.getConnection as any).mockResolvedValue(conn);
+
+      await createSale('tenant_1', {
+        ...baseSale,
+        loyaltyPointsRedeemed: 20,
+      } as any);
+
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE customers SET loyalty_points = ?'),
+        [90, 'tenant_1', 'cust_1']
+      );
+      expect(conn.query).toHaveBeenCalledWith(
+        expect.stringContaining('SELECT * FROM loyalty_tiers'),
+        ['tenant_1']
+      );
       expect(conn.commit).toHaveBeenCalled();
       expect(conn.rollback).not.toHaveBeenCalled();
     });

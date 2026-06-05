@@ -16,6 +16,40 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
 
+  const number = (value: unknown, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const effectiveQuantity = (item: RecipeItem) => {
+    const yieldQuantity = Math.max(1, number(item.yieldQuantity, 1));
+    const wastePercent = Math.max(0, number(item.wastePercent, 0));
+    return (number(item.quantity) / yieldQuantity) * (1 + wastePercent / 100);
+  };
+
+  const lineCost = (item: RecipeItem) => {
+    const bulk = bulkItems.find(b => b.id === item.bulkItemId);
+    return effectiveQuantity(item) * number(item.costPerUnit ?? bulk?.costPerUnit);
+  };
+
+  const costedBulkIds = new Set<string>();
+  const grouped = recipe.reduce((acc, item) => {
+    const group = item.substituteGroup?.trim();
+    if (group) acc[group] = [...(acc[group] || []), item];
+    return acc;
+  }, {} as Record<string, RecipeItem[]>);
+  recipe.forEach(item => {
+    if (!item.substituteGroup?.trim() && !item.isOptional) costedBulkIds.add(item.bulkItemId);
+  });
+  Object.values(grouped).forEach(items => {
+    const chosen = [...items].sort((a, b) => number(a.substituteRank) - number(b.substituteRank))[0];
+    if (chosen && !chosen.isOptional) costedBulkIds.add(chosen.bulkItemId);
+  });
+  const recipeCost = recipe.reduce((sum, item) => sum + (costedBulkIds.has(item.bulkItemId) ? lineCost(item) : 0), 0);
+  const unitCost = recipeCost > 0 ? recipeCost : number(product.costPrice);
+  const grossProfit = number(product.price) - unitCost;
+  const grossMargin = number(product.price) > 0 ? (grossProfit / number(product.price)) * 100 : 0;
+
   useEffect(() => {
     fetchData();
   }, [product.id]);
@@ -41,8 +75,15 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
     setRecipe([...recipe, { 
       bulkItemId: item.id, 
       quantity: 1, 
+      yieldQuantity: 1,
+      wastePercent: 0,
+      substituteGroup: null,
+      substituteRank: 0,
+      isOptional: false,
       bulkItemName: item.name, 
-      unit: item.unit 
+      unit: item.unit,
+      costPerUnit: item.costPerUnit || 0,
+      availableStock: item.stock || 0,
     }]);
   };
 
@@ -52,6 +93,10 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
 
   const handleUpdateQuantity = (bulkItemId: string, qty: number) => {
     setRecipe(recipe.map(r => r.bulkItemId === bulkItemId ? { ...r, quantity: qty } : r));
+  };
+
+  const handleUpdateItem = (bulkItemId: string, updates: Partial<RecipeItem>) => {
+    setRecipe(recipe.map(r => r.bulkItemId === bulkItemId ? { ...r, ...updates } : r));
   };
 
   const handleSave = async () => {
@@ -93,6 +138,27 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
         <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
           {/* Active Recipe */}
           <div className="flex-1 p-8 overflow-y-auto space-y-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Recipe cost</p>
+                <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">R{recipeCost.toFixed(2)}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Gross margin</p>
+                <p className={`mt-1 text-lg font-black ${grossMargin < 30 ? 'text-amber-600' : 'text-emerald-600'}`}>{grossMargin.toFixed(1)}%</p>
+              </div>
+              <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Sub groups</p>
+                <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">{Object.keys(grouped).length}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Waste avg</p>
+                <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">
+                  {recipe.length ? (recipe.reduce((sum, item) => sum + number(item.wastePercent), 0) / recipe.length).toFixed(1) : '0.0'}%
+                </p>
+              </div>
+            </div>
+
             <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-[0.2em] mb-4">Ingredients ({recipe.length})</h3>
             
             {recipe.length === 0 ? (
@@ -103,10 +169,13 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
             ) : (
               <div className="space-y-3">
                 {recipe.map((item, idx) => (
-                  <div key={item.bulkItemId} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-[#0B1120] rounded-2xl border border-slate-100 dark:border-slate-800 group animate-in slide-in-from-left-4 duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
-                    <div className="flex-1">
+                  <div key={item.bulkItemId} className="p-4 bg-slate-50 dark:bg-[#0B1120] rounded-2xl border border-slate-100 dark:border-slate-800 group animate-in slide-in-from-left-4 duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
+                    <div className="flex items-start gap-4">
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-black text-slate-900 dark:text-white">{item.bulkItemName}</p>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{item.unit}</p>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                        {item.unit} - {effectiveQuantity(item).toFixed(3)} effective - R{lineCost(item).toFixed(2)}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
                       <input
@@ -115,10 +184,58 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
                         className="w-24 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-center font-black text-primary"
                         value={item.quantity}
                         onChange={(e) => handleUpdateQuantity(item.bulkItemId, Number(e.target.value))}
+                        title="Recipe quantity"
                       />
                       <button onClick={() => handleRemoveIngredient(item.bulkItemId)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
                         <Trash2 className="w-4 h-4" />
                       </button>
+                    </div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 lg:grid-cols-5 gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        step="0.001"
+                        value={item.yieldQuantity ?? 1}
+                        onChange={e => handleUpdateItem(item.bulkItemId, { yieldQuantity: Math.max(1, Number(e.target.value) || 1) })}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-900 outline-none focus:ring-2 focus:ring-primary/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                        title="Yield quantity"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.1"
+                        value={item.wastePercent ?? 0}
+                        onChange={e => handleUpdateItem(item.bulkItemId, { wastePercent: Math.max(0, Number(e.target.value) || 0) })}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-900 outline-none focus:ring-2 focus:ring-primary/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                        title="Waste percent"
+                      />
+                      <input
+                        type="text"
+                        value={item.substituteGroup || ''}
+                        onChange={e => handleUpdateItem(item.bulkItemId, { substituteGroup: e.target.value || null })}
+                        placeholder="Sub group"
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-900 outline-none focus:ring-2 focus:ring-primary/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={item.substituteRank ?? 0}
+                        onChange={e => handleUpdateItem(item.bulkItemId, { substituteRank: Math.max(0, Number(e.target.value) || 0) })}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-900 outline-none focus:ring-2 focus:ring-primary/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                        title="Substitute rank"
+                      />
+                      <label className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:border-slate-800 dark:bg-slate-900">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(item.isOptional)}
+                          onChange={e => handleUpdateItem(item.bulkItemId, { isOptional: e.target.checked })}
+                          className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                        />
+                        Optional
+                      </label>
                     </div>
                   </div>
                 ))}

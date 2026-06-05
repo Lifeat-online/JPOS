@@ -5,12 +5,12 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Lock, Mail, Eye, EyeOff, AlertCircle, Store, Loader2 } from 'lucide-react';
+import { X, Lock, Mail, Eye, EyeOff, AlertCircle, Store, Loader2, ShieldCheck } from 'lucide-react';
 
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (email: string, password: string) => Promise<void>;
+  onSubmit: (email: string, password: string, twoFactorCode?: string) => Promise<void>;
   error: string | null;
   isLoading: boolean;
 }
@@ -18,6 +18,7 @@ interface LoginModalProps {
 export function LoginModal({ isOpen, onClose, onSubmit, error, isLoading }: LoginModalProps) {
   const [email, setEmail]         = useState('');
   const [password, setPassword]   = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
   const [showPass, setShowPass]   = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
 
@@ -27,6 +28,7 @@ export function LoginModal({ isOpen, onClose, onSubmit, error, isLoading }: Logi
       setTimeout(() => emailRef.current?.focus(), 80);
       setEmail('');
       setPassword('');
+      setTwoFactorCode('');
       setShowPass(false);
     }
   }, [isOpen]);
@@ -34,7 +36,7 @@ export function LoginModal({ isOpen, onClose, onSubmit, error, isLoading }: Logi
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password) return;
-    await onSubmit(email.trim().toLowerCase(), password);
+    await onSubmit(email.trim().toLowerCase(), password, twoFactorCode.trim() || undefined);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -152,6 +154,28 @@ export function LoginModal({ isOpen, onClose, onSubmit, error, isLoading }: Logi
                     >
                       {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
+                  </div>
+                </div>
+
+                {/* 2FA */}
+                <div className="space-y-1.5">
+                  <label htmlFor="login-two-factor" className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    2FA Code
+                  </label>
+                  <div className="relative">
+                    <ShieldCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <input
+                      id="login-two-factor"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={8}
+                      value={twoFactorCode}
+                      onChange={e => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      disabled={isLoading}
+                      placeholder="If enabled"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary disabled:opacity-50 transition"
+                    />
                   </div>
                 </div>
 

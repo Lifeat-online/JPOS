@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Staff } from '../types';
-import { Mail, Phone, Wallet, Loader2, DollarSign } from 'lucide-react';
-import { apiPost } from '../api';
+import React, { useEffect, useState } from 'react';
+import { Staff, StaffAttendanceStatus } from '../types';
+import { Mail, Phone, Wallet, Loader2, DollarSign, Clock, Coffee, ShieldCheck, KeyRound } from 'lucide-react';
+import { apiPost, clockInStaff, clockOutStaff, confirmTwoFactorSetup, disableTwoFactor, endStaffBreak, getMyAttendanceStatus, getTwoFactorStatus, revokeRefreshTokens, startStaffBreak, startTwoFactorSetup } from '../api';
 import { usePosStore } from '../store/usePosStore';
 import { useBrowserOnlineStatus } from '../hooks/useBrowserOnlineStatus';
 import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../utils/offlineGuards';
@@ -17,8 +17,41 @@ export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProf
   const [isProcessing, setIsProcessing] = useState(false);
   const [payoutAmount, setPayoutAmount] = useState<number | string>('');
   const [showPayoutModal, setShowPayoutModal] = useState(false);
+  const [attendance, setAttendance] = useState<StaffAttendanceStatus | null>(null);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [twoFactorStatus, setTwoFactorStatus] = useState<{ eligible: boolean; enabled: boolean; confirmedAt?: string | null } | null>(null);
+  const [twoFactorSetup, setTwoFactorSetup] = useState<{ secret: string; otpauthUri: string } | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [twoFactorPassword, setTwoFactorPassword] = useState('');
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  const [sessionRevokeLoading, setSessionRevokeLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  const loadAttendance = async () => {
+    if (!tenantId || !currentUserStaff?.id) return;
+    try {
+      setAttendance(await getMyAttendanceStatus(tenantId, currentUserStaff.id));
+    } catch {
+      setAttendance(null);
+    }
+  };
+
+  const isTwoFactorEligible = ['admin', 'manager', 'dev'].includes(String(currentUserStaff?.role || '').toLowerCase());
+
+  const loadTwoFactorStatus = async () => {
+    if (!tenantId || !currentUserStaff?.id || !isTwoFactorEligible) return;
+    try {
+      setTwoFactorStatus(await getTwoFactorStatus());
+    } catch {
+      setTwoFactorStatus(null);
+    }
+  };
+
+  useEffect(() => {
+    void loadAttendance();
+    void loadTwoFactorStatus();
+  }, [tenantId, currentUserStaff?.id]);
 
   if (!currentUserStaff) {
     return <div className="p-8 text-center bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl m-8">No staff profile found.</div>;
@@ -56,6 +89,99 @@ export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProf
     }
     setIsProcessing(false);
   };
+
+  const runAttendanceAction = async (action: 'clock-in' | 'break-start' | 'break-end' | 'clock-out') => {
+    if (!tenantId || !currentUserStaff) return;
+    if (isBrowserOffline) {
+      setErrorMsg('Clock and break actions need an online connection.');
+      return;
+    }
+    setAttendanceLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      if (action === 'clock-in') await clockInStaff(tenantId, { staffId: currentUserStaff.id });
+      if (action === 'break-start') await startStaffBreak(tenantId, { staffId: currentUserStaff.id });
+      if (action === 'break-end') await endStaffBreak(tenantId, { staffId: currentUserStaff.id });
+      if (action === 'clock-out') await clockOutStaff(tenantId, { staffId: currentUserStaff.id });
+      await loadAttendance();
+      await onStaffUpdated?.();
+      setSuccessMsg(action === 'clock-in' ? 'Clocked in.' : action === 'clock-out' ? 'Clocked out.' : action === 'break-start' ? 'Break started.' : 'Break ended.');
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Attendance action failed.');
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
+
+  const beginTwoFactorSetup = async () => {
+    setTwoFactorLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      setTwoFactorSetup(await startTwoFactorSetup());
+      setTwoFactorCode('');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to start 2FA setup.');
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const confirmTwoFactor = async () => {
+    if (!twoFactorCode.trim()) return;
+    setTwoFactorLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      await confirmTwoFactorSetup(twoFactorCode.trim());
+      setTwoFactorSetup(null);
+      setTwoFactorCode('');
+      await loadTwoFactorStatus();
+      setSuccessMsg('Two-factor authentication enabled.');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to confirm 2FA code.');
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const disableTwoFactorForProfile = async () => {
+    if (!twoFactorPassword || !twoFactorCode.trim()) return;
+    setTwoFactorLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      await disableTwoFactor(twoFactorPassword, twoFactorCode.trim());
+      setTwoFactorPassword('');
+      setTwoFactorCode('');
+      await loadTwoFactorStatus();
+      setSuccessMsg('Two-factor authentication disabled.');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to disable 2FA.');
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const revokeProfileSessions = async () => {
+    if (!currentUserStaff?.id) return;
+    setSessionRevokeLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      await revokeRefreshTokens(currentUserStaff.id, 'suspected_compromise');
+      setSuccessMsg('Refresh sessions revoked.');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to revoke refresh sessions.');
+    } finally {
+      setSessionRevokeLoading(false);
+    }
+  };
+
+  const openAttendance = attendance?.openAttendance || null;
+  const onBreak = Boolean(openAttendance?.breakStartedAt);
 
   return (
     <div className="flex-1 overflow-y-auto w-full pb-20 bg-slate-50/50 dark:bg-slate-950/50">
@@ -123,6 +249,210 @@ export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProf
               </div>
             </div>
           </div>
+        </div>
+
+        {isTwoFactorEligible && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/60 rounded-3xl p-8 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="flex items-center gap-3">
+                  <ShieldCheck className="h-6 w-6 text-emerald-500" />
+                  <h3 className="text-2xl font-black text-slate-900 dark:text-white">Two-Factor Authentication</h3>
+                </div>
+                <p className="mt-2 text-xs font-black uppercase tracking-widest text-slate-400">
+                  {twoFactorStatus?.enabled ? 'Enabled for this privileged account' : 'Recommended for admin, manager, and dev accounts'}
+                </p>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                twoFactorStatus?.enabled
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'
+                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'
+              }`}>
+                {twoFactorStatus?.enabled ? 'Protected' : 'Not enabled'}
+              </span>
+            </div>
+
+            {!twoFactorStatus?.enabled && !twoFactorSetup && (
+              <button
+                type="button"
+                onClick={() => void beginTwoFactorSetup()}
+                disabled={twoFactorLoading}
+                className="mt-5 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+              >
+                {twoFactorLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                Set Up 2FA
+              </button>
+            )}
+
+            {twoFactorSetup && (
+              <div className="mt-5 space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-200">Authenticator secret</p>
+                  <p className="mt-1 break-all rounded-xl bg-white px-3 py-2 font-mono text-sm font-black text-slate-800 dark:bg-slate-900 dark:text-slate-100">{twoFactorSetup.secret}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-200">Authenticator URI</p>
+                  <p className="mt-1 break-all rounded-xl bg-white px-3 py-2 font-mono text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">{twoFactorSetup.otpauthUri}</p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    value={twoFactorCode}
+                    onChange={e => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="6-digit code"
+                    className="flex-1 rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-black text-slate-900 outline-none focus:border-emerald-500 dark:border-emerald-900/60 dark:bg-slate-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void confirmTwoFactor()}
+                    disabled={twoFactorLoading || twoFactorCode.length !== 6}
+                    className="rounded-xl bg-emerald-600 px-5 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {twoFactorStatus?.enabled && (
+              <div className="mt-5 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                <input
+                  type="password"
+                  value={twoFactorPassword}
+                  onChange={e => setTwoFactorPassword(e.target.value)}
+                  placeholder="Current password"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-primary/50 dark:border-slate-800 dark:bg-[#0B1120] dark:text-white"
+                />
+                <input
+                  value={twoFactorCode}
+                  onChange={e => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="6-digit code"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-primary/50 dark:border-slate-800 dark:bg-[#0B1120] dark:text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => void disableTwoFactorForProfile()}
+                  disabled={twoFactorLoading || !twoFactorPassword || twoFactorCode.length !== 6}
+                  className="rounded-xl bg-slate-900 px-5 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                >
+                  Disable
+                </button>
+              </div>
+            )}
+
+            <div className="mt-6 flex flex-col gap-3 border-t border-slate-200 pt-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Signed-In Devices</p>
+                <p className="mt-1 text-sm font-semibold text-slate-600 dark:text-slate-300">Current profile</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void revokeProfileSessions()}
+                disabled={sessionRevokeLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+              >
+                {sessionRevokeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                Revoke
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/60 rounded-3xl p-8 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="flex items-center gap-3">
+                <Clock className="h-6 w-6 text-primary" />
+                <h3 className="text-2xl font-black text-slate-900 dark:text-white">Time Clock</h3>
+              </div>
+              <p className="mt-2 text-xs font-black uppercase tracking-widest text-slate-400">
+                {openAttendance
+                  ? `${openAttendance.status} since ${String(openAttendance.clockInAt).slice(0, 16).replace('T', ' ')}`
+                  : 'Not clocked in'}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:flex">
+              {!openAttendance && (
+                <button
+                  type="button"
+                  onClick={() => void runAttendanceAction('clock-in')}
+                  disabled={attendanceLoading || isBrowserOffline}
+                  className="rounded-xl bg-primary px-5 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                >
+                  {attendanceLoading ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Clock In'}
+                </button>
+              )}
+              {openAttendance && !onBreak && (
+                <button
+                  type="button"
+                  onClick={() => void runAttendanceAction('break-start')}
+                  disabled={attendanceLoading || isBrowserOffline}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-700 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <Coffee className="h-4 w-4" />
+                  Start Break
+                </button>
+              )}
+              {openAttendance && onBreak && (
+                <button
+                  type="button"
+                  onClick={() => void runAttendanceAction('break-end')}
+                  disabled={attendanceLoading || isBrowserOffline}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-100 px-5 py-3 text-xs font-black uppercase tracking-widest text-amber-700 disabled:opacity-50 dark:bg-amber-900/30 dark:text-amber-200"
+                >
+                  <Coffee className="h-4 w-4" />
+                  End Break
+                </button>
+              )}
+              {openAttendance && (
+                <button
+                  type="button"
+                  onClick={() => void runAttendanceAction('clock-out')}
+                  disabled={attendanceLoading || isBrowserOffline}
+                  className="rounded-xl bg-slate-900 px-5 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                >
+                  Clock Out
+                </button>
+              )}
+            </div>
+          </div>
+
+          {openAttendance && (
+            <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/60">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Scheduled</p>
+                <p className="mt-1 font-black text-slate-900 dark:text-white">{openAttendance.scheduledMinutes || 0}m</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/60">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Breaks</p>
+                <p className="mt-1 font-black text-slate-900 dark:text-white">{openAttendance.breakMinutes || 0}m</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/60">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Rate</p>
+                <p className="mt-1 font-black text-slate-900 dark:text-white">R{Number(openAttendance.payRate || 0).toFixed(2)}</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/60">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Mode</p>
+                <p className="mt-1 font-black text-slate-900 dark:text-white">{openAttendance.payType}</p>
+              </div>
+            </div>
+          )}
+
+          {(attendance?.recentAttendance || []).length > 0 && (
+            <div className="mt-5 space-y-2">
+              {(attendance?.recentAttendance || []).slice(0, 4).map(row => (
+                <div key={row.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-xs font-bold text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
+                  <span>{String(row.clockInAt).slice(0, 16).replace('T', ' ')}</span>
+                  <span>{row.status}</span>
+                  <span>{row.workedMinutes || 0}m worked</span>
+                  <span>R{Number(row.payrollAmount || 0).toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/60 rounded-3xl p-8 shadow-sm text-center">

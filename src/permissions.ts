@@ -3,6 +3,7 @@ import {
   Banknote,
   BarChart3,
   BrainCircuit,
+  CalendarDays,
   ChefHat,
   ClipboardCheck,
   Code2,
@@ -14,6 +15,7 @@ import {
   Settings,
   TabletSmartphone,
   Trophy,
+  Truck,
   Users,
   Utensils,
   Wallet,
@@ -31,12 +33,14 @@ export type AppView =
   | 'history'
   | 'messages'
   | 'actions'
+  | 'delivery'
   | 'stocktake'
   | 'cash'
   | 'live'
   | 'inventory'
   | 'customers'
   | 'accounts'
+  | 'bookings'
   | 'staff'
   | 'wallets'
   | 'leaderboard'
@@ -64,20 +68,20 @@ type AccessOptions = {
 const ROLE_VIEWS: Record<StaffRole, AppView[]> = {
   admin: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
-    'actions', 'stocktake',
-    'inventory', 'customers', 'accounts', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile',
+    'actions', 'delivery', 'stocktake',
+    'inventory', 'customers', 'accounts', 'bookings', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile',
     'ai', 'packages',
   ],
   dev: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
-    'actions', 'stocktake',
-    'inventory', 'customers', 'accounts', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile', 'dev',
+    'actions', 'delivery', 'stocktake',
+    'inventory', 'customers', 'accounts', 'bookings', 'staff', 'wallets', 'leaderboard', 'reports', 'settings', 'profile', 'dev',
     'ai', 'packages',
   ],
   manager: [
     'pos', 'tables', 'tabs', 'workstation', 'history', 'messages', 'cash', 'live',
-    'actions', 'stocktake',
-    'inventory', 'customers', 'accounts', 'leaderboard', 'reports', 'ai', 'profile',
+    'actions', 'delivery', 'stocktake',
+    'inventory', 'customers', 'accounts', 'bookings', 'staff', 'leaderboard', 'reports', 'ai', 'profile',
     'packages',
   ],
   cashier: ['pos', 'history', 'messages', 'stocktake', 'cash', 'profile'],
@@ -92,12 +96,14 @@ const VIEW_META: Record<AppView, NavItem> = {
   history: { id: 'history', icon: HistoryIcon, label: 'History' },
   messages: { id: 'messages', icon: MessageSquare, label: 'Messages' },
   actions: { id: 'actions', icon: ClipboardCheck, label: 'Actions', group: 'Operations' },
+  delivery: { id: 'delivery', icon: Truck, label: 'Delivery', group: 'Operations' },
   stocktake: { id: 'stocktake', icon: ClipboardCheck, label: 'Stocktake', group: 'Operations' },
   cash: { id: 'cash', icon: Banknote, label: 'Cash Mgmt', group: 'Operations' },
   live: { id: 'live', icon: Activity, label: 'Live', group: 'Operations' },
   inventory: { id: 'inventory', icon: Package, label: 'Inventory', group: 'Operations' },
   customers: { id: 'customers', icon: Users, label: 'Customers', group: 'Operations' },
   accounts: { id: 'accounts', icon: ReceiptText, label: 'Accounts', group: 'Management' },
+  bookings: { id: 'bookings', icon: CalendarDays, label: 'Bookings', group: 'Management' },
   staff: { id: 'staff', icon: Users, label: 'Staff', group: 'Management' },
   wallets: { id: 'wallets', icon: Wallet, label: 'Wallets', group: 'Management' },
   leaderboard: { id: 'leaderboard', icon: Trophy, label: 'Leaderboard', group: 'Management' },
@@ -123,6 +129,7 @@ const PERMISSION_VIEW_MAP: Array<[keyof StaffPermissions, AppView]> = [
   ['canManageInventory', 'inventory'],
   ['canManageCustomers', 'customers'],
   ['canManageCustomers', 'accounts'],
+  ['canManageTables', 'bookings'],
   ['canManageStaff', 'staff'],
   ['canManageWallets', 'wallets'],
   ['canViewLeaderboard', 'leaderboard'],
@@ -192,7 +199,7 @@ export function getDefaultView(role: StaffRole | null, options: AccessOptions = 
 
 export function buildNavigation(role: StaffRole | null, options: AccessOptions = {}) {
   const allowed = getAllowedViews(role, options);
-  const visible = [...PRIMARY_VIEWS, 'actions', 'stocktake', 'cash', 'live', 'inventory', 'customers', 'staff', 'wallets', 'leaderboard', 'reports', 'ai', 'packages', 'settings']
+  const visible = [...PRIMARY_VIEWS, 'actions', 'delivery', 'stocktake', 'cash', 'live', 'inventory', 'customers', 'bookings', 'staff', 'wallets', 'leaderboard', 'reports', 'ai', 'packages', 'settings']
     .filter(view => allowed.has(view as AppView)) as AppView[];
 
   return {

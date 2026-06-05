@@ -358,5 +358,12 @@ describe('manager action center', () => {
     expect(result.csv).toContain('"permission.denied"');
     expect(result.csv).toContain('"security access"');
     expect(result.csv).toContain('"OFF-CASH1-000001"');
+    expect(result.pdfFilename).toMatch(/masepos-compliance-audit-report-\d{4}-\d{2}-\d{2}\.pdf/);
+    expect(result.pdfMimeType).toBe('application/pdf');
+    const pdf = Buffer.from(result.pdfBase64, 'base64').toString('latin1');
+    expect(pdf).toContain('%PDF-1.4');
+    expect(pdf).toContain('MasePOS compliance audit and accounting activity pack');
+    expect(pdf).toContain('Permission denied: 1');
+    expect(pdf).toContain('security access');
   });
 });

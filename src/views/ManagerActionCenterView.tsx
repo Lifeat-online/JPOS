@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, Ban, Banknote, Boxes, CalendarDays, CheckCircle2, ClipboardCheck, ClipboardList, Download, ExternalLink, Filter, History, Monitor, Package, PlayCircle, RefreshCw, Search, ShieldCheck, Smartphone, Sparkles, UserRound, Users, WifiOff, XCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { decideManagerTask, exportManagerActivityHistoryCsv, exportManagerAuditReport, getManagerActionCenter, getManagerActivityHistory, getManagerTasks } from '../api';
+import { decideManagerTask, exportManagerActivityHistoryCsv, exportManagerAuditReport, exportPaymentProviderReconciliationReport, getManagerActionCenter, getManagerActivityHistory, getManagerOverrides, getManagerTasks } from '../api';
 import { getDate } from '../utils/date';
 
 type ActionCenterData = {
@@ -51,6 +51,21 @@ type ManagerTaskQueue = {
   };
 };
 
+type ManagerOverride = {
+  id: string;
+  overrideType: string;
+  targetType: string;
+  targetId: string;
+  action: string;
+  status?: string | null;
+  reason: string;
+  requestedBy?: string | null;
+  approvedBy?: string | null;
+  approvedByName?: string | null;
+  source?: string | null;
+  createdAt?: string;
+};
+
 type ActivityFilters = {
   type: 'all' | 'audit' | 'stock';
   search: string;
@@ -77,6 +92,8 @@ type ActivityHistoryData = {
 };
 
 type AuditReportAudience = 'owner' | 'accountant' | 'compliance';
+type AuditReportFormat = 'csv' | 'pdf';
+type ProviderReportFormat = 'csv' | 'pdf';
 
 const countCards = [
   { key: 'cashExceptions', label: 'Cash', icon: Banknote, path: '/cash', tone: 'amber' },
@@ -184,6 +201,23 @@ function activityDestination(item: any) {
   return '/actions';
 }
 
+function downloadBase64Pdf(base64: string, filename: string, mimeType = 'application/pdf') {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const blob = new Blob([bytes], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 const defaultActivityFilters: ActivityFilters = {
   type: 'all',
   search: '',
@@ -203,6 +237,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
   const navigate = useNavigate();
   const [data, setData] = useState<ActionCenterData | null>(null);
   const [taskQueue, setTaskQueue] = useState<ManagerTaskQueue | null>(null);
+  const [overrides, setOverrides] = useState<ManagerOverride[]>([]);
   const [activity, setActivity] = useState<ActivityHistoryData | null>(null);
   const [activityFilters, setActivityFilters] = useState<ActivityFilters>(defaultActivityFilters);
   const [taskNotes, setTaskNotes] = useState<Record<string, string>>({});
@@ -211,7 +246,11 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityExporting, setActivityExporting] = useState(false);
   const [activityReportAudience, setActivityReportAudience] = useState<AuditReportAudience>('owner');
-  const [activityReportExporting, setActivityReportExporting] = useState(false);
+  const [activityReportExporting, setActivityReportExporting] = useState<AuditReportFormat | null>(null);
+  const [providerReportExporting, setProviderReportExporting] = useState<ProviderReportFormat | null>(null);
+  const [providerReportMethod, setProviderReportMethod] = useState('');
+  const [providerReportStatus, setProviderReportStatus] = useState('');
+  const [providerReportProvider, setProviderReportProvider] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -219,13 +258,15 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
     setLoading(true);
     setError(null);
     try {
-      const [center, queue, history] = await Promise.all([
+      const [center, queue, overrideTrail, history] = await Promise.all([
         getManagerActionCenter(tenantId),
         getManagerTasks(tenantId),
+        getManagerOverrides(tenantId, 20),
         getManagerActivityHistory(tenantId, { ...activityFilters, limit: 50 }),
       ]);
       setData(center);
       setTaskQueue(queue);
+      setOverrides(overrideTrail);
       setActivity(history);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -273,9 +314,9 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
     }
   };
 
-  const exportAuditReport = async () => {
+  const exportAuditReport = async (format: AuditReportFormat) => {
     if (!tenantId) return;
-    setActivityReportExporting(true);
+    setActivityReportExporting(format);
     setError(null);
     try {
       const result = await exportManagerAuditReport(tenantId, {
@@ -283,6 +324,10 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
         audience: activityReportAudience,
         limit: 500,
       });
+      if (format === 'pdf') {
+        downloadBase64Pdf(result.pdfBase64, result.pdfFilename || `masepos-${activityReportAudience}-audit-report.pdf`, result.pdfMimeType);
+        return;
+      }
       const blob = new Blob([result.csv], { type: result.mimeType || 'text/csv' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -295,7 +340,40 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setActivityReportExporting(false);
+      setActivityReportExporting(null);
+    }
+  };
+
+  const exportProviderReport = async (format: ProviderReportFormat) => {
+    if (!tenantId) return;
+    setProviderReportExporting(format);
+    setError(null);
+    try {
+      const result = await exportPaymentProviderReconciliationReport(tenantId, {
+        from: activityFilters.from,
+        to: activityFilters.to,
+        provider: providerReportProvider,
+        status: providerReportStatus,
+        method: providerReportMethod,
+        limit: 500,
+      });
+      if (format === 'pdf') {
+        downloadBase64Pdf(result.pdfBase64, result.pdfFilename || 'masepos-payment-provider-reconciliation.pdf', result.pdfMimeType);
+        return;
+      }
+      const blob = new Blob([result.csv], { type: result.mimeType || 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.filename || 'masepos-payment-provider-reconciliation.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setProviderReportExporting(null);
     }
   };
 
@@ -312,8 +390,8 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
   const runTaskAction = async (task: ManagerTask, action: 'start' | 'approve' | 'decline' | 'dismiss') => {
     if (!tenantId) return;
     const note = (taskNotes[task.id] || '').trim();
-    if ((action === 'approve' || action === 'decline') && !note) {
-      setError('Add a manager note before approving or declining a task.');
+    if ((action === 'approve' || action === 'decline' || action === 'dismiss') && !note) {
+      setError('Add a manager override reason before resolving this task.');
       return;
     }
     setActingTaskId(task.id);
@@ -577,12 +655,71 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
               </select>
               <button
                 type="button"
-                onClick={exportAuditReport}
-                disabled={!tenantId || activityReportExporting}
+                onClick={() => exportAuditReport('csv')}
+                disabled={!tenantId || Boolean(activityReportExporting)}
                 className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-indigo-700 shadow-sm transition hover:bg-indigo-100 disabled:opacity-60 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-300"
               >
                 <Download className="h-4 w-4" />
-                {activityReportExporting ? 'Exporting...' : 'Report'}
+                {activityReportExporting === 'csv' ? 'Exporting...' : 'Report CSV'}
+              </button>
+              <button
+                type="button"
+                onClick={() => exportAuditReport('pdf')}
+                disabled={!tenantId || Boolean(activityReportExporting)}
+                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:opacity-60 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300"
+              >
+                <Download className="h-4 w-4" />
+                {activityReportExporting === 'pdf' ? 'Exporting...' : 'Report PDF'}
+              </button>
+              <select
+                value={providerReportMethod}
+                onChange={(event) => setProviderReportMethod(event.target.value)}
+                className="min-h-[42px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+              >
+                <option value="">Provider Methods</option>
+                <option value="card">Card</option>
+                <option value="payfast">PayFast</option>
+                <option value="qr">QR</option>
+                <option value="bnpl">BNPL</option>
+              </select>
+              <select
+                value={providerReportStatus}
+                onChange={(event) => setProviderReportStatus(event.target.value)}
+                className="min-h-[42px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+              >
+                <option value="">Provider Status</option>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="approved">Approved</option>
+                <option value="settled">Settled</option>
+                <option value="failed">Failed</option>
+                <option value="reversed">Reversed</option>
+                <option value="refunded">Refunded</option>
+                <option value="partial_refund">Partial Refund</option>
+              </select>
+              <input
+                value={providerReportProvider}
+                onChange={(event) => setProviderReportProvider(event.target.value)}
+                placeholder="Provider"
+                className="min-h-[42px] w-32 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+              />
+              <button
+                type="button"
+                onClick={() => exportProviderReport('csv')}
+                disabled={!tenantId || Boolean(providerReportExporting)}
+                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-cyan-700 shadow-sm transition hover:bg-cyan-100 disabled:opacity-60 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-300"
+              >
+                <Download className="h-4 w-4" />
+                {providerReportExporting === 'csv' ? 'Exporting...' : 'Provider CSV'}
+              </button>
+              <button
+                type="button"
+                onClick={() => exportProviderReport('pdf')}
+                disabled={!tenantId || Boolean(providerReportExporting)}
+                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:opacity-60 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300"
+              >
+                <Download className="h-4 w-4" />
+                {providerReportExporting === 'pdf' ? 'Exporting...' : 'Provider PDF'}
               </button>
             </div>
           </div>
@@ -714,7 +851,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                     <textarea
                       value={taskNotes[task.id] || ''}
                       onChange={(event) => setTaskNotes(current => ({ ...current, [task.id]: event.target.value }))}
-                      placeholder="Manager note for approval or decline"
+                      placeholder="Manager override reason"
                       rows={2}
                       className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none transition focus:border-indigo-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
                     />
@@ -927,7 +1064,33 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
           </Panel>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <Panel title="Manager Override Trail">
+            <div className="space-y-3">
+              {overrides.length === 0 && <EmptyLine label="No manager overrides recorded yet." />}
+              {overrides.slice(0, 6).map((override) => (
+                <div key={override.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-[#0B1120]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black text-slate-900 dark:text-white">
+                        {override.action.replace(/_/g, ' ')} {override.status ? `- ${override.status.replace(/_/g, ' ')}` : ''}
+                      </div>
+                      <div className="mt-0.5 text-xs font-bold text-slate-400">
+                        {override.approvedByName || override.approvedBy || 'Manager'} - {when(override.createdAt)}
+                      </div>
+                    </div>
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-indigo-500" />
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-xs font-semibold leading-5 text-slate-600 dark:text-slate-300">{override.reason}</p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <span>{override.targetType}</span>
+                    <span>{override.targetId}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
           <Panel title="Recent Stock Movement">
             <div className="space-y-3">
               {recentStock.length === 0 && <EmptyLine label="No stock movements yet." />}

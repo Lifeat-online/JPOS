@@ -10,6 +10,16 @@ describe('auth-middleware', () => {
     expect(decoded).toMatchObject(payload);
   });
 
+  it('adds a unique id to refresh tokens so rotation changes the stored hash', () => {
+    const payload = { uid: 'staff_1', email: 'test@example.com', name: 'Test User', tenantId: 'tenant_1', role: 'admin', staffId: 'staff_1' };
+    const first = generateRefreshToken(payload);
+    const second = generateRefreshToken(payload);
+
+    expect(first).not.toBe(second);
+    expect(verifyToken(first)).toMatchObject(payload);
+    expect(verifyToken(first)).toHaveProperty('jti');
+  });
+
   it('rejects invalid tokens', () => {
     const decoded = verifyToken('not-a-token');
     expect(decoded).toBeNull();

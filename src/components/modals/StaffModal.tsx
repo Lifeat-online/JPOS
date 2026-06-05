@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Save, Loader2, ShieldCheck, RotateCcw } from 'lucide-react';
-import { Staff, AppConfig, StaffPermissions } from '../../types';
+import { Staff, AppConfig, StaffPermissions, InventoryLocation } from '../../types';
 import { DEFAULT_CATEGORY_TREE } from '../../constants';
+import { getInventoryLocations } from '../../api';
+import { usePosStore } from '../../store/usePosStore';
 
 interface StaffModalProps {
   staff: Partial<Staff> | null;
@@ -116,6 +118,16 @@ function getRoleDefaults(role: Staff['role'] | undefined): StaffPermissions {
 export const StaffModal: React.FC<StaffModalProps> = ({
   staff, isProcessing, config, onSave, onClose, onChange,
 }) => {
+  const tenantId = usePosStore(state => state.tenantId);
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
+
+  useEffect(() => {
+    if (!tenantId) return;
+    getInventoryLocations(tenantId)
+      .then(rows => setLocations(rows.filter(location => location.status !== 'inactive')))
+      .catch(() => setLocations([]));
+  }, [tenantId]);
+
   if (!staff) return null;
 
   const categoryTree = config?.categories || DEFAULT_CATEGORY_TREE;
@@ -133,6 +145,19 @@ export const StaffModal: React.FC<StaffModalProps> = ({
   };
   const applyRoleDefaults = () => {
     onChange({ ...staff, permissions: getRoleDefaults(staff.role) });
+  };
+  const assignedLocationIds = staff.assignedLocationIds || [];
+  const setAssignedLocation = (locationId: string, enabled: boolean) => {
+    const next = enabled
+      ? Array.from(new Set([...assignedLocationIds, locationId]))
+      : assignedLocationIds.filter(id => id !== locationId);
+    onChange({
+      ...staff,
+      assignedLocationIds: next,
+      defaultLocationId: staff.defaultLocationId && next.length > 0 && !next.includes(staff.defaultLocationId)
+        ? next[0]
+        : staff.defaultLocationId,
+    });
   };
 
   return (
@@ -186,6 +211,51 @@ export const StaffModal: React.FC<StaffModalProps> = ({
               <option value="dev">Developer</option>
             </select>
           </div>
+
+          {locations.length > 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700/60 dark:bg-[#0B1120]">
+              <label className={labelClass}>Inventory Location Access</label>
+              <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1.4fr]">
+                <select
+                  className={`${inputClass} appearance-none bg-white dark:bg-slate-950`}
+                  value={staff.defaultLocationId || locations.find(location => location.isDefault)?.id || 'main'}
+                  onChange={event => {
+                    const nextDefault = event.target.value;
+                    onChange({
+                      ...staff,
+                      defaultLocationId: nextDefault,
+                      assignedLocationIds: assignedLocationIds.length > 0 && !assignedLocationIds.includes(nextDefault)
+                        ? [...assignedLocationIds, nextDefault]
+                        : assignedLocationIds,
+                    });
+                  }}
+                >
+                  {locations.map(location => (
+                    <option key={location.id} value={location.id}>{location.name}</option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap gap-2">
+                  {locations.map(location => (
+                    <label
+                      key={location.id}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={assignedLocationIds.includes(location.id)}
+                        onChange={event => setAssignedLocation(location.id, event.target.checked)}
+                        className="rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      {location.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <p className="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                Empty assignments allow all locations; assigned cashiers see stock from their default location first.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-3 pt-2">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

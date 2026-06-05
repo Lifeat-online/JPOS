@@ -1,5 +1,11 @@
 import { getConnection, isPostgres, query } from "./db.js";
 import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
+import { assertSafePaymentProviderEvidence } from "./paymentProviderBoundary.js";
+import { assertCurrentTaxPeriodOpen, assertSaleNotInLockedTaxPeriod } from "./taxReports.js";
+import { DEFAULT_INVENTORY_LOCATION_ID } from "./inventoryLocations.js";
+import { recordPromotionRedemption, validatePromotionForSale, type PromotionValidationInput, type PromotionValidationResult } from "./promotions.js";
+import { calculateLoyaltyAward, type LoyaltyAwardResult } from "./loyalty.js";
+import { CUSTOMER_CONSENT_TYPES, defaultCustomerConsentMap, listCustomerConsents, upsertCustomerConsents } from "./customerConsents.js";
 import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem, BulkItem, RecipeItem, ModifierGroup, ModifierOption, Vendor, PurchaseOrder, StockBatch } from "./types.js";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
@@ -29,11 +35,160 @@ function normalizeJsonField(value: any, fallback: any) {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+function saleHasPromotionInput(sale: any) {
+  return Boolean(
+    String(sale?.promotionCode || "").trim() ||
+    String(sale?.promotionId || "").trim() ||
+    Number(sale?.promotionDiscount || 0) > 0
+  );
+}
+
+function promotionInputFromSale(sale: any): PromotionValidationInput {
+  return {
+    promotionId: sale?.promotionId || null,
+    code: sale?.promotionCode || null,
+    customerId: sale?.customerId || null,
+    items: Array.isArray(sale?.items) ? sale.items : [],
+    subtotal: Number(sale?.subtotal || 0),
+    totalBeforeDiscount: Number(sale?.subtotal || 0),
+    promotionDiscount: Number(sale?.promotionDiscount || 0),
+  };
+}
+
+function loyaltyInputFromSale(sale: any) {
+  return {
+    customerId: sale?.customerId || null,
+    items: Array.isArray(sale?.items) ? sale.items : [],
+    subtotal: Number(sale?.subtotal || 0),
+    total: Number(sale?.total || sale?.subtotal || 0),
+    pointsRedeemed: Number(sale?.loyaltyPointsRedeemed || 0),
+  };
+}
+
 function paymentTotal(payments: any[] | undefined, method: string) {
   if (!Array.isArray(payments)) return 0;
   return Number(payments.reduce((sum, payment) => (
     String(payment?.method || "") === method ? sum + Math.max(0, Number(payment?.amount || 0)) : sum
   ), 0).toFixed(2));
+}
+
+function nullableText(value: any, maxLength = 255) {
+  const text = String(value ?? "").trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function decimal(value: any, fallback = 0, precision = 3) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Number(parsed.toFixed(precision)) : fallback;
+}
+
+function recipeYield(value: any) {
+  const parsed = decimal(value, 1);
+  return parsed > 0 ? parsed : 1;
+}
+
+function recipeWastePercent(value: any) {
+  return Math.max(0, Math.min(100, decimal(value, 0, 2)));
+}
+
+function recipeEffectiveQuantity(row: any, saleQuantity = 1) {
+  const baseQuantity = Math.max(0, decimal(row.quantity));
+  const yieldQuantity = recipeYield(row.yieldQuantity ?? row.yield_quantity);
+  const wastePercent = recipeWastePercent(row.wastePercent ?? row.waste_percent);
+  return decimal((baseQuantity / yieldQuantity) * (1 + wastePercent / 100) * Math.max(0, Number(saleQuantity || 0)), 0);
+}
+
+function serializeRecipeRow(row: any): RecipeItem {
+  const effectiveQuantity = recipeEffectiveQuantity(row);
+  const costPerUnit = decimal(row.costPerUnit ?? row.cost_per_unit, 0, 4);
+  return {
+    bulkItemId: row.bulkItemId ?? row.bulk_item_id,
+    quantity: decimal(row.quantity),
+    yieldQuantity: recipeYield(row.yieldQuantity ?? row.yield_quantity),
+    wastePercent: recipeWastePercent(row.wastePercent ?? row.waste_percent),
+    substituteGroup: nullableText(row.substituteGroup ?? row.substitute_group, 64),
+    substituteRank: Math.max(0, Math.floor(Number(row.substituteRank ?? row.substitute_rank ?? 0) || 0)),
+    isOptional: Boolean(Number(row.isOptional ?? row.is_optional ?? 0)),
+    bulkItemName: row.bulkItemName ?? row.bulk_item_name ?? row.name,
+    unit: row.unit,
+    costPerUnit,
+    availableStock: decimal(row.availableStock ?? row.stock, 0),
+    effectiveQuantity,
+    lineCost: decimal(effectiveQuantity * costPerUnit, 0, 2),
+  };
+}
+
+function chooseRecipeSubstitution(rows: any[], saleQuantity: number) {
+  const sorted = [...rows].sort((a, b) => (
+    (Number(a.substitute_rank ?? a.substituteRank ?? 0) - Number(b.substitute_rank ?? b.substituteRank ?? 0))
+    || String(a.bulk_item_id ?? a.bulkItemId).localeCompare(String(b.bulk_item_id ?? b.bulkItemId))
+  ));
+  return sorted.find((row) => decimal(row.stock ?? row.availableStock ?? row.available_stock, 0) >= recipeEffectiveQuantity(row, saleQuantity)) || sorted[0];
+}
+
+async function syncDefaultProductLocationStock(tenantId: string, productId: string, stock: any, minStock: any) {
+  const quantity = Math.max(0, Number(stock || 0));
+  const threshold = Math.max(0, Number(minStock || 0));
+  try {
+    if (isPostgres()) {
+      await query(
+        `INSERT INTO product_location_stock (
+           tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+         ON CONFLICT (tenant_id, product_id, location_id)
+         DO UPDATE SET quantity = EXCLUDED.quantity,
+                       min_stock = EXCLUDED.min_stock,
+                       reorder_threshold = EXCLUDED.reorder_threshold,
+                       updated_at = NOW()`,
+        [tenantId, productId, DEFAULT_INVENTORY_LOCATION_ID, quantity, threshold, threshold]
+      );
+      return;
+    }
+    await query(
+      `INSERT INTO product_location_stock (
+         tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+       ON DUPLICATE KEY UPDATE quantity = VALUES(quantity),
+                               min_stock = VALUES(min_stock),
+                               reorder_threshold = VALUES(reorder_threshold),
+                               updated_at = NOW()`,
+      [tenantId, productId, DEFAULT_INVENTORY_LOCATION_ID, quantity, threshold, threshold]
+    );
+  } catch (error: any) {
+    const message = String(error?.message || "");
+    if (!message.includes("product_location_stock")) throw error;
+  }
+}
+
+function paymentProviderValues(payment: any) {
+  const method = String(payment?.method || "");
+  assertSafePaymentProviderEvidence(payment, { method, source: "sale payment" });
+  const defaultStatus = method === "bnpl" ? "approved" : method === "qr" ? "confirmed" : null;
+  return [
+    nullableText(payment?.provider || payment?.paymentProvider, 64),
+    nullableText(payment?.providerDeviceId || payment?.deviceId || payment?.terminalId, 128),
+    nullableText(payment?.providerReference || payment?.reference || payment?.authorizationCode, 255),
+    nullableText(payment?.authorizationCode || payment?.authCode, 128),
+    nullableText(payment?.providerStatus || defaultStatus, 32),
+    nullableText(payment?.providerNote || payment?.note, 500),
+    nullableText(payment?.qrPayload || payment?.paymentLink || payment?.qrCode, 1000),
+  ];
+}
+
+function paymentProviderSummary(payments: any[] | undefined) {
+  return Array.isArray(payments)
+    ? payments
+      .filter((payment: any) => payment?.provider || payment?.providerDeviceId || payment?.providerReference || payment?.authorizationCode || payment?.providerNote || payment?.note)
+      .map((payment: any) => ({
+        method: payment.method,
+        provider: payment.provider || null,
+        providerDeviceId: payment.providerDeviceId || payment.deviceId || payment.terminalId || null,
+        providerReference: payment.providerReference || null,
+        authorizationCode: payment.authorizationCode || payment.authCode || null,
+        providerStatus: payment.providerStatus || null,
+        providerNote: payment.providerNote || payment.note || null,
+      }))
+    : [];
 }
 
 async function applyWalletSalePayment(
@@ -219,6 +374,21 @@ function makeStockBatchId() {
   return `batch_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 }
 
+function makeCustomerConsentEventId() {
+  return `consent_evt_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+}
+
+function anonymizedCustomerName(customerId: string) {
+  const suffix = String(customerId || "customer").replace(/[^a-zA-Z0-9]/g, "").slice(-6).toUpperCase();
+  return `Anonymized Customer ${suffix || "PROFILE"}`;
+}
+
+async function countRows(conn: any, sql: string, params: any[]) {
+  const [rows] = await conn.query(sql, params);
+  const row = (rows as any[])[0] || {};
+  return Number(row.count ?? row.total ?? Object.values(row)[0] ?? 0) || 0;
+}
+
 function cleanStockBatchDate(value: unknown) {
   const text = String(value || "").trim();
   if (!text) return null;
@@ -252,6 +422,7 @@ async function createReceivingStockBatch(
     expiryDate?: string | null;
     receivedBy?: string | null;
     receivedByName?: string | null;
+    locationId?: string | null;
     note?: string | null;
   }
 ) {
@@ -261,8 +432,8 @@ async function createReceivingStockBatch(
       id, tenant_id, product_id, product_name, purchase_order_id, vendor_id,
       supplier_invoice_number, supplier_invoice_date, batch_number,
       received_quantity, remaining_quantity, unit_cost, expiry_date,
-      received_at, received_by, received_by_name, status, note, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, NOW(), NOW())`,
+      received_at, received_by, received_by_name, location_id, status, note, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, NOW(), NOW())`,
     [
       id,
       input.tenantId,
@@ -279,6 +450,7 @@ async function createReceivingStockBatch(
       cleanStockBatchDate(input.expiryDate),
       input.receivedBy || null,
       input.receivedByName || null,
+      input.locationId || DEFAULT_INVENTORY_LOCATION_ID,
       "active",
       input.note || null,
     ]
@@ -574,6 +746,7 @@ export async function createProduct(
       product.workstationId || null,
     ]
   );
+  await syncDefaultProductLocationStock(tenantId, id, product.stock, product.minStock || 0);
   return { id, ...product };
 }
 
@@ -585,8 +758,9 @@ export async function createCustomer(
   await query(
     `INSERT INTO customers (
       id, tenant_id, name, email, phone, address, notes,
-      loyalty_points, wallet_balance, account_enabled, account_limit, account_balance, discount_percent, uid, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      loyalty_points, loyalty_member_status, loyalty_tier_id, membership_card_id, membership_barcode, membership_started_at,
+      wallet_balance, account_enabled, account_limit, account_balance, discount_percent, uid, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
     [
       id,
       tenantId,
@@ -596,6 +770,11 @@ export async function createCustomer(
       customer.address || null,
       customer.notes || null,
       customer.loyaltyPoints || 0,
+      (customer as any).loyaltyMemberStatus || "active",
+      (customer as any).loyaltyTierId || null,
+      (customer as any).membershipCardId || null,
+      (customer as any).membershipBarcode || null,
+      (customer as any).membershipStartedAt || ((customer as any).loyaltyMemberStatus === "opted_out" ? null : new Date().toISOString()),
       customer.walletBalance || 0,
       customer.accountEnabled ? 1 : 0,
       customer.accountLimit || 0,
@@ -604,6 +783,9 @@ export async function createCustomer(
       customer.uid || null,
     ]
   );
+  const consents = (customer as any).consents !== undefined
+    ? await upsertCustomerConsents(tenantId, id, (customer as any).consents, (customer as any).consentActor || {})
+    : defaultCustomerConsentMap();
   return {
     id,
     ...customer,
@@ -611,6 +793,17 @@ export async function createCustomer(
     accountLimit: Number(customer.accountLimit || 0),
     accountBalance: Number(customer.accountBalance || 0),
     discountPercent: Number(customer.discountPercent || 0),
+    loyaltyMemberStatus: ((customer as any).loyaltyMemberStatus || "active") as any,
+    loyaltyTierId: (customer as any).loyaltyTierId || null,
+    membershipCardId: (customer as any).membershipCardId || null,
+    membershipBarcode: (customer as any).membershipBarcode || null,
+    membershipStartedAt: (customer as any).membershipStartedAt || null,
+    isAnonymized: false,
+    anonymizedAt: null,
+    anonymizedBy: null,
+    anonymizedByName: null,
+    anonymizationReason: null,
+    consents,
   };
 }
 
@@ -623,8 +816,9 @@ export async function createStaff(
     `INSERT INTO staff (
       id, tenant_id, name, role, email, phone, status,
       permissions, assigned_sections, assigned_categories, id_number, pay_rate, pay_type,
-      accumulated_leave, wallet_balance, discount_percent, metrics, badges, rank, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      accumulated_leave, wallet_balance, discount_percent, default_location_id, assigned_location_ids,
+      metrics, badges, rank, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
     [
       id,
       tenantId,
@@ -642,6 +836,8 @@ export async function createStaff(
       staff.accumulatedLeave || 0,
       staff.walletBalance || 0,
       staff.discountPercent || 0,
+      staff.defaultLocationId || DEFAULT_INVENTORY_LOCATION_ID,
+      staff.assignedLocationIds ? JSON.stringify(staff.assignedLocationIds) : "[]",
       staff.metrics ? JSON.stringify(staff.metrics) : "{}",
       staff.badges ? JSON.stringify(staff.badges) : "[]",
       staff.rank || null,
@@ -805,6 +1001,10 @@ export async function updateProduct(
     WHERE tenant_id = ? AND id = ?`,
     [tenantId, productId]
   );
+  if (updates.stock !== undefined || updates.minStock !== undefined) {
+    const row = (rows as any[])[0];
+    await syncDefaultProductLocationStock(tenantId, productId, row?.stock, row?.minStock ?? row?.min_stock);
+  }
   return rows[0] as Product;
 }
 
@@ -815,6 +1015,8 @@ export async function updateCustomer(
 ): Promise<Customer> {
   const fields: string[] = [];
   const values: any[] = [];
+  const consentInput = (updates as any).consents;
+  const consentActor = (updates as any).consentActor || {};
 
   if (updates.name !== undefined) {
     fields.push("name = ?");
@@ -839,6 +1041,26 @@ export async function updateCustomer(
   if (updates.loyaltyPoints !== undefined) {
     fields.push("loyalty_points = ?");
     values.push(updates.loyaltyPoints);
+  }
+  if ((updates as any).loyaltyMemberStatus !== undefined) {
+    fields.push("loyalty_member_status = ?");
+    values.push((updates as any).loyaltyMemberStatus || "active");
+  }
+  if ((updates as any).loyaltyTierId !== undefined) {
+    fields.push("loyalty_tier_id = ?");
+    values.push((updates as any).loyaltyTierId || null);
+  }
+  if ((updates as any).membershipCardId !== undefined) {
+    fields.push("membership_card_id = ?");
+    values.push((updates as any).membershipCardId || null);
+  }
+  if ((updates as any).membershipBarcode !== undefined) {
+    fields.push("membership_barcode = ?");
+    values.push((updates as any).membershipBarcode || null);
+  }
+  if ((updates as any).membershipStartedAt !== undefined) {
+    fields.push("membership_started_at = ?");
+    values.push((updates as any).membershipStartedAt || null);
   }
   if (updates.walletBalance !== undefined) {
     fields.push("wallet_balance = ?");
@@ -874,6 +1096,9 @@ export async function updateCustomer(
       customerId,
     ]);
     const r = rows[0] as any;
+    const consents = consentInput !== undefined
+      ? await upsertCustomerConsents(tenantId, customerId, consentInput, consentActor)
+      : await listCustomerConsents(tenantId, customerId);
     return {
       id: r.id,
       name: r.name,
@@ -882,14 +1107,25 @@ export async function updateCustomer(
       address: r.address,
       notes: r.notes,
       loyaltyPoints: r.loyalty_points !== null ? Number(r.loyalty_points) : 0,
+      loyaltyMemberStatus: r.loyalty_member_status || "active",
+      loyaltyTierId: r.loyalty_tier_id || null,
+      membershipCardId: r.membership_card_id || null,
+      membershipBarcode: r.membership_barcode || null,
+      membershipStartedAt: r.membership_started_at || null,
       walletBalance: r.wallet_balance !== null ? Number(r.wallet_balance) : 0,
       accountEnabled: Boolean(r.account_enabled),
       accountLimit: r.account_limit !== null ? Number(r.account_limit) : 0,
       accountBalance: r.account_balance !== null ? Number(r.account_balance) : 0,
       discountPercent: r.discount_percent !== null ? Number(r.discount_percent) : 0,
       uid: r.uid,
+      isAnonymized: Boolean(r.is_anonymized),
+      anonymizedAt: r.anonymized_at || null,
+      anonymizedBy: r.anonymized_by || null,
+      anonymizedByName: r.anonymized_by_name || null,
+      anonymizationReason: r.anonymization_reason || null,
       createdAt: r.created_at,
-      updatedAt: r.updated_at
+      updatedAt: r.updated_at,
+      consents,
     } as Customer;
   }
 
@@ -903,6 +1139,9 @@ export async function updateCustomer(
     customerId,
   ]);
   const r = rows[0] as any;
+  const consents = consentInput !== undefined
+    ? await upsertCustomerConsents(tenantId, customerId, consentInput, consentActor)
+    : await listCustomerConsents(tenantId, customerId);
   return {
     id: r.id,
     name: r.name,
@@ -911,14 +1150,25 @@ export async function updateCustomer(
     address: r.address,
     notes: r.notes,
     loyaltyPoints: r.loyalty_points !== null ? Number(r.loyalty_points) : 0,
+    loyaltyMemberStatus: r.loyalty_member_status || "active",
+    loyaltyTierId: r.loyalty_tier_id || null,
+    membershipCardId: r.membership_card_id || null,
+    membershipBarcode: r.membership_barcode || null,
+    membershipStartedAt: r.membership_started_at || null,
     walletBalance: r.wallet_balance !== null ? Number(r.wallet_balance) : 0,
     accountEnabled: Boolean(r.account_enabled),
     accountLimit: r.account_limit !== null ? Number(r.account_limit) : 0,
     accountBalance: r.account_balance !== null ? Number(r.account_balance) : 0,
     discountPercent: r.discount_percent !== null ? Number(r.discount_percent) : 0,
     uid: r.uid,
+    isAnonymized: Boolean(r.is_anonymized),
+    anonymizedAt: r.anonymized_at || null,
+    anonymizedBy: r.anonymized_by || null,
+    anonymizedByName: r.anonymized_by_name || null,
+    anonymizationReason: r.anonymization_reason || null,
     createdAt: r.created_at,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    consents,
   } as Customer;
 }
 
@@ -990,6 +1240,14 @@ export async function updateStaff(
     fields.push("discount_percent = ?");
     values.push(updates.discountPercent || 0);
   }
+  if (updates.defaultLocationId !== undefined) {
+    fields.push("default_location_id = ?");
+    values.push(updates.defaultLocationId || null);
+  }
+  if (updates.assignedLocationIds !== undefined) {
+    fields.push("assigned_location_ids = ?");
+    values.push(JSON.stringify(updates.assignedLocationIds || []));
+  }
   if (updates.metrics !== undefined) {
     fields.push("metrics = ?");
     values.push(JSON.stringify(updates.metrics));
@@ -1024,6 +1282,8 @@ export async function updateStaff(
         accumulated_leave AS accumulatedLeave,
         wallet_balance AS walletBalance,
         discount_percent AS discountPercent,
+        default_location_id AS defaultLocationId,
+        assigned_location_ids AS assignedLocationIds,
         metrics,
         badges,
         rank,
@@ -1039,6 +1299,7 @@ export async function updateStaff(
       permissions: safeParse(r.permissions, {}),
       assignedSections: safeParse(r.assignedSections, []),
       assignedCategories: safeParse(r.assignedCategories, []),
+      assignedLocationIds: safeParse(r.assignedLocationIds, []),
       walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
       discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
       metrics: safeParse(r.metrics, {}),
@@ -1068,6 +1329,8 @@ export async function updateStaff(
       accumulated_leave AS accumulatedLeave,
       wallet_balance AS walletBalance,
       discount_percent AS discountPercent,
+      default_location_id AS defaultLocationId,
+      assigned_location_ids AS assignedLocationIds,
       metrics,
       badges,
       rank,
@@ -1083,6 +1346,7 @@ export async function updateStaff(
     permissions: safeParse(r.permissions, {}),
     assignedSections: safeParse(r.assignedSections, []),
     assignedCategories: safeParse(r.assignedCategories, []),
+    assignedLocationIds: safeParse(r.assignedLocationIds, []),
     walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
     discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
     metrics: safeParse(r.metrics, {}),
@@ -1324,6 +1588,7 @@ function serializeStockBatch(row: any): StockBatch {
     receivedAt: row.receivedAt ?? row.received_at ?? null,
     receivedBy: row.receivedBy ?? row.received_by ?? null,
     receivedByName: row.receivedByName ?? row.received_by_name ?? null,
+    locationId: row.locationId ?? row.location_id ?? DEFAULT_INVENTORY_LOCATION_ID,
     status,
     note: row.note || null,
     daysToExpiry,
@@ -1354,6 +1619,7 @@ export async function getStockBatches(tenantId: string): Promise<StockBatch[]> {
        received_at AS receivedAt,
        received_by AS receivedBy,
        received_by_name AS receivedByName,
+       location_id AS locationId,
        status,
        note,
        created_at AS createdAt,
@@ -1390,6 +1656,7 @@ type PurchaseOrderReceiveLine = {
   receivedPrice?: number | string | null;
   expiryDate?: string | null;
   batchNumber?: string | null;
+  locationId?: string | null;
   note?: string | null;
 };
 
@@ -1397,6 +1664,7 @@ type PurchaseOrderReceiveInput = {
   invoiceNumber?: string | null;
   invoiceDate?: string | null;
   invoiceStatus?: "unpaid" | "paid" | string | null;
+  locationId?: string | null;
   note?: string | null;
   items?: PurchaseOrderReceiveLine[];
 };
@@ -1513,6 +1781,7 @@ export async function receivePurchaseOrder(
 
       const batchNumber = cleanReceivingString(lineInput.batchNumber, 128);
       const expiryDate = cleanStockBatchDate(lineInput.expiryDate);
+      const locationId = cleanReceivingString(lineInput.locationId || item.locationId || item.location_id || input.locationId, 64) || DEFAULT_INVENTORY_LOCATION_ID;
       const varianceQuantity = Number((receivedQuantity - orderedQuantity).toFixed(3));
       totalReceivedQuantity += receivedQuantity;
       totalVarianceQuantity += varianceQuantity;
@@ -1536,6 +1805,7 @@ export async function receivePurchaseOrder(
           referenceId: id,
           staffId: actor.staffId || null,
           staffName: actor.staffName || null,
+          locationId,
           note: noteParts.join(" | ") || null,
         });
         if (!movement) throw new Error(`Product ${item.productName || productId} was not found for receiving`);
@@ -1553,6 +1823,7 @@ export async function receivePurchaseOrder(
           expiryDate,
           receivedBy: actor.staffId || null,
           receivedByName: actor.staffName || null,
+          locationId,
           note: noteParts.join(" | ") || null,
         });
       }
@@ -1568,6 +1839,7 @@ export async function receivePurchaseOrder(
         receivedAt,
         receivedBy: actor.staffId || null,
         receivedByName: actor.staffName || null,
+        locationId,
         invoiceNumber,
         invoiceDate,
       });
@@ -1661,8 +1933,248 @@ export async function deleteProduct(tenantId: string, productId: string): Promis
   await query(`DELETE FROM products WHERE tenant_id = ? AND id = ?`, [tenantId, productId]);
 }
 
-export async function deleteCustomer(tenantId: string, customerId: string): Promise<void> {
-  await query(`DELETE FROM customers WHERE tenant_id = ? AND id = ?`, [tenantId, customerId]);
+export async function deleteCustomer(
+  tenantId: string,
+  customerId: string,
+  actor: { staffId?: string | null; staffName?: string | null; reason?: string | null } = {},
+) {
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    const [customerRows] = await conn.query(
+      `SELECT
+         id,
+         name,
+         email,
+         phone,
+         wallet_balance AS walletBalance,
+         account_balance AS accountBalance,
+         is_anonymized AS isAnonymized,
+         anonymized_at AS anonymizedAt
+       FROM customers
+       WHERE tenant_id = ? AND id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [tenantId, customerId],
+    );
+    const customer = (customerRows as any[])[0];
+    if (!customer) throw new Error("Customer not found.");
+
+    const label = anonymizedCustomerName(customerId);
+    if (Boolean(customer.isAnonymized ?? customer.is_anonymized)) {
+      await conn.commit();
+      return {
+        success: true,
+        mode: "already_anonymized",
+        customerId,
+        anonymizedName: customer.name || label,
+        anonymizedAt: customer.anonymizedAt ?? customer.anonymized_at ?? null,
+        blockers: [],
+      };
+    }
+
+    const walletBalance = Number(customer.walletBalance ?? customer.wallet_balance ?? 0);
+    const accountBalance = Number(customer.accountBalance ?? customer.account_balance ?? 0);
+    const blockerChecks = [
+      {
+        code: "wallet_balance",
+        count: walletBalance > 0.009 ? 1 : 0,
+        message: `Settle or pay out the customer's wallet balance of R${walletBalance.toFixed(2)} before anonymizing.`,
+      },
+      {
+        code: "account_balance",
+        count: accountBalance > 0.009 ? 1 : 0,
+        message: `Settle the customer's account balance of R${accountBalance.toFixed(2)} before anonymizing.`,
+      },
+      {
+        code: "open_sales",
+        count: await countRows(conn, `SELECT COUNT(*) AS count FROM sales WHERE tenant_id = ? AND customer_id = ? AND status IN ('pending','open','kitchen')`, [tenantId, customerId]),
+        message: "Close or cancel open orders, tabs, and kitchen orders before anonymizing.",
+      },
+      {
+        code: "active_laybys",
+        count: await countRows(conn, `SELECT COUNT(*) AS count FROM layby_orders WHERE tenant_id = ? AND customer_id = ? AND status = 'active'`, [tenantId, customerId]),
+        message: "Complete or cancel active lay-bys before anonymizing.",
+      },
+      {
+        code: "pending_payouts",
+        count: await countRows(conn, `SELECT COUNT(*) AS count FROM customer_payout_requests WHERE tenant_id = ? AND customer_id = ? AND status IN ('pending','approved')`, [tenantId, customerId]),
+        message: "Resolve pending or approved customer payout requests before anonymizing.",
+      },
+      {
+        code: "active_bookings",
+        count: await countRows(conn, `SELECT COUNT(*) AS count FROM event_bookings WHERE tenant_id = ? AND customer_id = ? AND status IN ('inquiry','confirmed','in_progress')`, [tenantId, customerId]),
+        message: "Complete or cancel active bookings before anonymizing.",
+      },
+    ];
+    const blockers = blockerChecks.filter(item => item.count > 0);
+    if (blockers.length > 0) {
+      throw new Error(`Customer cannot be anonymized yet: ${blockers.map(item => item.message).join(" ")}`);
+    }
+
+    const reason = nullableText(actor.reason, 1000) || "Customer privacy deletion request";
+    await conn.query(
+      `UPDATE customers
+          SET name = ?,
+              email = NULL,
+              phone = NULL,
+              address = NULL,
+              notes = NULL,
+              loyalty_points = 0,
+              loyalty_member_status = 'opted_out',
+              loyalty_tier_id = NULL,
+              membership_card_id = NULL,
+              membership_barcode = NULL,
+              membership_started_at = NULL,
+              wallet_balance = 0,
+              account_enabled = 0,
+              account_limit = 0,
+              account_balance = 0,
+              discount_percent = 0,
+              uid = NULL,
+              is_anonymized = 1,
+              anonymized_at = NOW(),
+              anonymized_by = ?,
+              anonymized_by_name = ?,
+              anonymization_reason = ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND id = ?`,
+      [label, actor.staffId || null, actor.staffName || null, reason, tenantId, customerId],
+    );
+
+    await conn.query(
+      `UPDATE customer_payout_requests
+          SET customer_name = ?,
+              customer_email = NULL,
+              note = NULL,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND customer_id = ?`,
+      [label, tenantId, customerId],
+    );
+    await conn.query(
+      `UPDATE payout_requests
+          SET customer_name = ?,
+              customer_email = NULL,
+              note = NULL,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND customer_id = ?`,
+      [label, tenantId, customerId],
+    );
+    await conn.query(
+      `UPDATE manager_cash_movements
+          SET customer_name = ?
+        WHERE tenant_id = ? AND customer_id = ?`,
+      [label, tenantId, customerId],
+    );
+    await conn.query(
+      `UPDATE layby_orders
+          SET customer_name = ?,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND customer_id = ?`,
+      [label, tenantId, customerId],
+    );
+    await conn.query(
+      `UPDATE event_bookings
+          SET customer_name = ?,
+              contact_phone = NULL,
+              contact_email = NULL,
+              menu_notes = NULL,
+              internal_notes = NULL,
+              reminder_note = NULL,
+              updated_at = NOW()
+        WHERE tenant_id = ? AND customer_id = ?`,
+      [label, tenantId, customerId],
+    );
+
+    for (const consentType of CUSTOMER_CONSENT_TYPES) {
+      const [consentRows] = await conn.query(
+        `SELECT status
+           FROM customer_consents
+          WHERE tenant_id = ? AND customer_id = ? AND consent_type = ?
+          LIMIT 1
+          FOR UPDATE`,
+        [tenantId, customerId, consentType],
+      );
+      const previousStatus = (consentRows as any[])[0]?.status || "unknown";
+      if (isPostgres()) {
+        await conn.query(
+          `INSERT INTO customer_consents (
+             id, tenant_id, customer_id, consent_type, status, source, note,
+             captured_by, captured_by_name, captured_at, expires_at, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 'revoked', 'customer_anonymization', ?, ?, ?, NOW(), NULL, NOW(), NOW())
+           ON CONFLICT (tenant_id, customer_id, consent_type)
+           DO UPDATE SET status = 'revoked',
+                         source = EXCLUDED.source,
+                         note = EXCLUDED.note,
+                         captured_by = EXCLUDED.captured_by,
+                         captured_by_name = EXCLUDED.captured_by_name,
+                         captured_at = EXCLUDED.captured_at,
+                         expires_at = NULL,
+                         updated_at = NOW()`,
+          [`consent_${Date.now()}_${Math.random().toString(36).substring(7)}`, tenantId, customerId, consentType, reason, actor.staffId || null, actor.staffName || null],
+        );
+      } else {
+        await conn.query(
+          `INSERT INTO customer_consents (
+             id, tenant_id, customer_id, consent_type, status, source, note,
+             captured_by, captured_by_name, captured_at, expires_at, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 'revoked', 'customer_anonymization', ?, ?, ?, NOW(), NULL, NOW(), NOW())
+           ON DUPLICATE KEY UPDATE status = 'revoked',
+                                   source = VALUES(source),
+                                   note = VALUES(note),
+                                   captured_by = VALUES(captured_by),
+                                   captured_by_name = VALUES(captured_by_name),
+                                   captured_at = VALUES(captured_at),
+                                   expires_at = NULL,
+                                   updated_at = NOW()`,
+          [`consent_${Date.now()}_${Math.random().toString(36).substring(7)}`, tenantId, customerId, consentType, reason, actor.staffId || null, actor.staffName || null],
+        );
+      }
+      await conn.query(
+        `INSERT INTO customer_consent_events (
+           id, tenant_id, customer_id, consent_type, previous_status, status,
+           source, note, captured_by, captured_by_name, captured_at, created_at
+         ) VALUES (?, ?, ?, ?, ?, 'revoked', 'customer_anonymization', ?, ?, ?, NOW(), NOW())`,
+        [makeCustomerConsentEventId(), tenantId, customerId, consentType, previousStatus, reason, actor.staffId || null, actor.staffName || null],
+      );
+    }
+
+    const retainedSaleCount = await countRows(conn, `SELECT COUNT(*) AS count FROM sales WHERE tenant_id = ? AND customer_id = ?`, [tenantId, customerId]);
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: "customer.anonymized",
+      entityType: "customer",
+      entityId: customerId,
+      customerId,
+      staffId: actor.staffId || null,
+      staffName: actor.staffName || null,
+      source: "customer_privacy",
+      details: {
+        reason,
+        anonymizedName: label,
+        retainedSaleCount,
+        hadEmail: Boolean(customer.email),
+        hadPhone: Boolean(customer.phone),
+        consentStatusesRevoked: CUSTOMER_CONSENT_TYPES,
+      },
+    });
+
+    await conn.commit();
+    return {
+      success: true,
+      mode: "anonymized",
+      customerId,
+      anonymizedName: label,
+      retainedSaleCount,
+      revokedConsentTypes: [...CUSTOMER_CONSENT_TYPES],
+      blockers: [],
+    };
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
 export async function deleteStaff(tenantId: string, staffId: string): Promise<void> {
@@ -1708,22 +2220,37 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
   const conn = await getConnection();
   try {
     await conn.beginTransaction();
+    await assertCurrentTaxPeriodOpen(conn, tenantId, "create sale");
 
     const syncSource = offlineEventId ? 'offline' : ((sale as any).syncSource || 'online');
     const offlineSyncConflicts = offlineEventId
       ? await collectOfflineSaleSyncConflicts(conn, tenantId, sale)
       : [];
+    const completedSale = (sale.status || "pending") === "completed" && ((sale as any).transactionType || "sale") === "sale";
+    let promotionValidation: PromotionValidationResult | null = null;
+    if (completedSale && saleHasPromotionInput(sale)) {
+      promotionValidation = await validatePromotionForSale(conn, tenantId, promotionInputFromSale(sale), {
+        lock: true,
+        assertClientDiscount: true,
+      });
+      if (!promotionValidation.valid || !promotionValidation.promotion) {
+        throw new Error(promotionValidation.reason || "Promotion could not be applied.");
+      }
+      (sale as any).promotionId = promotionValidation.promotion.id;
+      (sale as any).promotionCode = promotionValidation.promotion.code;
+      (sale as any).promotionDiscount = promotionValidation.discountAmount;
+    }
 
     await conn.query(
       `INSERT INTO sales (
         id, tenant_id, customer_id, user_id, staff_id, total, subtotal, tax_amount,
         tax_rate, tax_inclusive, payment_method, tendered_amount, change_amount,
-        tip_amount, cash_out_amount, points_discount, status, payfast_payment_id,
+        tip_amount, cash_out_amount, points_discount, promotion_id, promotion_code, promotion_discount, status, payfast_payment_id,
         transaction_type, parent_sale_id, refund_status, refunded_amount, refund_reason, refunded_by,
         void_reason, voided_by,
         table_number, is_tab, tab_name,
         offline_event_id, sync_source, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         id,
         tenantId,
@@ -1741,6 +2268,9 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         sale.tipAmount || 0,
         sale.cashOutAmount || 0,
         sale.pointsDiscount || 0,
+        (sale as any).promotionId || null,
+        (sale as any).promotionCode || null,
+        (sale as any).promotionDiscount || 0,
         sale.status || "pending",
         sale.payfast_payment_id || null,
         (sale as any).transactionType || "sale",
@@ -1787,13 +2317,40 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         // 1. Deduct Bulk Stock from Recipe
         if (productId) {
           const [recipe] = await conn.query<any>(
-            `SELECT bulk_item_id, quantity FROM product_recipes WHERE product_id = ?`,
+            `SELECT
+               r.bulk_item_id,
+               r.quantity,
+               r.yield_quantity,
+               r.waste_percent,
+               r.substitute_group,
+               r.substitute_rank,
+               r.is_optional,
+               COALESCE(b.stock, 0) AS stock
+             FROM product_recipes r
+             LEFT JOIN bulk_items b ON b.id = r.bulk_item_id
+             WHERE r.product_id = ?
+             ORDER BY COALESCE(r.substitute_group, ''), r.substitute_rank ASC, r.bulk_item_id ASC`,
             [productId]
           );
+          const standaloneRows: any[] = [];
+          const substitutionGroups = new Map<string, any[]>();
           for (const r of recipe) {
+            const group = nullableText(r.substitute_group, 64);
+            if (!group) {
+              standaloneRows.push(r);
+              continue;
+            }
+            substitutionGroups.set(group, [...(substitutionGroups.get(group) || []), r]);
+          }
+          const rowsToDeduct = [
+            ...standaloneRows,
+            ...Array.from(substitutionGroups.values()).map((rows) => chooseRecipeSubstitution(rows, item.quantity)),
+          ].filter(Boolean);
+
+          for (const r of rowsToDeduct) {
             await conn.query(
               `UPDATE bulk_items SET stock = stock - ? WHERE id = ?`,
-              [r.quantity * item.quantity, r.bulk_item_id]
+              [recipeEffectiveQuantity(r, item.quantity), r.bulk_item_id]
             );
           }
         }
@@ -1816,7 +2373,7 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
       }
     }
 
-    if ((sale.status || "pending") === "completed" && ((sale as any).transactionType || "sale") === "sale") {
+    if (completedSale) {
       await deductCompletedSaleProductStock(conn, tenantId, sale.items || [], {
         saleId: id,
         staffId: sale.staffId || null,
@@ -1830,8 +2387,10 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(7)}`;
         await conn.query(
           `INSERT INTO sale_payments (
-            id, sale_id, method, amount, tendered_amount, change_amount, tip_amount, cash_out_amount, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            id, sale_id, method, amount, tendered_amount, change_amount, tip_amount, cash_out_amount,
+            provider, provider_device_id, provider_reference, authorization_code, provider_status, provider_note, qr_payload,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
           [
             paymentId,
             id,
@@ -1841,18 +2400,31 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
             p.changeAmount || 0,
             p.tipAmount || 0,
             p.cashOutAmount || 0,
+            ...paymentProviderValues(p),
           ]
         );
       }
     }
 
-    const walletSalePayment = (sale.status || "pending") === "completed" && ((sale as any).transactionType || "sale") === "sale"
+    if (completedSale && promotionValidation) {
+      await recordPromotionRedemption(conn, tenantId, id, promotionInputFromSale(sale), promotionValidation, sale.staffId || null);
+    }
+
+    const walletSalePayment = completedSale
       ? await applyWalletSalePayment(conn, tenantId, id, {
         customerId: sale.customerId || null,
         staffId: sale.staffId || null,
         payments: sale.payments as any[] | undefined,
       })
       : null;
+    let loyaltyAward: LoyaltyAwardResult | null = null;
+    if (completedSale && sale.customerId) {
+      loyaltyAward = await calculateLoyaltyAward(conn, tenantId, loyaltyInputFromSale(sale));
+      if (loyaltyAward.enabled && loyaltyAward.customerFound && loyaltyAward.memberStatus === "active") {
+        (sale as any).loyaltyPoints = loyaltyAward.nextPoints;
+        (sale as any).loyaltyPointsEarned = loyaltyAward.pointsEarned;
+      }
+    }
 
     await recordAuditEvent(conn, {
       tenantId,
@@ -1866,9 +2438,15 @@ export async function createSale(tenantId: string, sale: Partial<Sale>): Promise
         status: sale.status || "pending",
         transactionType: (sale as any).transactionType || "sale",
         paymentMethod: sale.paymentMethod || "pending",
+        paymentProviders: paymentProviderSummary(sale.payments as any[] | undefined),
         total: Number(sale.total || 0),
         itemCount: Array.isArray(sale.items) ? sale.items.length : 0,
         walletPaymentAmount: walletSalePayment?.walletAmount || 0,
+        loyaltyPointsEarned: loyaltyAward?.pointsEarned || 0,
+        loyaltyPointsRedeemed: loyaltyAward?.pointsRedeemed || 0,
+        loyaltyTier: loyaltyAward?.tier?.name || null,
+        promotionCode: (sale as any).promotionCode || null,
+        promotionDiscount: Number((sale as any).promotionDiscount || 0),
         offlineEventId,
         syncSource,
         cashSessionId: (sale as any).cashSessionId || null,
@@ -1989,6 +2567,37 @@ export async function updateSale(
       if (sale) return sale;
     }
 
+    await assertSaleNotInLockedTaxPeriod(conn, tenantId, saleId, "update sale");
+
+    const nextStatus = updates.status !== undefined ? updates.status : existingSale?.status;
+    const nextTransactionType = (updates as any).transactionType !== undefined ? ((updates as any).transactionType || "sale") : (existingSale?.transaction_type || "sale");
+    const completingSale = existingSale?.status !== "completed" && nextStatus === "completed" && nextTransactionType === "sale";
+    let promotionValidation: PromotionValidationResult | null = null;
+    if (completingSale && saleHasPromotionInput(updates)) {
+      const actualCustomerId = updates.customerId !== undefined ? (updates.customerId || null) : (existingSale?.customer_id || null);
+      const promotionSale: any = {
+        ...updates,
+        customerId: actualCustomerId,
+      };
+      if (!Array.isArray(promotionSale.items)) {
+        const [saleItemsResult] = await conn.query<any>(
+          `SELECT product_id AS productId, product_name AS name, price, quantity FROM sale_items WHERE sale_id = ?`,
+          [saleId]
+        );
+        promotionSale.items = saleItemsResult as any[];
+      }
+      promotionValidation = await validatePromotionForSale(conn, tenantId, promotionInputFromSale(promotionSale), {
+        lock: true,
+        assertClientDiscount: true,
+      });
+      if (!promotionValidation.valid || !promotionValidation.promotion) {
+        throw new Error(promotionValidation.reason || "Promotion could not be applied.");
+      }
+      (updates as any).promotionId = promotionValidation.promotion.id;
+      (updates as any).promotionCode = promotionValidation.promotion.code;
+      (updates as any).promotionDiscount = promotionValidation.discountAmount;
+    }
+
     const fields: string[] = [];
     const values: any[] = [];
 
@@ -2047,6 +2656,18 @@ export async function updateSale(
     if (updates.pointsDiscount !== undefined) {
       fields.push("points_discount = ?");
       values.push(updates.pointsDiscount || 0);
+    }
+    if ((updates as any).promotionId !== undefined) {
+      fields.push("promotion_id = ?");
+      values.push((updates as any).promotionId || null);
+    }
+    if ((updates as any).promotionCode !== undefined) {
+      fields.push("promotion_code = ?");
+      values.push((updates as any).promotionCode || null);
+    }
+    if ((updates as any).promotionDiscount !== undefined) {
+      fields.push("promotion_discount = ?");
+      values.push((updates as any).promotionDiscount || 0);
     }
     if (updates.status !== undefined) {
       fields.push("status = ?");
@@ -2108,9 +2729,6 @@ export async function updateSale(
       fields.push("sync_source = ?");
       values.push((updates as any).syncSource || 'online');
     }
-    const nextStatus = updates.status !== undefined ? updates.status : existingSale?.status;
-    const nextTransactionType = (updates as any).transactionType !== undefined ? ((updates as any).transactionType || "sale") : (existingSale?.transaction_type || "sale");
-
     if (fields.length > 0) {
       fields.push("updated_at = NOW()");
       values.push(tenantId, saleId);
@@ -2189,8 +2807,10 @@ export async function updateSale(
         const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(7)}`;
         await conn.query(
           `INSERT INTO sale_payments (
-            id, sale_id, method, amount, tendered_amount, change_amount, tip_amount, cash_out_amount, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            id, sale_id, method, amount, tendered_amount, change_amount, tip_amount, cash_out_amount,
+            provider, provider_device_id, provider_reference, authorization_code, provider_status, provider_note, qr_payload,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
           [
             paymentId,
             saleId,
@@ -2200,14 +2820,16 @@ export async function updateSale(
             p.changeAmount || 0,
             p.tipAmount || 0,
             p.cashOutAmount || 0,
+            ...paymentProviderValues(p),
           ]
         );
       }
     }
 
-    const shouldDeductStock = existingSale?.status !== "completed" && nextStatus === "completed" && nextTransactionType === "sale";
+    const shouldDeductStock = completingSale;
     let walletSalePayment: Awaited<ReturnType<typeof applyWalletSalePayment>> | null = null;
     let offlineSyncConflicts: OfflineSyncConflict[] = [];
+    let loyaltyAward: LoyaltyAwardResult | null = null;
     if (shouldDeductStock) {
       let itemsForStock = updates.items as any[] | undefined;
       if (!itemsForStock) {
@@ -2225,6 +2847,32 @@ export async function updateSale(
         staffId: updates.staffId || existingSale?.staff_id || null,
         note: "Sale status changed to completed",
       });
+      if (promotionValidation) {
+        await recordPromotionRedemption(
+          conn,
+          tenantId,
+          saleId,
+          promotionInputFromSale({
+            ...updates,
+            customerId: updates.customerId !== undefined ? (updates.customerId || null) : (existingSale?.customer_id || null),
+            items: itemsForStock || [],
+          }),
+          promotionValidation,
+          updates.staffId || existingSale?.staff_id || null
+        );
+      }
+      const actualCustomerIdForLoyalty = updates.customerId !== undefined ? (updates.customerId || null) : (existingSale?.customer_id || null);
+      if (actualCustomerIdForLoyalty) {
+        loyaltyAward = await calculateLoyaltyAward(conn, tenantId, loyaltyInputFromSale({
+          ...updates,
+          customerId: actualCustomerIdForLoyalty,
+          items: itemsForStock || [],
+        }));
+        if (loyaltyAward.enabled && loyaltyAward.customerFound && loyaltyAward.memberStatus === "active") {
+          (updates as any).loyaltyPoints = loyaltyAward.nextPoints;
+          (updates as any).loyaltyPointsEarned = loyaltyAward.pointsEarned;
+        }
+      }
 
       let paymentsForWallet = updates.payments as any[] | undefined;
       if (!paymentsForWallet) {
@@ -2258,7 +2906,13 @@ export async function updateSale(
         previousTransactionType: existingSale?.transaction_type || null,
         nextTransactionType,
         changedFields: Object.keys(updates || {}),
+        paymentProviders: paymentProviderSummary((updates as any).payments),
         walletPaymentAmount: walletSalePayment?.walletAmount || 0,
+        loyaltyPointsEarned: loyaltyAward?.pointsEarned || 0,
+        loyaltyPointsRedeemed: loyaltyAward?.pointsRedeemed || 0,
+        loyaltyTier: loyaltyAward?.tier?.name || null,
+        promotionCode: (updates as any).promotionCode || null,
+        promotionDiscount: Number((updates as any).promotionDiscount || 0),
         offlineEventId,
         cashSessionId: (updates as any).cashSessionId || null,
         deviceId: (updates as any).deviceId || null,
@@ -2392,14 +3046,133 @@ export async function updateSaleStatus(
   return updateSale(tenantId, saleId, { status });
 }
 
+export type SalePaymentProviderStatusInput = {
+  provider?: string | null;
+  providerDeviceId?: string | null;
+  providerReference?: string | null;
+  authorizationCode?: string | null;
+  providerStatus: string;
+  providerNote?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+};
+
+export async function updateSalePaymentProviderStatus(
+  tenantId: string,
+  saleId: string,
+  paymentId: string,
+  input: SalePaymentProviderStatusInput
+): Promise<Sale> {
+  const providerStatus = nullableText(input.providerStatus, 32);
+  if (!providerStatus) throw new Error("Choose a provider status before saving.");
+
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [paymentRows] = await conn.query<any>(
+      `SELECT
+         sp.id,
+         sp.method,
+         sp.provider,
+         sp.provider_device_id AS providerDeviceId,
+         sp.provider_reference AS providerReference,
+         sp.authorization_code AS authorizationCode,
+         sp.provider_status AS providerStatus,
+         s.customer_id AS customerId
+       FROM sale_payments sp
+       INNER JOIN sales s ON s.id = sp.sale_id
+       WHERE s.tenant_id = ?
+         AND sp.sale_id = ?
+         AND sp.id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [tenantId, saleId, paymentId]
+    );
+    const payment = (paymentRows as any[])[0];
+    if (!payment) throw new Error("Payment not found for this sale.");
+
+    const nextProvider = nullableText(input.provider ?? payment.provider, 64);
+    const nextDeviceId = nullableText((input as any).providerDeviceId ?? payment.providerDeviceId, 128);
+    const nextReference = nullableText(input.providerReference ?? payment.providerReference, 255);
+    const nextAuthorizationCode = nullableText((input as any).authorizationCode ?? payment.authorizationCode, 128);
+    const nextNote = nullableText(input.providerNote, 500);
+    assertSafePaymentProviderEvidence({
+      method: payment.method,
+      provider: nextProvider,
+      providerDeviceId: nextDeviceId,
+      providerReference: nextReference,
+      authorizationCode: nextAuthorizationCode,
+      providerStatus,
+      providerNote: nextNote,
+    }, { source: "provider reconciliation" });
+
+    await conn.query(
+      `UPDATE sale_payments
+          SET provider = ?,
+              provider_device_id = ?,
+              provider_reference = ?,
+              authorization_code = ?,
+              provider_status = ?,
+              provider_note = ?,
+              updated_at = NOW()
+        WHERE sale_id = ?
+          AND id = ?`,
+      [nextProvider, nextDeviceId, nextReference, nextAuthorizationCode, providerStatus, nextNote, saleId, paymentId]
+    );
+
+    await recordAuditEvent(conn, {
+      tenantId,
+      action: "payment.provider_reconciled",
+      entityType: "sale_payment",
+      entityId: paymentId,
+      relatedSaleId: saleId,
+      staffId: input.staffId || null,
+      staffName: input.staffName || null,
+      customerId: payment.customerId || null,
+      source: "provider_reconciliation",
+      details: {
+        saleId,
+        paymentId,
+        method: payment.method,
+        previousProvider: payment.provider || null,
+        previousProviderDeviceId: payment.providerDeviceId || null,
+        previousProviderReference: payment.providerReference || null,
+        previousAuthorizationCode: payment.authorizationCode || null,
+        previousProviderStatus: payment.providerStatus || null,
+        provider: nextProvider,
+        providerDeviceId: nextDeviceId,
+        providerReference: nextReference,
+        authorizationCode: nextAuthorizationCode,
+        providerStatus,
+        providerNote: nextNote,
+      },
+    });
+
+    await conn.commit();
+    const sale = await getSaleById(tenantId, saleId);
+    if (!sale) throw new Error("Provider status was saved but the sale could not be loaded.");
+    return sale;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 export type SaleRefundInput = {
   items: { saleItemId: string; quantity: number }[];
   reason: string;
-  method: "cash" | "card" | "wallet";
+  method: "cash" | "card" | "wallet" | "bnpl";
   restock?: boolean;
   staffId?: string | null;
   staffName?: string | null;
   cashSessionId?: string | null;
+  provider?: string | null;
+  providerReference?: string | null;
+  providerStatus?: "refunded" | "partial_refund" | "reversed" | "settled" | string | null;
+  providerNote?: string | null;
 };
 
 export async function processSaleRefund(tenantId: string, saleId: string, input: SaleRefundInput): Promise<Sale> {
@@ -2430,6 +3203,22 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
     if (original.status !== "completed" || original.transaction_type === "refund") {
       throw new Error("Only completed sales can be refunded.");
     }
+
+    const [originalPaymentResult] = await conn.query<any>(
+      `SELECT
+         id,
+         method,
+         provider,
+         provider_reference AS providerReference,
+         provider_status AS providerStatus,
+         provider_note AS providerNote
+       FROM sale_payments
+       WHERE sale_id = ?`,
+      [saleId]
+    );
+    const originalPaymentRows = originalPaymentResult as any[];
+    const originalProviderPayment = originalPaymentRows.find(payment => payment.method === input.method)
+      || (input.method === "bnpl" ? originalPaymentRows.find(payment => payment.method === "bnpl") : null);
 
     const [itemResult] = await conn.query<any>(
       `SELECT id, product_id AS productId, product_name AS name, price, quantity
@@ -2490,6 +3279,17 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
     const signedTotal = -refundTotal;
     const signedTax = -refundTax;
     const signedSubtotal = Number((signedTotal - signedTax).toFixed(2));
+    const newRefundedAmount = Number((Number(original.refunded_amount || 0) + refundTotal).toFixed(2));
+    const refundStatus = newRefundedAmount >= originalTotal - 0.01 ? "full" : "partial";
+    const providerRefundStatus = input.providerStatus
+      || (refundStatus === "full" ? "refunded" : "partial_refund");
+    const refundPayment: any = {
+      method: input.method,
+      provider: input.method === "bnpl" ? (input.provider || originalProviderPayment?.provider || "bnpl") : null,
+      providerReference: input.method === "bnpl" ? (input.providerReference || originalProviderPayment?.providerReference || null) : null,
+      providerStatus: input.method === "bnpl" ? providerRefundStatus : null,
+      providerNote: input.method === "bnpl" ? (input.providerNote || reason) : null,
+    };
 
     await conn.query(
       `INSERT INTO sales (
@@ -2550,13 +3350,20 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
     const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     await conn.query(
       `INSERT INTO sale_payments (
-        id, sale_id, method, amount, tendered_amount, change_amount, tip_amount, cash_out_amount, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, NOW(), NOW())`,
-      [paymentId, refundId, input.method, signedTotal, signedTotal]
+        id, sale_id, method, amount, tendered_amount, change_amount, tip_amount, cash_out_amount,
+        provider, provider_device_id, provider_reference, authorization_code, provider_status, provider_note, qr_payload,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        paymentId,
+        refundId,
+        input.method,
+        signedTotal,
+        signedTotal,
+        ...paymentProviderValues(refundPayment),
+      ]
     );
 
-    const newRefundedAmount = Number((Number(original.refunded_amount || 0) + refundTotal).toFixed(2));
-    const refundStatus = newRefundedAmount >= originalTotal - 0.01 ? "full" : "partial";
     await conn.query(
       `UPDATE sales
           SET refunded_amount = ?,
@@ -2567,6 +3374,18 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
         WHERE tenant_id = ? AND id = ?`,
       [newRefundedAmount, refundStatus, reason, input.staffId || null, tenantId, saleId]
     );
+
+    if (input.method === "bnpl") {
+      await conn.query(
+        `UPDATE sale_payments
+            SET provider_status = ?,
+                provider_note = ?,
+                updated_at = NOW()
+          WHERE sale_id = ?
+            AND method = 'bnpl'`,
+        [providerRefundStatus, input.providerNote || reason, saleId]
+      );
+    }
 
     if (input.method === "wallet" && original.customer_id) {
       await conn.query(
@@ -2638,6 +3457,9 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
         originalSaleId: saleId,
         refundTotal,
         method: input.method,
+        provider: refundPayment.provider || null,
+        providerReference: refundPayment.providerReference || null,
+        providerStatus: refundPayment.providerStatus || null,
         restock: Boolean(input.restock),
         reason,
         itemCount: refundItems.length,
@@ -2687,6 +3509,7 @@ export async function processSaleVoid(tenantId: string, saleId: string, input: S
     if (sale.status === "completed") {
       throw new Error("Completed sales must be handled through the refund flow.");
     }
+    await assertSaleNotInLockedTaxPeriod(conn, tenantId, saleId, "void sale");
 
     const [itemResult] = await conn.query<any>(
       `SELECT product_id AS productId, quantity
@@ -2774,6 +3597,9 @@ export async function getSaleById(tenantId: string, saleId: string): Promise<Sal
       tip_amount AS tipAmount,
       cash_out_amount AS cashOutAmount,
       points_discount AS pointsDiscount,
+      promotion_id AS promotionId,
+      promotion_code AS promotionCode,
+      promotion_discount AS promotionDiscount,
       status,
       transaction_type AS transactionType,
       parent_sale_id AS parentSaleId,
@@ -2830,6 +3656,13 @@ export async function getSaleById(tenantId: string, saleId: string): Promise<Sal
        change_amount AS changeAmount,
        tip_amount AS tipAmount,
        cash_out_amount AS cashOutAmount,
+       provider,
+       provider_device_id AS providerDeviceId,
+       provider_reference AS providerReference,
+       authorization_code AS authorizationCode,
+       provider_status AS providerStatus,
+       provider_note AS providerNote,
+       qr_payload AS qrPayload,
        created_at AS createdAt
      FROM sale_payments
      WHERE sale_id = ?`,
@@ -3101,6 +3934,7 @@ export async function updateAppConfig(
     config.payfastSandbox ? 1 : 0,
     JSON.stringify(config.business || {}),
     JSON.stringify(config.categories || {}),
+    JSON.stringify((config as any).retentionPolicy || {}),
     config.slug || null,
     config.setupCompleted ? 1 : 0,
   ];
@@ -3115,11 +3949,12 @@ export async function updateAppConfig(
            payfast_sandbox,
            business,
            categories,
+           retention_policy,
            slug,
            setup_completed,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
          ON CONFLICT (tenant_id) DO UPDATE SET
            payfast_merchant_id = EXCLUDED.payfast_merchant_id,
            payfast_merchant_key = EXCLUDED.payfast_merchant_key,
@@ -3127,6 +3962,7 @@ export async function updateAppConfig(
            payfast_sandbox = EXCLUDED.payfast_sandbox,
            business = EXCLUDED.business,
            categories = EXCLUDED.categories,
+           retention_policy = EXCLUDED.retention_policy,
            slug = EXCLUDED.slug,
            setup_completed = EXCLUDED.setup_completed,
            updated_at = NOW()`
@@ -3138,11 +3974,12 @@ export async function updateAppConfig(
            payfast_sandbox,
            business,
            categories,
+           retention_policy,
            slug,
            setup_completed,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
          ON DUPLICATE KEY UPDATE
            payfast_merchant_id = VALUES(payfast_merchant_id),
            payfast_merchant_key = VALUES(payfast_merchant_key),
@@ -3150,6 +3987,7 @@ export async function updateAppConfig(
            payfast_sandbox = VALUES(payfast_sandbox),
            business = VALUES(business),
            categories = VALUES(categories),
+           retention_policy = VALUES(retention_policy),
            slug = VALUES(slug),
            setup_completed = VALUES(setup_completed),
            updated_at = NOW()`,
@@ -3462,8 +4300,20 @@ export async function updateProductRecipe(productId: string, recipe: RecipeItem[
     await conn.query(`DELETE FROM product_recipes WHERE product_id = ?`, [productId]);
     for (const r of recipe) {
       await conn.query(
-        `INSERT INTO product_recipes (product_id, bulk_item_id, quantity) VALUES (?, ?, ?)`,
-        [productId, r.bulkItemId, r.quantity]
+        `INSERT INTO product_recipes (
+           product_id, bulk_item_id, quantity, yield_quantity, waste_percent,
+           substitute_group, substitute_rank, is_optional
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          productId,
+          r.bulkItemId,
+          decimal(r.quantity),
+          recipeYield(r.yieldQuantity),
+          recipeWastePercent(r.wastePercent),
+          nullableText(r.substituteGroup, 64),
+          Math.max(0, Math.floor(Number(r.substituteRank || 0))),
+          r.isOptional ? 1 : 0,
+        ]
       );
     }
     await conn.commit();
@@ -3477,13 +4327,158 @@ export async function updateProductRecipe(productId: string, recipe: RecipeItem[
 
 export async function getProductRecipe(productId: string): Promise<RecipeItem[]> {
   const rows = await query(
-    `SELECT r.bulk_item_id AS bulkItemId, r.quantity, b.name AS bulkItemName, b.unit
+    `SELECT
+       r.bulk_item_id AS bulkItemId,
+       r.quantity,
+       r.yield_quantity AS yieldQuantity,
+       r.waste_percent AS wastePercent,
+       r.substitute_group AS substituteGroup,
+       r.substitute_rank AS substituteRank,
+       r.is_optional AS isOptional,
+       b.name AS bulkItemName,
+       b.unit,
+       b.cost_per_unit AS costPerUnit,
+       b.stock AS availableStock
      FROM product_recipes r
      JOIN bulk_items b ON r.bulk_item_id = b.id
-     WHERE r.product_id = ?`,
+     WHERE r.product_id = ?
+     ORDER BY COALESCE(r.substitute_group, ''), r.substitute_rank ASC, b.name ASC`,
     [productId]
   );
-  return rows as RecipeItem[];
+  return (rows as any[]).map(serializeRecipeRow);
+}
+
+function csvCell(value: any) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+export async function getRecipeCostingReport(tenantId: string) {
+  const [products, recipeRows] = await Promise.all([
+    query<any>(
+      `SELECT
+         id AS productId,
+         name AS productName,
+         category,
+         section,
+         price AS sellingPrice,
+         cost_price AS productCost
+       FROM products
+       WHERE tenant_id = ?
+       ORDER BY name ASC`,
+      [tenantId]
+    ),
+    query<any>(
+      `SELECT
+         p.id AS productId,
+         r.bulk_item_id AS bulkItemId,
+         r.quantity,
+         r.yield_quantity AS yieldQuantity,
+         r.waste_percent AS wastePercent,
+         r.substitute_group AS substituteGroup,
+         r.substitute_rank AS substituteRank,
+         r.is_optional AS isOptional,
+         b.name AS bulkItemName,
+         b.unit,
+         b.cost_per_unit AS costPerUnit,
+         b.stock AS availableStock
+       FROM products p
+       INNER JOIN product_recipes r ON r.product_id = p.id
+       INNER JOIN bulk_items b ON b.id = r.bulk_item_id AND b.tenant_id = p.tenant_id
+       WHERE p.tenant_id = ?
+       ORDER BY p.name ASC, COALESCE(r.substitute_group, ''), r.substitute_rank ASC, b.name ASC`,
+      [tenantId]
+    ),
+  ]);
+
+  const recipeByProduct = new Map<string, any[]>();
+  for (const row of recipeRows || []) {
+    const productId = String(row.productId || "");
+    recipeByProduct.set(productId, [...(recipeByProduct.get(productId) || []), row]);
+  }
+
+  const rows = (products || []).map((product: any) => {
+    const rawLines = recipeByProduct.get(String(product.productId)) || [];
+    const lines = rawLines.map((row) => serializeRecipeRow(row)).map((line) => ({ ...line, costed: false }));
+    const costedBulkIds = new Set<string>();
+    const groupRows = new Map<string, any[]>();
+
+    for (const raw of rawLines) {
+      const group = nullableText(raw.substituteGroup ?? raw.substitute_group, 64);
+      if (!group) {
+        const line = serializeRecipeRow(raw);
+        if (!line.isOptional) costedBulkIds.add(line.bulkItemId);
+        continue;
+      }
+      groupRows.set(group, [...(groupRows.get(group) || []), raw]);
+    }
+
+    for (const alternatives of groupRows.values()) {
+      const chosen = serializeRecipeRow(chooseRecipeSubstitution(alternatives, 1));
+      if (!chosen.isOptional) costedBulkIds.add(chosen.bulkItemId);
+    }
+
+    const reportLines = lines.map((line) => ({ ...line, costed: costedBulkIds.has(line.bulkItemId) }));
+    const recipeCost = decimal(reportLines.reduce((sum, line) => sum + (line.costed ? Number(line.lineCost || 0) : 0), 0), 0, 2);
+    const productCost = decimal(product.productCost ?? product.cost_price, 0, 2);
+    const sellingPrice = decimal(product.sellingPrice ?? product.price, 0, 2);
+    const expectedUnitCost = recipeCost > 0 ? recipeCost : productCost;
+    const grossProfit = decimal(sellingPrice - expectedUnitCost, 0, 2);
+    const grossMarginPercent = sellingPrice > 0 ? decimal((grossProfit / sellingPrice) * 100, 0, 2) : 0;
+
+    return {
+      productId: product.productId,
+      productName: product.productName,
+      category: product.category || null,
+      section: product.section || null,
+      sellingPrice,
+      productCost,
+      recipeCost,
+      expectedUnitCost,
+      grossProfit,
+      grossMarginPercent,
+      ingredientCount: reportLines.length,
+      substituteGroupCount: groupRows.size,
+      optionalCount: reportLines.filter((line) => line.isOptional).length,
+      lines: reportLines,
+    };
+  });
+
+  const recipeRowsOnly = rows.filter((row) => row.ingredientCount > 0);
+  const avgGrossMarginPercent = rows.length
+    ? decimal(rows.reduce((sum, row) => sum + row.grossMarginPercent, 0) / rows.length, 0, 2)
+    : 0;
+  const csvRows = [
+    ["Product", "Section", "Category", "Selling Price", "Product Cost", "Recipe Cost", "Expected Unit Cost", "Gross Profit", "Gross Margin %", "Ingredients", "Substitution Groups", "Optional Ingredients"],
+    ...rows.map((row) => [
+      row.productName,
+      row.section || "",
+      row.category || "",
+      row.sellingPrice,
+      row.productCost,
+      row.recipeCost,
+      row.expectedUnitCost,
+      row.grossProfit,
+      row.grossMarginPercent,
+      row.ingredientCount,
+      row.substituteGroupCount,
+      row.optionalCount,
+    ]),
+  ].map((line) => line.map(csvCell).join(",")).join("\n");
+
+  return {
+    generatedAt: new Date().toISOString(),
+    summary: {
+      productCount: rows.length,
+      recipeProductCount: recipeRowsOnly.length,
+      avgGrossMarginPercent,
+      lowMarginCount: rows.filter((row) => row.grossMarginPercent < 30).length,
+      substitutionGroupCount: rows.reduce((sum, row) => sum + row.substituteGroupCount, 0),
+      optionalIngredientCount: rows.reduce((sum, row) => sum + row.optionalCount, 0),
+    },
+    rows,
+    csv: csvRows,
+  };
 }
 
 export async function createModifierGroup(productId: string, group: Partial<ModifierGroup>): Promise<string> {

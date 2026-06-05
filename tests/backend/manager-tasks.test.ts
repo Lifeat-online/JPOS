@@ -223,7 +223,7 @@ describe('manager task queue', () => {
       return Promise.resolve({});
     });
 
-    await expect(decideManagerTask('tenant_1', 'task_1', { action: 'approve' })).rejects.toThrow('manager note');
+    await expect(decideManagerTask('tenant_1', 'task_1', { action: 'approve' })).rejects.toThrow('manager override reason');
 
     const result = await decideManagerTask('tenant_1', 'task_1', {
       action: 'approve',
@@ -240,7 +240,19 @@ describe('manager task queue', () => {
       expect.stringContaining('INSERT INTO audit_events'),
       expect.arrayContaining(['tenant_1', 'manager_task.approved', 'manager_task', 'task_1'])
     );
+    expect(dbModule.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO manager_overrides'),
+      expect.arrayContaining(['tenant_1', 'manager_task', 'manager_task', 'task_1', 'approve', 'approved', 'Checked till slip and accepted variance.'])
+    );
     expect(result).toMatchObject({ id: 'task_1', status: 'approved' });
+  });
+
+  it('requires a manager override reason before dismissing a task', async () => {
+    await expect(decideManagerTask('tenant_1', 'task_1', { action: 'dismiss' })).rejects.toThrow('manager override reason');
+    expect(dbModule.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE manager_tasks'),
+      expect.anything()
+    );
   });
 
   it('creates cashier refund approval requests for the manager queue', async () => {

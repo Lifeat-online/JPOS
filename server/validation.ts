@@ -27,13 +27,35 @@ export function validateSchema(schema: any) {
 // ── Validation Schemas ───────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { getPaymentProviderEvidenceIssues } from './paymentProviderBoundary.js';
 
 const StaffPermissionsSchema = z.record(z.string(), z.boolean()).optional();
+export const SensitiveVerificationSchema = z.object({
+  actionType: z.string().max(64).optional(),
+  password: z.string().max(512).optional(),
+  pin: z.string().max(64).optional(),
+  reason: z.string().max(500).optional()
+}).optional();
+
+const SensitiveActionFields = {
+  sensitiveVerification: SensitiveVerificationSchema,
+  sensitiveActionToken: z.string().max(2048).optional()
+};
+
+function addPaymentProviderEvidenceIssues(value: any, ctx: z.RefinementCtx, source: string, allowMissingMethod = false) {
+  for (const issue of getPaymentProviderEvidenceIssues(value, { source, allowMissingMethod })) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: issue
+    });
+  }
+}
 
 export const LoginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address' }),
   password: z.string().min(6, { message: 'Password must be at least 6 characters' }),
-  tenantId: z.string().optional()
+  tenantId: z.string().optional(),
+  twoFactorCode: z.string().max(16).optional()
 });
 
 export const PasswordSetupSchema = z.object({
@@ -59,6 +81,23 @@ export const ProductSchema = z.object({
   workstationId: z.string().optional()
 });
 
+const CustomerConsentEntrySchema = z.object({
+  status: z.enum(['unknown', 'granted', 'denied', 'revoked']),
+  source: z.string().max(80).nullish(),
+  note: z.string().max(1000).nullish(),
+  capturedAt: z.string().nullish(),
+  expiresAt: z.string().nullish()
+});
+
+const CustomerConsentsSchema = z.object({
+  loyalty: CustomerConsentEntrySchema.optional(),
+  marketing: CustomerConsentEntrySchema.optional(),
+  customer_portal: CustomerConsentEntrySchema.optional(),
+  stored_contact_details: CustomerConsentEntrySchema.optional(),
+  promotions: CustomerConsentEntrySchema.optional(),
+  ai_recommendations: CustomerConsentEntrySchema.optional()
+});
+
 export const CustomerSchema = z.object({
   name: z.string().min(1, { message: 'Customer name is required' }),
   email: z.string().email({ message: 'Invalid email address' }).optional(),
@@ -66,16 +105,22 @@ export const CustomerSchema = z.object({
   address: z.string().optional(),
   notes: z.string().optional(),
   loyaltyPoints: z.number().min(0).optional(),
+  loyaltyMemberStatus: z.enum(['active', 'paused', 'opted_out']).optional(),
+  loyaltyTierId: z.string().nullish(),
+  membershipCardId: z.string().max(128).nullish(),
+  membershipBarcode: z.string().max(128).nullish(),
+  membershipStartedAt: z.string().nullish(),
   walletBalance: z.number().min(0).optional(),
   accountEnabled: z.boolean().optional(),
   accountLimit: z.number().min(0).optional(),
   accountBalance: z.number().min(0).optional(),
   accountBalanceDelta: z.number().optional(),
   discountPercent: z.number().min(0).max(100).optional(),
-  uid: z.string().optional()
+  uid: z.string().optional(),
+  consents: CustomerConsentsSchema.optional()
 });
 
-export const CustomerUpdateSchema = CustomerSchema.partial();
+export const CustomerUpdateSchema = CustomerSchema.partial().extend(SensitiveActionFields);
 
 export const StaffSchema = z.object({
   name: z.string().min(1, { message: 'Staff name is required' }),
@@ -86,6 +131,8 @@ export const StaffSchema = z.object({
   permissions: StaffPermissionsSchema,
   assignedSections: z.array(z.string()).optional(),
   assignedCategories: z.array(z.string()).optional(),
+  defaultLocationId: z.string().nullish(),
+  assignedLocationIds: z.array(z.string()).optional(),
   idNumber: z.string().optional(),
   payRate: z.number().min(0).optional(),
   payType: z.enum(['hourly', 'salary']).optional(),
@@ -94,14 +141,42 @@ export const StaffSchema = z.object({
   discountPercent: z.number().min(0).max(100).optional()
 });
 
-export const StaffUpdateSchema = StaffSchema.partial();
+export const StaffUpdateSchema = StaffSchema.partial().extend(SensitiveActionFields);
+
+const SalePaymentSchema = z.object({
+  method: z.enum(['cash', 'payfast', 'card', 'wallet', 'account', 'qr', 'bnpl']),
+  amount: z.number().min(0),
+  tenderedAmount: z.number().min(0).nullish(),
+  changeAmount: z.number().min(0).nullish(),
+  tipAmount: z.number().min(0).nullish(),
+  cashOutAmount: z.number().min(0).nullish(),
+  provider: z.string().max(64).nullish(),
+  providerDeviceId: z.string().max(128).nullish(),
+  providerReference: z.string().max(255).nullish(),
+  authorizationCode: z.string().max(128).nullish(),
+  providerStatus: z.enum(['pending', 'confirmed', 'approved', 'settled', 'failed', 'reversed', 'refunded', 'partial_refund']).nullish(),
+  providerNote: z.string().max(500).nullish(),
+  qrPayload: z.string().max(1000).nullish()
+}).passthrough().superRefine((payment, ctx) => {
+  addPaymentProviderEvidenceIssues(payment, ctx, 'sale payment');
+});
 
 export const SaleSchema = z.object({
   items: z.array(z.object({
+    id: z.string().nullish(),
     productId: z.string().nullish(),
     name: z.string().min(1),
     price: z.number().min(0),
     quantity: z.number().min(1),
+    category: z.string().nullish(),
+    section: z.string().nullish(),
+    subCategory: z.string().nullish(),
+    selectedModifiers: z.array(z.object({
+      modifierId: z.string().nullish(),
+      optionId: z.string().min(1),
+      name: z.string().nullish(),
+      priceExtra: z.number().nullish()
+    })).optional(),
     status: z.string().nullish(),
     workstationId: z.string().nullish()
   })).min(1, { message: 'Sale must have at least one item' }),
@@ -110,20 +185,18 @@ export const SaleSchema = z.object({
   taxAmount: z.number().min(0).nullish(),
   taxRate: z.number().min(0).nullish(),
   taxInclusive: z.boolean().nullish(),
-  paymentMethod: z.enum(['cash', 'payfast', 'card', 'wallet', 'account', 'pending']).nullish(),
+  paymentMethod: z.enum(['cash', 'payfast', 'card', 'wallet', 'account', 'qr', 'bnpl', 'pending']).nullish(),
   tenderedAmount: z.number().min(0).nullish(),
   changeAmount: z.number().min(0).nullish(),
   tipAmount: z.number().min(0).nullish(),
   cashOutAmount: z.number().min(0).nullish(),
-  payments: z.array(z.object({
-    method: z.enum(['cash', 'payfast', 'card', 'wallet', 'account']),
-    amount: z.number().min(0),
-    tenderedAmount: z.number().min(0).nullish(),
-    changeAmount: z.number().min(0).nullish(),
-    tipAmount: z.number().min(0).nullish(),
-    cashOutAmount: z.number().min(0).nullish()
-  })).optional(),
+  payments: z.array(SalePaymentSchema).optional(),
   pointsDiscount: z.number().min(0).nullish(),
+  loyaltyPointsRedeemed: z.number().int().min(0).nullish(),
+  loyaltyPointsEarned: z.number().int().min(0).nullish(),
+  promotionId: z.string().nullish(),
+  promotionCode: z.string().max(64).nullish(),
+  promotionDiscount: z.number().min(0).nullish(),
   status: z.enum(['pending', 'completed', 'failed', 'open', 'kitchen']).nullish(),
   customerId: z.string().nullish(),
   staffId: z.string().nullish(),
@@ -155,7 +228,10 @@ export const SaleSchema = z.object({
   syncEventType: z.string().nullish(),
   syncEventVersion: z.number().nullish(),
   syncBatchId: z.string().nullish(),
-  syncSequence: z.number().int().min(0).nullish()
+  syncSequence: z.number().int().min(0).nullish(),
+  manualDiscountAmount: z.number().min(0).nullish(),
+  manualDiscountReason: z.string().max(500).nullish(),
+  ...SensitiveActionFields
 });
 
 export const SaleRefundSchema = z.object({
@@ -164,18 +240,36 @@ export const SaleRefundSchema = z.object({
     quantity: z.number().int().min(1)
   })).min(1, { message: 'Choose at least one item to refund' }),
   reason: z.string().min(3, { message: 'Please add a short refund reason' }),
-  method: z.enum(['cash', 'card', 'wallet']),
+  method: z.enum(['cash', 'card', 'wallet', 'bnpl']),
   restock: z.boolean().optional(),
   staffId: z.string().nullish(),
   staffName: z.string().nullish(),
-  cashSessionId: z.string().nullish()
+  cashSessionId: z.string().nullish(),
+  provider: z.string().max(64).nullish(),
+  providerReference: z.string().max(255).nullish(),
+  providerStatus: z.enum(['refunded', 'partial_refund', 'reversed', 'settled']).nullish(),
+  providerNote: z.string().max(500).nullish()
+}).passthrough().superRefine((refund, ctx) => {
+  addPaymentProviderEvidenceIssues(refund, ctx, 'sale refund');
+});
+
+export const PaymentProviderStatusSchema = z.object({
+  provider: z.string().max(64).nullish(),
+  providerDeviceId: z.string().max(128).nullish(),
+  providerReference: z.string().max(255).nullish(),
+  authorizationCode: z.string().max(128).nullish(),
+  providerStatus: z.enum(['pending', 'confirmed', 'approved', 'settled', 'failed', 'reversed', 'refunded', 'partial_refund']),
+  providerNote: z.string().max(500).nullish()
+}).passthrough().superRefine((status, ctx) => {
+  addPaymentProviderEvidenceIssues(status, ctx, 'provider reconciliation', true);
 });
 
 export const SaleVoidSchema = z.object({
   reason: z.string().min(3, { message: 'Please add a short void reason' }),
   restock: z.boolean().optional(),
   staffId: z.string().nullish(),
-  staffName: z.string().nullish()
+  staffName: z.string().nullish(),
+  ...SensitiveActionFields
 });
 
 export const WorkstationSchema = z.object({
@@ -207,6 +301,7 @@ export type StaffInput = z.infer<typeof StaffSchema>;
 export type SaleInput = z.infer<typeof SaleSchema>;
 export type SaleRefundInput = z.infer<typeof SaleRefundSchema>;
 export type SaleVoidInput = z.infer<typeof SaleVoidSchema>;
+export type PaymentProviderStatusInput = z.infer<typeof PaymentProviderStatusSchema>;
 export type WorkstationInput = z.infer<typeof WorkstationSchema>;
 export type TableSectionInput = z.infer<typeof TableSectionSchema>;
 export type RestaurantTableInput = z.infer<typeof RestaurantTableSchema>;

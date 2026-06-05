@@ -1,4 +1,11 @@
 import { isPostgres, query } from "./db.js";
+import {
+  cashierCanAccessLocation,
+  DEFAULT_INVENTORY_LOCATION_ID,
+  getStaffInventoryLocationAccess,
+  listProductLocationStocks,
+} from "./inventoryLocations.js";
+import { defaultCustomerConsentMap, listTenantCustomerConsents } from "./customerConsents.js";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helper Functions
@@ -48,8 +55,17 @@ export async function getStaffTenantByEmail(email: string) {
   return rows.length > 0 ? rows[0] : null;
 }
 
-export async function getProductsByTenant(tenantId: string) {
-  return query(
+export async function getProductsByTenant(
+  tenantId: string,
+  options: { locationId?: string | null; staffId?: string | null; role?: string | null } = {}
+) {
+  const locationAccess = await getStaffInventoryLocationAccess(tenantId, options.staffId);
+  const activeLocationId = String(options.locationId || locationAccess.defaultLocationId || DEFAULT_INVENTORY_LOCATION_ID);
+  if (!cashierCanAccessLocation(options.role || locationAccess.role, locationAccess, activeLocationId)) {
+    throw new Error("This staff member is not assigned to the selected inventory location.");
+  }
+
+  const products = await query<any>(
     `
     SELECT
       id,
@@ -72,6 +88,28 @@ export async function getProductsByTenant(tenantId: string) {
     `,
     [tenantId]
   );
+  const locationStocks = await listProductLocationStocks(tenantId);
+  const stocksByProduct = new Map<string, any[]>();
+  for (const stock of locationStocks) {
+    const key = String(stock.productId || "");
+    stocksByProduct.set(key, [...(stocksByProduct.get(key) || []), stock]);
+  }
+
+  return products.map((product: any) => {
+    const stocks = stocksByProduct.get(String(product.id)) || [];
+    const active = stocks.find((stock) => stock.locationId === activeLocationId)
+      || stocks.find((stock) => stock.locationId === DEFAULT_INVENTORY_LOCATION_ID)
+      || null;
+    return {
+      ...product,
+      stock: active ? active.quantity : Number(product.stock || 0),
+      minStock: active ? active.minStock : Number(product.minStock ?? product.min_stock ?? 0),
+      aggregateStock: Number(product.stock || 0),
+      activeLocationId,
+      locationStock: active || null,
+      locationStocks: stocks,
+    };
+  });
 }
 
 export async function getAppConfigByTenant(tenantId: string) {
@@ -82,6 +120,7 @@ export async function getAppConfigByTenant(tenantId: string) {
     payfast_sandbox: number;
     business: string | null;
     categories: string | null;
+    retention_policy: string | null;
     slug: string | null;
     setup_completed: number;
   }>(
@@ -92,6 +131,7 @@ export async function getAppConfigByTenant(tenantId: string) {
        payfast_sandbox,
        business,
        categories,
+       retention_policy,
        slug,
        setup_completed
      FROM app_settings
@@ -111,6 +151,10 @@ export async function getAppConfigByTenant(tenantId: string) {
     typeof row.categories === "string"
       ? (row.categories ? JSON.parse(row.categories) : undefined)
       : (row.categories ?? undefined);
+  const retentionPolicy =
+    typeof row.retention_policy === "string"
+      ? (row.retention_policy ? JSON.parse(row.retention_policy) : undefined)
+      : (row.retention_policy ?? undefined);
   return {
     payfastMerchantId: row.payfast_merchant_id,
     payfastMerchantKey: row.payfast_merchant_key,
@@ -118,6 +162,7 @@ export async function getAppConfigByTenant(tenantId: string) {
     payfastSandbox: Boolean(row.payfast_sandbox),
     business,
     categories,
+    retentionPolicy,
     slug: row.slug || undefined,
     setupCompleted: Boolean(row.setup_completed),
   };
@@ -133,12 +178,22 @@ export async function getCustomersByTenant(tenantId: string) {
        address,
        notes,
        loyalty_points AS loyaltyPoints,
+       loyalty_member_status AS loyaltyMemberStatus,
+       loyalty_tier_id AS loyaltyTierId,
+       membership_card_id AS membershipCardId,
+       membership_barcode AS membershipBarcode,
+       membership_started_at AS membershipStartedAt,
        wallet_balance AS walletBalance,
        account_enabled AS accountEnabled,
        account_limit AS accountLimit,
        account_balance AS accountBalance,
        discount_percent AS discountPercent,
        uid,
+       is_anonymized AS isAnonymized,
+       anonymized_at AS anonymizedAt,
+       anonymized_by AS anonymizedBy,
+       anonymized_by_name AS anonymizedByName,
+       anonymization_reason AS anonymizationReason,
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM customers
@@ -146,14 +201,26 @@ export async function getCustomersByTenant(tenantId: string) {
      ORDER BY name ASC`,
     [tenantId]
   );
+  const consentsByCustomer = await listTenantCustomerConsents(tenantId);
   return rows.map((r: any) => ({
     ...r,
     loyaltyPoints: r.loyaltyPoints !== null ? Number(r.loyaltyPoints) : 0,
+    loyaltyMemberStatus: r.loyaltyMemberStatus || "active",
+    loyaltyTierId: r.loyaltyTierId || null,
+    membershipCardId: r.membershipCardId || null,
+    membershipBarcode: r.membershipBarcode || null,
+    membershipStartedAt: r.membershipStartedAt || null,
     walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
     accountEnabled: Boolean(r.accountEnabled),
     accountLimit: r.accountLimit !== null ? Number(r.accountLimit) : 0,
     accountBalance: r.accountBalance !== null ? Number(r.accountBalance) : 0,
     discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
+    isAnonymized: Boolean(r.isAnonymized),
+    anonymizedAt: r.anonymizedAt || null,
+    anonymizedBy: r.anonymizedBy || null,
+    anonymizedByName: r.anonymizedByName || null,
+    anonymizationReason: r.anonymizationReason || null,
+    consents: consentsByCustomer.get(String(r.id)) || defaultCustomerConsentMap(),
   }));
 }
 
@@ -175,6 +242,8 @@ export async function getStaffByTenant(tenantId: string) {
        accumulated_leave AS accumulatedLeave,
        wallet_balance AS walletBalance,
        discount_percent AS discountPercent,
+       default_location_id AS defaultLocationId,
+       assigned_location_ids AS assignedLocationIds,
        metrics,
        badges,
        rank,
@@ -191,6 +260,7 @@ export async function getStaffByTenant(tenantId: string) {
     permissions: safeParse(r.permissions, {}),
     assignedSections: safeParse(r.assignedSections, []),
     assignedCategories: safeParse(r.assignedCategories, []),
+    assignedLocationIds: safeParse(r.assignedLocationIds, []),
     walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
     discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
     metrics: safeParse(r.metrics, {}),
@@ -234,6 +304,9 @@ export async function getActiveSalesByTenant(tenantId: string) {
         tip_amount AS tipAmount,
         cash_out_amount AS cashOutAmount,
         points_discount AS pointsDiscount,
+        promotion_id AS promotionId,
+        promotion_code AS promotionCode,
+        promotion_discount AS promotionDiscount,
         status,
         transaction_type AS transactionType,
         parent_sale_id AS parentSaleId,
@@ -291,6 +364,13 @@ export async function getActiveSalesByTenant(tenantId: string) {
          change_amount AS changeAmount,
          tip_amount AS tipAmount,
          cash_out_amount AS cashOutAmount,
+         provider,
+         provider_device_id AS providerDeviceId,
+         provider_reference AS providerReference,
+         authorization_code AS authorizationCode,
+         provider_status AS providerStatus,
+         provider_note AS providerNote,
+         qr_payload AS qrPayload,
          created_at AS createdAt
        FROM sale_payments
        WHERE sale_id = ?`,

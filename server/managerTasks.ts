@@ -3,6 +3,7 @@ import { applyProductStockDelta, normalizeStockMovementReasonCode, recordAuditEv
 import { processSaleRefund, processSaleVoid } from "./mariadb-crud.js";
 import { approveStockTakeSession } from "./stockTake.js";
 import { approveReorderRecommendation, dismissReorderRecommendation } from "./reorderRecommendations.js";
+import { recordManagerOverride } from "./managerOverrides.js";
 
 type TaskPriority = "low" | "normal" | "high" | "critical";
 type TaskStatus = "open" | "in_review" | "approved" | "declined" | "done" | "dismissed";
@@ -893,8 +894,8 @@ export async function decideManagerTask(tenantId: string, taskId: string, input:
   }
   const status = statusForAction(action);
   const note = String(input.note || "").trim();
-  if (["approve", "decline", "complete"].includes(action) && !note) {
-    throw new Error("A manager note is required for this decision");
+  if (["approve", "decline", "complete", "dismiss"].includes(action) && !note) {
+    throw new Error("A manager override reason is required for this decision");
   }
 
   const task = await getTask(tenantId, taskId);
@@ -905,6 +906,30 @@ export async function decideManagerTask(tenantId: string, taskId: string, input:
 
   const terminal = ["approved", "declined", "done", "dismissed"].includes(status);
   const sourceResult = await applySourceDecision(tenantId, task, status, input);
+
+  const override = terminal
+    ? await recordManagerOverride(tenantId, {
+        overrideType: "manager_task",
+        targetType: "manager_task",
+        targetId: task.id,
+        action,
+        status,
+        reason: note,
+        requestedBy: task.requestedBy || null,
+        approvedBy: input.staffId || null,
+        approvedByName: input.staffName || null,
+        relatedSaleId: task.relatedSaleId || null,
+        relatedProductId: task.relatedProductId || null,
+        source: "manager_action_center",
+        details: {
+          taskType: task.taskType,
+          sourceType: task.sourceType,
+          sourceId: task.sourceId,
+          previousStatus: task.status,
+          nextStatus: status,
+        },
+      })
+    : null;
 
   await query(
     `UPDATE manager_tasks
@@ -948,5 +973,6 @@ export async function decideManagerTask(tenantId: string, taskId: string, input:
   return {
     ...updated,
     sourceResult: sourceResult || null,
+    managerOverride: override,
   };
 }

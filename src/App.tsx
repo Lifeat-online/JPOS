@@ -31,6 +31,8 @@ import { InventoryView } from './views/InventoryView';
 import { StockTakeView } from './views/StockTakeView';
 import { CustomersView } from './views/CustomersView';
 import { AccountsView } from './views/AccountsView';
+import { EventBookingsView } from './views/EventBookingsView';
+import { DeliveryOrdersView } from './views/DeliveryOrdersView';
 import { StaffView } from './views/StaffView';
 import { ReportsView } from './views/ReportsView';
 import { LiveView } from './views/LiveView';
@@ -52,6 +54,7 @@ import { TabsView } from './views/TabsView';
 import { BarcodeScanner } from './components/BarcodeScanner';
 import { Receipt } from './components/Receipt';
 import { PrinterReadinessPanel } from './components/PrinterReadinessPanel';
+import { RoleOnboardingChecklist } from './components/RoleOnboardingChecklist';
 
 import { ProductModal } from './components/modals/ProductModal';
 import { CustomerModal } from './components/modals/CustomerModal';
@@ -573,9 +576,9 @@ export default function App() {
   const handleClientLogin = async () => { setLoginMode('client'); await login(); };
   const handleLogout = async () => { setLoginMode(null); await logout(); navigate('/'); };
   // Called by LoginModal on form submit
-  const handleLoginSubmit = async (email: string, password: string) => {
+  const handleLoginSubmit = async (email: string, password: string, twoFactorCode?: string) => {
     setLoginLoading(true);
-    const ok = await login({ email, password });
+    const ok = await login({ email, password, ...(twoFactorCode ? { twoFactorCode } : {}) });
     setLoginLoading(false);
     // Modal stays open on error; useAuth sets authError.
     // On success user becomes non-null, App re-renders past the WelcomeView.
@@ -595,7 +598,7 @@ export default function App() {
     tenantLoading, configLoading, isStaffLoading,
   } = useAppData(authLoading ? null : user);
 
-  const { cart, setCart, setActiveCategory, setSelectedCustomerId, setActiveTableNumber, setActiveOrderId, selectedCustomerId } = usePosStore();
+  const { cart, setCart, setActiveCategory, setSelectedCustomerId, setActiveTableNumber, setActiveOrderId, selectedCustomerId, activeTableNumber } = usePosStore();
   const storeActiveSession = usePosStore(s => s.activeSession);
   const addToCart = usePosStore(s => s.addToCart);
   const tenantId = usePosStore(s => s.tenantId);
@@ -1210,6 +1213,23 @@ export default function App() {
         })}
       </nav>
 
+      <RoleOnboardingChecklist
+        role={roleForPermissions}
+        isDev={isDev}
+        isRestaurant={Boolean(config.business?.isRestaurantMode)}
+        hasOpenRegister={Boolean(effectiveActiveSession)}
+        products={products}
+        customers={posCustomerProfiles}
+        staff={staff}
+        sales={sales}
+        workstations={workstations}
+        restaurantTables={restaurantTables}
+        pendingWorkstationCount={pendingWorkstationCount}
+        openTabsCount={openTabsCount}
+        currentView={view}
+        onNavigate={navigate}
+      />
+
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
         {view === 'pos' && (
@@ -1239,6 +1259,14 @@ export default function App() {
             pointsDiscount={checkout.pointsDiscount}
             pricingDiscount={checkout.pricingDiscount}
             totalDiscount={checkout.totalDiscount}
+            promotionCode={checkout.promotionCode}
+            setPromotionCode={checkout.setPromotionCode}
+            appliedPromotion={checkout.appliedPromotion}
+            promotionDiscount={checkout.promotionDiscount}
+            promotionError={checkout.promotionError}
+            promotionLoading={checkout.promotionLoading}
+            onApplyPromotionCode={checkout.applyPromotionCode}
+            onClearPromotion={checkout.clearPromotion}
             onRedeemPoints={checkout.redeemPoints}
             onClearPointsDiscount={checkout.clearPointsDiscount}
             restaurantTables={restaurantTables}
@@ -1248,6 +1276,8 @@ export default function App() {
             lastReceiptSale={lastReceiptSale}
             onPrintLastReceipt={() => printReceipt(lastReceiptSale)}
             suppressBillPrint={Boolean(receiptToPrint)}
+            checkoutRecovery={checkout.checkoutRecovery}
+            onDismissCheckoutRecovery={checkout.clearCheckoutRecovery}
             offlineStatus={checkout.offlineStatus}
           />
         )}
@@ -1280,6 +1310,7 @@ export default function App() {
         {view === 'stocktake' && <StockTakeView products={products} onProductsUpdated={refreshProducts} />}
         {view === 'customers' && (
           <CustomersView
+            tenantId={tenantId}
             customers={customers}
             sales={sales}
             onEdit={(c) => setCustomerModal({ isOpen: true, customer: c })}
@@ -1291,6 +1322,7 @@ export default function App() {
               usePosStore.getState().setActiveOrderId(sale.id);
               navigate('/pos');
             }}
+            onCustomersUpdated={refreshCustomers}
           />
         )}
         {view === 'accounts' && (
@@ -1301,6 +1333,8 @@ export default function App() {
             onViewOrders={(id) => { setFilterCustomerId(id); navigate('/history'); }}
           />
         )}
+        {view === 'bookings' && <EventBookingsView tenantId={tenantId} customers={customers} restaurantTables={restaurantTables} />}
+        {view === 'delivery' && <DeliveryOrdersView tenantId={tenantId} />}
         {view === 'actions' && <ManagerActionCenterView tenantId={tenantId} />}
         {view === 'live' && <LiveView tenantId={tenantId} />}
         {view === 'reports' && <ReportsView sales={sales} customers={customers} tenantId={tenantId} />}
@@ -1309,6 +1343,7 @@ export default function App() {
           <StaffView
             staff={staff}
             tenantId={tenantId}
+            currentUserStaff={currentUserStaff}
             onEdit={(s) => setStaffModal({ isOpen: true, staff: s })}
             onAdd={() => setStaffModal({ isOpen: true, staff: { role: 'cashier' } })}
             onDelete={(id) => setStaffToDelete(id)}
@@ -1471,7 +1506,7 @@ export default function App() {
             isProcessing={checkout.isProcessing}
             onTenderedChange={checkout.setTenderedAmount}
             onCardOverageChange={checkout.setCardOverageAction}
-            onConfirm={() => checkout.handleCheckout(checkout.tenderModal.method!)}
+            onConfirm={(details) => checkout.handleCheckout(checkout.tenderModal.method!, undefined, details)}
             onClose={() => checkout.setTenderModal({ isOpen: false, method: null })}
           />
         )}
@@ -1485,6 +1520,10 @@ export default function App() {
             customerAccountEnabled={Boolean(customers.find(c => c.id === selectedCustomerId)?.accountEnabled)}
             customerAccountRemaining={Math.max(0, Number(customers.find(c => c.id === selectedCustomerId)?.accountLimit || 0) - Number(customers.find(c => c.id === selectedCustomerId)?.accountBalance || 0))}
             offlineMode={checkout.offlineStatus.isOffline}
+            billSplitEnabled={Boolean(config?.business?.isRestaurantMode)}
+            billSplitItems={cart}
+            billSplitTableLabel={activeTableNumber}
+            billSplitTableOptions={restaurantTables.map(table => table.label || table.id)}
             onConfirm={(payments) => checkout.handleCheckout('split', payments)}
             onClose={() => checkout.setSplitPaymentModal(false)}
           />

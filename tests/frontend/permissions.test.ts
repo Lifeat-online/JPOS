@@ -58,6 +58,17 @@ describe('role permissions', () => {
     expect(buildNavigation('cashier', options).secondaryNav.map(item => item.id)).not.toContain('actions');
   });
 
+  it('exposes delivery orders only to management roles', () => {
+    const options = { isRestaurant: false, hasOpenTerminal: false };
+
+    expect(canAccessView('admin', 'delivery', options)).toBe(true);
+    expect(canAccessView('manager', 'delivery', options)).toBe(true);
+    expect(canAccessView('dev', 'delivery', options)).toBe(true);
+    expect(canAccessView('cashier', 'delivery', options)).toBe(false);
+    expect(buildNavigation('manager', options).secondaryNav.map(item => item.id)).toContain('delivery');
+    expect(buildNavigation('cashier', options).secondaryNav.map(item => item.id)).not.toContain('delivery');
+  });
+
   it('keeps stocktake available to assigned staff without exposing full inventory', () => {
     const options = { isRestaurant: false, hasOpenTerminal: false };
 

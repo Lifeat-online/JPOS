@@ -1,7 +1,7 @@
 import { apiPut, createSale, reportOfflineSyncIssue } from '../api';
 import { WALLET_ONLINE_REQUIRED_MESSAGE } from './offlineGuards';
 
-export type CheckoutMethod = 'cash' | 'payfast' | 'card' | 'wallet' | 'account' | 'split';
+export type CheckoutMethod = 'cash' | 'payfast' | 'card' | 'wallet' | 'account' | 'qr' | 'bnpl' | 'split';
 export type OfflineSaleQueueStatus = 'pending' | 'syncing' | 'synced' | 'failed';
 export type OfflineSyncEventType = 'sale.create' | 'sale.update';
 export type OfflineSyncConflictType =
@@ -268,6 +268,12 @@ export function getOfflineCheckoutBlock(method: CheckoutMethod, splitPayments?: 
   }
   if (methods.includes('payfast')) {
     return { allowed: false, reason: 'PayFast needs an online checkout and cannot be queued offline.' };
+  }
+  if (methods.includes('qr')) {
+    return { allowed: false, reason: 'QR and mobile-wallet payments need online provider confirmation and cannot be queued offline.' };
+  }
+  if (methods.includes('bnpl')) {
+    return { allowed: false, reason: 'BNPL payments need online provider approval and cannot be queued offline.' };
   }
   if (methods.every(tender => tender === 'cash' || tender === 'card')) {
     return { allowed: true, reason: null as string | null };

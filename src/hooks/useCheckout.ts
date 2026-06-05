@@ -2,11 +2,11 @@
  * useCheckout — MariaDB REST edition.
  * Replaces all Firestore addDoc/updateDoc calls with REST API calls.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { JwtUser } from './useAuth';
-import { Customer, Staff, AppConfig } from '../types';
+import { Customer, Staff, AppConfig, Promotion } from '../types';
 import { usePosStore } from '../store/usePosStore';
-import { apiPut, createSale, getSaleById } from '../api';
+import { apiPut, createSale, getSaleById, validatePromotionCode } from '../api';
 import { useSocket } from './useSocket';
 import { getApplicablePricingDiscount } from '../utils/discounts';
 import {
@@ -37,6 +37,36 @@ interface CheckoutDeps {
   refreshCustomers?: () => Promise<void>;
 }
 
+export interface CheckoutRecoveryNotice {
+  message: string;
+  method?: CheckoutMethod;
+  createdAt: string;
+}
+
+export interface QrPaymentDetails {
+  provider: string;
+  providerReference: string;
+  providerStatus?: 'pending' | 'confirmed' | 'approved' | 'settled' | 'failed' | 'reversed' | 'refunded' | 'partial_refund';
+  providerNote?: string | null;
+  qrPayload?: string | null;
+}
+
+export interface BnplPaymentDetails {
+  provider: 'payjustnow' | 'mobicred' | 'payflex' | string;
+  providerReference: string;
+  providerStatus?: 'pending' | 'approved' | 'settled' | 'failed' | 'reversed';
+  providerNote?: string | null;
+}
+
+export interface CardTerminalDetails {
+  provider: string;
+  providerDeviceId: string;
+  providerReference?: string | null;
+  authorizationCode?: string | null;
+  providerStatus?: 'approved' | 'settled' | 'pending';
+  providerNote?: string | null;
+}
+
 export function useCheckout({ user, tenantId, currentUserStaff, customers, activeSession, config, refreshSales, refreshCustomers }: CheckoutDeps) {
   const {
     cart, clearCart,
@@ -57,6 +87,12 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   const [tenderedAmount, setTenderedAmount] = useState<number | string>('');
   const [cardOverageAction, setCardOverageAction] = useState<'tip' | 'cashout'>('tip');
   const [pointsDiscount, setPointsDiscount] = useState(0);
+  const [promotionCode, setPromotionCode] = useState('');
+  const [appliedPromotion, setAppliedPromotion] = useState<Promotion | null>(null);
+  const [promotionDiscount, setPromotionDiscount] = useState(0);
+  const [promotionError, setPromotionError] = useState<string | null>(null);
+  const [promotionLoading, setPromotionLoading] = useState(false);
+  const appliedPromotionSignatureRef = useRef<string | null>(null);
   const [tenderModal, setTenderModal] = useState<{ isOpen: boolean; method: 'cash' | 'card' | null }>({
     isOpen: false, method: null,
   });
@@ -79,6 +115,17 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   const [offlineSyncStatus, setOfflineSyncStatus] = useState<'idle' | 'syncing' | 'error'>('idle');
   const [offlineSyncError, setOfflineSyncError] = useState<string | null>(null);
   const [offlineSyncSummary, setOfflineSyncSummary] = useState<OfflineSyncBatchSummary | null>(null);
+  const [checkoutRecovery, setCheckoutRecovery] = useState<CheckoutRecoveryNotice | null>(null);
+
+  const recordCheckoutRecovery = useCallback((message: string, method?: CheckoutMethod) => {
+    setCheckoutRecovery({
+      message,
+      method,
+      createdAt: new Date().toISOString(),
+    });
+  }, []);
+
+  const clearCheckoutRecovery = useCallback(() => setCheckoutRecovery(null), []);
 
   const refreshOfflineQueue = useCallback(() => {
     if (!tenantId) {
@@ -197,7 +244,21 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     () => getApplicablePricingDiscount(cartTotal, selectedCustomer, config),
     [cartTotal, selectedCustomer, config]
   );
-  const totalDiscount = Math.min(cartTotal, Number(pointsDiscount || 0) + Number(pricingDiscount.amount || 0));
+  const promotionSignature = useMemo(() => [
+    selectedCustomerId || 'no-customer',
+    ...cart.map(item => [
+      (item as any).productId || item.id,
+      item.category || '',
+      item.section || '',
+      item.subCategory || '',
+      Number(item.price || 0).toFixed(2),
+      Number(item.quantity || 0),
+    ].join(':')),
+  ].join('|'), [cart, selectedCustomerId]);
+  const totalDiscount = Math.min(
+    cartTotal,
+    Number(pointsDiscount || 0) + Number(pricingDiscount.amount || 0) + Number(promotionDiscount || 0)
+  );
   const cartTotalAfterDiscount = Math.max(0, cartTotal - totalDiscount);
 
   const stampOrderItems = (items: any[], delivered = false) => {
@@ -211,16 +272,77 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   // ── Points redemption ────────────────────────────────────────────────────────
   const redeemPoints = (customerId: string, customerPoints: number) => {
     if (!config?.business?.enableLoyalty) return;
+    const customer = customers.find(c => c.id === customerId);
+    if ((customer?.loyaltyMemberStatus || 'active') !== 'active') return;
     const { pointsRequiredForDiscount, discountAmountForPoints } = config.business;
     if (!pointsRequiredForDiscount || !discountAmountForPoints) return;
     if (customerPoints < pointsRequiredForDiscount) return;
     const setsOfPoints = Math.floor(customerPoints / pointsRequiredForDiscount);
-    const discountableTotal = Math.max(0, cartTotal - Number(pricingDiscount.amount || 0));
+    const discountableTotal = Math.max(0, cartTotal - Number(pricingDiscount.amount || 0) - Number(promotionDiscount || 0));
     const discount = Math.min(setsOfPoints * discountAmountForPoints, discountableTotal);
     setPointsDiscount(discount);
   };
 
   const clearPointsDiscount = () => setPointsDiscount(0);
+
+  const clearPromotion = useCallback((message?: string | null) => {
+    setAppliedPromotion(null);
+    setPromotionDiscount(0);
+    appliedPromotionSignatureRef.current = null;
+    if (message !== undefined) setPromotionError(message);
+  }, []);
+
+  const promotionPayloadItems = useMemo(() => cart.map(item => ({
+    id: item.id,
+    productId: (item as any).productId || item.id,
+    name: item.name,
+    category: item.category || null,
+    section: item.section || null,
+    subCategory: item.subCategory || null,
+    price: Number(item.price || 0),
+    quantity: Number(item.quantity || 0),
+  })), [cart]);
+
+  const applyPromotionCode = useCallback(async () => {
+    const code = promotionCode.trim();
+    if (!tenantId || !code || cart.length === 0) return;
+    if (isBrowserOffline) {
+      setPromotionError('Coupon validation needs an online connection.');
+      return;
+    }
+    setPromotionLoading(true);
+    setPromotionError(null);
+    try {
+      const result = await validatePromotionCode(tenantId, {
+        code,
+        customerId: selectedCustomerId || null,
+        items: promotionPayloadItems,
+        subtotal: Number(cartSubtotal || 0),
+        totalBeforeDiscount: Number(cartTotal || 0),
+      });
+      if (!result.valid || !result.promotion || Number(result.discountAmount || 0) <= 0) {
+        throw new Error(result.reason || 'Coupon could not be applied.');
+      }
+      setAppliedPromotion(result.promotion);
+      setPromotionCode(result.promotion.code);
+      setPromotionDiscount(Number(result.discountAmount || 0));
+      appliedPromotionSignatureRef.current = promotionSignature;
+    } catch (error) {
+      setAppliedPromotion(null);
+      setPromotionDiscount(0);
+      appliedPromotionSignatureRef.current = null;
+      setPromotionError(error instanceof Error ? error.message : 'Coupon could not be applied.');
+    } finally {
+      setPromotionLoading(false);
+    }
+  }, [promotionCode, tenantId, cart.length, isBrowserOffline, selectedCustomerId, promotionPayloadItems, cartSubtotal, cartTotal, promotionSignature]);
+
+  useEffect(() => {
+    if (!appliedPromotion) return;
+    if (appliedPromotionSignatureRef.current && appliedPromotionSignatureRef.current !== promotionSignature) {
+      clearPromotion('Coupon removed because the cart or customer changed. Apply it again to revalidate.');
+    }
+  }, [appliedPromotion, promotionSignature, clearPromotion]);
 
   // ── Reset cart state after checkout ─────────────────────────────────────────
   const resetAfterCheckout = () => {
@@ -229,6 +351,8 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     setActiveOrderId(null);
     setActiveTableNumber(null);
     setPointsDiscount(0);
+    setPromotionCode('');
+    clearPromotion(null);
   };
 
   const queueOfflineCheckout = (saleData: any, method: CheckoutMethod) => {
@@ -253,16 +377,11 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   const attachCheckoutSideEffects = (saleData: any) => {
     if (saleData.status !== 'completed') return;
 
-    if (selectedCustomerId && config?.business?.enableLoyalty && config?.business?.pointsEarnedPerCurrency) {
-      const pointsEarned = Math.floor(cartTotalAfterDiscount / config.business.pointsEarnedPerCurrency);
+    if (selectedCustomerId && config?.business?.enableLoyalty) {
       const customer = customers.find(c => c.id === selectedCustomerId);
-      if (!isStaffCustomerProfile(customer)) {
-        const currentPoints = Number(customer?.loyaltyPoints || customer?.points || 0);
-        let pointsConsumed = 0;
-        if (pointsDiscount > 0 && config.business.pointsRequiredForDiscount && config.business.discountAmountForPoints) {
-          pointsConsumed = Math.ceil(pointsDiscount / config.business.discountAmountForPoints) * config.business.pointsRequiredForDiscount;
-        }
-        saleData.loyaltyPoints = Math.max(0, currentPoints - pointsConsumed) + pointsEarned;
+      const isActiveMember = (customer?.loyaltyMemberStatus || 'active') === 'active';
+      if (!isStaffCustomerProfile(customer) && isActiveMember && pointsDiscount > 0 && config.business.pointsRequiredForDiscount && config.business.discountAmountForPoints) {
+        saleData.loyaltyPointsRedeemed = Math.ceil(pointsDiscount / config.business.discountAmountForPoints) * config.business.pointsRequiredForDiscount;
       }
     }
 
@@ -333,6 +452,16 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
   };
 
   // ── Save order (restaurant hold/send to workstations) ────────────────────────
+  const promotionSaleFields = () => (
+    appliedPromotion && promotionDiscount > 0
+      ? {
+          promotionId: appliedPromotion.id,
+          promotionCode: appliedPromotion.code,
+          promotionDiscount: Number(promotionDiscount || 0),
+        }
+      : {}
+  );
+
   const handleSaveOrder = async (sendToWorkstations: boolean, navigate: (path: string) => void) => {
     if (cart.length === 0 || !tenantId) return;
     setIsProcessing(true);
@@ -349,6 +478,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
         ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
+        ...promotionSaleFields(),
       };
       if (activeTableNumber) saleData.tableNumber = activeTableNumber;
 
@@ -405,6 +535,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
         ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
+        ...promotionSaleFields(),
       };
 
       let saleId = activeOrderId;
@@ -446,6 +577,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         customerId: selectedCustomerId,
         staffId: currentUserStaff?.id || null,
         ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
+        ...promotionSaleFields(),
       };
 
       let saleId = activeOrderId;
@@ -499,6 +631,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
         ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
+        ...promotionSaleFields(),
       };
 
       let saleId = activeOrderId;
@@ -532,8 +665,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     }
   };
 
-  const handleCheckout = async (method: CheckoutMethod, splitPayments?: any[]) => {
+  const handleCheckout = async (method: CheckoutMethod, splitPayments?: any[], paymentDetails?: QrPaymentDetails | BnplPaymentDetails | CardTerminalDetails) => {
     if (cart.length === 0 || !tenantId) return;
+    clearCheckoutRecovery();
     const walletAmount = method === 'wallet'
       ? cartTotalAfterDiscount
       : (splitPayments || []).reduce((sum, p) => sum + (p.method === 'wallet' ? Number(p.amount || 0) : 0), 0);
@@ -543,18 +677,30 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
     const offlineCapability = getOfflineCheckoutBlock(method, splitPayments, isBrowserOffline);
     if (!offlineCapability.allowed) {
-      alert(offlineCapability.reason || 'This payment needs an online connection.');
+      const message = offlineCapability.reason || 'This payment needs an online connection.';
+      recordCheckoutRecovery(message, method);
+      alert(message);
+      return;
+    }
+    if (appliedPromotion && isBrowserOffline) {
+      const message = 'Coupon checkout needs an online connection so redemption limits can be verified.';
+      recordCheckoutRecovery(message, method);
+      alert(message);
       return;
     }
 
     if (walletAmount > 0) {
       const walletBalance = Number(selectedCustomer?.walletBalance || 0);
       if (!selectedCustomer || walletBalance <= 0) {
-        alert('Select a client with a positive wallet balance before using wallet payment.');
+        const message = 'Select a client with a positive wallet balance before using wallet payment.';
+        recordCheckoutRecovery(message, method);
+        alert(message);
         return;
       }
       if (walletBalance < walletAmount) {
-        alert(`Client wallet balance is R${walletBalance.toFixed(2)}, which is not enough for this wallet payment.`);
+        const message = `Client wallet balance is R${walletBalance.toFixed(2)}, which is not enough for this wallet payment.`;
+        recordCheckoutRecovery(message, method);
+        alert(message);
         return;
       }
     }
@@ -564,13 +710,32 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       const accountBalance = Number(selectedCustomer?.accountBalance || 0);
       const accountRemaining = Math.max(0, accountLimit - accountBalance);
       if (!selectedCustomer || !selectedCustomer.accountEnabled) {
-        alert('Select a client with an active account before using account payment.');
+        const message = 'Select a client with an active account before using account payment.';
+        recordCheckoutRecovery(message, method);
+        alert(message);
         return;
       }
       if (accountRemaining < accountAmount) {
-        alert(`Client account remaining is R${accountRemaining.toFixed(2)}, which is not enough for this account payment.`);
+        const message = `Client account remaining is R${accountRemaining.toFixed(2)}, which is not enough for this account payment.`;
+        recordCheckoutRecovery(message, method);
+        alert(message);
         return;
       }
+    }
+
+    const cardTenderDetails = method === 'card'
+      ? [paymentDetails]
+      : method === 'split'
+        ? (splitPayments || []).filter(payment => payment?.method === 'card')
+        : [];
+    const missingCardTerminal = cardTenderDetails.some((payment: any) => (
+      !String(payment?.provider || '').trim() || !String(payment?.providerDeviceId || payment?.deviceId || payment?.terminalId || '').trim()
+    ));
+    if (missingCardTerminal) {
+      const message = 'Capture the card provider and terminal/device reference before completing a card payment.';
+      recordCheckoutRecovery(message, method);
+      alert(message);
+      return;
     }
 
     setIsProcessing(true);
@@ -588,6 +753,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         customerId: selectedCustomerId || null,
         staffId: currentUserStaff?.id || null,
         ...(totalDiscount > 0 ? { pointsDiscount: totalDiscount } : {}),
+        ...promotionSaleFields(),
         ...(activeTableNumber ? { tableNumber: activeTableNumber } : {}),
       };
 
@@ -595,16 +761,40 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         saleData.payments = splitPayments;
         // Logic to determine primary payment method for legacy field if needed
         saleData.paymentMethod = splitPayments.length > 1 ? 'cash' : (splitPayments[0]?.method || 'cash');
-      } else if (method === 'cash' || method === 'card' || method === 'wallet' || method === 'account') {
-        const overage = (method === 'wallet' || method === 'account') ? 0 : Math.max(0, Number(tenderedAmount || 0) - cartTotalAfterDiscount);
+      } else if (method === 'cash' || method === 'card' || method === 'wallet' || method === 'account' || method === 'qr' || method === 'bnpl') {
+        const exactTenderOnly = method === 'wallet' || method === 'account' || method === 'qr' || method === 'bnpl';
+        const overage = exactTenderOnly ? 0 : Math.max(0, Number(tenderedAmount || 0) - cartTotalAfterDiscount);
         const p: any = {
           method: method,
           amount: cartTotalAfterDiscount,
-          tenderedAmount: method === 'account' ? cartTotalAfterDiscount : Number(tenderedAmount || cartTotalAfterDiscount),
+          tenderedAmount: exactTenderOnly ? cartTotalAfterDiscount : Number(tenderedAmount || cartTotalAfterDiscount),
           changeAmount: method === 'cash' ? overage : 0,
           tipAmount: (method === 'card' && cardOverageAction === 'tip') ? overage : 0,
           cashOutAmount: (method === 'card' && cardOverageAction === 'cashout') ? overage : 0,
         };
+        if (method === 'card' && paymentDetails) {
+          const cardDetails = paymentDetails as CardTerminalDetails;
+          p.provider = cardDetails.provider;
+          p.providerDeviceId = cardDetails.providerDeviceId;
+          p.providerReference = cardDetails.providerReference || null;
+          p.authorizationCode = cardDetails.authorizationCode || cardDetails.providerReference || null;
+          p.providerStatus = cardDetails.providerStatus || 'approved';
+          p.providerNote = cardDetails.providerNote || null;
+        }
+        if (method === 'qr' && paymentDetails) {
+          const qrDetails = paymentDetails as QrPaymentDetails;
+          p.provider = paymentDetails.provider;
+          p.providerReference = paymentDetails.providerReference;
+          p.providerStatus = paymentDetails.providerStatus || 'confirmed';
+          p.providerNote = paymentDetails.providerNote || null;
+          p.qrPayload = qrDetails.qrPayload || null;
+        }
+        if (method === 'bnpl' && paymentDetails) {
+          p.provider = paymentDetails.provider;
+          p.providerReference = paymentDetails.providerReference;
+          p.providerStatus = paymentDetails.providerStatus || 'approved';
+          p.providerNote = paymentDetails.providerNote || null;
+        }
         saleData.payments = [p];
         
         // Legacy fields
@@ -635,13 +825,22 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
         }
       } catch (saleWriteError) {
         const offlineAfterFailure = getOfflineCheckoutBlock(method, splitPayments, true);
-        if (isOfflineLikeError(saleWriteError) && offlineAfterFailure.allowed) {
+        if (isOfflineLikeError(saleWriteError) && offlineAfterFailure.allowed && !appliedPromotion) {
           queueOfflineCheckout(saleData, method);
           setIsProcessing(false);
           return;
         }
+        if (isOfflineLikeError(saleWriteError) && appliedPromotion) {
+          const message = 'Coupon checkout could not be completed offline. Reconnect and try again.';
+          recordCheckoutRecovery(message, method);
+          alert(message);
+          setIsProcessing(false);
+          return;
+        }
         if (isOfflineLikeError(saleWriteError) && !offlineAfterFailure.allowed) {
-          alert(offlineAfterFailure.reason || 'This payment needs an online connection.');
+          const message = offlineAfterFailure.reason || 'This payment needs an online connection.';
+          recordCheckoutRecovery(message, method);
+          alert(message);
           setIsProcessing(false);
           return;
         }
@@ -652,6 +851,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
       if (method !== 'payfast') {
         resetAfterCheckout();
+        clearCheckoutRecovery();
         setTenderModal({ isOpen: false, method: null });
         setSplitPaymentModal(false);
         setCheckoutModal({ isOpen: true, paymentMethod: method, saleData: { ...saleData, id: saleId } });
@@ -690,7 +890,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       }
     } catch (err) {
       console.error('Checkout failed:', err);
-      alert(err instanceof Error ? err.message : 'Checkout failed. Please try again.');
+      const message = err instanceof Error ? err.message : 'Checkout failed. Please try again.';
+      recordCheckoutRecovery(message, method);
+      alert(message);
       setIsProcessing(false);
     }
   };
@@ -709,6 +911,9 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     tenderedAmount, setTenderedAmount,
     cardOverageAction, setCardOverageAction,
     pointsDiscount, pricingDiscount, totalDiscount, redeemPoints, clearPointsDiscount,
+    promotionCode, setPromotionCode,
+    appliedPromotion, promotionDiscount, promotionError, promotionLoading,
+    applyPromotionCode, clearPromotion,
     tenderModal, setTenderModal,
     checkoutModal, setCheckoutModal,
     splitPaymentModal, setSplitPaymentModal,
@@ -716,6 +921,8 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
     cartSubtotal, taxAmount,
     cartTotal: cartTotalAfterDiscount,
     cartTotalBeforeDiscount: cartTotal,
+    checkoutRecovery,
+    clearCheckoutRecovery,
     offlineStatus: {
       isOffline: isBrowserOffline,
       pendingCount: offlineQueueCount,

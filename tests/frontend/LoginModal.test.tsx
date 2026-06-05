@@ -12,9 +12,10 @@ describe('LoginModal', () => {
 
     fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'user@example.com' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret123' } });
+    fireEvent.change(screen.getByLabelText(/2FA Code/i), { target: { value: '123456' } });
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith('user@example.com', 'secret123');
+    expect(onSubmit).toHaveBeenCalledWith('user@example.com', 'secret123', '123456');
   });
 
   it('closes when backdrop is clicked', async () => {

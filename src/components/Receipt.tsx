@@ -133,6 +133,36 @@ export const Receipt: React.FC<ReceiptProps> = ({ sale, config }) => {
                     <span>{currency}{Number(p.cashOutAmount).toFixed(2)}</span>
                   </div>
                 )}
+                {p.providerReference && (
+                  <div className="flex justify-between text-[10px] pl-2 uppercase">
+                    <span>{p.provider || 'provider'} ref</span>
+                    <span>{p.providerReference}</span>
+                  </div>
+                )}
+                {p.providerDeviceId && (
+                  <div className="flex justify-between text-[10px] pl-2 uppercase">
+                    <span>{p.provider || 'terminal'} device</span>
+                    <span>{p.providerDeviceId}</span>
+                  </div>
+                )}
+                {p.authorizationCode && (
+                  <div className="flex justify-between text-[10px] pl-2 uppercase">
+                    <span>Auth code</span>
+                    <span>{p.authorizationCode}</span>
+                  </div>
+                )}
+                {p.providerStatus && (
+                  <div className="flex justify-between text-[10px] pl-2 uppercase">
+                    <span>Provider status</span>
+                    <span>{String(p.providerStatus).replace(/_/g, ' ')}</span>
+                  </div>
+                )}
+                {p.providerNote && (
+                  <div className="flex justify-between text-[10px] pl-2 uppercase">
+                    <span>Payment note</span>
+                    <span>{p.providerNote}</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>

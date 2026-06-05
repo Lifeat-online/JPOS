@@ -9,6 +9,7 @@ const {
   ensureCompanionDeviceAssignmentsSchema,
   ensureCustomerAccountSchema,
   ensureAuditAndStockLedgerSchema,
+  ensureHardwareDeviceSchema,
   ensureManagerTaskSchema,
   ensurePersonDiscountSchema,
   ensurePurchaseOrderReceivingSchema,
@@ -54,6 +55,9 @@ await ensureStockTakeSchema().catch((err: unknown) => {
 });
 await ensureCompanionDeviceAssignmentsSchema().catch((err: unknown) => {
   console.warn("Failed to ensure companion device assignment schema:", err);
+});
+await ensureHardwareDeviceSchema().catch((err: unknown) => {
+  console.warn("Failed to ensure hardware device schema:", err);
 });
 await ensurePushNotificationSchema().catch((err: unknown) => {
   console.warn("Failed to ensure push notification schema:", err);

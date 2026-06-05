@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { X, Loader2 } from 'lucide-react';
+import { CreditCard, Loader2, X } from 'lucide-react';
+import type { CardTerminalDetails } from '../../hooks/useCheckout';
 
 interface TenderModalProps {
   method: 'cash' | 'card';
@@ -10,7 +11,7 @@ interface TenderModalProps {
   isProcessing: boolean;
   onTenderedChange: (val: string) => void;
   onCardOverageChange: (action: 'tip' | 'cashout') => void;
-  onConfirm: () => void;
+  onConfirm: (details?: CardTerminalDetails) => void;
   onClose: () => void;
 }
 
@@ -18,9 +19,42 @@ export const TenderModal: React.FC<TenderModalProps> = ({
   method, cartTotal, tenderedAmount, cardOverageAction,
   isProcessing, onTenderedChange, onCardOverageChange, onConfirm, onClose,
 }) => {
+  const [cardProvider, setCardProvider] = useState('yoco');
+  const [providerDeviceId, setProviderDeviceId] = useState('');
+  const [providerReference, setProviderReference] = useState('');
+  const [authorizationCode, setAuthorizationCode] = useState('');
+  const [providerStatus, setProviderStatus] = useState<CardTerminalDetails['providerStatus']>('approved');
+  const [providerNote, setProviderNote] = useState('');
+
+  useEffect(() => {
+    if (method !== 'card') return;
+    setCardProvider('yoco');
+    setProviderDeviceId('');
+    setProviderReference('');
+    setAuthorizationCode('');
+    setProviderStatus('approved');
+    setProviderNote('');
+  }, [method]);
+
   const tendered = Number(tenderedAmount || 0);
   const overage = Math.max(0, tendered - cartTotal);
-  const canConfirm = tendered >= cartTotal;
+  const cardTerminalReady = method !== 'card' || (cardProvider.trim().length > 0 && providerDeviceId.trim().length > 0);
+  const canConfirm = tendered >= cartTotal && cardTerminalReady;
+
+  const confirm = () => {
+    if (method !== 'card') {
+      onConfirm();
+      return;
+    }
+    onConfirm({
+      provider: cardProvider.trim(),
+      providerDeviceId: providerDeviceId.trim(),
+      providerReference: providerReference.trim() || null,
+      authorizationCode: authorizationCode.trim() || providerReference.trim() || null,
+      providerStatus: providerStatus || 'approved',
+      providerNote: providerNote.trim() || null,
+    });
+  };
 
   return (
     <motion.div
@@ -29,7 +63,7 @@ export const TenderModal: React.FC<TenderModalProps> = ({
     >
       <motion.div
         initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-        className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl flex flex-col"
+        className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col"
       >
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
@@ -85,6 +119,82 @@ export const TenderModal: React.FC<TenderModalProps> = ({
                   </button>
                 </div>
               )}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] p-3 space-y-3">
+                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  <CreditCard className="w-4 h-4" />
+                  Terminal confirmation
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 px-1 mb-1 block">
+                      Provider
+                    </label>
+                    <select
+                      value={cardProvider}
+                      onChange={event => setCardProvider(event.target.value)}
+                      className="w-full px-3 py-3 bg-white dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-bold text-slate-900 dark:text-white"
+                    >
+                      <option value="yoco">Yoco</option>
+                      <option value="ikhokha">iKhokha</option>
+                      <option value="adumo">Adumo</option>
+                      <option value="speedpoint">Speedpoint</option>
+                      <option value="other_terminal">Other terminal</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 px-1 mb-1 block">
+                      Device / Terminal
+                    </label>
+                    <input
+                      value={providerDeviceId}
+                      onChange={event => setProviderDeviceId(event.target.value)}
+                      placeholder="e.g. Yoco-Front-01"
+                      className="w-full px-3 py-3 bg-white dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-bold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 px-1 mb-1 block">
+                      Receipt / Reference
+                    </label>
+                    <input
+                      value={providerReference}
+                      onChange={event => setProviderReference(event.target.value)}
+                      placeholder="Optional terminal reference"
+                      className="w-full px-3 py-3 bg-white dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-bold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 px-1 mb-1 block">
+                      Auth Code
+                    </label>
+                    <input
+                      value={authorizationCode}
+                      onChange={event => setAuthorizationCode(event.target.value)}
+                      placeholder="Optional auth code"
+                      className="w-full px-3 py-3 bg-white dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-bold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_1fr]">
+                  <select
+                    value={providerStatus}
+                    onChange={event => setProviderStatus(event.target.value as CardTerminalDetails['providerStatus'])}
+                    className="w-full px-3 py-3 bg-white dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-bold text-slate-900 dark:text-white"
+                  >
+                    <option value="approved">Approved</option>
+                    <option value="settled">Settled</option>
+                    <option value="pending">Pending settlement</option>
+                  </select>
+                  <input
+                    value={providerNote}
+                    onChange={event => setProviderNote(event.target.value)}
+                    placeholder="Optional terminal note"
+                    className="w-full px-3 py-3 bg-white dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -95,7 +205,7 @@ export const TenderModal: React.FC<TenderModalProps> = ({
           </button>
           <button
             disabled={isProcessing || !canConfirm}
-            onClick={onConfirm}
+            onClick={confirm}
             className="flex-1 py-4 bg-primary text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-xl shadow-primary/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 flex justify-center items-center gap-2"
           >
             {isProcessing && <Loader2 className="w-4 h-4 animate-spin" />}

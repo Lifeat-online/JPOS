@@ -19,6 +19,9 @@ export interface JwtUser {
   role: string;
   tenantId: string;
   tenantName?: string;
+  twoFactorEnabled?: boolean;
+  twoFactorEligible?: boolean;
+  twoFactorConfirmedAt?: string | null;
   // Shape expected by App.tsx / UserMenu (Firebase-compat shims)
   uid: string;
   displayName: string | null;
@@ -29,6 +32,7 @@ interface LoginCredentials {
   email: string;
   password: string;
   tenantId?: string;
+  twoFactorCode?: string;
 }
 
 interface EnrollmentDetails {
@@ -310,11 +314,13 @@ export function useAuth() {
 
   const logout = useCallback(async (): Promise<void> => {
     const accessToken = localStorage.getItem(KEYS.ACCESS);
+    const refreshToken = localStorage.getItem(KEYS.REFRESH);
     if (accessToken) {
       // Best-effort server logout (fire-and-forget)
       fetch('/api/auth/logout', {
         method:  'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ refreshToken }),
       }).catch(() => {});
     }
     clearSession();

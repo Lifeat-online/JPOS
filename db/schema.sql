@@ -25,6 +25,24 @@ CREATE TABLE IF NOT EXISTS users (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS refresh_token_sessions (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  staff_id VARCHAR(64) NOT NULL,
+  token_hash CHAR(64) NOT NULL UNIQUE,
+  ip_address VARCHAR(128),
+  user_agent TEXT,
+  expires_at DATETIME,
+  revoked_at DATETIME,
+  revoked_reason VARCHAR(255),
+  replaced_by_token_hash CHAR(64),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  last_used_at DATETIME,
+  INDEX idx_refresh_token_sessions_staff (tenant_id, staff_id, revoked_at),
+  INDEX idx_refresh_token_sessions_token_hash (token_hash),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
   tenant_id VARCHAR(64) PRIMARY KEY,
   payfast_merchant_id VARCHAR(128) DEFAULT '10000100',
@@ -34,6 +52,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
   business JSON DEFAULT JSON_OBJECT(),
   setup_completed BOOLEAN DEFAULT FALSE,
   categories JSON DEFAULT JSON_OBJECT(),
+  retention_policy JSON DEFAULT JSON_OBJECT(),
   slug VARCHAR(255),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -74,6 +93,39 @@ CREATE TABLE IF NOT EXISTS products (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS inventory_locations (
+  id VARCHAR(64) NOT NULL,
+  tenant_id VARCHAR(64) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  type ENUM('branch','warehouse','register','kitchen','other') NOT NULL DEFAULT 'branch',
+  status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+  is_default BOOLEAN DEFAULT FALSE,
+  address TEXT,
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_id, id),
+  INDEX idx_inventory_locations_status (tenant_id, status),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS product_location_stock (
+  tenant_id VARCHAR(64) NOT NULL,
+  product_id VARCHAR(64) NOT NULL,
+  location_id VARCHAR(64) NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+  min_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
+  reorder_threshold DECIMAL(12,3) NOT NULL DEFAULT 0,
+  updated_by VARCHAR(64),
+  updated_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_id, product_id, location_id),
+  INDEX idx_product_location_stock_location (tenant_id, location_id),
+  INDEX idx_product_location_stock_reorder (tenant_id, location_id, reorder_threshold),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS customers (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
@@ -83,14 +135,98 @@ CREATE TABLE IF NOT EXISTS customers (
   address TEXT,
   notes TEXT,
   loyalty_points INT DEFAULT 0,
+  loyalty_member_status ENUM('active','paused','opted_out') DEFAULT 'active',
+  loyalty_tier_id VARCHAR(64),
+  membership_card_id VARCHAR(128),
+  membership_barcode VARCHAR(128),
+  membership_started_at DATETIME,
   wallet_balance DECIMAL(12,2) DEFAULT 0,
   account_enabled TINYINT(1) DEFAULT 0,
   account_limit DECIMAL(12,2) DEFAULT 0,
   account_balance DECIMAL(12,2) DEFAULT 0,
   discount_percent DECIMAL(5,2) DEFAULT 0,
   uid VARCHAR(128),
+  is_anonymized TINYINT(1) DEFAULT 0,
+  anonymized_at DATETIME,
+  anonymized_by VARCHAR(64),
+  anonymized_by_name VARCHAR(255),
+  anonymization_reason TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS customer_consents (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  customer_id VARCHAR(64) NOT NULL,
+  consent_type ENUM('loyalty','marketing','customer_portal','stored_contact_details','promotions','ai_recommendations') NOT NULL,
+  status ENUM('unknown','granted','denied','revoked') NOT NULL DEFAULT 'unknown',
+  source VARCHAR(80),
+  note TEXT,
+  captured_by VARCHAR(64),
+  captured_by_name VARCHAR(255),
+  captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_customer_consents_type (tenant_id, customer_id, consent_type),
+  INDEX idx_customer_consents_customer (tenant_id, customer_id),
+  INDEX idx_customer_consents_status (tenant_id, consent_type, status),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS customer_consent_events (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  customer_id VARCHAR(64) NOT NULL,
+  consent_type ENUM('loyalty','marketing','customer_portal','stored_contact_details','promotions','ai_recommendations') NOT NULL,
+  previous_status ENUM('unknown','granted','denied','revoked') DEFAULT 'unknown',
+  status ENUM('unknown','granted','denied','revoked') NOT NULL,
+  source VARCHAR(80),
+  note TEXT,
+  captured_by VARCHAR(64),
+  captured_by_name VARCHAR(255),
+  captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_customer_consent_events_customer (tenant_id, customer_id, created_at),
+  INDEX idx_customer_consent_events_type (tenant_id, consent_type, created_at),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS loyalty_tiers (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  status ENUM('active','inactive') DEFAULT 'active',
+  min_points INT DEFAULT 0,
+  earn_multiplier DECIMAL(8,3) DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_loyalty_tiers_threshold (tenant_id, status, min_points),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS loyalty_reward_rules (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  status ENUM('active','inactive') DEFAULT 'active',
+  rule_type ENUM('base','category','product','time_window') DEFAULT 'base',
+  points_per_currency DECIMAL(12,4) DEFAULT 0,
+  multiplier DECIMAL(8,3) DEFAULT 1,
+  bonus_points INT DEFAULT 0,
+  min_subtotal DECIMAL(12,2) DEFAULT 0,
+  starts_at DATETIME,
+  ends_at DATETIME,
+  target_product_ids JSON DEFAULT JSON_ARRAY(),
+  target_categories JSON DEFAULT JSON_ARRAY(),
+  days_of_week JSON DEFAULT JSON_ARRAY(),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_loyalty_reward_rules_status (tenant_id, status, rule_type),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
@@ -101,6 +237,10 @@ CREATE TABLE IF NOT EXISTS staff (
   role ENUM('admin','cashier','manager','chef','dev') DEFAULT 'cashier',
   email VARCHAR(255) NOT NULL,
   password_hash VARCHAR(255),
+  security_pin_hash VARCHAR(255),
+  two_factor_enabled TINYINT(1) DEFAULT 0,
+  two_factor_secret VARCHAR(255),
+  two_factor_confirmed_at DATETIME,
   phone VARCHAR(64),
   status ENUM('active','inactive') DEFAULT 'active',
   permissions JSON DEFAULT JSON_OBJECT(),
@@ -112,12 +252,139 @@ CREATE TABLE IF NOT EXISTS staff (
   accumulated_leave INT DEFAULT 0,
   wallet_balance DECIMAL(12,2) DEFAULT 0,
   discount_percent DECIMAL(5,2) DEFAULT 0,
+  default_location_id VARCHAR(64),
+  assigned_location_ids JSON DEFAULT JSON_ARRAY(),
   metrics JSON DEFAULT JSON_OBJECT(),
   badges JSON DEFAULT JSON_ARRAY(),
   rank VARCHAR(128),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS staff_shifts (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  staff_id VARCHAR(64) NOT NULL,
+  staff_name VARCHAR(255) NOT NULL,
+  role VARCHAR(32),
+  shift_date DATE NOT NULL,
+  start_at DATETIME NOT NULL,
+  end_at DATETIME NOT NULL,
+  status ENUM('draft','published','cancelled','completed') DEFAULT 'draft',
+  location_id VARCHAR(64),
+  break_minutes_planned INT DEFAULT 0,
+  notes TEXT,
+  published_at DATETIME,
+  published_by VARCHAR(64),
+  published_by_name VARCHAR(255),
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_staff_shifts_roster (tenant_id, shift_date, status),
+  KEY idx_staff_shifts_staff (tenant_id, staff_id, shift_date),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS staff_attendance (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  staff_id VARCHAR(64) NOT NULL,
+  staff_name VARCHAR(255) NOT NULL,
+  shift_id VARCHAR(64),
+  status ENUM('open','closed') DEFAULT 'open',
+  clock_in_at DATETIME NOT NULL,
+  clock_out_at DATETIME,
+  break_started_at DATETIME,
+  break_minutes INT DEFAULT 0,
+  scheduled_minutes INT DEFAULT 0,
+  worked_minutes INT DEFAULT 0,
+  regular_minutes INT DEFAULT 0,
+  overtime_minutes INT DEFAULT 0,
+  pay_rate DECIMAL(12,2) DEFAULT 0,
+  pay_type ENUM('hourly','salary') DEFAULT 'hourly',
+  payroll_amount DECIMAL(12,2) DEFAULT 0,
+  note TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_staff_attendance_staff (tenant_id, staff_id, clock_in_at),
+  KEY idx_staff_attendance_status (tenant_id, status),
+  KEY idx_staff_attendance_shift (tenant_id, shift_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+  FOREIGN KEY (shift_id) REFERENCES staff_shifts(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS tip_pool_rules (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  status ENUM('active','inactive') DEFAULT 'active',
+  distribution_method ENUM('worked_hours','equal_shift','role_weighted') DEFAULT 'worked_hours',
+  source ENUM('sale_tips') DEFAULT 'sale_tips',
+  included_roles JSON DEFAULT JSON_ARRAY(),
+  role_weights JSON DEFAULT JSON_OBJECT(),
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_tip_pool_rules_status (tenant_id, status),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tip_pool_payouts (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  rule_id VARCHAR(64) NOT NULL,
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,
+  staff_id VARCHAR(64) NOT NULL,
+  staff_name VARCHAR(255) NOT NULL,
+  attendance_id VARCHAR(64),
+  shift_id VARCHAR(64),
+  shift_date DATE,
+  worked_minutes INT DEFAULT 0,
+  weight DECIMAL(12,4) DEFAULT 0,
+  tip_pool_amount DECIMAL(12,2) DEFAULT 0,
+  payout_amount DECIMAL(12,2) DEFAULT 0,
+  status ENUM('draft','approved','paid','void') DEFAULT 'draft',
+  generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  generated_by VARCHAR(64),
+  generated_by_name VARCHAR(255),
+  approved_at DATETIME,
+  approved_by VARCHAR(64),
+  approved_by_name VARCHAR(255),
+  paid_at DATETIME,
+  paid_by VARCHAR(64),
+  paid_by_name VARCHAR(255),
+  notes TEXT,
+  KEY idx_tip_pool_payouts_period (tenant_id, period_start, period_end, status),
+  KEY idx_tip_pool_payouts_staff (tenant_id, staff_id, shift_date),
+  KEY idx_tip_pool_payouts_rule (tenant_id, rule_id, period_start, period_end),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (rule_id) REFERENCES tip_pool_rules(id) ON DELETE CASCADE,
+  FOREIGN KEY (attendance_id) REFERENCES staff_attendance(id) ON DELETE SET NULL,
+  FOREIGN KEY (shift_id) REFERENCES staff_shifts(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS staff_coaching_notes (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  staff_id VARCHAR(64) NOT NULL,
+  staff_name VARCHAR(255) NOT NULL,
+  note_type ENUM('coaching','recognition','warning','follow_up') DEFAULT 'coaching',
+  title VARCHAR(255) NOT NULL,
+  note TEXT NOT NULL,
+  source ENUM('manager','ai','performance') DEFAULT 'manager',
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_staff_coaching_notes_staff (tenant_id, staff_id, created_at),
+  KEY idx_staff_coaching_notes_type (tenant_id, note_type, created_at),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS workstations (
@@ -146,6 +413,49 @@ CREATE TABLE IF NOT EXISTS companion_device_assignments (
   FOREIGN KEY (workstation_id) REFERENCES workstations(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS hardware_devices (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  device_type ENUM('receipt_printer','kitchen_printer','cash_drawer','scale','barcode_scanner','pole_display','card_terminal') NOT NULL,
+  connection_type ENUM('browser_print','escpos_network','escpos_usb','serial','webserial','webhid','keyboard_wedge','local_bridge','payment_provider') NOT NULL,
+  status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+  workstation_id VARCHAR(64),
+  is_default BOOLEAN DEFAULT FALSE,
+  connection_config JSON DEFAULT JSON_OBJECT(),
+  capabilities JSON DEFAULT JSON_ARRAY(),
+  last_check_status VARCHAR(32),
+  last_check_message TEXT,
+  last_checked_at DATETIME,
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_hardware_devices_tenant_type (tenant_id, device_type, status),
+  INDEX idx_hardware_devices_workstation (tenant_id, workstation_id, device_type),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (workstation_id) REFERENCES workstations(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS hardware_device_events (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  device_id VARCHAR(64),
+  event_type VARCHAR(64) NOT NULL,
+  command_type VARCHAR(64) NOT NULL,
+  status ENUM('queued','sent','failed','skipped') NOT NULL DEFAULT 'queued',
+  request_payload JSON DEFAULT JSON_OBJECT(),
+  response_payload JSON DEFAULT JSON_OBJECT(),
+  error_message TEXT,
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_hardware_device_events_tenant (tenant_id, created_at),
+  INDEX idx_hardware_device_events_device (tenant_id, device_id, created_at),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (device_id) REFERENCES hardware_devices(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS sales (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
@@ -157,12 +467,15 @@ CREATE TABLE IF NOT EXISTS sales (
   tax_amount DECIMAL(12,2) DEFAULT 0,
   tax_rate DECIMAL(5,2) DEFAULT 0,
   tax_inclusive BOOLEAN DEFAULT FALSE,
-  payment_method ENUM('cash','payfast','card','wallet','account','pending') DEFAULT 'pending',
+  payment_method ENUM('cash','payfast','card','wallet','account','qr','bnpl','pending') DEFAULT 'pending',
   tendered_amount DECIMAL(12,2) DEFAULT 0,
   change_amount DECIMAL(12,2) DEFAULT 0,
   tip_amount DECIMAL(12,2) DEFAULT 0,
   cash_out_amount DECIMAL(12,2) DEFAULT 0,
   points_discount DECIMAL(12,2) DEFAULT 0,
+  promotion_id VARCHAR(64),
+  promotion_code VARCHAR(64),
+  promotion_discount DECIMAL(12,2) DEFAULT 0,
   status ENUM('pending','completed','failed','open','kitchen') DEFAULT 'pending',
   transaction_type VARCHAR(24) DEFAULT 'sale',
   parent_sale_id VARCHAR(64),
@@ -204,15 +517,189 @@ CREATE TABLE IF NOT EXISTS sale_items (
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS delivery_orders (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  provider ENUM('uber_eats','mr_d') NOT NULL,
+  external_order_id VARCHAR(128) NOT NULL,
+  status ENUM('new','accepted','preparing','ready','dispatched','completed','cancelled') NOT NULL DEFAULT 'new',
+  customer_name VARCHAR(255),
+  customer_phone VARCHAR(64),
+  delivery_address TEXT,
+  subtotal DECIMAL(12,2) DEFAULT 0,
+  delivery_fee DECIMAL(12,2) DEFAULT 0,
+  tip_amount DECIMAL(12,2) DEFAULT 0,
+  discount_amount DECIMAL(12,2) DEFAULT 0,
+  total DECIMAL(12,2) DEFAULT 0,
+  currency VARCHAR(8) DEFAULT 'ZAR',
+  placed_at DATETIME,
+  accepted_at DATETIME,
+  due_at DATETIME,
+  sale_id VARCHAR(64),
+  raw_payload JSON DEFAULT JSON_OBJECT(),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_delivery_orders_external (tenant_id, provider, external_order_id),
+  INDEX idx_delivery_orders_status (tenant_id, status, placed_at),
+  INDEX idx_delivery_orders_provider (tenant_id, provider, placed_at),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS delivery_order_items (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  delivery_order_id VARCHAR(64) NOT NULL,
+  external_item_id VARCHAR(128),
+  product_id VARCHAR(64),
+  product_name VARCHAR(255) NOT NULL,
+  quantity DECIMAL(12,3) DEFAULT 1,
+  price DECIMAL(12,2) DEFAULT 0,
+  note TEXT,
+  modifiers JSON DEFAULT JSON_ARRAY(),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_delivery_order_items_order (tenant_id, delivery_order_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (delivery_order_id) REFERENCES delivery_orders(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS integration_api_keys (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  key_hash CHAR(64) NOT NULL,
+  key_prefix VARCHAR(32) NOT NULL,
+  scopes JSON DEFAULT JSON_ARRAY(),
+  status ENUM('active','revoked') NOT NULL DEFAULT 'active',
+  last_used_at DATETIME,
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  revoked_at DATETIME,
+  revoked_by VARCHAR(64),
+  revoked_by_name VARCHAR(255),
+  UNIQUE KEY uniq_integration_api_keys_hash (key_hash),
+  INDEX idx_integration_api_keys_tenant (tenant_id, status, created_at),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS integration_webhook_events (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  api_key_id VARCHAR(64),
+  source VARCHAR(80) NOT NULL,
+  event_type VARCHAR(80) NOT NULL,
+  idempotency_key VARCHAR(160) NOT NULL,
+  status ENUM('received','applied','failed','duplicate') NOT NULL DEFAULT 'received',
+  entity_type VARCHAR(80),
+  entity_id VARCHAR(64),
+  payload JSON DEFAULT JSON_OBJECT(),
+  result JSON DEFAULT JSON_OBJECT(),
+  error_message TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  processed_at DATETIME,
+  UNIQUE KEY uniq_integration_webhook_events_idempotency (tenant_id, source, idempotency_key),
+  INDEX idx_integration_webhook_events_tenant (tenant_id, created_at),
+  INDEX idx_integration_webhook_events_status (tenant_id, status, created_at),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (api_key_id) REFERENCES integration_api_keys(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS promotions (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  code VARCHAR(64) NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  description TEXT,
+  status ENUM('active','inactive') DEFAULT 'active',
+  discount_type ENUM('percent','fixed') DEFAULT 'percent',
+  discount_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+  starts_at DATETIME,
+  ends_at DATETIME,
+  min_subtotal DECIMAL(12,2) DEFAULT 0,
+  max_discount_amount DECIMAL(12,2),
+  applies_to ENUM('cart','products','categories') DEFAULT 'cart',
+  target_product_ids JSON DEFAULT JSON_ARRAY(),
+  target_categories JSON DEFAULT JSON_ARRAY(),
+  customer_scope ENUM('all','selected','no_customer') DEFAULT 'all',
+  target_customer_ids JSON DEFAULT JSON_ARRAY(),
+  total_redemption_limit INT,
+  per_customer_limit INT,
+  redemption_count INT DEFAULT 0,
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_promotions_tenant_code (tenant_id, code),
+  KEY idx_promotions_status_window (tenant_id, status, starts_at, ends_at),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS promotion_redemptions (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  promotion_id VARCHAR(64) NOT NULL,
+  promotion_code VARCHAR(64) NOT NULL,
+  sale_id VARCHAR(64) NOT NULL,
+  customer_id VARCHAR(64),
+  staff_id VARCHAR(64),
+  discount_amount DECIMAL(12,2) DEFAULT 0,
+  subtotal DECIMAL(12,2) DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_promotion_redemptions_promotion (tenant_id, promotion_id, created_at),
+  KEY idx_promotion_redemptions_customer (tenant_id, promotion_id, customer_id),
+  KEY idx_promotion_redemptions_sale (tenant_id, sale_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE CASCADE,
+  FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tax_periods (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  period_start DATETIME NOT NULL,
+  period_end DATETIME NOT NULL,
+  status ENUM('locked') DEFAULT 'locked',
+  locked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  locked_by VARCHAR(64),
+  locked_by_name VARCHAR(255),
+  lock_note TEXT,
+  currency VARCHAR(8) DEFAULT 'ZAR',
+  standard_rate DECIMAL(5,2) DEFAULT 15,
+  gross_sales DECIMAL(12,2) DEFAULT 0,
+  taxable_sales DECIMAL(12,2) DEFAULT 0,
+  zero_rated_sales DECIMAL(12,2) DEFAULT 0,
+  exempt_sales DECIMAL(12,2) DEFAULT 0,
+  output_tax DECIMAL(12,2) DEFAULT 0,
+  input_tax DECIMAL(12,2) DEFAULT 0,
+  net_vat_payable DECIMAL(12,2) DEFAULT 0,
+  invoice_count INT DEFAULT 0,
+  refund_count INT DEFAULT 0,
+  summary_snapshot LONGTEXT,
+  report_snapshot LONGTEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_tax_periods_tenant_range (tenant_id, period_start, period_end),
+  KEY idx_tax_periods_range (tenant_id, period_start, period_end),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS sale_payments (
   id VARCHAR(64) PRIMARY KEY,
   sale_id VARCHAR(64) NOT NULL,
-  method ENUM('cash','payfast','card','wallet','account') NOT NULL,
+  method ENUM('cash','payfast','card','wallet','account','qr','bnpl') NOT NULL,
   amount DECIMAL(12,2) NOT NULL DEFAULT 0,
   tendered_amount DECIMAL(12,2) DEFAULT 0,
   change_amount DECIMAL(12,2) DEFAULT 0,
   tip_amount DECIMAL(12,2) DEFAULT 0,
   cash_out_amount DECIMAL(12,2) DEFAULT 0,
+  provider VARCHAR(64),
+  provider_device_id VARCHAR(128),
+  provider_reference VARCHAR(255),
+  authorization_code VARCHAR(128),
+  provider_status VARCHAR(32) DEFAULT 'confirmed',
+  provider_note TEXT,
+  qr_payload TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
@@ -280,6 +767,9 @@ CREATE TABLE IF NOT EXISTS layby_payments (
   staff_name VARCHAR(255),
   cash_session_id VARCHAR(64),
   note TEXT,
+  location_id VARCHAR(64),
+  from_location_id VARCHAR(64),
+  to_location_id VARCHAR(64),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_layby_payments_order (layby_order_id, created_at),
   FOREIGN KEY (layby_order_id) REFERENCES layby_orders(id) ON DELETE CASCADE
@@ -473,6 +963,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   INDEX idx_stock_movements_product (tenant_id, product_id),
   INDEX idx_stock_movements_sale (tenant_id, sale_id),
   INDEX idx_stock_movements_reason_code (tenant_id, reason_code, created_at),
+  INDEX idx_stock_movements_location (tenant_id, location_id, created_at),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
@@ -501,6 +992,29 @@ CREATE TABLE IF NOT EXISTS manager_tasks (
   INDEX idx_manager_tasks_tenant_status (tenant_id, status, updated_at),
   INDEX idx_manager_tasks_source (tenant_id, source_type, source_id),
   INDEX idx_manager_tasks_assigned (tenant_id, assigned_to),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS manager_overrides (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  override_type VARCHAR(64) NOT NULL DEFAULT 'manager_task',
+  target_type VARCHAR(64) NOT NULL,
+  target_id VARCHAR(128) NOT NULL,
+  action VARCHAR(64) NOT NULL,
+  status VARCHAR(64),
+  reason TEXT NOT NULL,
+  requested_by VARCHAR(64),
+  approved_by VARCHAR(64),
+  approved_by_name VARCHAR(255),
+  related_sale_id VARCHAR(64),
+  related_product_id VARCHAR(64),
+  source VARCHAR(64) DEFAULT 'manager_action_center',
+  details JSON DEFAULT JSON_OBJECT(),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_manager_overrides_tenant_created (tenant_id, created_at),
+  INDEX idx_manager_overrides_target (tenant_id, target_type, target_id),
+  INDEX idx_manager_overrides_approved_by (tenant_id, approved_by, created_at),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
@@ -673,6 +1187,43 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS event_bookings (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  customer_id VARCHAR(64),
+  customer_name VARCHAR(255),
+  contact_phone VARCHAR(64),
+  contact_email VARCHAR(255),
+  title VARCHAR(255) NOT NULL,
+  event_type ENUM('private','public','restaurant','catering','other') NOT NULL DEFAULT 'private',
+  status ENUM('inquiry','confirmed','in_progress','completed','cancelled') NOT NULL DEFAULT 'inquiry',
+  start_at DATETIME NOT NULL,
+  end_at DATETIME,
+  guest_count INT DEFAULT 0,
+  table_numbers JSON DEFAULT JSON_ARRAY(),
+  table_ids JSON DEFAULT JSON_ARRAY(),
+  deposit_amount DECIMAL(12,2) DEFAULT 0,
+  deposit_status ENUM('none','unpaid','paid','refunded') DEFAULT 'none',
+  deposit_due_at DATETIME,
+  deposit_paid_at DATETIME,
+  deposit_reference VARCHAR(128),
+  menu_notes TEXT,
+  internal_notes TEXT,
+  reminder_at DATETIME,
+  reminder_status ENUM('none','pending','sent','failed','skipped') DEFAULT 'none',
+  reminder_sent_at DATETIME,
+  reminder_note TEXT,
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_event_bookings_calendar (tenant_id, start_at, status),
+  INDEX idx_event_bookings_customer (tenant_id, customer_id),
+  INDEX idx_event_bookings_deposits (tenant_id, deposit_status, deposit_due_at),
+  INDEX idx_event_bookings_reminders (tenant_id, reminder_status, reminder_at),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS stock_batches (
   id VARCHAR(64) PRIMARY KEY,
   tenant_id VARCHAR(64) NOT NULL,
@@ -690,13 +1241,54 @@ CREATE TABLE IF NOT EXISTS stock_batches (
   received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   received_by VARCHAR(64),
   received_by_name VARCHAR(255),
+  location_id VARCHAR(64),
   status ENUM('active','depleted','expired') NOT NULL DEFAULT 'active',
   note TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_stock_batches_tenant_expiry (tenant_id, status, expiry_date),
   INDEX idx_stock_batches_product (tenant_id, product_id, status, expiry_date),
+  INDEX idx_stock_batches_location (tenant_id, location_id, status, expiry_date),
   INDEX idx_stock_batches_purchase_order (tenant_id, purchase_order_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS stock_transfer_orders (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  from_location_id VARCHAR(64) NOT NULL,
+  to_location_id VARCHAR(64) NOT NULL,
+  status ENUM('draft','requested','approved','in_transit','completed','cancelled') NOT NULL DEFAULT 'requested',
+  requested_by VARCHAR(64),
+  requested_by_name VARCHAR(255),
+  approved_by VARCHAR(64),
+  approved_by_name VARCHAR(255),
+  completed_by VARCHAR(64),
+  completed_by_name VARCHAR(255),
+  notes TEXT,
+  completed_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_stock_transfer_orders_status (tenant_id, status, updated_at),
+  INDEX idx_stock_transfer_orders_locations (tenant_id, from_location_id, to_location_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS stock_transfer_items (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  transfer_id VARCHAR(64) NOT NULL,
+  product_id VARCHAR(64) NOT NULL,
+  product_name VARCHAR(255) NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL DEFAULT 0,
+  from_previous_quantity DECIMAL(12,3) DEFAULT 0,
+  from_new_quantity DECIMAL(12,3) DEFAULT 0,
+  to_previous_quantity DECIMAL(12,3) DEFAULT 0,
+  to_new_quantity DECIMAL(12,3) DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_stock_transfer_items_transfer (tenant_id, transfer_id),
+  INDEX idx_stock_transfer_items_product (tenant_id, product_id),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
@@ -731,6 +1323,28 @@ CREATE TABLE IF NOT EXISTS reorder_recommendations (
   INDEX idx_reorder_recommendations_status (tenant_id, status, priority, updated_at),
   INDEX idx_reorder_recommendations_product (tenant_id, product_id, status),
   INDEX idx_reorder_recommendations_purchase_order (tenant_id, purchase_order_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS reorder_notification_rules (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+  location_id VARCHAR(64),
+  trigger_type ENUM('below_threshold','critical_only','days_cover') NOT NULL DEFAULT 'below_threshold',
+  priority ENUM('normal','high','critical') NOT NULL DEFAULT 'high',
+  days_of_cover INT DEFAULT 14,
+  vendor_id VARCHAR(64),
+  notify_roles JSON DEFAULT JSON_ARRAY(),
+  last_run_at DATETIME,
+  last_result JSON DEFAULT JSON_OBJECT(),
+  created_by VARCHAR(64),
+  created_by_name VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_reorder_notification_rules_status (tenant_id, status, location_id),
+  INDEX idx_reorder_notification_rules_location (tenant_id, location_id),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
@@ -937,7 +1551,13 @@ CREATE TABLE IF NOT EXISTS product_recipes (
   product_id VARCHAR(64) NOT NULL,
   bulk_item_id VARCHAR(64) NOT NULL,
   quantity DECIMAL(12,3) NOT NULL, -- e.g. 25.000 for ml
+  yield_quantity DECIMAL(12,3) DEFAULT 1,
+  waste_percent DECIMAL(5,2) DEFAULT 0,
+  substitute_group VARCHAR(64),
+  substitute_rank INT DEFAULT 0,
+  is_optional BOOLEAN DEFAULT FALSE,
   PRIMARY KEY (product_id, bulk_item_id),
+  INDEX idx_product_recipes_substitute_group (product_id, substitute_group, substitute_rank),
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
   FOREIGN KEY (bulk_item_id) REFERENCES bulk_items(id) ON DELETE CASCADE
 );

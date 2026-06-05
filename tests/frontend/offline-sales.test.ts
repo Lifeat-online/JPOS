@@ -42,8 +42,18 @@ describe('offline sale queue', () => {
     });
     expect(getOfflineCheckoutBlock('account', undefined, true)).toMatchObject({ allowed: false });
     expect(getOfflineCheckoutBlock('payfast', undefined, true)).toMatchObject({ allowed: false });
+    expect(getOfflineCheckoutBlock('qr', undefined, true)).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining('QR'),
+    });
+    expect(getOfflineCheckoutBlock('bnpl', undefined, true)).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining('BNPL'),
+    });
     expect(getOfflineCheckoutBlock('split', [{ method: 'cash' }, { method: 'card' }], true)).toMatchObject({ allowed: true });
     expect(getOfflineCheckoutBlock('split', [{ method: 'cash' }, { method: 'wallet' }], true)).toMatchObject({ allowed: false });
+    expect(getOfflineCheckoutBlock('split', [{ method: 'cash' }, { method: 'qr' }], true)).toMatchObject({ allowed: false });
+    expect(getOfflineCheckoutBlock('split', [{ method: 'cash' }, { method: 'bnpl' }], true)).toMatchObject({ allowed: false });
   });
 
   it('stores queued sales with a local receipt number and pending sync status', () => {

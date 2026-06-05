@@ -56,7 +56,7 @@ type SaleDraft = {
   total: number;
   subtotal: number;
   taxAmount: number;
-  paymentMethod: "cash" | "payfast" | "card" | "wallet" | "account" | "pending";
+  paymentMethod: "cash" | "payfast" | "card" | "wallet" | "account" | "qr" | "bnpl" | "pending";
   tenderedAmount: number;
   changeAmount: number;
   tipAmount: number;
@@ -103,12 +103,19 @@ type SaleItemDraft = {
 type PaymentDraft = {
   id: string;
   saleId: string;
-  method: "cash" | "payfast" | "card" | "wallet" | "account";
+  method: "cash" | "payfast" | "card" | "wallet" | "account" | "qr" | "bnpl";
   amount: number;
   tenderedAmount: number;
   changeAmount: number;
   tipAmount: number;
   cashOutAmount: number;
+  provider?: string | null;
+  providerDeviceId?: string | null;
+  providerReference?: string | null;
+  authorizationCode?: string | null;
+  providerStatus?: string | null;
+  providerNote?: string | null;
+  qrPayload?: string | null;
   createdAt: string;
   updatedAt: string;
 };

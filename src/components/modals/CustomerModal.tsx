@@ -1,7 +1,23 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { X, Save, Loader2 } from 'lucide-react';
-import { Customer } from '../../types';
+import type { Customer, CustomerConsentStatus, CustomerConsentType } from '../../types';
+
+const CONSENT_FIELDS: Array<{ type: CustomerConsentType; label: string }> = [
+  { type: 'loyalty', label: 'Loyalty' },
+  { type: 'marketing', label: 'Marketing' },
+  { type: 'customer_portal', label: 'Customer portal' },
+  { type: 'stored_contact_details', label: 'Stored contact details' },
+  { type: 'promotions', label: 'Promotions' },
+  { type: 'ai_recommendations', label: 'AI recommendations' },
+];
+
+const CONSENT_STATUS_OPTIONS: Array<{ value: CustomerConsentStatus; label: string }> = [
+  { value: 'unknown', label: 'Unknown' },
+  { value: 'granted', label: 'Granted' },
+  { value: 'denied', label: 'Denied' },
+  { value: 'revoked', label: 'Revoked' },
+];
 
 interface CustomerModalProps {
   customer: Partial<Customer> | null;
@@ -21,6 +37,20 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
   const accountLimit = Number(customer.accountLimit || 0);
   const accountBalance = Number(customer.accountBalance || 0);
   const accountRemaining = Math.max(0, accountLimit - accountBalance);
+  const updateConsent = (type: CustomerConsentType, status: CustomerConsentStatus) => {
+    onChange({
+      ...customer,
+      consents: {
+        ...(customer.consents || {}),
+        [type]: {
+          ...(customer.consents?.[type] || {}),
+          consentType: type,
+          status,
+          source: 'customer_profile',
+        },
+      },
+    });
+  };
 
   return (
     <motion.div
@@ -93,6 +123,85 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
             <p className="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
               Applied automatically in the POS when this customer is selected.
             </p>
+          </div>
+
+          <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 dark:border-primary/30 dark:bg-primary/10 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Loyalty Status</label>
+                <select
+                  className={inputClass}
+                  value={customer.loyaltyMemberStatus || 'active'}
+                  onChange={e => onChange({ ...customer, loyaltyMemberStatus: e.target.value as Customer['loyaltyMemberStatus'] })}
+                >
+                  <option value="active">Active member</option>
+                  <option value="paused">Paused</option>
+                  <option value="opted_out">Opted out</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>Assigned Tier ID</label>
+                <input
+                  className={inputClass}
+                  value={customer.loyaltyTierId || ''}
+                  onChange={e => onChange({ ...customer, loyaltyTierId: e.target.value || null })}
+                  placeholder="Optional tier override"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Membership Card ID</label>
+                <input
+                  className={inputClass}
+                  value={customer.membershipCardId || ''}
+                  onChange={e => onChange({ ...customer, membershipCardId: e.target.value || null })}
+                  placeholder="CARD-0001"
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Membership Barcode</label>
+                <input
+                  className={inputClass}
+                  value={customer.membershipBarcode || ''}
+                  onChange={e => onChange({ ...customer, membershipBarcode: e.target.value || null })}
+                  placeholder="Scan or type barcode"
+                />
+              </div>
+            </div>
+            <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              Active loyalty members can earn and redeem points. Card IDs and barcodes are optional lookup references.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-900/50 dark:bg-sky-900/10">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <label className={labelClass}>Customer Consent</label>
+                <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  POPIA preferences for this profile.
+                </p>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-sky-600 shadow-sm dark:bg-slate-900 dark:text-sky-300">
+                Tracked
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {CONSENT_FIELDS.map(field => (
+                <div key={field.type} className="space-y-1">
+                  <label className={labelClass}>{field.label}</label>
+                  <select
+                    className={inputClass}
+                    value={(customer.consents?.[field.type]?.status as CustomerConsentStatus | undefined) || 'unknown'}
+                    onChange={e => updateConsent(field.type, e.target.value as CustomerConsentStatus)}
+                  >
+                    {CONSENT_STATUS_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-slate-50/70 dark:bg-[#0B1120] p-4 space-y-4">

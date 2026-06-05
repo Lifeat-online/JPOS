@@ -4,7 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
-import type { AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, LaybyOrder, LaybyPaymentMethod, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, ReorderRecommendation, StockTakeSuggestion, StockValuationReport } from './types';
+import type { AccountingJournalReport, AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, CustomerCampaignExport, CustomerConsentMap, CustomerDataExport, DeliveryOrder, DeliveryOrderStatus, EcommerceMarketplaceExport, EventBooking, HardwareDevice, HardwareDeviceEvent, IntegrationApiKey, IntegrationWebhookEvent, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, InventoryLocation, LaybyOrder, LaybyPaymentMethod, LoyaltyAwardResult, LoyaltyRewardRule, LoyaltyTier, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, MarginReport, OperationalReport, ProductLocationStock, Promotion, PromotionValidationResult, RecipeCostingReport, ReorderNotificationRule, ReorderRecommendation, RetentionApplyResult, RetentionPolicy, RetentionPreview, StaffAttendance, StaffAttendanceStatus, StaffCoachingNote, StaffPerformanceReport, StaffShift, StaffTimesheetReport, StockTakeSuggestion, StockTransferOrder, StockValuationReport, TaxPeriod, TipPoolReport, TipPoolRule, VatTaxReport } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
 let sessionCleared = false;
@@ -73,6 +73,54 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
 
 // ── Core fetch with auto-refresh ──────────────────────────────────────────────
 
+async function readJsonishBody(res: Response): Promise<{ raw: string; parsed: any | null }> {
+  const raw = await res.text();
+  if (!raw) return { raw, parsed: null };
+  try {
+    return { raw, parsed: JSON.parse(raw) };
+  } catch {
+    return { raw, parsed: null };
+  }
+}
+
+function isJsonMutation(init: RequestInit) {
+  const method = String(init.method || 'GET').toUpperCase();
+  const headers = init.headers as Record<string, string> | undefined;
+  const contentType = headers?.['Content-Type'] || headers?.['content-type'] || '';
+  return method !== 'GET'
+    && typeof init.body === 'string'
+    && contentType.toLowerCase().includes('application/json');
+}
+
+function withSensitiveVerification(init: RequestInit, credential: string, actionType?: string | null): RequestInit | null {
+  if (!isJsonMutation(init)) return null;
+  try {
+    const parsed = init.body ? JSON.parse(String(init.body)) : {};
+    const body = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    return {
+      ...init,
+      body: JSON.stringify({
+        ...body,
+        sensitiveVerification: {
+          actionType: actionType || body.sensitiveVerification?.actionType || undefined,
+          password: credential,
+          pin: credential,
+        },
+      }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function promptSensitiveCredential(parsed: any): string | null {
+  if (typeof window === 'undefined' || typeof window.prompt !== 'function') return null;
+  const label = parsed?.actionLabel || 'complete this sensitive action';
+  const credential = window.prompt(`Enter your password or PIN to ${label}.`);
+  const trimmed = credential?.trim();
+  return trimmed ? trimmed : null;
+}
+
 async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<T> {
   if (sessionCleared && getAccessToken()) {
     sessionCleared = false;
@@ -82,36 +130,46 @@ async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<
     throw new Error('Session expired. Please sign in again.');
   }
 
-  const doRequest = () => fetch(input, {
-    ...init,
+  const doRequest = (requestInit: RequestInit) => fetch(input, {
+    ...requestInit,
     headers: {
-      ...authHeaders(init.headers as Record<string, string>),
+      ...authHeaders(requestInit.headers as Record<string, string>),
     },
   });
 
-  let res = await doRequest();
+  let currentInit = init;
+  let res = await doRequest(currentInit);
 
   // If unauthorized, try to refresh once and retry
   if (res.status === 401) {
     const refreshed = await tryRefresh();
     if (refreshed) {
       sessionCleared = false;
-      res = await doRequest();
+      res = await doRequest(currentInit);
     } else {
       clearStoredSession();
       throw new Error('Session expired. Please sign in again.');
     }
   }
 
-  if (!res.ok) {
-    const body = await res.text();
-    try {
-      const parsed = JSON.parse(body);
-      const message = parsed?.error || parsed?.message || parsed?.detail;
-      if (message) throw new Error(String(message));
-    } catch (err) {
-      if (err instanceof Error && err.message && !err.message.startsWith('Unexpected')) throw err;
+  if (res.status === 428 && isJsonMutation(currentInit)) {
+    const { parsed } = await readJsonishBody(res);
+    if (parsed?.sensitiveActionRequired) {
+      const credential = promptSensitiveCredential(parsed);
+      const retryInit = credential ? withSensitiveVerification(currentInit, credential, parsed?.actionType) : null;
+      if (retryInit) {
+        currentInit = retryInit;
+        res = await doRequest(currentInit);
+      } else {
+        throw new Error(parsed?.error || 'Sensitive action verification required.');
+      }
     }
+  }
+
+  if (!res.ok) {
+    const { raw: body, parsed } = await readJsonishBody(res);
+    const message = parsed?.error || parsed?.message || parsed?.detail;
+    if (message) throw new Error(String(message));
     throw new Error(`API request failed [${res.status}]: ${body}`);
   }
 
@@ -140,8 +198,14 @@ export function apiPut<T>(path: string, data: unknown): Promise<T> {
   });
 }
 
-export function apiDelete<T>(path: string): Promise<T> {
-  return apiFetch<T>(path, { method: 'DELETE' });
+export function apiDelete<T>(path: string, data?: unknown): Promise<T> {
+  return apiFetch<T>(path, data === undefined
+    ? { method: 'DELETE' }
+    : {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,12 +224,158 @@ export function apiLogin(email: string, password: string, tenantId?: string) {
 // Tenant Data Queries
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function getTenantProducts(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/products`);
+export function getTwoFactorStatus() {
+  return apiGet<{ eligible: boolean; enabled: boolean; confirmedAt?: string | null }>('/api/auth/2fa');
+}
+
+export function startTwoFactorSetup() {
+  return apiPost<{ secret: string; otpauthUri: string }>('/api/auth/2fa/setup', {});
+}
+
+export function confirmTwoFactorSetup(code: string) {
+  return apiPost<{ enabled: boolean }>('/api/auth/2fa/confirm', { code });
+}
+
+export function disableTwoFactor(password: string, code: string) {
+  return apiPost<{ enabled: boolean }>('/api/auth/2fa/disable', { password, code });
+}
+
+export function revokeRefreshTokens(staffId?: string, reason = 'suspected_compromise') {
+  return apiPost<{ revoked: boolean; staffId: string }>('/api/auth/refresh-tokens/revoke', { staffId, reason });
+}
+
+export function getTenantProducts(tenantId: string, locationId?: string | null) {
+  const query = locationId ? `?locationId=${encodeURIComponent(locationId)}` : '';
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/products${query}`);
+}
+
+export function getInventoryLocations(tenantId: string) {
+  return apiGet<InventoryLocation[]>(`/api/mariadb/tenants/${tenantId}/inventory-locations`);
+}
+
+export function createInventoryLocation(tenantId: string, data: Partial<InventoryLocation>) {
+  return apiPost<InventoryLocation>(`/api/mariadb/tenants/${tenantId}/inventory-locations`, data);
+}
+
+export function updateInventoryLocation(tenantId: string, locationId: string, data: Partial<InventoryLocation>) {
+  return apiPut<InventoryLocation>(`/api/mariadb/tenants/${tenantId}/inventory-locations/${encodeURIComponent(locationId)}`, data);
+}
+
+export function getProductLocationStocks(tenantId: string, filters: { productId?: string | null; locationId?: string | null } = {}) {
+  const query = new URLSearchParams();
+  if (filters.productId) query.set('productId', filters.productId);
+  if (filters.locationId) query.set('locationId', filters.locationId);
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiGet<ProductLocationStock[]>(`/api/mariadb/tenants/${tenantId}/inventory-location-stock${suffix}`);
+}
+
+export function updateProductLocationStock(tenantId: string, data: {
+  productId: string;
+  locationId: string;
+  quantity: number;
+  minStock?: number;
+  reorderThreshold?: number;
+  note?: string | null;
+}) {
+  return apiPut<ProductLocationStock>(`/api/mariadb/tenants/${tenantId}/inventory-location-stock`, data);
+}
+
+export function getStockTransfers(tenantId: string, status?: string | null) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : '';
+  return apiGet<StockTransferOrder[]>(`/api/mariadb/tenants/${tenantId}/stock-transfers${query}`);
+}
+
+export function createStockTransfer(tenantId: string, data: {
+  fromLocationId: string;
+  toLocationId: string;
+  notes?: string | null;
+  items: Array<{ productId: string; productName?: string; quantity: number }>;
+}) {
+  return apiPost<StockTransferOrder>(`/api/mariadb/tenants/${tenantId}/stock-transfers`, data);
+}
+
+export function completeStockTransfer(tenantId: string, transferId: string) {
+  return apiPost<StockTransferOrder>(`/api/mariadb/tenants/${tenantId}/stock-transfers/${encodeURIComponent(transferId)}/complete`, {});
 }
 
 export function getTenantConfig(tenantId: string) {
   return apiGet<any>(`/api/mariadb/tenants/${tenantId}/config`);
+}
+
+export function getPromotions(tenantId: string) {
+  return apiGet<Promotion[]>(`/api/mariadb/tenants/${tenantId}/promotions`);
+}
+
+export function createPromotion(tenantId: string, data: Partial<Promotion>) {
+  return apiPost<Promotion>(`/api/mariadb/tenants/${tenantId}/promotions`, data);
+}
+
+export function updatePromotion(tenantId: string, promotionId: string, data: Partial<Promotion>) {
+  return apiPut<Promotion>(`/api/mariadb/tenants/${tenantId}/promotions/${encodeURIComponent(promotionId)}`, data);
+}
+
+export function validatePromotionCode(tenantId: string, data: {
+  code?: string | null;
+  promotionId?: string | null;
+  customerId?: string | null;
+  subtotal?: number;
+  totalBeforeDiscount?: number;
+  promotionDiscount?: number;
+  items: Array<{
+    id?: string | null;
+    productId?: string | null;
+    name?: string | null;
+    category?: string | null;
+    section?: string | null;
+    subCategory?: string | null;
+    price: number;
+    quantity: number;
+  }>;
+}) {
+  return apiPost<PromotionValidationResult>(`/api/mariadb/tenants/${tenantId}/promotions/validate`, data);
+}
+
+export function getLoyaltyTiers(tenantId: string) {
+  return apiGet<LoyaltyTier[]>(`/api/mariadb/tenants/${tenantId}/loyalty/tiers`);
+}
+
+export function createLoyaltyTier(tenantId: string, data: Partial<LoyaltyTier>) {
+  return apiPost<LoyaltyTier>(`/api/mariadb/tenants/${tenantId}/loyalty/tiers`, data);
+}
+
+export function updateLoyaltyTier(tenantId: string, tierId: string, data: Partial<LoyaltyTier>) {
+  return apiPut<LoyaltyTier>(`/api/mariadb/tenants/${tenantId}/loyalty/tiers/${encodeURIComponent(tierId)}`, data);
+}
+
+export function getLoyaltyRewardRules(tenantId: string) {
+  return apiGet<LoyaltyRewardRule[]>(`/api/mariadb/tenants/${tenantId}/loyalty/reward-rules`);
+}
+
+export function createLoyaltyRewardRule(tenantId: string, data: Partial<LoyaltyRewardRule>) {
+  return apiPost<LoyaltyRewardRule>(`/api/mariadb/tenants/${tenantId}/loyalty/reward-rules`, data);
+}
+
+export function updateLoyaltyRewardRule(tenantId: string, ruleId: string, data: Partial<LoyaltyRewardRule>) {
+  return apiPut<LoyaltyRewardRule>(`/api/mariadb/tenants/${tenantId}/loyalty/reward-rules/${encodeURIComponent(ruleId)}`, data);
+}
+
+export function previewLoyaltyAward(tenantId: string, data: {
+  customerId?: string | null;
+  subtotal?: number;
+  total?: number;
+  pointsRedeemed?: number;
+  items: Array<{
+    id?: string | null;
+    productId?: string | null;
+    name?: string | null;
+    category?: string | null;
+    section?: string | null;
+    subCategory?: string | null;
+    price: number;
+    quantity: number;
+  }>;
+}) {
+  return apiPost<LoyaltyAwardResult>(`/api/mariadb/tenants/${tenantId}/loyalty/preview`, data);
 }
 
 export type PushNotificationStatus = {
@@ -200,11 +410,57 @@ export function getReorderRecommendations(tenantId: string, status = 'open,in_re
   return apiGet<ReorderRecommendation[]>(`/api/mariadb/tenants/${tenantId}/reorder-recommendations?status=${encodeURIComponent(status)}`);
 }
 
-export function refreshReorderRecommendations(tenantId: string, data: { daysOfCover?: number; vendorId?: string | null } = {}) {
+export function refreshReorderRecommendations(tenantId: string, data: { daysOfCover?: number; vendorId?: string | null; locationId?: string | null } = {}) {
   return apiPost<{ created: number; updated: number; skippedApproved: number; recommendations: ReorderRecommendation[] }>(
     `/api/mariadb/tenants/${tenantId}/reorder-recommendations/refresh`,
     data
   );
+}
+
+export function getReorderNotificationRules(tenantId: string) {
+  return apiGet<ReorderNotificationRule[]>(`/api/mariadb/tenants/${tenantId}/reorder-notification-rules`);
+}
+
+export function getRecipeCostingReport(tenantId: string) {
+  return apiGet<RecipeCostingReport>(`/api/mariadb/tenants/${tenantId}/recipe-costing-report`);
+}
+
+export function getEventBookings(tenantId: string, filters: { from?: string; to?: string; status?: string; eventType?: string; reminderStatus?: string } = {}) {
+  const query = new URLSearchParams();
+  if (filters.from) query.set('from', filters.from);
+  if (filters.to) query.set('to', filters.to);
+  if (filters.status) query.set('status', filters.status);
+  if (filters.eventType) query.set('eventType', filters.eventType);
+  if (filters.reminderStatus) query.set('reminderStatus', filters.reminderStatus);
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiGet<EventBooking[]>(`/api/mariadb/tenants/${tenantId}/event-bookings${suffix}`);
+}
+
+export function createEventBooking(tenantId: string, data: Partial<EventBooking>) {
+  return apiPost<EventBooking>(`/api/mariadb/tenants/${tenantId}/event-bookings`, data);
+}
+
+export function updateEventBooking(tenantId: string, id: string, data: Partial<EventBooking>) {
+  return apiPut<EventBooking>(`/api/mariadb/tenants/${tenantId}/event-bookings/${encodeURIComponent(id)}`, data);
+}
+
+export function deleteEventBooking(tenantId: string, id: string) {
+  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/event-bookings/${encodeURIComponent(id)}`);
+}
+
+export function createReorderNotificationRule(tenantId: string, data: Partial<ReorderNotificationRule>) {
+  return apiPost<ReorderNotificationRule>(`/api/mariadb/tenants/${tenantId}/reorder-notification-rules`, data);
+}
+
+export function updateReorderNotificationRule(tenantId: string, id: string, data: Partial<ReorderNotificationRule>) {
+  return apiPut<ReorderNotificationRule>(`/api/mariadb/tenants/${tenantId}/reorder-notification-rules/${encodeURIComponent(id)}`, data);
+}
+
+export function runReorderNotificationRule(tenantId: string, id: string) {
+  return apiPost<{
+    rule: ReorderNotificationRule | null;
+    result: { created: number; updated: number; skippedApproved: number; recommendations: ReorderRecommendation[]; ruleRun?: Record<string, any> };
+  }>(`/api/mariadb/tenants/${tenantId}/reorder-notification-rules/${encodeURIComponent(id)}/run`, {});
 }
 
 export function approveReorderRecommendation(tenantId: string, id: string, data: { note?: string | null; vendorId?: string | null; quantity?: number; expectedPrice?: number; expectedDeliveryDate?: string | null } = {}) {
@@ -265,6 +521,10 @@ export function getManagerTasks(tenantId: string) {
   return apiGet<any>(`/api/mariadb/tenants/${tenantId}/action-center/tasks`);
 }
 
+export function getManagerOverrides(tenantId: string, limit = 20) {
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/manager-overrides?limit=${encodeURIComponent(String(limit))}`);
+}
+
 export function getManagerActivityHistory(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
@@ -294,9 +554,149 @@ export function exportManagerAuditReport(tenantId: string, filters: Record<strin
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<{ filename: string; mimeType: string; audience: string; count: number; summary: Record<string, number>; csv: string; generatedAt: string }>(
+  return apiGet<{
+    filename: string;
+    pdfFilename: string;
+    mimeType: string;
+    pdfMimeType: string;
+    audience: string;
+    count: number;
+    summary: Record<string, number>;
+    csv: string;
+    pdfBase64: string;
+    generatedAt: string;
+  }>(
     `/api/mariadb/tenants/${tenantId}/action-center/activity/report${query ? `?${query}` : ''}`
   );
+}
+
+export function exportPaymentProviderReconciliationReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<{
+    filename: string;
+    pdfFilename: string;
+    mimeType: string;
+    pdfMimeType: string;
+    count: number;
+    summary: Record<string, number>;
+    providerBreakdown: Array<{ label: string; count: number; amount: number }>;
+    statusBreakdown: Array<{ label: string; count: number; amount: number }>;
+    methodBreakdown: Array<{ label: string; count: number; amount: number }>;
+    payments: any[];
+    csv: string;
+    pdfBase64: string;
+    generatedAt: string;
+    pciBoundary: {
+      storedSensitiveCardData: false;
+      excludedFields: string[];
+      note: string;
+    };
+  }>(
+    `/api/mariadb/tenants/${tenantId}/payment-provider-reconciliation/report${query ? `?${query}` : ''}`
+  );
+}
+
+export function getTaxPeriods(tenantId: string, limit = 24) {
+  return apiGet<TaxPeriod[]>(`/api/mariadb/tenants/${tenantId}/tax/periods?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function exportVatTaxReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<VatTaxReport>(`/api/mariadb/tenants/${tenantId}/tax/vat-report${query ? `?${query}` : ''}`);
+}
+
+export function lockTaxPeriod(tenantId: string, data: { periodStart: string; periodEnd: string; note?: string | null }) {
+  return apiPost<{ period: TaxPeriod; report: VatTaxReport }>(`/api/mariadb/tenants/${tenantId}/tax/periods/lock`, data);
+}
+
+export function exportMarginReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<MarginReport>(`/api/mariadb/tenants/${tenantId}/reports/margins${query ? `?${query}` : ''}`);
+}
+
+export function exportOperationalReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<OperationalReport>(`/api/mariadb/tenants/${tenantId}/reports/operational${query ? `?${query}` : ''}`);
+}
+
+export function exportAccountingJournalReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<AccountingJournalReport>(`/api/mariadb/tenants/${tenantId}/reports/accounting-journal${query ? `?${query}` : ''}`);
+}
+
+export function exportEcommerceMarketplacePack(tenantId: string, filters: Record<string, string | number | boolean | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<EcommerceMarketplaceExport>(`/api/mariadb/tenants/${tenantId}/integrations/ecommerce/products-export${query ? `?${query}` : ''}`);
+}
+
+export function getIntegrationApiKeys(tenantId: string) {
+  return apiGet<IntegrationApiKey[]>(`/api/mariadb/tenants/${tenantId}/integrations/api-keys`);
+}
+
+export function createIntegrationApiKey(tenantId: string, data: { name?: string; scopes?: string[] }) {
+  return apiPost<{ key: IntegrationApiKey; secret: string }>(`/api/mariadb/tenants/${tenantId}/integrations/api-keys`, data);
+}
+
+export function revokeIntegrationApiKey(tenantId: string, keyId: string) {
+  return apiPost<IntegrationApiKey>(`/api/mariadb/tenants/${tenantId}/integrations/api-keys/${encodeURIComponent(keyId)}/revoke`, {});
+}
+
+export function getIntegrationWebhookEvents(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<IntegrationWebhookEvent[]>(`/api/mariadb/tenants/${tenantId}/integrations/webhook-events${query ? `?${query}` : ''}`);
+}
+
+export function getDeliveryOrders(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<DeliveryOrder[]>(`/api/mariadb/tenants/${tenantId}/integrations/delivery/orders${query ? `?${query}` : ''}`);
+}
+
+export function ingestDeliveryOrder(tenantId: string, payload: unknown) {
+  return apiPost<DeliveryOrder>(`/api/mariadb/tenants/${tenantId}/integrations/delivery/orders`, payload);
+}
+
+export function updateDeliveryOrderStatus(tenantId: string, orderId: string, status: DeliveryOrderStatus) {
+  return apiPut<DeliveryOrder>(`/api/mariadb/tenants/${tenantId}/integrations/delivery/orders/${encodeURIComponent(orderId)}/status`, { status });
 }
 
 export function decideManagerTask(tenantId: string, taskId: string, data: { action: string; note?: string; assignedTo?: string | null }) {
@@ -493,8 +893,36 @@ export function updateCustomer(tenantId: string, customerId: string, updates: an
   return apiPut<any>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}`, updates);
 }
 
-export function deleteCustomer(tenantId: string, customerId: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}`);
+export function deleteCustomer(tenantId: string, customerId: string, data: { reason?: string | null } = {}) {
+  return apiDelete<{
+    success: boolean;
+    mode: 'anonymized' | 'already_anonymized';
+    customerId: string;
+    anonymizedName: string;
+    retainedSaleCount?: number;
+    revokedConsentTypes?: string[];
+    blockers?: any[];
+  }>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}`, data);
+}
+
+export function getCustomerCampaignExport(tenantId: string, filters: { segment?: string; limit?: number } = {}) {
+  const query = new URLSearchParams();
+  if (filters.segment) query.set('segment', filters.segment);
+  if (filters.limit) query.set('limit', String(filters.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiGet<CustomerCampaignExport>(`/api/mariadb/tenants/${tenantId}/customers/campaign-export${suffix}`);
+}
+
+export function getCustomerConsents(tenantId: string, customerId: string) {
+  return apiGet<CustomerConsentMap>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}/consents`);
+}
+
+export function updateCustomerConsents(tenantId: string, customerId: string, consents: Partial<CustomerConsentMap>) {
+  return apiPut<CustomerConsentMap>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}/consents`, { consents });
+}
+
+export function getCustomerDataExport(tenantId: string, customerId: string) {
+  return apiGet<CustomerDataExport>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}/data-export`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -523,6 +951,39 @@ export function createWorkstation(tenantId: string, workstation: any) {
 
 export function deleteWorkstation(tenantId: string, workstationId: string) {
   return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/workstations/${workstationId}`);
+}
+
+export function getHardwareDevices(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || String(value).trim() === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGet<HardwareDevice[]>(`/api/mariadb/tenants/${tenantId}/hardware-devices${query ? `?${query}` : ''}`);
+}
+
+export function createHardwareDevice(tenantId: string, device: Partial<HardwareDevice>) {
+  return apiPost<HardwareDevice>(`/api/mariadb/tenants/${tenantId}/hardware-devices`, device);
+}
+
+export function updateHardwareDevice(tenantId: string, deviceId: string, device: Partial<HardwareDevice>) {
+  return apiPut<HardwareDevice>(`/api/mariadb/tenants/${tenantId}/hardware-devices/${encodeURIComponent(deviceId)}`, device);
+}
+
+export function deleteHardwareDevice(tenantId: string, deviceId: string) {
+  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/hardware-devices/${encodeURIComponent(deviceId)}`);
+}
+
+export function testHardwareDevice(tenantId: string, deviceId: string, context: Record<string, any> = {}) {
+  return apiPost<{ eventId: string; ready: boolean; message: string; dispatchMode: string; command: any; device: HardwareDevice }>(
+    `/api/mariadb/tenants/${tenantId}/hardware-devices/${encodeURIComponent(deviceId)}/test`,
+    context
+  );
+}
+
+export function getHardwareEvents(tenantId: string, limit = 25) {
+  return apiGet<HardwareDeviceEvent[]>(`/api/mariadb/tenants/${tenantId}/hardware-events?limit=${encodeURIComponent(String(limit))}`);
 }
 
 export function createTableSection(tenantId: string, section: any) {
@@ -587,14 +1048,29 @@ export function updateSaleStatus(tenantId: string, saleId: string, status: strin
   return apiPut<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}`, { status });
 }
 
+export function updateSalePaymentProviderStatus(tenantId: string, saleId: string, paymentId: string, data: {
+  provider?: string | null;
+  providerDeviceId?: string | null;
+  providerReference?: string | null;
+  authorizationCode?: string | null;
+  providerStatus: string;
+  providerNote?: string | null;
+}) {
+  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}/payments/${paymentId}/provider-status`, data);
+}
+
 export function refundSale(tenantId: string, saleId: string, data: {
   items: { saleItemId: string; quantity: number }[];
   reason: string;
-  method: 'cash' | 'card' | 'wallet';
+  method: 'cash' | 'card' | 'wallet' | 'bnpl';
   restock?: boolean;
   staffId?: string | null;
   staffName?: string | null;
   cashSessionId?: string | null;
+  provider?: string | null;
+  providerReference?: string | null;
+  providerStatus?: string | null;
+  providerNote?: string | null;
 }) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}/refund`, data);
 }
@@ -892,6 +1368,113 @@ export function setupTenant(data: any) {
 
 export function updateTenantConfig(tenantId: string, config: any) {
   return apiPut<any>(`/api/mariadb/tenants/${tenantId}/settings/app`, config);
+}
+
+function queryString(params: Record<string, string | number | undefined | null>) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') search.set(key, String(value));
+  });
+  const text = search.toString();
+  return text ? `?${text}` : '';
+}
+
+export function getStaffShifts(tenantId: string, params: { startDate?: string; endDate?: string; staffId?: string } = {}) {
+  return apiGet<StaffShift[]>(`/api/mariadb/tenants/${tenantId}/workforce/shifts${queryString(params)}`);
+}
+
+export function createStaffShift(tenantId: string, data: Partial<StaffShift>) {
+  return apiPost<StaffShift>(`/api/mariadb/tenants/${tenantId}/workforce/shifts`, data);
+}
+
+export function updateStaffShift(tenantId: string, shiftId: string, data: Partial<StaffShift>) {
+  return apiPut<StaffShift>(`/api/mariadb/tenants/${tenantId}/workforce/shifts/${encodeURIComponent(shiftId)}`, data);
+}
+
+export function cancelStaffShift(tenantId: string, shiftId: string) {
+  return apiDelete<StaffShift>(`/api/mariadb/tenants/${tenantId}/workforce/shifts/${encodeURIComponent(shiftId)}`);
+}
+
+export function publishStaffRoster(tenantId: string, data: { startDate: string; endDate: string }) {
+  return apiPost<{ startDate: string; endDate: string; shifts: StaffShift[] }>(`/api/mariadb/tenants/${tenantId}/workforce/roster/publish`, data);
+}
+
+export function getTimesheetPayrollReport(tenantId: string, params: { startDate?: string; endDate?: string; staffId?: string } = {}) {
+  return apiGet<StaffTimesheetReport>(`/api/mariadb/tenants/${tenantId}/workforce/timesheet-payroll${queryString(params)}`);
+}
+
+export function getStaffPerformanceReport(tenantId: string, params: { startDate?: string; endDate?: string; staffId?: string } = {}) {
+  return apiGet<StaffPerformanceReport>(`/api/mariadb/tenants/${tenantId}/workforce/staff-performance${queryString(params)}`);
+}
+
+export function addStaffCoachingNote(tenantId: string, data: {
+  staffId: string;
+  title: string;
+  note: string;
+  noteType?: StaffCoachingNote['noteType'];
+  source?: StaffCoachingNote['source'];
+}) {
+  return apiPost<StaffCoachingNote>(`/api/mariadb/tenants/${tenantId}/workforce/staff-performance/coaching-notes`, data);
+}
+
+export function getTipPoolRules(tenantId: string) {
+  return apiGet<TipPoolRule[]>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pool-rules`);
+}
+
+export function createTipPoolRule(tenantId: string, data: Partial<TipPoolRule>) {
+  return apiPost<TipPoolRule>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pool-rules`, data);
+}
+
+export function updateTipPoolRule(tenantId: string, ruleId: string, data: Partial<TipPoolRule>) {
+  return apiPut<TipPoolRule>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pool-rules/${encodeURIComponent(ruleId)}`, data);
+}
+
+export function previewTipPoolPayouts(tenantId: string, data: { ruleId?: string; startDate?: string; endDate?: string }) {
+  return apiPost<TipPoolReport>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pools/preview`, data);
+}
+
+export function generateTipPoolPayouts(tenantId: string, data: { ruleId?: string; startDate?: string; endDate?: string }) {
+  return apiPost<TipPoolReport>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pools/generate`, data);
+}
+
+export function getTipPoolPayouts(tenantId: string, params: { ruleId?: string; startDate?: string; endDate?: string; staffId?: string } = {}) {
+  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pool-payouts${queryString(params)}`);
+}
+
+export function getMyAttendanceStatus(tenantId: string, staffId?: string) {
+  return apiGet<StaffAttendanceStatus>(`/api/mariadb/tenants/${tenantId}/workforce/attendance/me${queryString({ staffId })}`);
+}
+
+export function clockInStaff(tenantId: string, data: { staffId?: string; shiftId?: string | null; at?: string; note?: string }) {
+  return apiPost<StaffAttendance>(`/api/mariadb/tenants/${tenantId}/workforce/clock-in`, data);
+}
+
+export function startStaffBreak(tenantId: string, data: { staffId?: string; at?: string } = {}) {
+  return apiPost<StaffAttendance>(`/api/mariadb/tenants/${tenantId}/workforce/break/start`, data);
+}
+
+export function endStaffBreak(tenantId: string, data: { staffId?: string; at?: string } = {}) {
+  return apiPost<StaffAttendance>(`/api/mariadb/tenants/${tenantId}/workforce/break/end`, data);
+}
+
+export function clockOutStaff(tenantId: string, data: { staffId?: string; at?: string; note?: string } = {}) {
+  return apiPost<StaffAttendance>(`/api/mariadb/tenants/${tenantId}/workforce/clock-out`, data);
+}
+
+export function getRetentionPolicy(tenantId: string) {
+  return apiGet<RetentionPolicy>(`/api/mariadb/tenants/${tenantId}/settings/retention-policy`);
+}
+
+export function updateRetentionPolicy(tenantId: string, policy: Partial<RetentionPolicy>) {
+  return apiPut<RetentionPolicy>(`/api/mariadb/tenants/${tenantId}/settings/retention-policy`, policy);
+}
+
+export function previewRetentionPolicy(tenantId: string, policy?: Partial<RetentionPolicy>) {
+  return apiPost<RetentionPreview>(`/api/mariadb/tenants/${tenantId}/settings/retention-policy/preview`, policy || {});
+}
+
+export function applyRetentionPolicy(tenantId: string, policy?: Partial<RetentionPolicy>) {
+  return apiPost<RetentionApplyResult>(`/api/mariadb/tenants/${tenantId}/settings/retention-policy/apply`, policy || {});
 }
 
 export function uploadTenantLogo(tenantId: string, data: { dataUrl: string; filename: string; mimeType: string }) {

@@ -3,10 +3,26 @@ import { AlertCircle, Ban, CheckCircle2, Clock, CreditCard, Hash, Loader2, Packa
 import { AppConfig, Sale, Customer } from '../types';
 import { getDate } from '../utils/date';
 import { Receipt } from '../components/Receipt';
-import { refundSale, voidSale } from '../api';
+import { refundSale, updateSalePaymentProviderStatus, voidSale } from '../api';
 import { usePosStore } from '../store/usePosStore';
 import { useBrowserOnlineStatus } from '../hooks/useBrowserOnlineStatus';
 import { WALLET_ONLINE_REQUIRED_MESSAGE } from '../utils/offlineGuards';
+
+type RefundMethod = 'cash' | 'card' | 'wallet' | 'bnpl';
+
+const providerStatusOptions = ['pending', 'confirmed', 'approved', 'settled', 'failed', 'reversed', 'refunded', 'partial_refund'];
+const bnplProviders = [
+  { id: 'payjustnow', label: 'PayJustNow' },
+  { id: 'mobicred', label: 'Mobicred' },
+  { id: 'payflex', label: 'PayFlex' },
+];
+
+function providerLabel(value?: string | null) {
+  const found = bnplProviders.find(provider => provider.id === value);
+  if (found) return found.label;
+  if (!value) return 'Provider';
+  return value.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+}
 
 interface HistoryViewProps {
   sales: Sale[];
@@ -26,11 +42,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [refundOpen, setRefundOpen] = useState(false);
   const [refundReason, setRefundReason] = useState('');
-  const [refundMethod, setRefundMethod] = useState<'cash' | 'card' | 'wallet'>('cash');
+  const [refundMethod, setRefundMethod] = useState<RefundMethod>('cash');
+  const [bnplRefundProvider, setBnplRefundProvider] = useState('payjustnow');
+  const [bnplRefundReference, setBnplRefundReference] = useState('');
+  const [bnplRefundNote, setBnplRefundNote] = useState('');
   const [restockRefund, setRestockRefund] = useState(true);
   const [refundQuantities, setRefundQuantities] = useState<Record<string, number>>({});
   const [isRefunding, setIsRefunding] = useState(false);
   const [refundError, setRefundError] = useState('');
+  const [providerDrafts, setProviderDrafts] = useState<Record<string, { provider: string; providerDeviceId: string; providerReference: string; authorizationCode: string; providerStatus: string; providerNote: string }>>({});
+  const [savingProviderPaymentId, setSavingProviderPaymentId] = useState<string | null>(null);
+  const [providerReconcileError, setProviderReconcileError] = useState('');
   const [voidOpen, setVoidOpen] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [restockVoid, setRestockVoid] = useState(true);
@@ -57,6 +79,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const selectedCustomer = selectedSale?.customerId
     ? customers.find(c => c.id === selectedSale.customerId)
     : null;
+  const selectedBnplPayment = useMemo(
+    () => selectedSale?.payments?.find(payment => payment.method === 'bnpl') || null,
+    [selectedSale]
+  );
   const selectedDate = selectedSale ? getDate(selectedSale.createdAt) : null;
   const selectedDateText = selectedDate && !isNaN(selectedDate.getTime())
     ? selectedDate.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
@@ -87,6 +113,25 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   }, [refundQuantities, refundableItems]);
   const refundTotal = selectedRefundLines.reduce((sum, line) => sum + line.amount, 0);
 
+  useEffect(() => {
+    const drafts: Record<string, { provider: string; providerDeviceId: string; providerReference: string; authorizationCode: string; providerStatus: string; providerNote: string }> = {};
+    selectedSale?.payments?.forEach(payment => {
+      if (payment.provider || payment.providerDeviceId || payment.providerReference || payment.authorizationCode || payment.providerNote || payment.method === 'card' || payment.method === 'qr' || payment.method === 'bnpl') {
+        drafts[payment.id] = {
+          provider: payment.provider || '',
+          providerDeviceId: payment.providerDeviceId || '',
+          providerReference: payment.providerReference || '',
+          authorizationCode: payment.authorizationCode || '',
+          providerStatus: payment.providerStatus || (payment.method === 'bnpl' ? 'approved' : 'confirmed'),
+          providerNote: payment.providerNote || '',
+        };
+      }
+    });
+    setProviderDrafts(drafts);
+    setProviderReconcileError('');
+    setSavingProviderPaymentId(null);
+  }, [selectedSale]);
+
   const printSelectedReceipt = () => {
     if (!selectedSale) return;
     window.print();
@@ -101,7 +146,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     });
     setRefundQuantities(initial);
     setRefundReason('');
-    setRefundMethod('cash');
+    const bnplPayment = selectedSale.payments?.find(payment => payment.method === 'bnpl');
+    setRefundMethod(bnplPayment ? 'bnpl' : 'cash');
+    setBnplRefundProvider(bnplPayment?.provider || 'payjustnow');
+    setBnplRefundReference('');
+    setBnplRefundNote('');
     setRestockRefund(true);
     setRefundError('');
     setApprovalMessage('');
@@ -127,6 +176,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       setRefundError(WALLET_ONLINE_REQUIRED_MESSAGE);
       return;
     }
+    if (refundMethod === 'bnpl' && isBrowserOffline) {
+      setRefundError('BNPL refunds need online provider confirmation.');
+      return;
+    }
+    if (refundMethod === 'bnpl' && bnplRefundReference.trim().length === 0) {
+      setRefundError('Capture the BNPL refund or reversal reference before continuing.');
+      return;
+    }
 
     setIsRefunding(true);
     try {
@@ -138,6 +195,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         staffId: currentUserStaff?.id || null,
         staffName: currentUserStaff?.name || null,
         cashSessionId: refundMethod === 'cash' ? activeSession?.id || null : null,
+        provider: refundMethod === 'bnpl' ? bnplRefundProvider : null,
+        providerReference: refundMethod === 'bnpl' ? bnplRefundReference.trim() : null,
+        providerNote: refundMethod === 'bnpl' ? (bnplRefundNote.trim() || refundReason.trim()) : null,
       });
       if (result?.approvalRequired) {
         setApprovalMessage(result.message || 'Refund request sent to the manager Action Center.');
@@ -154,6 +214,49 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       setRefundError(error?.message || 'Refund could not be completed.');
     } finally {
       setIsRefunding(false);
+    }
+  };
+
+  const updateProviderDraft = (paymentId: string, patch: Partial<{ provider: string; providerDeviceId: string; providerReference: string; authorizationCode: string; providerStatus: string; providerNote: string }>) => {
+    setProviderDrafts(drafts => ({
+      ...drafts,
+      [paymentId]: {
+        provider: '',
+        providerDeviceId: '',
+        providerReference: '',
+        authorizationCode: '',
+        providerStatus: 'pending',
+        providerNote: '',
+        ...(drafts[paymentId] || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const submitProviderReconciliation = async (paymentId: string) => {
+    if (!tenantId || !selectedSale) return;
+    const draft = providerDrafts[paymentId];
+    if (!draft?.providerStatus) {
+      setProviderReconcileError('Choose a provider status before saving.');
+      return;
+    }
+    setSavingProviderPaymentId(paymentId);
+    setProviderReconcileError('');
+    try {
+      const updated = await updateSalePaymentProviderStatus(tenantId, selectedSale.id, paymentId, {
+        provider: draft.provider || null,
+        providerDeviceId: draft.providerDeviceId || null,
+        providerReference: draft.providerReference || null,
+        authorizationCode: draft.authorizationCode || null,
+        providerStatus: draft.providerStatus,
+        providerNote: draft.providerNote || null,
+      });
+      setSelectedSale(updated);
+      await onSalesUpdated?.();
+    } catch (error: any) {
+      setProviderReconcileError(error?.message || 'Provider status could not be saved.');
+    } finally {
+      setSavingProviderPaymentId(null);
     }
   };
 
@@ -438,13 +541,94 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     <div className="bg-slate-50 dark:bg-slate-900 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
                       Payments
                     </div>
+                    {providerReconcileError && (
+                      <div className="border-b border-rose-100 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+                        {providerReconcileError}
+                      </div>
+                    )}
                     <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {selectedSale.payments.map(payment => (
-                        <div key={payment.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                          <span className="font-black uppercase text-slate-600 dark:text-slate-300">{payment.method}</span>
-                          <span className="font-black text-slate-900 dark:text-white">{currency}{Number(payment.amount || 0).toFixed(2)}</span>
-                        </div>
-                      ))}
+                      {selectedSale.payments.map(payment => {
+                        const hasProviderData = Boolean(payment.provider || payment.providerDeviceId || payment.providerReference || payment.authorizationCode || payment.providerNote || payment.method === 'card' || payment.method === 'qr' || payment.method === 'bnpl');
+                        const draft = providerDrafts[payment.id] || {
+                          provider: payment.provider || '',
+                          providerDeviceId: payment.providerDeviceId || '',
+                          providerReference: payment.providerReference || '',
+                          authorizationCode: payment.authorizationCode || '',
+                          providerStatus: payment.providerStatus || (payment.method === 'bnpl' ? 'approved' : 'confirmed'),
+                          providerNote: payment.providerNote || '',
+                        };
+                        return (
+                          <div key={payment.id} className="px-4 py-3 text-sm">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <span className="font-black uppercase text-slate-600 dark:text-slate-300">{payment.method}</span>
+                                {hasProviderData && (
+                                  <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    {draft.provider || payment.provider ? providerLabel(draft.provider || payment.provider) : 'Split bill'} / {draft.providerStatus || 'pending'}
+                                  </p>
+                                )}
+                              </div>
+                              <span className="font-black text-slate-900 dark:text-white">{currency}{Number(payment.amount || 0).toFixed(2)}</span>
+                            </div>
+
+                            {hasProviderData && (
+                              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                                <div className="grid gap-2 md:grid-cols-3">
+                                  <input
+                                    value={draft.provider}
+                                    onChange={event => updateProviderDraft(payment.id, { provider: event.target.value })}
+                                    placeholder="Provider"
+                                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-primary/50 dark:border-slate-700 dark:bg-slate-950"
+                                  />
+                                  <input
+                                    value={draft.providerDeviceId}
+                                    onChange={event => updateProviderDraft(payment.id, { providerDeviceId: event.target.value })}
+                                    placeholder="Device / terminal"
+                                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-primary/50 dark:border-slate-700 dark:bg-slate-950"
+                                  />
+                                  <input
+                                    value={draft.providerReference}
+                                    onChange={event => updateProviderDraft(payment.id, { providerReference: event.target.value })}
+                                    placeholder="Provider reference"
+                                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-primary/50 dark:border-slate-700 dark:bg-slate-950"
+                                  />
+                                  <input
+                                    value={draft.authorizationCode}
+                                    onChange={event => updateProviderDraft(payment.id, { authorizationCode: event.target.value })}
+                                    placeholder="Auth code"
+                                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-primary/50 dark:border-slate-700 dark:bg-slate-950"
+                                  />
+                                  <select
+                                    value={draft.providerStatus}
+                                    onChange={event => updateProviderDraft(payment.id, { providerStatus: event.target.value })}
+                                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-primary/50 dark:border-slate-700 dark:bg-slate-950"
+                                  >
+                                    {providerStatusOptions.map(status => (
+                                      <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    disabled={!isManagerRole || savingProviderPaymentId === payment.id}
+                                    onClick={() => submitProviderReconciliation(payment.id)}
+                                    title={isManagerRole ? 'Save provider status' : 'Manager access required'}
+                                    className="h-10 rounded-lg bg-primary px-4 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-50"
+                                  >
+                                    {savingProviderPaymentId === payment.id ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Save'}
+                                  </button>
+                                </div>
+                                <textarea
+                                  value={draft.providerNote}
+                                  onChange={event => updateProviderDraft(payment.id, { providerNote: event.target.value })}
+                                  placeholder="Optional reconciliation note"
+                                  rows={2}
+                                  className="mt-2 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold outline-none focus:border-primary/50 dark:border-slate-700 dark:bg-slate-950"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -566,9 +750,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Refund method</label>
-                      <div className="mt-2 grid grid-cols-3 gap-2">
-                        {(['cash', 'card', 'wallet'] as const).map(method => {
+                      <div className={`mt-2 grid gap-2 ${selectedBnplPayment ? 'grid-cols-4' : 'grid-cols-3'}`}>
+                        {((selectedBnplPayment ? ['cash', 'card', 'wallet', 'bnpl'] : ['cash', 'card', 'wallet']) as RefundMethod[]).map(method => {
                           const walletBlocked = method === 'wallet' && isBrowserOffline;
+                          const bnplBlocked = method === 'bnpl' && isBrowserOffline;
                           return (
                           <button
                             key={method}
@@ -578,10 +763,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                                 setRefundError(WALLET_ONLINE_REQUIRED_MESSAGE);
                                 return;
                               }
+                              if (bnplBlocked) {
+                                setRefundError('BNPL refunds need online provider confirmation.');
+                                return;
+                              }
                               setRefundMethod(method);
                             }}
-                            disabled={walletBlocked}
-                            title={walletBlocked ? WALLET_ONLINE_REQUIRED_MESSAGE : method}
+                            disabled={walletBlocked || bnplBlocked}
+                            title={walletBlocked ? WALLET_ONLINE_REQUIRED_MESSAGE : bnplBlocked ? 'BNPL refunds need online provider confirmation' : method}
                             className={`h-11 rounded-xl border text-xs font-black uppercase tracking-widest disabled:opacity-40 ${refundMethod === method ? 'border-primary bg-primary text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}
                           >
                             {method}
@@ -591,8 +780,34 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       </div>
                       {isBrowserOffline && (
                         <p className="mt-2 text-xs font-semibold text-amber-600 dark:text-amber-300">
-                          Wallet refunds are online-only.
+                          Wallet and BNPL refunds are online-only.
                         </p>
+                      )}
+                      {refundMethod === 'bnpl' && (
+                        <div className="mt-3 space-y-2 rounded-xl border border-fuchsia-100 bg-fuchsia-50 p-3 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20">
+                          <select
+                            value={bnplRefundProvider}
+                            onChange={event => setBnplRefundProvider(event.target.value)}
+                            className="h-10 w-full rounded-lg border border-fuchsia-200 bg-white px-3 text-xs font-bold outline-none focus:border-primary/50 dark:border-fuchsia-900 dark:bg-slate-950"
+                          >
+                            {bnplProviders.map(provider => (
+                              <option key={provider.id} value={provider.id}>{provider.label}</option>
+                            ))}
+                          </select>
+                          <input
+                            value={bnplRefundReference}
+                            onChange={event => setBnplRefundReference(event.target.value)}
+                            placeholder="BNPL refund or reversal reference"
+                            className="h-10 w-full rounded-lg border border-fuchsia-200 bg-white px-3 text-xs font-bold outline-none focus:border-primary/50 dark:border-fuchsia-900 dark:bg-slate-950"
+                          />
+                          <textarea
+                            value={bnplRefundNote}
+                            onChange={event => setBnplRefundNote(event.target.value)}
+                            rows={2}
+                            placeholder="Optional BNPL refund note"
+                            className="w-full resize-none rounded-lg border border-fuchsia-200 bg-white px-3 py-2 text-xs font-bold outline-none focus:border-primary/50 dark:border-fuchsia-900 dark:bg-slate-950"
+                          />
+                        </div>
                       )}
                     </div>
                     <label className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3">

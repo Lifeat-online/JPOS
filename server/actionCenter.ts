@@ -1,4 +1,5 @@
 import { query } from "./db.js";
+import { createSimplePdfBase64 } from "./pdfExport.js";
 
 function toNumber(value: unknown) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
@@ -172,6 +173,22 @@ function countBy(items: any[], keyFn: (item: any) => string | null | undefined) 
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function reportLabel(value: unknown) {
+  return clean(value) || "Unspecified";
+}
+
+function formatReportAmount(value: unknown) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "n/a";
+  return `R${amount.toFixed(2)}`;
+}
+
+function formatReportQuantity(value: unknown) {
+  const quantity = Number(value);
+  if (!Number.isFinite(quantity)) return "n/a";
+  return quantity.toFixed(3).replace(/\.?0+$/, "");
 }
 
 export async function getManagerActionCenter(tenantId: string) {
@@ -815,6 +832,24 @@ export async function getManagerAuditReport(tenantId: string, filters: ActivityF
   const titleOrSourceMatches = (pattern: RegExp) => items.filter((item: any) => (
     pattern.test(String(item.title || "")) || pattern.test(String(item.source || ""))
   )).length;
+  const summary = {
+    totalRows: items.length,
+    auditEvents: auditItems.length,
+    stockMovements: stockItems.length,
+    salesEvents: titleMatches(/^sale\./i),
+    cashEvents: titleOrSourceMatches(/cash|wallet/i),
+    permissionDenied: titleMatches(/^permission\.denied$/i),
+    authEvents: titleMatches(/^auth\./i),
+    settingsChanges: titleMatches(/^settings\./i),
+    customerChanges: titleMatches(/^customer\./i),
+    staffChanges: titleMatches(/^staff\./i),
+    aiEvents: titleMatches(/^ai\./i),
+    offlineEvents: titleMatches(/^offline\./i),
+  };
+  const actionBreakdown = countBy(auditItems, (item) => item.title).slice(0, 40);
+  const sourceBreakdown = countBy(items, (item) => item.source).slice(0, 25);
+  const staffBreakdown = countBy(items, (item) => item.staffName || item.staffId).slice(0, 25);
+  const stockReasonBreakdown = countBy(stockItems, (item) => item.reasonCode || item.subtitle).slice(0, 25);
 
   const header = [
     "section",
@@ -847,33 +882,33 @@ export async function getManagerAuditReport(tenantId: string, filters: ActivityF
   const rows: unknown[][] = [
     ["metadata", audience, generatedAt, "", "", "tenantId", tenantId, "", "", "", "", "", "", "", "", "", "", "", "report context", ""],
     ["metadata", audience, generatedAt, "", "", "filters", "", "", "", "", "", "", "", "", "", "", "", "", "report context", JSON.stringify(filterSummary)],
-    ["summary", audience, generatedAt, "", "", "totalRows", items.length, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "auditEvents", auditItems.length, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "stockMovements", stockItems.length, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "salesEvents", titleMatches(/^sale\./i), "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "cashEvents", titleOrSourceMatches(/cash|wallet/i), "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "permissionDenied", titleMatches(/^permission\.denied$/i), "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "authEvents", titleMatches(/^auth\./i), "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "settingsChanges", titleMatches(/^settings\./i), "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "customerChanges", titleMatches(/^customer\./i), "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "staffChanges", titleMatches(/^staff\./i), "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "aiEvents", titleMatches(/^ai\./i), "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
-    ["summary", audience, generatedAt, "", "", "offlineEvents", titleMatches(/^offline\./i), "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "totalRows", summary.totalRows, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "auditEvents", summary.auditEvents, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "stockMovements", summary.stockMovements, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "salesEvents", summary.salesEvents, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "cashEvents", summary.cashEvents, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "permissionDenied", summary.permissionDenied, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "authEvents", summary.authEvents, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "settingsChanges", summary.settingsChanges, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "customerChanges", summary.customerChanges, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "staffChanges", summary.staffChanges, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "aiEvents", summary.aiEvents, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
+    ["summary", audience, generatedAt, "", "", "offlineEvents", summary.offlineEvents, "", "", "", "", "", "", "", "", "", "", "", "report summary", ""],
   ];
 
-  for (const [action, count] of countBy(auditItems, (item) => item.title).slice(0, 40)) {
+  for (const [action, count] of actionBreakdown) {
     rows.push(["breakdown", audience, generatedAt, "", "", "action", action, "", "", "", "", "", "", "", "", "", count, "", "action breakdown", ""]);
   }
 
-  for (const [source, count] of countBy(items, (item) => item.source).slice(0, 25)) {
+  for (const [source, count] of sourceBreakdown) {
     rows.push(["breakdown", audience, generatedAt, "", "", "source", source, "", "", "", "", "", "", "", "", "", count, "", "source breakdown", ""]);
   }
 
-  for (const [staff, count] of countBy(items, (item) => item.staffName || item.staffId).slice(0, 25)) {
+  for (const [staff, count] of staffBreakdown) {
     rows.push(["breakdown", audience, generatedAt, "", "", "staff", staff, "", "", "", "", "", "", "", "", "", count, "", "staff breakdown", ""]);
   }
 
-  for (const [reason, count] of countBy(stockItems, (item) => item.reasonCode || item.subtitle).slice(0, 25)) {
+  for (const [reason, count] of stockReasonBreakdown) {
     rows.push(["breakdown", audience, generatedAt, "", "", "stockReason", reason, "", "", "", "", "", "", "", "", "", count, "", "stock breakdown", ""]);
   }
 
@@ -901,27 +936,72 @@ export async function getManagerAuditReport(tenantId: string, filters: ActivityF
       item.note || (item.details ? JSON.stringify(item.details) : ""),
     ]);
   }
+  const pdfBase64 = createSimplePdfBase64(`MasePOS ${audience} audit and accounting activity pack`, [
+    {
+      heading: "Summary",
+      rows: [
+        `Rows: ${summary.totalRows}`,
+        `Audit events: ${summary.auditEvents}`,
+        `Stock movements: ${summary.stockMovements}`,
+        `Sales events: ${summary.salesEvents}`,
+        `Cash and wallet events: ${summary.cashEvents}`,
+        `Permission denied: ${summary.permissionDenied}`,
+        `Auth events: ${summary.authEvents}`,
+        `Settings changes: ${summary.settingsChanges}`,
+        `Customer changes: ${summary.customerChanges}`,
+        `Staff changes: ${summary.staffChanges}`,
+        `AI events: ${summary.aiEvents}`,
+        `Offline events: ${summary.offlineEvents}`,
+      ],
+    },
+    {
+      heading: "Action breakdown",
+      rows: actionBreakdown.length
+        ? actionBreakdown.slice(0, 16).map(([action, count]) => [action, `${count} event${count === 1 ? "" : "s"}`])
+        : ["No audit actions in this report pack."],
+    },
+    {
+      heading: "Source breakdown",
+      rows: sourceBreakdown.length
+        ? sourceBreakdown.slice(0, 12).map(([source, count]) => [source, `${count} row${count === 1 ? "" : "s"}`])
+        : ["No source metadata in this report pack."],
+    },
+    {
+      heading: "Staff breakdown",
+      rows: staffBreakdown.length
+        ? staffBreakdown.slice(0, 12).map(([staff, count]) => [staff, `${count} row${count === 1 ? "" : "s"}`])
+        : ["No staff metadata in this report pack."],
+    },
+    {
+      heading: "Stock reason breakdown",
+      rows: stockReasonBreakdown.length
+        ? stockReasonBreakdown.slice(0, 12).map(([reason, count]) => [reason, `${count} movement${count === 1 ? "" : "s"}`])
+        : ["No stock movements in this report pack."],
+    },
+    {
+      heading: "Activity detail",
+      rows: items.slice(0, 30).map((item: any) => [
+        item.createdAt,
+        item.kind,
+        reportLabel(item.title),
+        reviewFocusForReport(audience, item),
+        item.staffName || item.staffId || "No staff",
+        item.customerId || item.productId || item.saleId || item.registerId || item.deviceId || "No entity",
+        item.kind === "stock" ? `qty ${formatReportQuantity(item.quantityDelta)}` : `amount ${formatReportAmount(amountForReport(item))}`,
+      ]),
+    },
+  ]);
 
   return {
     filename: `masepos-${audience}-audit-report-${new Date().toISOString().slice(0, 10)}.csv`,
+    pdfFilename: `masepos-${audience}-audit-report-${new Date().toISOString().slice(0, 10)}.pdf`,
     mimeType: "text/csv",
+    pdfMimeType: "application/pdf",
     audience,
     count: items.length,
-    summary: {
-      totalRows: items.length,
-      auditEvents: auditItems.length,
-      stockMovements: stockItems.length,
-      salesEvents: titleMatches(/^sale\./i),
-      cashEvents: titleOrSourceMatches(/cash|wallet/i),
-      permissionDenied: titleMatches(/^permission\.denied$/i),
-      authEvents: titleMatches(/^auth\./i),
-      settingsChanges: titleMatches(/^settings\./i),
-      customerChanges: titleMatches(/^customer\./i),
-      staffChanges: titleMatches(/^staff\./i),
-      aiEvents: titleMatches(/^ai\./i),
-      offlineEvents: titleMatches(/^offline\./i),
-    },
+    summary,
     csv: [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n"),
+    pdfBase64,
     generatedAt,
   };
 }

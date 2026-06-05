@@ -1,14 +1,16 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Plus, Minus, Package, ShieldCheck, Banknote, ChevronRight, ChevronDown, Edit, ClipboardCheck, X } from 'lucide-react';
-import { Product, AppConfig } from '../types';
+import { Search, Plus, Minus, Package, ShieldCheck, Banknote, ChevronRight, ChevronDown, Edit, ClipboardCheck, X, Download, RefreshCw, KeyRound, Webhook, Trash2, Copy } from 'lucide-react';
+import { Product, AppConfig, EcommerceMarketplaceExport, IntegrationApiKey, IntegrationWebhookEvent } from '../types';
 import { VendorManagementView } from '../components/VendorManagementView';
 import { PurchaseOrdersView } from '../components/PurchaseOrdersView';
-import { requestStockAdjustment } from '../api';
+import { createIntegrationApiKey, exportEcommerceMarketplacePack, getIntegrationApiKeys, getIntegrationWebhookEvents, requestStockAdjustment, revokeIntegrationApiKey } from '../api';
 import { usePosStore } from '../store/usePosStore';
 import { BulkInventoryView } from '../components/BulkInventoryView';
 import { InventoryAgentView } from '../components/InventoryAgentView';
 import { StockBatchesView } from '../components/StockBatchesView';
 import { ReorderRecommendationsView } from '../components/ReorderRecommendationsView';
+import { RecipeCostingView } from '../components/RecipeCostingView';
+import { InventoryLocationsView } from '../components/InventoryLocationsView';
 import { StockTakeView } from './StockTakeView';
 
 interface InventoryViewProps {
@@ -19,14 +21,32 @@ interface InventoryViewProps {
   onProductsUpdated?: () => void;
 }
 
+function saveCsvFile(csv: string, filename: string, mimeType = 'text/csv;charset=utf-8') {
+  const url = URL.createObjectURL(new Blob([csv], { type: mimeType }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function formatChannelDate(value: any) {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
 export const InventoryView: React.FC<InventoryViewProps> = ({
   products, config, onEditProduct, onAddProduct, onProductsUpdated,
 }) => {
   const tenantId = usePosStore(state => state.tenantId);
   const currentUserStaff = usePosStore(state => state.currentUserStaff);
-  const [tab, setTab] = useState<'products' | 'vendors' | 'purchaseOrders' | 'bulk' | 'copilot' | 'stocktake' | 'batches' | 'reorder'>(() => {
+  const [tab, setTab] = useState<'products' | 'channels' | 'vendors' | 'purchaseOrders' | 'bulk' | 'copilot' | 'stocktake' | 'batches' | 'reorder' | 'recipeCosting' | 'locations'>(() => {
     const queryTab = new URLSearchParams(window.location.search).get('tab');
-    return queryTab === 'stocktake' ? 'stocktake' : 'products';
+    return queryTab === 'stocktake' ? 'stocktake' : queryTab === 'locations' ? 'locations' : queryTab === 'recipeCosting' ? 'recipeCosting' : queryTab === 'channels' ? 'channels' : 'products';
   });
   const [search, setSearch] = useState('');
   const [section, setSection] = useState('All');
@@ -37,6 +57,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [adjustNote, setAdjustNote] = useState('');
   const [adjustMessage, setAdjustMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [isAdjusting, setIsAdjusting] = useState(false);
+  const [marketplacePack, setMarketplacePack] = useState<EcommerceMarketplaceExport | null>(null);
+  const [marketplaceLoading, setMarketplaceLoading] = useState(false);
+  const [marketplaceError, setMarketplaceError] = useState<string | null>(null);
+  const [marketplaceIncludeInactive, setMarketplaceIncludeInactive] = useState(false);
+  const [integrationKeys, setIntegrationKeys] = useState<IntegrationApiKey[]>([]);
+  const [integrationEvents, setIntegrationEvents] = useState<IntegrationWebhookEvent[]>([]);
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [integrationError, setIntegrationError] = useState<string | null>(null);
+  const [integrationKeyName, setIntegrationKeyName] = useState('ERP stock sync');
+  const [generatedIntegrationSecret, setGeneratedIntegrationSecret] = useState<string | null>(null);
+  const [creatingIntegrationKey, setCreatingIntegrationKey] = useState(false);
 
   const categoryTree = config?.categories || {};
   const SECTIONS = Object.keys(categoryTree);
@@ -141,18 +172,104 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       }
     : null;
 
+  const loadMarketplacePack = React.useCallback(async () => {
+    if (!tenantId) {
+      setMarketplacePack(null);
+      return;
+    }
+    setMarketplaceLoading(true);
+    setMarketplaceError(null);
+    try {
+      setMarketplacePack(await exportEcommerceMarketplacePack(tenantId, { includeInactive: marketplaceIncludeInactive }));
+    } catch (err: any) {
+      setMarketplaceError(err?.message || 'Unable to load marketplace exports.');
+    } finally {
+      setMarketplaceLoading(false);
+    }
+  }, [marketplaceIncludeInactive, tenantId]);
+
+  const loadIntegrationAccess = React.useCallback(async () => {
+    if (!tenantId) {
+      setIntegrationKeys([]);
+      setIntegrationEvents([]);
+      return;
+    }
+    setIntegrationLoading(true);
+    setIntegrationError(null);
+    try {
+      const [keys, events] = await Promise.all([
+        getIntegrationApiKeys(tenantId),
+        getIntegrationWebhookEvents(tenantId, { limit: 8 }),
+      ]);
+      setIntegrationKeys(keys);
+      setIntegrationEvents(events);
+    } catch (err: any) {
+      setIntegrationError(err?.message || 'Unable to load integration access.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  }, [tenantId]);
+
+  React.useEffect(() => {
+    if (tab === 'channels') {
+      void loadMarketplacePack();
+      void loadIntegrationAccess();
+    }
+  }, [loadIntegrationAccess, loadMarketplacePack, tab]);
+
+  const downloadMarketplaceTarget = (targetId: string) => {
+    const targetExport = (marketplacePack?.targetExports || []).find(target => target.targetId === targetId);
+    if (!targetExport) return;
+    saveCsvFile(targetExport.csv, targetExport.filename, targetExport.mimeType || 'text/csv;charset=utf-8');
+  };
+
+  const createChannelApiKey = async () => {
+    if (!tenantId) return;
+    setCreatingIntegrationKey(true);
+    setIntegrationError(null);
+    try {
+      const created = await createIntegrationApiKey(tenantId, {
+        name: integrationKeyName.trim() || 'ERP stock sync',
+        scopes: ['stock:write', 'products:read'],
+      });
+      setGeneratedIntegrationSecret(created.secret);
+      setIntegrationKeys(keys => [created.key, ...keys.filter(key => key.id !== created.key.id)]);
+      setIntegrationKeyName('ERP stock sync');
+    } catch (err: any) {
+      setIntegrationError(err?.message || 'Unable to create integration API key.');
+    } finally {
+      setCreatingIntegrationKey(false);
+    }
+  };
+
+  const revokeChannelApiKey = async (keyId: string) => {
+    if (!tenantId) return;
+    setIntegrationError(null);
+    try {
+      const revoked = await revokeIntegrationApiKey(tenantId, keyId);
+      setIntegrationKeys(keys => keys.map(key => (key.id === keyId ? revoked : key)));
+    } catch (err: any) {
+      setIntegrationError(err?.message || 'Unable to revoke integration API key.');
+    }
+  };
+
+  const copyGeneratedSecret = async () => {
+    if (!generatedIntegrationSecret || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(generatedIntegrationSecret);
+  };
+
   return (
     <div className="flex-1 p-4 lg:p-10 overflow-y-auto bg-slate-50 dark:bg-[#0B1120]">
       <div className="max-w-[1600px] mx-auto flex flex-col gap-8">
         {/* Sub-Tabs */}
         <div className="flex border-b border-slate-200 dark:border-slate-800 gap-6">
-          {(['products', 'stocktake', 'batches', 'reorder', 'bulk', 'vendors', 'purchaseOrders', 'copilot'] as const).map(t => (
+          {(['products', 'channels', 'stocktake', 'locations', 'batches', 'reorder', 'recipeCosting', 'bulk', 'vendors', 'purchaseOrders', 'copilot'] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`pb-4 px-2 text-sm font-bold transition-all capitalize ${tab === t ? 'border-b-2 border-primary text-primary' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
-              {t === 'purchaseOrders' ? 'Purchase Orders' : t === 'bulk' ? 'Bulk Inventory' : t === 'copilot' ? 'Copilot Agent' : t === 'stocktake' ? 'Stocktake' : t === 'batches' ? 'Batches' : t === 'reorder' ? 'Reorder' : t.charAt(0).toUpperCase() + t.slice(1)}
+              {t === 'purchaseOrders' ? 'Purchase Orders' : t === 'bulk' ? 'Bulk Inventory' : t === 'copilot' ? 'Copilot Agent' : t === 'stocktake' ? 'Stocktake' : t === 'batches' ? 'Batches' : t === 'reorder' ? 'Reorder' : t === 'recipeCosting' ? 'Recipe Costing' : t === 'locations' ? 'Locations' : t === 'channels' ? 'Channels' : t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
         </div>
@@ -176,12 +293,265 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
         )}
 
-        {tab === 'vendors' ? (
+        {tab === 'channels' ? (
+          <div className="space-y-6">
+            <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">
+                    <Package className="h-4 w-4" />
+                    Marketplace Channels
+                  </div>
+                  <h2 className="mt-2 text-3xl font-black text-slate-900 dark:text-white">Product Listing Exports</h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">
+                    {marketplacePack ? `${marketplacePack.summary.productCount} products ready` : 'Shopify, WooCommerce, and Takealot'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="inline-flex items-center gap-2 rounded-2xl bg-slate-100 px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={marketplaceIncludeInactive}
+                      onChange={event => setMarketplaceIncludeInactive(event.target.checked)}
+                      className="h-4 w-4 accent-primary"
+                    />
+                    Out of stock
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void loadMarketplacePack()}
+                    disabled={marketplaceLoading || !tenantId}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-black text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${marketplaceLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+              </div>
+
+              {marketplaceError && (
+                <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+                  {marketplaceError}
+                </div>
+              )}
+
+              <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <div className="text-xs font-black uppercase tracking-widest text-slate-400">Products</div>
+                  <div className="mt-1 text-3xl font-black text-slate-900 dark:text-white">{marketplacePack?.summary.productCount || 0}</div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <div className="text-xs font-black uppercase tracking-widest text-slate-400">Targets</div>
+                  <div className="mt-1 text-3xl font-black text-slate-900 dark:text-white">{marketplacePack?.summary.targetCount || 0}</div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <div className="text-xs font-black uppercase tracking-widest text-slate-400">Low Stock</div>
+                  <div className="mt-1 text-3xl font-black text-orange-500">{marketplacePack?.summary.lowStockCount || 0}</div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <div className="text-xs font-black uppercase tracking-widest text-slate-400">Listing Value</div>
+                  <div className="mt-1 text-3xl font-black text-slate-900 dark:text-white">R{(marketplacePack?.summary.inventoryValue || 0).toFixed(2)}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.9fr)]">
+              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">
+                      <KeyRound className="h-4 w-4" />
+                      ERP API Access
+                    </div>
+                    <h3 className="mt-2 text-2xl font-black text-slate-900 dark:text-white">Stock Sync Keys</h3>
+                    <p className="mt-1 text-xs font-bold text-slate-500">POST /api/integrations/{tenantId || ':tenantId'}/stock-sync</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadIntegrationAccess()}
+                    disabled={integrationLoading || !tenantId}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-2 text-sm font-black text-slate-700 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-100"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${integrationLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+
+                {integrationError && (
+                  <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+                    {integrationError}
+                  </div>
+                )}
+
+                {generatedIntegrationSecret && (
+                  <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+                    <div className="text-xs font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">New key secret</div>
+                    <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <code className="min-w-0 flex-1 overflow-x-auto rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-800 dark:bg-slate-950 dark:text-slate-100">
+                        {generatedIntegrationSecret}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => void copyGeneratedSecret()}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white"
+                      >
+                        <Copy className="h-4 w-4" />
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+                  <input
+                    type="text"
+                    value={integrationKeyName}
+                    onChange={event => setIntegrationKeyName(event.target.value)}
+                    className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-4 focus:ring-primary/10 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                    placeholder="Key name"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void createChannelApiKey()}
+                    disabled={creatingIntegrationKey || !tenantId}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-black text-white shadow-lg shadow-primary/20 disabled:opacity-50"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Create
+                  </button>
+                </div>
+
+                <div className="mt-6 space-y-3">
+                  {integrationKeys.map(key => (
+                    <div key={key.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="truncate text-sm font-black text-slate-900 dark:text-white">{key.name}</h4>
+                            <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-widest ${
+                              key.status === 'active'
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                                : 'bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                            }`}>
+                              {key.status}
+                            </span>
+                          </div>
+                          <div className="mt-2 text-xs font-bold text-slate-500">
+                            {key.keyPrefix}... · {key.scopes.join(', ')}
+                          </div>
+                          <div className="mt-1 text-[11px] font-bold text-slate-400">
+                            Last used {formatChannelDate(key.lastUsedAt)}
+                          </div>
+                        </div>
+                        {key.status === 'active' && (
+                          <button
+                            type="button"
+                            onClick={() => void revokeChannelApiKey(key.id)}
+                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600 transition hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300"
+                            aria-label={`Revoke ${key.name}`}
+                            title={`Revoke ${key.name}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {integrationKeys.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400 dark:border-slate-700 dark:bg-slate-950">
+                      No API keys yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">
+                  <Webhook className="h-4 w-4" />
+                  Recent Webhooks
+                </div>
+                <div className="mt-5 space-y-3">
+                  {integrationEvents.map(event => (
+                    <div key={event.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-black text-slate-900 dark:text-white">{event.source}</div>
+                          <div className="mt-1 text-xs font-bold text-slate-500">{event.eventType} · {event.idempotencyKey}</div>
+                        </div>
+                        <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-widest ${
+                          event.status === 'applied'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                            : event.status === 'failed'
+                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                              : event.status === 'duplicate'
+                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                                : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                        }`}>
+                          {event.status}
+                        </span>
+                      </div>
+                      <div className="mt-3 text-[11px] font-bold text-slate-400">{formatChannelDate(event.createdAt)}</div>
+                      {event.result?.appliedCount !== undefined && (
+                        <div className="mt-2 text-xs font-bold text-slate-500">
+                          Applied {event.result.appliedCount} item{Number(event.result.appliedCount) === 1 ? '' : 's'}
+                        </div>
+                      )}
+                      {event.errorMessage && (
+                        <div className="mt-2 text-xs font-bold text-rose-500">{event.errorMessage}</div>
+                      )}
+                    </div>
+                  ))}
+                  {integrationEvents.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400 dark:border-slate-700 dark:bg-slate-950">
+                      No webhook events yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-3">
+              {(marketplacePack?.targets || []).map(target => (
+                <div key={target.id} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h3 className="text-xl font-black text-slate-900 dark:text-white">{target.name}</h3>
+                      <p className="mt-1 text-xs font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">{target.status.replace(/_/g, ' ')}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => downloadMarketplaceTarget(target.id)}
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-primary/20 disabled:opacity-50"
+                      aria-label={`${target.name} CSV`}
+                      title={`${target.name} CSV`}
+                    >
+                      <Download className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <div className="mt-5 rounded-2xl bg-slate-50 p-4 dark:bg-slate-950">
+                    <div className="text-xs font-black uppercase tracking-widest text-slate-400">Rows</div>
+                    <div className="mt-1 text-2xl font-black text-slate-900 dark:text-white">{target.productCount}</div>
+                    <div className="mt-3 text-xs font-bold text-slate-500">{target.requiredFields.slice(0, 5).join(', ')}</div>
+                  </div>
+                </div>
+              ))}
+              {(!marketplacePack || marketplacePack.targets.length === 0) && (
+                <div className="rounded-[28px] border border-dashed border-slate-300 bg-white p-10 text-center text-sm font-bold text-slate-400 dark:border-slate-700 dark:bg-slate-900">
+                  No marketplace export rows.
+                </div>
+              )}
+            </div>
+          </div>
+        ) : tab === 'vendors' ? (
           <VendorManagementView />
+        ) : tab === 'locations' ? (
+          <InventoryLocationsView products={products} onProductsUpdated={onProductsUpdated} />
         ) : tab === 'batches' ? (
           <StockBatchesView />
         ) : tab === 'reorder' ? (
           <ReorderRecommendationsView />
+        ) : tab === 'recipeCosting' ? (
+          <RecipeCostingView />
         ) : tab === 'purchaseOrders' ? (
           <PurchaseOrdersView />
         ) : tab === 'bulk' ? (

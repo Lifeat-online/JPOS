@@ -12,7 +12,8 @@ import rateLimit from "express-rate-limit";
 import http from "http";
 import { setupSocketIO, broadcastToMessages, broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "./socket.js";
 import { buildLiveWorkstationQueueRows } from "./workstationStats.js";
-import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
+import { getDashboardKpis } from "./dashboardKpis.js";
+import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
 import { NextFunction, Request, Response } from "express";
 import {
   getProductsByTenant,
@@ -53,6 +54,7 @@ import {
   createSale,
   updateSale,
   updateSaleStatus,
+  updateSalePaymentProviderStatus,
   updateSaleItem,
   processSaleRefund,
   processSaleVoid,
@@ -81,6 +83,7 @@ import {
   receivePurchaseOrder,
   updateProductRecipe,
   getProductRecipe,
+  getRecipeCostingReport,
   createModifierGroup,
   updateModifierOptions,
   getProductModifiers,
@@ -92,9 +95,14 @@ import {
   handleLogin,
   handleLogout,
   handleRefreshToken,
+  handleRevokeRefreshTokens,
   handleGetMe,
   handleSetupPassword,
   handleStartDemo,
+  handleTwoFactorConfirm,
+  handleTwoFactorDisable,
+  handleTwoFactorSetup,
+  handleTwoFactorStatus,
 } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
 import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
@@ -160,11 +168,57 @@ import {
 } from "./stockTake.js";
 import {
   approveReorderRecommendation,
+  createReorderNotificationRule,
   dismissReorderRecommendation,
+  listReorderNotificationRules,
   listReorderRecommendations,
   refreshReorderRecommendations,
+  runReorderNotificationRule,
+  updateReorderNotificationRule,
 } from "./reorderRecommendations.js";
 import { getStockValuationReport } from "./stockReports.js";
+import { getPaymentProviderReconciliationReport } from "./paymentReports.js";
+import { getMarginReport } from "./marginReports.js";
+import { getOperationalAnalyticsReport } from "./operationalReports.js";
+import { getAccountingJournalReport } from "./accountingJournal.js";
+import { getEcommerceMarketplaceExport } from "./ecommerceIntegrations.js";
+import { ingestDeliveryOrder, listDeliveryOrders, updateDeliveryOrderStatus } from "./deliveryIntegrations.js";
+import {
+  authenticateIntegrationApiKey,
+  createIntegrationApiKey,
+  ingestStockWebhook,
+  listIntegrationApiKeys,
+  listIntegrationWebhookEvents,
+  revokeIntegrationApiKey,
+} from "./integrationAccess.js";
+import { getCustomerCampaignExport } from "./customerSegments.js";
+import { getCustomerDataExport } from "./customerDataExport.js";
+import { listCustomerConsents, upsertCustomerConsents } from "./customerConsents.js";
+import { applyRetentionPolicy, getRetentionPolicy, getRetentionPreview, saveRetentionPolicy } from "./retentionPolicy.js";
+import { cancelStaffShift, clockIn, clockOut, createStaffShift, endBreak, getMyAttendanceStatus, getTimesheetPayrollReport, listStaffShifts, publishRoster, startBreak, updateStaffShift } from "./staffScheduling.js";
+import { createTipPoolRule, generateTipPoolPayouts, listTipPoolPayouts, listTipPoolRules, previewTipPoolPayouts, updateTipPoolRule } from "./tipPooling.js";
+import { addStaffCoachingNote, getStaffPerformanceReport } from "./staffPerformance.js";
+import { getTaxPeriods, getVatTaxReport, lockTaxPeriod } from "./taxReports.js";
+import {
+  completeStockTransferOrder,
+  createInventoryLocation,
+  createStockTransferOrder,
+  listInventoryLocations,
+  listProductLocationStocks,
+  listStockTransferOrders,
+  updateInventoryLocation,
+  upsertProductLocationStock,
+} from "./inventoryLocations.js";
+import {
+  createHardwareDevice,
+  deleteHardwareDevice,
+  listHardwareDeviceEvents,
+  listHardwareDevices,
+  queueCashDrawerPulseForNoSale,
+  queueKitchenPrintJobsForSale,
+  testHardwareDevice,
+  updateHardwareDevice,
+} from "./hardwareAdapters.js";
 import { recordOfflineSyncIssue } from "./offlineSync.js";
 import {
   addLaybyPayment,
@@ -174,6 +228,29 @@ import {
   getLaybyOrderById,
   listLaybyOrders,
 } from "./layby.js";
+import {
+  createEventBooking,
+  deleteEventBooking,
+  listEventBookings,
+  updateEventBooking,
+} from "./eventBookings.js";
+import {
+  createPromotion,
+  listPromotions,
+  updatePromotion,
+  validatePromotionForSale,
+} from "./promotions.js";
+import { stripSensitiveVerification, verifySensitiveActionForRequest, type SensitiveActionType } from "./sensitiveActions.js";
+import { listManagerOverrides } from "./managerOverrides.js";
+import {
+  calculateLoyaltyAward,
+  createLoyaltyRewardRule,
+  createLoyaltyTier,
+  listLoyaltyRewardRules,
+  listLoyaltyTiers,
+  updateLoyaltyRewardRule,
+  updateLoyaltyTier,
+} from "./loyalty.js";
 
 dotenv.config();
 
@@ -205,6 +282,11 @@ function canUseActionCenter(role: unknown) {
 }
 
 function canManageInventory(role: unknown) {
+  const r = normalizeRole(role);
+  return r === "admin" || r === "manager" || r === "dev";
+}
+
+function canManageBookings(role: unknown) {
   const r = normalizeRole(role);
   return r === "admin" || r === "manager" || r === "dev";
 }
@@ -258,6 +340,14 @@ function auditChangedFields(value: unknown) {
     .sort();
 }
 
+function integrationSecretFromRequest(req: Request) {
+  const direct = req.get("x-jimmy-integration-key") || req.get("x-jpos-integration-key");
+  if (direct) return direct.trim();
+  const authorization = req.get("authorization") || "";
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i);
+  return bearer?.[1]?.trim() || "";
+}
+
 async function auditRouteEvent(
   req: Request,
   action: string,
@@ -297,6 +387,52 @@ function denyWithAudit(
     ...details,
   }, auditActorFromRequest(req).staffId, "permission");
   return res.status(403).json({ error: message });
+}
+
+async function enforceSensitiveAction(
+  req: Request,
+  res: Response,
+  actionType: SensitiveActionType,
+  details: Record<string, unknown> = {}
+) {
+  const verification = await verifySensitiveActionForRequest(req, actionType, details);
+  if (verification.ok === true) return null;
+  return res.status(verification.status).json({
+    error: verification.message,
+    sensitiveActionRequired: verification.status === 428,
+    sensitiveActionFailed: verification.status === 403,
+    actionType: verification.actionType,
+    actionLabel: verification.actionLabel,
+  });
+}
+
+function hasOwn(body: unknown, key: string) {
+  return Boolean(body && typeof body === "object" && Object.prototype.hasOwnProperty.call(body, key));
+}
+
+function customerSensitiveAction(updates: Record<string, unknown>): SensitiveActionType | null {
+  if (hasOwn(updates, "walletBalance")) return "wallet_adjustment";
+  if (hasOwn(updates, "accountBalance") || hasOwn(updates, "accountBalanceDelta") || hasOwn(updates, "accountLimit")) return "account_balance_edit";
+  if (hasOwn(updates, "discountPercent")) return "manual_discount";
+  return null;
+}
+
+function staffSensitiveAction(updates: Record<string, unknown>): SensitiveActionType | null {
+  if (hasOwn(updates, "walletBalance") || hasOwn(updates, "walletBalanceDelta")) return "wallet_adjustment";
+  if (hasOwn(updates, "discountPercent")) return "manual_discount";
+  return null;
+}
+
+function saleMutationSensitiveAction(updates: Record<string, unknown>): SensitiveActionType | null {
+  if (hasOwn(updates, "manualDiscountAmount") || hasOwn(updates, "manualDiscountReason")) return "manual_discount";
+  if (hasOwn(updates, "accountBalanceDelta")) return "account_balance_edit";
+  return null;
+}
+
+function drawerMovementSensitiveAction(movementType: string): SensitiveActionType | null {
+  if (movementType === "no_sale") return "no_sale";
+  if (["cash_drop", "cash_added", "cash_removed", "manager_adjustment"].includes(movementType)) return "cash_movement";
+  return null;
 }
 
 function safeJsonField(value: unknown, fallback: any) {
@@ -804,6 +940,10 @@ export async function createApp(io: any = null) {
   const authRateLimitWindowMs = parsePositiveEnvNumber(process.env.AUTH_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000);
   const authRateLimitMax = parsePositiveEnvNumber(process.env.AUTH_RATE_LIMIT_MAX, isProduction ? 5 : 200);
   const authRateLimit = createAuthRateLimit(authRateLimitWindowMs, authRateLimitMax);
+  const integrationWebhookRateLimit = createAuthRateLimit(
+    parsePositiveEnvNumber(process.env.INTEGRATION_WEBHOOK_RATE_LIMIT_WINDOW_MS, 60 * 1000),
+    parsePositiveEnvNumber(process.env.INTEGRATION_WEBHOOK_RATE_LIMIT_MAX, isProduction ? 120 : 500)
+  );
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -864,8 +1004,13 @@ export async function createApp(io: any = null) {
   app.post("/api/auth/login", authRateLimit, validateSchema(LoginSchema), handleLogin);
   app.post("/api/auth/logout", handleLogout);
   app.post("/api/auth/refresh", authRateLimit, handleRefreshToken);
+  app.post("/api/auth/refresh-tokens/revoke", requireAuth, handleRevokeRefreshTokens);
   app.get("/api/auth/me", requireAuth, handleGetMe);
   app.post("/api/auth/setup-password", requireAuth, validateSchema(PasswordSetupSchema), handleSetupPassword);
+  app.get("/api/auth/2fa", requireAuth, handleTwoFactorStatus);
+  app.post("/api/auth/2fa/setup", requireAuth, handleTwoFactorSetup);
+  app.post("/api/auth/2fa/confirm", requireAuth, handleTwoFactorConfirm);
+  app.post("/api/auth/2fa/disable", requireAuth, handleTwoFactorDisable);
 
   app.get("/api/mariadb/users/:uid", optionalAuth, async (req, res) => {
     try {
@@ -891,10 +1036,118 @@ export async function createApp(io: any = null) {
 
   app.get("/api/mariadb/tenants/:tenantId/products", requireAuth, async (req, res) => {
     try {
-      const products = await getProductsByTenant(req.params.tenantId);
+      const products = await getProductsByTenant(req.params.tenantId, {
+        locationId: typeof req.query.locationId === "string" ? req.query.locationId : null,
+        staffId: req.user?.staffId || null,
+        role: req.user?.role || null,
+      });
       res.json(products);
     } catch (err: any) {
+      const status = String(err?.message || "").includes("not assigned") ? 403 : 500;
+      res.status(status).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/inventory-locations", requireAuth, async (req, res) => {
+    try {
+      res.json(await listInventoryLocations(req.params.tenantId));
+    } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/inventory-locations", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "inventory_locations.create", "Manager access is required to create inventory locations.");
+      }
+      const location = await createInventoryLocation(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
+      res.status(201).json(location);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/inventory-locations/:locationId", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "inventory_locations.update", "Manager access is required to update inventory locations.", {
+          locationId: req.params.locationId,
+        });
+      }
+      const location = await updateInventoryLocation(req.params.tenantId, req.params.locationId, req.body || {}, auditActorFromRequest(req));
+      res.json(location);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/inventory-location-stock", requireAuth, async (req, res) => {
+    try {
+      res.json(await listProductLocationStocks(req.params.tenantId, {
+        productId: typeof req.query.productId === "string" ? req.query.productId : null,
+        locationId: typeof req.query.locationId === "string" ? req.query.locationId : null,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/inventory-location-stock", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "inventory_location_stock.update", "Manager access is required to adjust location stock.");
+      }
+      const stock = await upsertProductLocationStock(req.params.tenantId, {
+        ...(req.body || {}),
+        ...auditActorFromRequest(req),
+      });
+      res.json(stock);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/stock-transfers", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "stock_transfers.view", "Manager access is required to view stock transfers.");
+      }
+      res.json(await listStockTransferOrders(req.params.tenantId, {
+        status: typeof req.query.status === "string" ? req.query.status : null,
+        limit: typeof req.query.limit === "string" ? req.query.limit : null,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/stock-transfers", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "stock_transfers.create", "Manager access is required to create stock transfers.");
+      }
+      const transfer = await createStockTransferOrder(req.params.tenantId, {
+        ...(req.body || {}),
+        ...auditActorFromRequest(req),
+      });
+      res.status(201).json(transfer);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/stock-transfers/:transferId/complete", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "stock_transfers.complete", "Manager access is required to complete stock transfers.", {
+          transferId: req.params.transferId,
+        });
+      }
+      const transfer = await completeStockTransferOrder(req.params.tenantId, req.params.transferId, auditActorFromRequest(req));
+      res.json(transfer);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -904,6 +1157,158 @@ export async function createApp(io: any = null) {
       res.json(config);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/promotions", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "promotions.view", "Manager access is required for promotions.");
+      }
+      res.json(await listPromotions(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/promotions", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "promotions.create", "Manager access is required to create promotions.");
+      }
+      const promotion = await createPromotion(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
+      await auditRouteEvent(req, "promotion.created", "promotion", {
+        promotionId: promotion.id,
+        code: promotion.code,
+        discountType: promotion.discountType,
+        discountValue: promotion.discountValue,
+      }, promotion.id, "promotions");
+      res.status(201).json(promotion);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/promotions/validate", requireAuth, async (req, res) => {
+    try {
+      const result = await validatePromotionForSale(null, req.params.tenantId, req.body || {});
+      if (!result.valid) return res.status(400).json({ ...result, error: result.reason || "Promotion could not be applied." });
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/promotions/:promotionId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "promotions.update", "Manager access is required to update promotions.");
+      }
+      const promotion = await updatePromotion(req.params.tenantId, req.params.promotionId, req.body || {}, auditActorFromRequest(req));
+      await auditRouteEvent(req, "promotion.updated", "promotion", {
+        promotionId: promotion.id,
+        code: promotion.code,
+        status: promotion.status,
+        discountType: promotion.discountType,
+        discountValue: promotion.discountValue,
+      }, promotion.id, "promotions");
+      res.json(promotion);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/loyalty/tiers", requireAuth, async (req, res) => {
+    try {
+      res.json(await listLoyaltyTiers(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/loyalty/tiers", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "loyalty.tier_create", "Manager access is required to create loyalty tiers.");
+      }
+      const tier = await createLoyaltyTier(req.params.tenantId, req.body || {});
+      await auditRouteEvent(req, "loyalty.tier_created", "loyalty_tier", {
+        tierId: tier.id,
+        name: tier.name,
+        minPoints: tier.minPoints,
+        earnMultiplier: tier.earnMultiplier,
+      }, tier.id, "loyalty");
+      res.status(201).json(tier);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/loyalty/tiers/:tierId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "loyalty.tier_update", "Manager access is required to update loyalty tiers.");
+      }
+      const tier = await updateLoyaltyTier(req.params.tenantId, req.params.tierId, req.body || {});
+      await auditRouteEvent(req, "loyalty.tier_updated", "loyalty_tier", {
+        tierId: tier.id,
+        name: tier.name,
+        status: tier.status,
+      }, tier.id, "loyalty");
+      res.json(tier);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/loyalty/reward-rules", requireAuth, async (req, res) => {
+    try {
+      res.json(await listLoyaltyRewardRules(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/loyalty/reward-rules", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "loyalty.rule_create", "Manager access is required to create loyalty reward rules.");
+      }
+      const rule = await createLoyaltyRewardRule(req.params.tenantId, req.body || {});
+      await auditRouteEvent(req, "loyalty.reward_rule_created", "loyalty_reward_rule", {
+        ruleId: rule.id,
+        name: rule.name,
+        ruleType: rule.ruleType,
+      }, rule.id, "loyalty");
+      res.status(201).json(rule);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/loyalty/reward-rules/:ruleId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "loyalty.rule_update", "Manager access is required to update loyalty reward rules.");
+      }
+      const rule = await updateLoyaltyRewardRule(req.params.tenantId, req.params.ruleId, req.body || {});
+      await auditRouteEvent(req, "loyalty.reward_rule_updated", "loyalty_reward_rule", {
+        ruleId: rule.id,
+        name: rule.name,
+        status: rule.status,
+        ruleType: rule.ruleType,
+      }, rule.id, "loyalty");
+      res.json(rule);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/loyalty/preview", requireAuth, async (req, res) => {
+    try {
+      res.json(await calculateLoyaltyAward(null, req.params.tenantId, req.body || {}));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -1236,14 +1641,65 @@ export async function createApp(io: any = null) {
           });
         }
       }
-      await updateAppConfig(req.params.tenantId, req.body);
+      const settingsUpdate = stripSensitiveVerification(req.body || {});
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "settings_change", {
+        changedFields: auditChangedFields(settingsUpdate || {}),
+        businessFields: auditChangedFields((settingsUpdate as any)?.business || {}),
+      });
+      if (sensitiveResponse) return;
+
+      await updateAppConfig(req.params.tenantId, settingsUpdate);
       await auditRouteEvent(req, "settings.app_updated", "settings", {
-        changedFields: auditChangedFields(req.body || {}),
-        businessFields: auditChangedFields(req.body?.business || {}),
+        changedFields: auditChangedFields(settingsUpdate || {}),
+        businessFields: auditChangedFields((settingsUpdate as any)?.business || {}),
       }, req.params.tenantId, "settings");
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/settings/retention-policy", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "retention_policy.view", "Manager access is required to view retention settings.");
+      }
+      res.json(await getRetentionPolicy(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/settings/retention-policy", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "retention_policy.update", "Manager access is required to update retention settings.");
+      }
+      res.json(await saveRetentionPolicy(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/settings/retention-policy/preview", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "retention_policy.preview", "Manager access is required to preview retention cleanup.");
+      }
+      res.json(await getRetentionPreview(req.params.tenantId, req.body || undefined));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/settings/retention-policy/apply", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "retention_policy.apply", "Manager access is required to apply retention cleanup.");
+      }
+      res.json(await applyRetentionPolicy(req.params.tenantId, req.body || undefined, auditActorFromRequest(req)));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -1337,6 +1793,17 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/manager-overrides", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "manager_overrides.view", "Manager access is required for override history.");
+      }
+      res.json(await listManagerOverrides(req.params.tenantId, Number(req.query.limit || 25)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/mariadb/tenants/:tenantId/action-center/activity/export", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
@@ -1365,6 +1832,272 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/payment-provider-reconciliation/report", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "payment_provider_reconciliation.report_export", "Manager access is required for payment provider reconciliation reports.");
+      }
+      const report = await getPaymentProviderReconciliationReport(req.params.tenantId, req.query);
+      await auditRouteEvent(req, "payment_provider_reconciliation.report_exported", "payment_provider_reconciliation", {
+        rowCount: report.count,
+        filters: req.query || {},
+        pciBoundary: report.pciBoundary,
+      }, null, "payment_provider_reconciliation");
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/tax/periods", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "tax.periods_view", "Manager access is required for tax periods.");
+      }
+      res.json(await getTaxPeriods(req.params.tenantId, typeof req.query.limit === "string" ? req.query.limit : 24));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/tax/vat-report", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "tax.vat_report_export", "Manager access is required for VAT reports.");
+      }
+      const report = await getVatTaxReport(req.params.tenantId, req.query);
+      await auditRouteEvent(req, "tax_report.exported", "tax_report", {
+        periodStart: report.periodStart,
+        periodEnd: report.periodEnd,
+        invoiceCount: report.summary.invoiceCount,
+        outputTax: report.summary.outputTax,
+        locked: report.locked,
+      }, null, "tax_reporting");
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/tax/periods/lock", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "tax.period_lock", "Manager access is required to lock tax periods.");
+      }
+      res.json(await lockTaxPeriod(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+        role: req.user?.role || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/reports/margins", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "reports.margins_view", "Manager access is required for margin reports.");
+      }
+      const report = await getMarginReport(req.params.tenantId, req.query);
+      await auditRouteEvent(req, "margin_report.exported", "margin_report", {
+        periodStart: report.periodStart,
+        periodEnd: report.periodEnd,
+        revenue: report.summary.revenue,
+        grossProfit: report.summary.grossProfit,
+        grossMarginPercent: report.summary.grossMarginPercent,
+      }, null, "reporting");
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/reports/operational", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "reports.operational_view", "Manager access is required for operational analytics reports.");
+      }
+      const report = await getOperationalAnalyticsReport(req.params.tenantId, req.query);
+      await auditRouteEvent(req, "operational_report.exported", "operational_report", {
+        periodStart: report.periodStart,
+        periodEnd: report.periodEnd,
+        categoryCount: report.summary.categoryCount,
+        openTabCount: report.summary.openTabCount,
+        refundVoidCount: report.summary.refundVoidCount,
+        cashAbsoluteVariance: report.summary.cashAbsoluteVariance,
+      }, null, "reporting");
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/reports/accounting-journal", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "reports.accounting_journal_view", "Manager access is required for accounting journal exports.");
+      }
+      const report = await getAccountingJournalReport(req.params.tenantId, req.query);
+      await auditRouteEvent(req, "accounting_journal.exported", "accounting_journal", {
+        periodStart: report.periodStart,
+        periodEnd: report.periodEnd,
+        entryCount: report.summary.entryCount,
+        lineCount: report.summary.lineCount,
+        totalDebits: report.summary.totalDebits,
+        totalCredits: report.summary.totalCredits,
+        balanced: report.summary.balanced,
+      }, null, "reporting");
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/integrations/ecommerce/products-export", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "integrations.ecommerce_export", "Manager access is required for marketplace exports.");
+      }
+      const report = await getEcommerceMarketplaceExport(req.params.tenantId, req.query);
+      await auditRouteEvent(req, "integrations.ecommerce_exported", "ecommerce_integration", {
+        productCount: report.summary.productCount,
+        targetCount: report.summary.targetCount,
+        targets: report.targets.map(target => target.id),
+      }, null, "integration");
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/integrations/api-keys", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "integrations.api_keys_view", "Manager access is required for integration API keys.");
+      }
+      res.json(await listIntegrationApiKeys(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/integrations/api-keys", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "integrations.api_key_create", "Manager access is required for integration API keys.");
+      }
+      const created = await createIntegrationApiKey(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      });
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/integrations/api-keys/:keyId/revoke", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "integrations.api_key_revoke", "Manager access is required for integration API keys.");
+      }
+      const key = await revokeIntegrationApiKey(req.params.tenantId, req.params.keyId, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      });
+      if (!key) return res.status(404).json({ error: "Integration API key not found" });
+      res.json(key);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/integrations/webhook-events", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "integrations.webhook_events_view", "Manager access is required for integration webhook history.");
+      }
+      res.json(await listIntegrationWebhookEvents(req.params.tenantId, {
+        source: typeof req.query.source === "string" ? req.query.source : null,
+        status: typeof req.query.status === "string" ? req.query.status : null,
+        limit: typeof req.query.limit === "string" ? req.query.limit : 50,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/integrations/:tenantId/stock-sync", integrationWebhookRateLimit, async (req, res) => {
+    try {
+      const apiKey = await authenticateIntegrationApiKey(req.params.tenantId, integrationSecretFromRequest(req));
+      if (!apiKey) return res.status(401).json({ error: "Invalid integration API key" });
+      const event = await ingestStockWebhook(req.params.tenantId, req.body || {}, apiKey);
+      res.status(event.status === "duplicate" ? 200 : 202).json({
+        status: event.status,
+        eventId: event.id,
+        result: event.result,
+        duplicateOf: (event as any).duplicateOf || null,
+      });
+    } catch (err: any) {
+      res.status(err?.eventId ? 400 : 500).json({
+        error: err.message,
+        eventId: err?.eventId || null,
+      });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/integrations/delivery/orders", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "integrations.delivery_orders_view", "Manager access is required for delivery orders.");
+      }
+      res.json(await listDeliveryOrders(req.params.tenantId, {
+        provider: typeof req.query.provider === "string" ? req.query.provider : null,
+        status: typeof req.query.status === "string" ? req.query.status : null,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/integrations/delivery/orders", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "integrations.delivery_order_ingest", "Manager access is required to ingest delivery orders.");
+      }
+      const order = await ingestDeliveryOrder(req.params.tenantId, req.body, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      });
+      await auditRouteEvent(req, "delivery_order.ingest_route", "delivery_order", {
+        provider: order.provider,
+        externalOrderId: order.externalOrderId,
+        status: order.status,
+        itemCount: order.items.length,
+      }, order.id, "integration");
+      res.status(201).json(order);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/integrations/delivery/orders/:orderId/status", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "integrations.delivery_order_status", "Manager access is required to update delivery orders.");
+      }
+      const order = await updateDeliveryOrderStatus(req.params.tenantId, req.params.orderId, req.body?.status, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      });
+      if (!order) return res.status(404).json({ error: "Delivery order not found" });
+      res.json(order);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.put("/api/mariadb/tenants/:tenantId/action-center/tasks/:taskId", requireAuth, async (req, res) => {
     try {
       if (!canUseActionCenter(req.user?.role)) {
@@ -1372,10 +2105,17 @@ export async function createApp(io: any = null) {
           taskId: req.params.taskId,
         });
       }
+      const decisionInput = stripSensitiveVerification(req.body || {});
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "manager_override", {
+        taskId: req.params.taskId,
+        action: (decisionInput as any)?.action || null,
+      });
+      if (sensitiveResponse) return;
+
       res.json(await decideManagerTask(req.params.tenantId, req.params.taskId, {
-        action: req.body?.action,
-        note: req.body?.note,
-        assignedTo: req.body?.assignedTo,
+        action: (decisionInput as any)?.action,
+        note: (decisionInput as any)?.note,
+        assignedTo: (decisionInput as any)?.assignedTo,
         staffId: req.user?.staffId || req.user?.uid || null,
         staffName: req.user?.name || null,
       }));
@@ -1605,6 +2345,74 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/customers/campaign-export", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "customers.campaign_export", "Manager access is required for customer campaign exports.");
+      }
+      const report = await getCustomerCampaignExport(req.params.tenantId, {
+        segment: typeof req.query.segment === "string" ? req.query.segment : undefined,
+        limit: typeof req.query.limit === "string" ? req.query.limit : undefined,
+      });
+      await auditRouteEvent(req, "customers.campaign_exported", "customer_campaign_export", {
+        segment: report.segment,
+        rowCount: report.count,
+        totalCustomers: report.totalCustomers,
+        contactableCount: report.contactableCount,
+      }, null, "customer_campaigns");
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/customers/:id/consents", requireAuth, async (req, res) => {
+    try {
+      res.json(await listCustomerConsents(req.params.tenantId, req.params.id));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/customers/:id/data-export", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "customers.data_export", "Manager access is required for customer data exports.", {
+          customerId: req.params.id,
+        });
+      }
+      const report = await getCustomerDataExport(req.params.tenantId, req.params.id);
+      await auditRouteEvent(req, "customers.data_exported", "customer_data_export", {
+        customerId: req.params.id,
+        saleCount: report.summary.saleCount,
+        payoutRequestCount: report.summary.payoutRequestCount,
+        laybyCount: report.summary.laybyCount,
+      }, req.params.id, "customer_data");
+      res.json(report);
+    } catch (err: any) {
+      const status = String(err?.message || "").includes("not found") ? 404 : 500;
+      res.status(status).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/customers/:id/consents", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "customers.consent_update", "Manager access is required to update customer consent records.", {
+          customerId: req.params.id,
+        });
+      }
+      res.json(await upsertCustomerConsents(
+        req.params.tenantId,
+        req.params.id,
+        req.body?.consents || req.body || {},
+        auditActorFromRequest(req),
+      ));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.get("/api/mariadb/tenants/:tenantId/staff", requireAuth, async (req, res) => {
     try {
       const staff = await getStaffByTenant(req.params.tenantId);
@@ -1614,10 +2422,341 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/workforce/shifts", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.shifts.view", "Manager access is required to view staff rosters.");
+      }
+      res.json(await listStaffShifts(req.params.tenantId, {
+        startDate: String(req.query.startDate || req.query.from || ""),
+        endDate: String(req.query.endDate || req.query.to || ""),
+        staffId: req.query.staffId ? String(req.query.staffId) : undefined,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/shifts", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.shifts.create", "Manager access is required to schedule shifts.");
+      }
+      res.json(await createStaffShift(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/workforce/shifts/:shiftId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.shifts.update", "Manager access is required to edit shifts.");
+      }
+      res.json(await updateStaffShift(req.params.tenantId, req.params.shiftId, req.body || {}, auditActorFromRequest(req)));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/workforce/shifts/:shiftId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.shifts.cancel", "Manager access is required to cancel shifts.");
+      }
+      res.json(await cancelStaffShift(req.params.tenantId, req.params.shiftId, auditActorFromRequest(req)));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/roster/publish", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.roster.publish", "Manager access is required to publish rosters.");
+      }
+      res.json(await publishRoster(
+        req.params.tenantId,
+        String(req.body?.startDate || req.body?.from || ""),
+        String(req.body?.endDate || req.body?.to || req.body?.startDate || ""),
+        auditActorFromRequest(req),
+      ));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/workforce/timesheet-payroll", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.payroll.export", "Manager access is required to export timesheets.");
+      }
+      const report = await getTimesheetPayrollReport(req.params.tenantId, {
+        startDate: String(req.query.startDate || req.query.from || ""),
+        endDate: String(req.query.endDate || req.query.to || ""),
+        staffId: req.query.staffId ? String(req.query.staffId) : undefined,
+      });
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/workforce/staff-performance", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.staff_performance.view", "Manager access is required to view staff performance insights.");
+      }
+      res.json(await getStaffPerformanceReport(req.params.tenantId, {
+        startDate: String(req.query.startDate || req.query.from || ""),
+        endDate: String(req.query.endDate || req.query.to || ""),
+        staffId: req.query.staffId ? String(req.query.staffId) : undefined,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/staff-performance/coaching-notes", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.staff_performance.coaching_note", "Manager access is required to add staff coaching notes.");
+      }
+      res.json(await addStaffCoachingNote(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/workforce/tip-pool-rules", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.tip_pool_rules.view", "Manager access is required to view tip pool rules.");
+      }
+      res.json(await listTipPoolRules(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/tip-pool-rules", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.tip_pool_rules.create", "Manager access is required to create tip pool rules.");
+      }
+      res.json(await createTipPoolRule(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/workforce/tip-pool-rules/:ruleId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.tip_pool_rules.update", "Manager access is required to update tip pool rules.");
+      }
+      res.json(await updateTipPoolRule(req.params.tenantId, req.params.ruleId, req.body || {}, auditActorFromRequest(req)));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/tip-pools/preview", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.tip_pool.preview", "Manager access is required to preview tip pool payouts.");
+      }
+      res.json(await previewTipPoolPayouts(req.params.tenantId, req.body || {}));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/tip-pools/generate", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.tip_pool.generate", "Manager access is required to generate tip pool payouts.");
+      }
+      res.json(await generateTipPoolPayouts(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/workforce/tip-pool-payouts", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.tip_pool_payouts.view", "Manager access is required to view tip pool payouts.");
+      }
+      res.json(await listTipPoolPayouts(req.params.tenantId, {
+        ruleId: req.query.ruleId ? String(req.query.ruleId) : undefined,
+        startDate: req.query.startDate ? String(req.query.startDate) : undefined,
+        endDate: req.query.endDate ? String(req.query.endDate) : undefined,
+        staffId: req.query.staffId ? String(req.query.staffId) : undefined,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/workforce/attendance/me", requireAuth, async (req, res) => {
+    try {
+      const actor = auditActorFromRequest(req);
+      const requestedStaffId = req.query.staffId ? String(req.query.staffId) : actor.staffId;
+      if (!requestedStaffId) return res.status(400).json({ error: "Staff member is required." });
+      if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.attendance.view", "Manager access is required to view another staff member's attendance.");
+      }
+      res.json(await getMyAttendanceStatus(req.params.tenantId, requestedStaffId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/clock-in", requireAuth, async (req, res) => {
+    try {
+      const actor = auditActorFromRequest(req);
+      const requestedStaffId = req.body?.staffId || actor.staffId;
+      if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.clock_in", "Manager access is required to clock in another staff member.");
+      }
+      res.json(await clockIn(req.params.tenantId, { ...req.body, staffId: requestedStaffId }, actor));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/break/start", requireAuth, async (req, res) => {
+    try {
+      const actor = auditActorFromRequest(req);
+      const requestedStaffId = req.body?.staffId || actor.staffId;
+      if (!requestedStaffId) return res.status(400).json({ error: "Staff member is required." });
+      if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.break_start", "Manager access is required to start another staff member's break.");
+      }
+      res.json(await startBreak(req.params.tenantId, requestedStaffId, req.body?.at || null));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/break/end", requireAuth, async (req, res) => {
+    try {
+      const actor = auditActorFromRequest(req);
+      const requestedStaffId = req.body?.staffId || actor.staffId;
+      if (!requestedStaffId) return res.status(400).json({ error: "Staff member is required." });
+      if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.break_end", "Manager access is required to end another staff member's break.");
+      }
+      res.json(await endBreak(req.params.tenantId, requestedStaffId, req.body?.at || null));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/workforce/clock-out", requireAuth, async (req, res) => {
+    try {
+      const actor = auditActorFromRequest(req);
+      const requestedStaffId = req.body?.staffId || actor.staffId;
+      if (!requestedStaffId) return res.status(400).json({ error: "Staff member is required." });
+      if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "workforce.clock_out", "Manager access is required to clock out another staff member.");
+      }
+      res.json(await clockOut(req.params.tenantId, { ...req.body, staffId: requestedStaffId }, actor));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.get("/api/mariadb/tenants/:tenantId/workstations", requireAuth, async (req, res) => {
     try {
       const workstations = await getWorkstationsByTenant(req.params.tenantId);
       res.json(workstations);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/hardware-devices", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "hardware.devices_view", "Manager access is required for hardware devices.");
+      }
+      res.json(await listHardwareDevices(req.params.tenantId, {
+        deviceType: typeof req.query.deviceType === "string" ? req.query.deviceType : null,
+        status: typeof req.query.status === "string" ? req.query.status : null,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/hardware-devices", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "hardware.device_create", "Manager access is required for hardware devices.");
+      }
+      res.status(201).json(await createHardwareDevice(req.params.tenantId, req.body || {}, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/hardware-devices/:deviceId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "hardware.device_update", "Manager access is required for hardware devices.");
+      }
+      const device = await updateHardwareDevice(req.params.tenantId, req.params.deviceId, req.body || {}, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      });
+      if (!device) return res.status(404).json({ error: "Hardware device not found" });
+      res.json(device);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/hardware-devices/:deviceId", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "hardware.device_delete", "Manager access is required for hardware devices.");
+      }
+      res.json(await deleteHardwareDevice(req.params.tenantId, req.params.deviceId, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/hardware-devices/:deviceId/test", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "hardware.device_test", "Manager access is required for hardware device tests.");
+      }
+      const result = await testHardwareDevice(req.params.tenantId, req.params.deviceId, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }, req.body || {});
+      if (!result) return res.status(404).json({ error: "Hardware device not found" });
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/hardware-events", requireAuth, async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "hardware.events_view", "Manager access is required for hardware events.");
+      }
+      res.json(await listHardwareDeviceEvents(req.params.tenantId, typeof req.query.limit === "string" ? req.query.limit : 50));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1714,9 +2853,84 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/event-bookings", requireAuth, async (req, res) => {
+    try {
+      if (!canManageBookings(req.user?.role)) {
+        return denyWithAudit(req, res, "event_bookings.view", "Manager access is required for event bookings.");
+      }
+      res.json(await listEventBookings(req.params.tenantId, {
+        from: typeof req.query.from === "string" ? req.query.from : undefined,
+        to: typeof req.query.to === "string" ? req.query.to : undefined,
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        eventType: typeof req.query.eventType === "string" ? req.query.eventType : undefined,
+        reminderStatus: typeof req.query.reminderStatus === "string" ? req.query.reminderStatus : undefined,
+      }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/event-bookings", requireAuth, async (req, res) => {
+    try {
+      if (!canManageBookings(req.user?.role)) {
+        return denyWithAudit(req, res, "event_bookings.create", "Manager access is required to create event bookings.");
+      }
+      res.json(await createEventBooking(req.params.tenantId, {
+        ...req.body,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/event-bookings/:id", requireAuth, async (req, res) => {
+    try {
+      if (!canManageBookings(req.user?.role)) {
+        return denyWithAudit(req, res, "event_bookings.update", "Manager access is required to update event bookings.", {
+          bookingId: req.params.id,
+        });
+      }
+      res.json(await updateEventBooking(req.params.tenantId, req.params.id, {
+        ...req.body,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mariadb/tenants/:tenantId/event-bookings/:id", requireAuth, async (req, res) => {
+    try {
+      if (!canManageBookings(req.user?.role)) {
+        return denyWithAudit(req, res, "event_bookings.delete", "Manager access is required to delete event bookings.", {
+          bookingId: req.params.id,
+        });
+      }
+      res.json(await deleteEventBooking(req.params.tenantId, req.params.id, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.post("/api/mariadb/tenants/:tenantId/sales", requireAuth, validateSchema(SaleSchema), async (req, res) => {
     try {
-      const sale = await createSale(req.params.tenantId, req.body);
+      const saleInput = stripSensitiveVerification(req.body || {});
+      const sensitiveAction = saleMutationSensitiveAction(saleInput);
+      if (sensitiveAction) {
+        const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
+          saleId: null,
+          changedFields: auditChangedFields(saleInput),
+        });
+        if (sensitiveResponse) return;
+      }
+
+      const sale = await createSale(req.params.tenantId, saleInput);
       
       // Broadcast to workstations if order has workstation items
       const liveIo = realtimeIo();
@@ -1727,6 +2941,10 @@ export async function createApp(io: any = null) {
         }
       }
       await sendWorkstationOrderPush(req.params.tenantId, sale);
+      queueKitchenPrintJobsForSale(req.params.tenantId, sale, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }).catch(err => console.warn("Unable to queue kitchen print jobs:", err?.message || err));
       
       res.json(sale);
     } catch (err: any) {
@@ -1754,12 +2972,47 @@ export async function createApp(io: any = null) {
         res.status(400).json({ error: "Missing sale updates" });
         return;
       }
-      const sale = await updateSale(req.params.tenantId, req.params.saleId, req.body);
+      const saleUpdate = stripSensitiveVerification(req.body || {});
+      const sensitiveAction = saleMutationSensitiveAction(saleUpdate);
+      if (sensitiveAction) {
+        const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
+          saleId: req.params.saleId,
+          changedFields: auditChangedFields(saleUpdate),
+        });
+        if (sensitiveResponse) return;
+      }
+
+      const sale = await updateSale(req.params.tenantId, req.params.saleId, saleUpdate);
       const liveIo = realtimeIo();
       if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, sale.id);
-      if (req.body?.status === "kitchen") {
+      if ((saleUpdate as any)?.status === "kitchen") {
         await sendWorkstationOrderPush(req.params.tenantId, sale);
+        queueKitchenPrintJobsForSale(req.params.tenantId, sale, {
+          staffId: req.user?.staffId || req.user?.uid || null,
+          staffName: req.user?.name || null,
+        }).catch(err => console.warn("Unable to queue kitchen print jobs:", err?.message || err));
       }
+      res.json(sale);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/sales/:saleId/payments/:paymentId/provider-status", requireAuth, validateSchema(PaymentProviderStatusSchema), async (req, res) => {
+    try {
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "payment.provider_reconcile", "Manager access is required to reconcile provider payments.", {
+          saleId: req.params.saleId,
+          paymentId: req.params.paymentId,
+        });
+      }
+      const sale = await updateSalePaymentProviderStatus(req.params.tenantId, req.params.saleId, req.params.paymentId, {
+        ...req.body,
+        staffId: req.body.staffId || req.user?.staffId || null,
+        staffName: req.body.staffName || req.user?.name || null,
+      });
+      const liveIo = realtimeIo();
+      if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, sale.id);
       res.json(sale);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1768,18 +3021,19 @@ export async function createApp(io: any = null) {
 
   app.post("/api/mariadb/tenants/:tenantId/sales/:saleId/refund", requireAuth, validateSchema(SaleRefundSchema), async (req, res) => {
     try {
+      const refundInput = stripSensitiveVerification(req.body || {});
       const role = String(req.user?.role || "").toLowerCase();
       if (!["admin", "manager", "dev"].includes(role)) {
         const task = await createManagerSaleApprovalRequest(req.params.tenantId, {
           kind: "refund",
           saleId: req.params.saleId,
           payload: {
-            ...req.body,
-            staffId: req.body.staffId || req.user?.staffId || null,
-            staffName: req.body.staffName || req.user?.name || null,
+            ...refundInput,
+            staffId: (refundInput as any).staffId || req.user?.staffId || null,
+            staffName: (refundInput as any).staffName || req.user?.name || null,
           },
-          requestedBy: req.user?.staffId || req.user?.uid || req.body.staffId || null,
-          requestedByName: req.user?.name || req.body.staffName || null,
+          requestedBy: req.user?.staffId || req.user?.uid || (refundInput as any).staffId || null,
+          requestedByName: req.user?.name || (refundInput as any).staffName || null,
         });
         res.status(202).json({
           approvalRequired: true,
@@ -1789,10 +3043,17 @@ export async function createApp(io: any = null) {
         return;
       }
 
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "refund", {
+        saleId: req.params.saleId,
+        method: (refundInput as any).method || null,
+        itemCount: Array.isArray((refundInput as any).items) ? (refundInput as any).items.length : 0,
+      });
+      if (sensitiveResponse) return;
+
       const refund = await processSaleRefund(req.params.tenantId, req.params.saleId, {
-        ...req.body,
-        staffId: req.body.staffId || req.user?.staffId || null,
-        staffName: req.body.staffName || req.user?.name || null,
+        ...refundInput,
+        staffId: (refundInput as any).staffId || req.user?.staffId || null,
+        staffName: (refundInput as any).staffName || req.user?.name || null,
       });
       const liveIo = realtimeIo();
       if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, refund.id);
@@ -1804,18 +3065,19 @@ export async function createApp(io: any = null) {
 
   app.post("/api/mariadb/tenants/:tenantId/sales/:saleId/void", requireAuth, validateSchema(SaleVoidSchema), async (req, res) => {
     try {
+      const voidInput = stripSensitiveVerification(req.body || {});
       const role = String(req.user?.role || "").toLowerCase();
       if (!["admin", "manager", "dev"].includes(role)) {
         const task = await createManagerSaleApprovalRequest(req.params.tenantId, {
           kind: "void",
           saleId: req.params.saleId,
           payload: {
-            ...req.body,
-            staffId: req.body.staffId || req.user?.staffId || null,
-            staffName: req.body.staffName || req.user?.name || null,
+            ...voidInput,
+            staffId: (voidInput as any).staffId || req.user?.staffId || null,
+            staffName: (voidInput as any).staffName || req.user?.name || null,
           },
-          requestedBy: req.user?.staffId || req.user?.uid || req.body.staffId || null,
-          requestedByName: req.user?.name || req.body.staffName || null,
+          requestedBy: req.user?.staffId || req.user?.uid || (voidInput as any).staffId || null,
+          requestedByName: req.user?.name || (voidInput as any).staffName || null,
         });
         res.status(202).json({
           approvalRequired: true,
@@ -1825,10 +3087,16 @@ export async function createApp(io: any = null) {
         return;
       }
 
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "void", {
+        saleId: req.params.saleId,
+        restock: Boolean((voidInput as any).restock),
+      });
+      if (sensitiveResponse) return;
+
       const voided = await processSaleVoid(req.params.tenantId, req.params.saleId, {
-        ...req.body,
-        staffId: req.body.staffId || req.user?.staffId || null,
-        staffName: req.body.staffName || req.user?.name || null,
+        ...voidInput,
+        staffId: (voidInput as any).staffId || req.user?.staffId || null,
+        staffName: (voidInput as any).staffName || req.user?.name || null,
       });
       const liveIo = realtimeIo();
       if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, voided.id);
@@ -1890,7 +3158,7 @@ export async function createApp(io: any = null) {
             SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
             MAX(s.created_at) AS lastSaleAt,
             SUM(CASE WHEN s.status = 'completed' AND s.payment_method = 'cash' THEN s.total ELSE 0 END) AS cashRevenue,
-            SUM(CASE WHEN s.status = 'completed' AND s.payment_method IN ('card','payfast') THEN s.total ELSE 0 END) AS cardRevenue,
+            SUM(CASE WHEN s.status = 'completed' AND s.payment_method IN ('card','payfast','qr','bnpl') THEN s.total ELSE 0 END) AS cardRevenue,
             SUM(CASE WHEN s.status = 'completed' AND s.payment_method = 'wallet' THEN s.total ELSE 0 END) AS walletRevenue
           FROM cash_sessions cs
           LEFT JOIN sales s
@@ -2068,10 +3336,13 @@ export async function createApp(io: any = null) {
         };
       }
 
+      const dashboardKpis = await getDashboardKpis(tenantId);
+
       res.json({
         tenantId,
         isRestaurantMode,
         serverTime: new Date().toISOString(),
+        dashboardKpis,
         retail: {
           openRegisterCount: registers.length,
           registers,
@@ -2272,6 +3543,7 @@ export async function createApp(io: any = null) {
       const rows = await query("SELECT * FROM customers WHERE email = ?", [email]);
       if (rows.length === 0) return res.json(null);
       const r = rows[0] as any;
+      const consents = await listCustomerConsents(r.tenant_id, r.id);
       const customer = {
         id: r.id,
         name: r.name,
@@ -2280,13 +3552,24 @@ export async function createApp(io: any = null) {
         address: r.address,
         notes: r.notes,
         loyaltyPoints: r.loyalty_points,
+        loyaltyMemberStatus: r.loyalty_member_status || "active",
+        loyaltyTierId: r.loyalty_tier_id || null,
+        membershipCardId: r.membership_card_id || null,
+        membershipBarcode: r.membership_barcode || null,
+        membershipStartedAt: r.membership_started_at || null,
         walletBalance: r.wallet_balance,
         accountEnabled: Boolean(r.account_enabled),
         accountLimit: r.account_limit !== null ? Number(r.account_limit) : 0,
         accountBalance: r.account_balance !== null ? Number(r.account_balance) : 0,
         uid: r.uid,
+        isAnonymized: Boolean(r.is_anonymized),
+        anonymizedAt: r.anonymized_at || null,
+        anonymizedBy: r.anonymized_by || null,
+        anonymizedByName: r.anonymized_by_name || null,
+        anonymizationReason: r.anonymization_reason || null,
         createdAt: r.created_at,
-        updatedAt: r.updated_at
+        updatedAt: r.updated_at,
+        consents,
       };
       res.json({ customer, tenantId: r.tenant_id });
     } catch (err: any) {
@@ -2331,8 +3614,9 @@ export async function createApp(io: any = null) {
 
   app.post("/api/mariadb/tenants/:tenantId/products/:id/stock-adjustments", requireAuth, async (req, res) => {
     try {
-      const delta = Number(req.body?.delta);
-      const reason = String(req.body?.reason || "").trim();
+      const stockInput = stripSensitiveVerification(req.body || {});
+      const delta = Number((stockInput as any)?.delta);
+      const reason = String((stockInput as any)?.reason || "").trim();
       if (!Number.isFinite(delta) || delta === 0) {
         res.status(400).json({ error: "Stock adjustment quantity must be a non-zero number" });
         return;
@@ -2343,15 +3627,15 @@ export async function createApp(io: any = null) {
       }
 
       const actor = {
-        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
-        staffName: req.user?.name || req.body?.staffName || null,
+        staffId: req.user?.staffId || req.user?.uid || (stockInput as any)?.staffId || null,
+        staffName: req.user?.name || (stockInput as any)?.staffName || null,
       };
       const payload = {
         productId: req.params.id,
-        productName: req.body?.productName || null,
+        productName: (stockInput as any)?.productName || null,
         delta,
         reason,
-        note: req.body?.note || null,
+        note: (stockInput as any)?.note || null,
         requestedBy: actor.staffId,
         requestedByName: actor.staffName,
       };
@@ -2365,6 +3649,13 @@ export async function createApp(io: any = null) {
         });
         return;
       }
+
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "stock_adjustment", {
+        productId: req.params.id,
+        delta,
+        reason,
+      });
+      if (sensitiveResponse) return;
 
       const result = await applyStockAdjustment(req.params.tenantId, payload, actor);
       res.json({
@@ -2393,7 +3684,10 @@ export async function createApp(io: any = null) {
     (req, res, next) => requirePackageCapacity(req, res, next, "customers", "maxCustomers", "customers"),
     async (req, res) => {
     try {
-      const data = await createCustomer(req.params.tenantId, req.body);
+      const data = await createCustomer(req.params.tenantId, {
+        ...req.body,
+        consentActor: auditActorFromRequest(req),
+      });
       await auditRouteEvent(req, "customer.created", "customer", {
         customerName: data?.name || req.body?.name || null,
         changedFields: auditChangedFields(req.body || {}),
@@ -2406,10 +3700,23 @@ export async function createApp(io: any = null) {
 
   app.put("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, validateSchema(CustomerUpdateSchema), async (req, res) => {
     try {
-      const data = await updateCustomer(req.params.tenantId, req.params.id, req.body);
+      const customerUpdates = stripSensitiveVerification(req.body || {});
+      const sensitiveAction = customerSensitiveAction(customerUpdates);
+      if (sensitiveAction) {
+        const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
+          customerId: req.params.id,
+          changedFields: auditChangedFields(customerUpdates),
+        });
+        if (sensitiveResponse) return;
+      }
+
+      const data = await updateCustomer(req.params.tenantId, req.params.id, {
+        ...customerUpdates,
+        consentActor: auditActorFromRequest(req),
+      });
       await auditRouteEvent(req, "customer.updated", "customer", {
-        customerName: data?.name || req.body?.name || null,
-        changedFields: auditChangedFields(req.body || {}),
+        customerName: data?.name || (customerUpdates as any)?.name || null,
+        changedFields: auditChangedFields(customerUpdates || {}),
       }, req.params.id, "customer_admin");
       res.json(data);
     } catch (err: any) {
@@ -2419,13 +3726,24 @@ export async function createApp(io: any = null) {
 
   app.delete("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, async (req, res) => {
     try {
-      await deleteCustomer(req.params.tenantId, req.params.id);
+      if (!canUseActionCenter(req.user?.role)) {
+        return denyWithAudit(req, res, "customers.anonymize", "Manager access is required to anonymize customer profiles.", {
+          customerId: req.params.id,
+        });
+      }
+      const result = await deleteCustomer(req.params.tenantId, req.params.id, {
+        ...auditActorFromRequest(req),
+        reason: req.body?.reason || null,
+      });
       await auditRouteEvent(req, "customer.deleted", "customer", {
         customerId: req.params.id,
+        mode: result.mode || "anonymized",
+        retainedSaleCount: result.retainedSaleCount ?? null,
       }, req.params.id, "customer_admin");
-      res.json({ success: true });
+      res.json(result);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const message = String(err?.message || "");
+      res.status(message.includes("not found") ? 404 : message.includes("cannot be anonymized") ? 409 : 500).json({ error: err.message });
     }
   });
 
@@ -2450,11 +3768,21 @@ export async function createApp(io: any = null) {
 
   app.put("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, validateSchema(StaffUpdateSchema), async (req, res) => {
     try {
-      const data = await updateStaff(req.params.tenantId, req.params.id, req.body);
+      const staffUpdates = stripSensitiveVerification(req.body || {});
+      const sensitiveAction = staffSensitiveAction(staffUpdates);
+      if (sensitiveAction) {
+        const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
+          targetStaffId: req.params.id,
+          changedFields: auditChangedFields(staffUpdates),
+        });
+        if (sensitiveResponse) return;
+      }
+
+      const data = await updateStaff(req.params.tenantId, req.params.id, staffUpdates);
       await auditRouteEvent(req, "staff.updated", "staff", {
-        staffName: data?.name || req.body?.name || null,
-        role: data?.role || req.body?.role || null,
-        changedFields: auditChangedFields(req.body || {}),
+        staffName: data?.name || (staffUpdates as any)?.name || null,
+        role: data?.role || (staffUpdates as any)?.role || null,
+        changedFields: auditChangedFields(staffUpdates || {}),
       }, req.params.id, "staff_admin");
       res.json(data);
     } catch (err: any) {
@@ -2777,7 +4105,15 @@ export async function createApp(io: any = null) {
       if (!canManageCash(req.user?.role)) {
         return denyWithAudit(req, res, "manager_cash.movement_create", "Only managers and admins can record manager cash movements.");
       }
-      const movement = await recordManagerCashMovement(req.params.tenantId, req.body || {}, {
+      const movementInput = stripSensitiveVerification(req.body || {});
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "cash_movement", {
+        movementType: (movementInput as any)?.movementType || null,
+        direction: (movementInput as any)?.direction || null,
+        amount: (movementInput as any)?.amount || 0,
+      });
+      if (sensitiveResponse) return;
+
+      const movement = await recordManagerCashMovement(req.params.tenantId, movementInput || {}, {
         staffId: req.user?.staffId,
         staffName: req.user?.name,
         role: req.user?.role,
@@ -2914,7 +4250,16 @@ export async function createApp(io: any = null) {
       if (!canManageCash(req.user?.role)) {
         return denyWithAudit(req, res, "manager_cash.wallet_cash_reconcile", "Only managers and admins can reconcile wallet cash.");
       }
-      const result = await recordWalletCashMovement(req.params.tenantId, req.body || {}, {
+      const walletInput = stripSensitiveVerification(req.body || {});
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "wallet_adjustment", {
+        ownerType: (walletInput as any)?.ownerType || null,
+        ownerId: (walletInput as any)?.ownerId || null,
+        movementType: (walletInput as any)?.movementType || null,
+        amount: (walletInput as any)?.amount || 0,
+      });
+      if (sensitiveResponse) return;
+
+      const result = await recordWalletCashMovement(req.params.tenantId, walletInput || {}, {
         staffId: req.user?.staffId,
         staffName: req.user?.name,
         role: req.user?.role,
@@ -2927,8 +4272,18 @@ export async function createApp(io: any = null) {
 
   app.post("/api/mariadb/tenants/:tenantId/cash-sessions/:id/wallet-cash", requireAuth, async (req, res) => {
     try {
+      const walletInput = stripSensitiveVerification(req.body || {});
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "wallet_adjustment", {
+        cashSessionId: req.params.id,
+        ownerType: (walletInput as any)?.ownerType || null,
+        ownerId: (walletInput as any)?.ownerId || null,
+        movementType: (walletInput as any)?.movementType || null,
+        amount: (walletInput as any)?.amount || 0,
+      });
+      if (sensitiveResponse) return;
+
       const result = await recordRegisterWalletCashMovement(req.params.tenantId, {
-        ...(req.body || {}),
+        ...(walletInput || {}),
         cashSessionId: req.params.id,
       }, {
         staffId: req.user?.staffId,
@@ -3013,32 +4368,53 @@ export async function createApp(io: any = null) {
 
   app.post("/api/mariadb/tenants/:tenantId/cash-sessions/:id/movements", requireAuth, async (req, res) => {
     try {
-      const movementType = String(req.body.type || "");
+      const movementInput = stripSensitiveVerification(req.body || {});
+      const movementType = String((movementInput as any).type || "");
       if (["cash_drop", "cash_added", "cash_removed"].includes(movementType) && !canManageCash(req.user?.role)) {
         return denyWithAudit(req, res, "cash_session.manager_movement", "Manager approval is required for cash movements.", {
           cashSessionId: req.params.id,
           movementType,
         });
       }
-      const amount = toMoneyNumber(req.body.amount);
+      const sensitiveAction = drawerMovementSensitiveAction(movementType);
+      if (sensitiveAction) {
+        const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
+          cashSessionId: req.params.id,
+          movementType,
+          amount: (movementInput as any).amount || 0,
+        });
+        if (sensitiveResponse) return;
+      }
+
+      const amount = toMoneyNumber((movementInput as any).amount);
       const movement = await recordCashMovement(req.params.tenantId, {
         cashSessionId: req.params.id,
         type: movementType,
-        direction: req.body.direction,
+        direction: (movementInput as any).direction,
         amount,
-        saleId: req.body.saleId,
-        paymentId: req.body.paymentId,
-        staffId: req.body.staffId,
-        staffName: req.body.staffName,
+        saleId: (movementInput as any).saleId,
+        paymentId: (movementInput as any).paymentId,
+        staffId: (movementInput as any).staffId,
+        staffName: (movementInput as any).staffName,
         createdBy: req.user?.staffId,
-        note: req.body.note,
+        note: (movementInput as any).note,
       });
       await mirrorDrawerMovementToManagerCash(req.params.tenantId, movement, {
         staffId: req.user?.staffId,
         staffName: req.user?.name,
         role: req.user?.role,
       });
-      const delta = expectedCashDeltaForMovement(movementType, req.body.direction, amount);
+      if (movementType === "no_sale") {
+        queueCashDrawerPulseForNoSale(req.params.tenantId, {
+          staffId: req.user?.staffId || req.user?.uid || null,
+          staffName: req.user?.name || (movementInput as any).staffName || null,
+        }, {
+          cashSessionId: req.params.id,
+          movementId: movement.id,
+          reason: (movementInput as any).note || null,
+        }).catch(err => console.error("[hardware] Failed to queue cash drawer pulse", err));
+      }
+      const delta = expectedCashDeltaForMovement(movementType, (movementInput as any).direction, amount);
       if (delta !== 0) {
         await query(
           `UPDATE cash_sessions SET expected_cash = COALESCE(expected_cash, 0) + ?, updated_at = NOW() WHERE tenant_id = ? AND id = ? AND status = 'open'`,
@@ -3337,6 +4713,65 @@ export async function createApp(io: any = null) {
     }
   });
 
+  app.get("/api/mariadb/tenants/:tenantId/reorder-notification-rules", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "reorder_notification_rules.view", "Manager access is required for reorder notification rules.");
+      }
+      res.json(await listReorderNotificationRules(req.params.tenantId));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/reorder-notification-rules", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "reorder_notification_rules.create", "Manager access is required to create reorder notification rules.");
+      }
+      res.json(await createReorderNotificationRule(req.params.tenantId, {
+        ...req.body,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/mariadb/tenants/:tenantId/reorder-notification-rules/:id", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "reorder_notification_rules.update", "Manager access is required to update reorder notification rules.", {
+          ruleId: req.params.id,
+        });
+      }
+      res.json(await updateReorderNotificationRule(req.params.tenantId, req.params.id, {
+        ...req.body,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mariadb/tenants/:tenantId/reorder-notification-rules/:id/run", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "reorder_notification_rules.run", "Manager access is required to run reorder notification rules.", {
+          ruleId: req.params.id,
+        });
+      }
+      res.json(await runReorderNotificationRule(req.params.tenantId, req.params.id, {
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
+      }));
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.post("/api/mariadb/tenants/:tenantId/reorder-recommendations/:id/approve", requireAuth, async (req, res) => {
     try {
       if (!canManageInventory(req.user?.role)) {
@@ -3445,6 +4880,17 @@ export async function createApp(io: any = null) {
     try {
       await deleteBulkItem(req.params.tenantId, req.params.id);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mariadb/tenants/:tenantId/recipe-costing-report", requireAuth, async (req, res) => {
+    try {
+      if (!canManageInventory(req.user?.role)) {
+        return denyWithAudit(req, res, "recipe_costing_report.view", "Manager access is required for recipe costing reports.");
+      }
+      res.json(await getRecipeCostingReport(req.params.tenantId));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
