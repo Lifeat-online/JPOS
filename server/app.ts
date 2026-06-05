@@ -2165,8 +2165,8 @@ export async function createApp(io: any = null) {
         return denyWithAudit(req, res, "stocktake.create", "Manager access is required to start a stocktake.");
       }
       const session = await createStockTakeSession(req.params.tenantId, req.body || {}, {
-        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
-        staffName: req.user?.name || req.body?.staffName || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
         role: req.user?.role || null,
       });
       res.status(201).json(session);
@@ -2205,8 +2205,8 @@ export async function createApp(io: any = null) {
         return denyWithAudit(req, res, "stocktake.rule_create", "Manager access is required to create stocktake rules.");
       }
       res.status(201).json(await createStockTakeRule(req.params.tenantId, req.body || {}, {
-        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
-        staffName: req.user?.name || req.body?.staffName || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
         role: req.user?.role || null,
       }));
     } catch (err: any) {
@@ -2220,8 +2220,8 @@ export async function createApp(io: any = null) {
         return denyWithAudit(req, res, "stocktake.rule_run_due", "Manager access is required to run stocktake rules.");
       }
       res.json(await runDueStockTakeRules(req.params.tenantId, {
-        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
-        staffName: req.user?.name || req.body?.staffName || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
         role: req.user?.role || null,
       }, {
         ruleId: req.body?.ruleId || null,
@@ -2240,8 +2240,8 @@ export async function createApp(io: any = null) {
         });
       }
       res.json(await updateStockTakeRule(req.params.tenantId, req.params.ruleId, req.body || {}, {
-        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
-        staffName: req.user?.name || req.body?.staffName || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
         role: req.user?.role || null,
       }));
     } catch (err: any) {
@@ -2312,8 +2312,8 @@ export async function createApp(io: any = null) {
         note: req.body?.note || null,
         varianceReason: req.body?.varianceReason || null,
       }, {
-        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
-        staffName: req.user?.name || req.body?.staffName || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
         role: req.user?.role || null,
       }));
     } catch (err: any) {
@@ -2331,8 +2331,8 @@ export async function createApp(io: any = null) {
       res.json(await requestStockTakeRecount(req.params.tenantId, req.params.itemId, {
         note: req.body?.note || null,
       }, {
-        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
-        staffName: req.user?.name || req.body?.staffName || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
         role: req.user?.role || null,
       }));
     } catch (err: any) {
@@ -2348,8 +2348,8 @@ export async function createApp(io: any = null) {
         });
       }
       res.json(await approveStockTakeSession(req.params.tenantId, req.params.sessionId, {
-        staffId: req.user?.staffId || req.user?.uid || req.body?.staffId || null,
-        staffName: req.user?.name || req.body?.staffName || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
         role: req.user?.role || null,
       }));
     } catch (err: any) {
@@ -2804,8 +2804,8 @@ export async function createApp(io: any = null) {
     try {
       const order = await createLaybyOrder(req.params.tenantId, {
         ...req.body,
-        staffId: req.body?.staffId || req.user?.staffId || req.user?.uid || null,
-        staffName: req.body?.staffName || req.user?.name || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
       });
       res.json(order);
     } catch (err: any) {
@@ -2830,8 +2830,8 @@ export async function createApp(io: any = null) {
     try {
       const order = await addLaybyPayment(req.params.tenantId, req.params.laybyId, {
         ...req.body,
-        staffId: req.body?.staffId || req.user?.staffId || req.user?.uid || null,
-        staffName: req.body?.staffName || req.user?.name || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
       });
       res.json(order);
     } catch (err: any) {
@@ -2843,13 +2843,13 @@ export async function createApp(io: any = null) {
     try {
       const order = await completeLaybyOrder(req.params.tenantId, req.params.laybyId, {
         ...req.body,
-        staffId: req.body?.staffId || req.user?.staffId || req.user?.uid || null,
-        staffName: req.body?.staffName || req.user?.name || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
         payment: req.body?.payment
           ? {
             ...req.body.payment,
-            staffId: req.body.payment.staffId || req.body?.staffId || req.user?.staffId || req.user?.uid || null,
-            staffName: req.body.payment.staffName || req.body?.staffName || req.user?.name || null,
+            staffId: req.user?.staffId || req.user?.uid || null,
+            staffName: req.user?.name || null,
           }
           : undefined,
       });
@@ -2865,8 +2865,8 @@ export async function createApp(io: any = null) {
     try {
       const order = await cancelLaybyOrder(req.params.tenantId, req.params.laybyId, {
         ...req.body,
-        staffId: req.body?.staffId || req.user?.staffId || req.user?.uid || null,
-        staffName: req.body?.staffName || req.user?.name || null,
+        staffId: req.user?.staffId || req.user?.uid || null,
+        staffName: req.user?.name || null,
       });
       res.json(order);
     } catch (err: any) {
@@ -3029,8 +3029,8 @@ export async function createApp(io: any = null) {
       }
       const sale = await updateSalePaymentProviderStatus(req.params.tenantId, req.params.saleId, req.params.paymentId, {
         ...req.body,
-        staffId: req.body.staffId || req.user?.staffId || null,
-        staffName: req.body.staffName || req.user?.name || null,
+        staffId: req.user?.staffId || null,
+        staffName: req.user?.name || null,
       });
       const liveIo = realtimeIo();
       if (liveIo) broadcastSalesUpdate(liveIo, req.params.tenantId, sale.id);
@@ -4345,6 +4345,14 @@ export async function createApp(io: any = null) {
       }
 
       const id = `cs_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      // staffId/staffName are derived from the JWT — never trust the body
+      // here, otherwise a cashier could open a register "as" another staff
+      // member and the audit trail would be falsified.
+      const sessionStaffId = req.user?.staffId || req.user?.uid || null;
+      const sessionStaffName = req.user?.name || null;
+      if (!sessionStaffId) {
+        return res.status(401).json({ error: "Cannot open a cash session without an authenticated staff identity." });
+      }
       await query(
         `INSERT INTO cash_sessions (
           id, tenant_id, staff_id, staff_name, opened_at, opening_float, opening_breakdown,
@@ -4353,8 +4361,8 @@ export async function createApp(io: any = null) {
         [
           id,
           req.params.tenantId,
-          req.body.staffId,
-          req.body.staffName || '',
+          sessionStaffId,
+          sessionStaffName || '',
           req.body.openedAt ? new Date(req.body.openedAt) : new Date(),
           req.body.openingFloat || 0,
           JSON.stringify(req.body.openingBreakdown || {}),
@@ -4369,15 +4377,15 @@ export async function createApp(io: any = null) {
           type: "opening_float",
           direction: "in",
           amount: Number(req.body.openingFloat || 0),
-          staffId: req.body.staffId,
-          staffName: req.body.staffName || "",
-          createdBy: req.user?.staffId,
+          staffId: sessionStaffId,
+          staffName: sessionStaffName || "",
+          createdBy: sessionStaffId,
           note: "Opening float counted",
         });
       }
       await auditRouteEvent(req, "cash_session.opened", "cash_session", {
-        staffId: req.body.staffId || null,
-        staffName: req.body.staffName || null,
+        staffId: sessionStaffId,
+        staffName: sessionStaffName,
         openingFloat: req.body.openingFloat || 0,
         status: req.body.status || "open",
       }, id, "cash_session");
