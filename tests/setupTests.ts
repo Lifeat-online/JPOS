@@ -39,4 +39,7 @@ process.env.DB_PASSWORD ||= 'test';
 process.env.DB_DATABASE ||= 'jimmy_pos';
 process.env.CORS_ORIGINS ||= '';
 process.env.TRUST_PROXY_HOPS ||= '0';
-process.env.API_RATE_LIMIT_PER_MIN ||= '0';
+// NOTE: do NOT set API_RATE_LIMIT_PERMIN here. The securityHardening
+// module reads it at import time; forcing it to '0' would make the
+// apiRateLimit middleware a no-op for the rest of the process. The
+// rate-limit suite sets it explicitly per-test and resets state.

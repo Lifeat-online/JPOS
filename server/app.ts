@@ -1,7 +1,6 @@
 import dotenv from "dotenv";
 import express from "express";
 import path from "path";
-import cors from "cors";
 import bodyParser from "body-parser";
 import crypto from "crypto";
 import fs from "fs/promises";
@@ -15,6 +14,15 @@ import { buildLiveWorkstationQueueRows } from "./workstationStats.js";
 import { getDashboardKpis } from "./dashboardKpis.js";
 import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
 import { NextFunction, Request, Response } from "express";
+import {
+  applyTrustProxy,
+  apiRateLimit,
+  corsHandler,
+  requestId,
+  securityHeaders,
+  sendSafeError,
+  stripPoweredBy,
+} from "./securityHardening.js";
 import {
   getProductsByTenant,
   getTenantIdBySlug,
@@ -712,10 +720,23 @@ export async function createApp(io: any = null) {
   const isProduction = process.env.NODE_ENV === "production";
   const isTest = process.env.VITEST === "1" || process.env.NODE_ENV === "test";
 
-  app.use(cors());
-  app.use(bodyParser.json({ limit: "25mb" }));
-  app.use(bodyParser.urlencoded({ extended: true, limit: "25mb" }));
-  app.use('/uploads', express.static(path.resolve(__dirname, '..', 'public', 'uploads')));
+  applyTrustProxy(app);
+  app.disable('x-powered-by');
+  app.use(stripPoweredBy);
+  app.use(requestId);
+  app.use(apiRateLimit);
+  app.use(corsHandler);
+  app.use(securityHeaders(isProduction));
+  app.use(bodyParser.json({ limit: "1mb" }));
+  app.use(bodyParser.urlencoded({ extended: false, limit: "1mb" }));
+  app.use('/uploads', express.static(path.resolve(__dirname, '..', 'public', 'uploads'), {
+    dotfiles: 'deny',
+    index: false,
+    setHeaders(res) {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'private, max-age=300');
+    },
+  }));
 
   if (process.env.JPOS_HOSTED === "true") {
     const { licenceRouter } = await import("./licenceServer.js");
@@ -887,20 +908,10 @@ export async function createApp(io: any = null) {
     });
   };
 
-  // Security Headers
-  app.use((req, res, next) => {
-    res.setHeader("X-Frame-Options", "DENY");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-XSS-Protection", "1; mode=block");
-    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
-    
-    if (isProduction) {
-      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-    }
-    
-    next();
-  });
+  // Security headers are installed at the top of createApp() (securityHeaders).
+  // The audit-driven additions (CSP, COOP, CORP, X-Permitted-Cross-Domain-Policies,
+  // Origin-Agent-Cluster) live in server/securityHardening.ts so they can be
+  // unit-tested and version-controlled independently.
 
   // Rate limiting for auth endpoints. Production stays strict, while local
   // development gets enough headroom that repeated UI testing does not lock you out.
@@ -978,28 +989,34 @@ export async function createApp(io: any = null) {
   app.post("/api/demo/start", handleStartDemo);
   app.post("/api/enroll", handleEnrollment);
 
-  app.get("/api/dev/db-test", async (req, res) => {
-    try {
-      const conn = await getConnection();
+  // Dev-only routes. They expose DB internals (db-test returns raw
+  // query output; init-db re-runs DDL). In production these MUST be
+  // disabled — the licence check above does not block them on a
+  // self-hosted install. Operator override: ENABLE_DEV_ROUTES=true.
+  if (!isProduction || process.env.ENABLE_DEV_ROUTES === "true") {
+    app.get("/api/dev/db-test", async (req, res) => {
       try {
-        const rows = await conn.query("SELECT 1 as val");
-        res.json({ status: "ok", postgres: isPostgres(), rows });
-      } finally {
-        conn.release();
+        const conn = await getConnection();
+        try {
+          const rows = await conn.query("SELECT 1 as val");
+          res.json({ status: "ok", postgres: isPostgres(), rows });
+        } finally {
+          conn.release();
+        }
+      } catch (err) {
+        sendSafeError(res, 500, "Database probe failed", err, req);
       }
-    } catch (err: any) {
-      res.status(500).json({ error: err.message, stack: err.stack });
-    }
-  });
+    });
 
-  app.post("/api/dev/init-db", async (req, res) => {
-    try {
-      await initDb();
-      res.json({ success: true, message: "Database schema initialized successfully" });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message, stack: err.stack });
-    }
-  });
+    app.post("/api/dev/init-db", async (req, res) => {
+      try {
+        await initDb();
+        res.json({ success: true, message: "Database schema initialized successfully" });
+      } catch (err) {
+        sendSafeError(res, 500, "Schema initialization failed", err, req);
+      }
+    });
+  }
 
   app.post("/api/auth/login", authRateLimit, validateSchema(LoginSchema), handleLogin);
   app.post("/api/auth/logout", handleLogout);
@@ -1012,25 +1029,29 @@ export async function createApp(io: any = null) {
   app.post("/api/auth/2fa/confirm", requireAuth, handleTwoFactorConfirm);
   app.post("/api/auth/2fa/disable", requireAuth, handleTwoFactorDisable);
 
-  app.get("/api/mariadb/users/:uid", optionalAuth, async (req, res) => {
+  // Authenticated lookups: these expose email/name/role for cross-tenant
+  // user resolution. Previously they were optionalAuth (i.e. unauthenticated
+  // callers could enumerate staff by guessing emails). Now requireAuth +
+  // tenant scoping via the licence check above.
+  app.get("/api/mariadb/users/:uid", requireAuth, async (req, res) => {
     try {
       const user = await getUserByUid(req.params.uid);
       res.json(user || null);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    } catch (err) {
+      sendSafeError(res, 500, "Failed to load user", err, req);
     }
   });
 
-  app.get("/api/mariadb/staff", optionalAuth, async (req, res) => {
+  app.get("/api/mariadb/staff", requireAuth, async (req, res) => {
     try {
       const { email } = req.query;
-      if (email) {
-        const staff = await getStaffTenantByEmail(email as string);
-        return res.json(staff || null);
+      if (typeof email !== "string" || !email.trim()) {
+        return res.status(400).json({ error: "Email query parameter is required" });
       }
-      res.status(400).json({ error: "Email query parameter is required" });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const staff = await getStaffTenantByEmail(email.trim().toLowerCase());
+      return res.json(staff || null);
+    } catch (err) {
+      sendSafeError(res, 500, "Failed to load staff", err, req);
     }
   });
 
