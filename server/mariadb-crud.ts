@@ -3071,6 +3071,10 @@ export async function updateSalePaymentProviderStatus(
   try {
     await conn.beginTransaction();
 
+    // Reconciling a payment's provider status can change the totals
+    // reported to SARS — block when the sale is in a locked period.
+    await assertSaleNotInLockedTaxPeriod(conn, tenantId, saleId, "update sale payment provider status");
+
     const [paymentRows] = await conn.query<any>(
       `SELECT
          sp.id,
@@ -3188,6 +3192,9 @@ export async function processSaleRefund(tenantId: string, saleId: string, input:
 
   try {
     await conn.beginTransaction();
+
+    // Refunding a sale touches the locked tax period — block it.
+    await assertSaleNotInLockedTaxPeriod(conn, tenantId, saleId, "refund sale");
 
     const [saleResult] = await conn.query<any>(
       `SELECT id, tenant_id, customer_id, user_id, staff_id, total, subtotal, tax_amount,
