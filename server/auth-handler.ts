@@ -18,13 +18,14 @@ import {
   storeRefreshTokenSession,
   verifyStoredRefreshToken,
 } from './refreshTokenSessions.js';
-import { 
-  generateAccessToken, 
-  generateRefreshToken, 
-  verifyToken, 
+import {
+  generateAccessToken,
+  generateRefreshToken,
+  verifyToken,
   AuthTokenPayload,
   DEV_EMAIL,
   DEV_TENANT_ID,
+  devBootstrapEnabled,
   isDevEmail,
   normalizeEmail,
   normalizeAuthTokenPayload,
@@ -66,6 +67,9 @@ async function ensureTenantExists(tenantId: string, tenantName: string) {
 }
 
 async function normalizeDevStaff(staff: StaffAuthRow): Promise<StaffAuthRow> {
+  if (!devBootstrapEnabled()) {
+    throw new Error('Dev staff normalization is disabled (ENABLE_DEV_BOOTSTRAP=false)');
+  }
   const tenantName = await ensureTenantExists(DEV_TENANT_ID, staff.tenant_name || "MasePOS");
   const nextStaff: StaffAuthRow = {
     ...staff,

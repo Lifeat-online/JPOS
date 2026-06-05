@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { handleLogin, handleLogout, handleRefreshToken, handleGetMe, handleRevokeRefreshTokens, hashPassword } from '../../server/auth-handler.js';
 import { generateTotpSecret, totpForTest } from '../../server/twoFactor.js';
 import { hashRefreshToken } from '../../server/refreshTokenSessions.js';
@@ -11,6 +11,10 @@ vi.mock('../../server/db.js', () => ({
 describe('auth-handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    delete process.env.ENABLE_DEV_BOOTSTRAP;
   });
 
   it('returns invalid credentials when no user is found', async () => {
@@ -123,6 +127,7 @@ describe('auth-handler', () => {
   });
 
   it('accepts the matching DEV password when a stale tenant1 duplicate exists', async () => {
+    process.env.ENABLE_DEV_BOOTSTRAP = 'true';
     const staleHash = await hashPassword('old-password');
     const matchingHash = await hashPassword('correct-password');
     (dbModule.query as any)

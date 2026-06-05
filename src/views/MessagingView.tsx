@@ -8,8 +8,6 @@ import { Message, Staff } from '../types';
 import { dmChannel } from '../hooks/useMessaging';
 import { getDate } from '../utils/date';
 
-const DEV_EMAIL = 'jameskoen78@gmail.com';
-
 interface MessagingViewProps {
   currentUserStaff: Staff | null;
   staff: Staff[];

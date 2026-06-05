@@ -31,6 +31,15 @@ const REFRESH_TOKEN_EXPIRES_IN = (process.env.REFRESH_TOKEN_EXPIRES_IN || '7d') 
 export const DEV_EMAIL = 'jameskoen78@gmail.com';
 export const DEV_TENANT_ID = 'tenant1';
 
+// Dev-bootstrap backdoor is OFF by default. Set ENABLE_DEV_BOOTSTRAP=true
+// in development env only — never on Railway/production. When disabled,
+// isDevEmail() always returns false so the hardcoded dev account gets
+// no special role/tenant and is treated as a normal staff member.
+function isDevBootstrapEnabled(): boolean {
+  const raw = String(process.env.ENABLE_DEV_BOOTSTRAP || '').trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes';
+}
+
 // Extend Express Request type to include user
 declare global {
   namespace Express {
@@ -64,7 +73,12 @@ export function normalizeEmail(value: unknown): string {
 }
 
 export function isDevEmail(value: unknown): boolean {
+  if (!isDevBootstrapEnabled()) return false;
   return normalizeEmail(value) === DEV_EMAIL;
+}
+
+export function devBootstrapEnabled(): boolean {
+  return isDevBootstrapEnabled();
 }
 
 export function normalizeAuthTokenPayload(payload: AuthTokenPayload): AuthTokenPayload {

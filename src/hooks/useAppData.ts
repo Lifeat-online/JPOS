@@ -16,9 +16,7 @@ import {
   getTenantRestaurantTables,
 } from '../api';
 import { canLoadDataset, type StaffRole } from '../permissions';
-
-const DEV_EMAIL = 'jameskoen78@gmail.com';
-const DEV_TENANT_ID = 'tenant1';
+import { DEV_TENANT_ID, isDevEmail } from '../utils/devMode';
 
 export const DEFAULT_CONFIG: AppConfig = {
   payfastMerchantId: '10000100',
@@ -159,7 +157,7 @@ export function useAppData(user: User | null) {
 
       setTenantLoading(true);
       const userEmail = String(user.email || '').trim().toLowerCase();
-      if (userEmail === DEV_EMAIL) {
+      if (isDevEmail(userEmail)) {
         if (!active) return;
         setTenantId(DEV_TENANT_ID);
         setTenantLoading(false);
@@ -212,7 +210,7 @@ export function useAppData(user: User | null) {
         return;
       }
 
-      if (userEmail === DEV_EMAIL || user.role === 'dev') {
+      if (isDevEmail(userEmail) || user.role === 'dev') {
         setCurrentUserStaff({
           id: user.uid || user.id || 'dev',
           name: user.displayName || user.name || user.email || 'Dev',

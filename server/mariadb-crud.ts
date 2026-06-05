@@ -6,6 +6,7 @@ import { DEFAULT_INVENTORY_LOCATION_ID } from "./inventoryLocations.js";
 import { recordPromotionRedemption, validatePromotionForSale, type PromotionValidationInput, type PromotionValidationResult } from "./promotions.js";
 import { calculateLoyaltyAward, type LoyaltyAwardResult } from "./loyalty.js";
 import { CUSTOMER_CONSENT_TYPES, defaultCustomerConsentMap, listCustomerConsents, upsertCustomerConsents } from "./customerConsents.js";
+import { isDevEmail } from "./auth-middleware.js";
 import type { Product, Customer, Staff, Sale, Workstation, AppConfig, OrderItem, BulkItem, RecipeItem, ModifierGroup, ModifierOption, Vendor, PurchaseOrder, StockBatch } from "./types.js";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
@@ -4087,9 +4088,9 @@ export async function setupTenant(data: {
       [data.user.uid, tenantId, data.user.email, data.user.displayName]
     );
     
-    // 3. Create staff (admin)
-    const DEV_EMAIL = 'jameskoen78@gmail.com';
-    const assignedRole = String(data.user.email || '').trim().toLowerCase() === DEV_EMAIL ? 'dev' : 'admin';
+    // 3. Create staff (admin) — dev role only when the env-gated bootstrap
+    // backdoor is enabled (dev/staging only, never in production).
+    const assignedRole = isDevEmail(data.user.email) ? 'dev' : 'admin';
     await conn.query(
       pg
         ? `INSERT INTO staff (id, tenant_id, name, email, role, status, created_at, updated_at)

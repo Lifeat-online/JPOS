@@ -8,6 +8,7 @@
  *   masepos_user           — serialised user object
  */
 import { useState, useEffect, useCallback } from 'react';
+import { DEV_EMAIL, DEV_TENANT_ID, isDevEmail } from '../utils/devMode';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -58,16 +59,13 @@ const KEYS = {
   USER:    'masepos_user',
 } as const;
 
-const DEV_EMAIL = 'jameskoen78@gmail.com';
-const DEV_TENANT_ID = 'tenant1';
-
 let refreshPromise: Promise<boolean> | null = null;
 
 function normalizeAuthUser(user: JwtUser | null): JwtUser | null {
   if (!user) return null;
 
   const email = String(user.email || '').trim().toLowerCase();
-  if (email !== DEV_EMAIL) return user;
+  if (!isDevEmail(email)) return user;
 
   return {
     ...user,

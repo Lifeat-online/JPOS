@@ -73,9 +73,7 @@ import { MessagingView } from './views/MessagingView';
 import { useMessaging } from './hooks/useMessaging';
 import { usePWA } from './hooks/usePWA';
 import { buildNavigation, canAccessView, getDefaultView, type StaffRole } from './permissions';
-
-// Hardcoded dev email — only this account gets the dev role
-const DEV_EMAIL = 'jameskoen78@gmail.com';
+import { isDevEmail } from './utils/devMode';
 
 export { DEFAULT_CATEGORY_TREE };
 
@@ -851,8 +849,8 @@ export default function App() {
     };
   }, [receiptPrintPending, receiptToPrint]);
 
-  // Dev role — hardcoded to the dev email, bypasses tenant role system
-  const isDev = String(user?.email || '').trim().toLowerCase() === DEV_EMAIL || user?.role === 'dev';
+  // Dev role — gated by VITE_ENABLE_DEV_BOOTSTRAP in production builds
+  const isDev = isDevEmail(user?.email) || user?.role === 'dev';
 
   // Nav items based on role — split into primary (always visible) and secondary (dropdown)
   const roleForPermissions = (isDev ? 'dev' : currentUserRole) as StaffRole | null;
