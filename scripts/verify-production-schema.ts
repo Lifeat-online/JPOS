@@ -235,8 +235,10 @@ export async function runSchemaVerificationCli() {
 }
 
 if (isDirectRun(import.meta.url, process.argv)) {
-  runSchemaVerificationCli().catch((err) => {
-    console.error("Production schema verification failed:", err);
-    process.exit(1);
-  });
+  runSchemaVerificationCli()
+    .then(() => process.exit(process.exitCode || 0))
+    .catch((err) => {
+      console.error("Production schema verification failed:", err);
+      process.exit(1);
+    });
 }
