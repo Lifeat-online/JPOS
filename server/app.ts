@@ -2307,6 +2307,11 @@ export async function createApp(io: any = null) {
 
   app.put("/api/mariadb/tenants/:tenantId/stocktakes/items/:itemId/count", requireAuth, async (req, res) => {
     try {
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "stock_adjustment", {
+        itemId: req.params.itemId,
+        countedQuantity: Number(req.body?.countedQuantity),
+      });
+      if (sensitiveResponse) return;
       res.json(await submitStockTakeCount(req.params.tenantId, req.params.itemId, {
         countedQuantity: Number(req.body?.countedQuantity),
         note: req.body?.note || null,
@@ -2328,6 +2333,11 @@ export async function createApp(io: any = null) {
           itemId: req.params.itemId,
         });
       }
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "manager_override", {
+        itemId: req.params.itemId,
+        action: "recount_request",
+      });
+      if (sensitiveResponse) return;
       res.json(await requestStockTakeRecount(req.params.tenantId, req.params.itemId, {
         note: req.body?.note || null,
       }, {
@@ -2347,6 +2357,11 @@ export async function createApp(io: any = null) {
           sessionId: req.params.sessionId,
         });
       }
+      const sensitiveResponse = await enforceSensitiveAction(req, res, "manager_override", {
+        sessionId: req.params.sessionId,
+        action: "stocktake_approval",
+      });
+      if (sensitiveResponse) return;
       res.json(await approveStockTakeSession(req.params.tenantId, req.params.sessionId, {
         staffId: req.user?.staffId || req.user?.uid || null,
         staffName: req.user?.name || null,
