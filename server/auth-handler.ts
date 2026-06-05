@@ -31,9 +31,15 @@ import {
   normalizeAuthTokenPayload,
 } from './auth-middleware.js';
 
-// Hash password for storage
+// Hash password for storage.
+// 12 rounds of bcryptjs ≈ 250-400ms on a typical CPU — strong enough
+// for a POS app and stays pure-JS (no native build deps on the
+// Hetzner VPS). Existing 10-round hashes still verify fine because
+// bcryptjs.compare is format-agnostic; the next password change
+// re-hashes at 12 rounds.
+const BCRYPT_ROUNDS = 12;
 export async function hashPassword(password: string): Promise<string> {
-  const salt = await bcrypt.genSalt(10);
+  const salt = await bcrypt.genSalt(BCRYPT_ROUNDS);
   return bcrypt.hash(password, salt);
 }
 
