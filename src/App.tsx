@@ -24,6 +24,7 @@ import { usePosStore } from './store/usePosStore';
 import { WelcomeView } from './components/WelcomeView';
 import { LoginModal } from './components/LoginModal';
 import { EnrollmentModal } from './components/EnrollmentModal';
+import { SensitiveActionModal } from './components/SensitiveActionModal';
 import { SetupWizard } from './components/SetupWizard';
 import { PointOfSaleView } from './views/PointOfSaleView';
 import { HistoryView } from './views/HistoryView';
@@ -1599,6 +1600,7 @@ export default function App() {
             onCancel={() => setStaffToDelete(null)}
           />
         )}
+        <SensitiveActionModal />
       </AnimatePresence>
     </div>
   );

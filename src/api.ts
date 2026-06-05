@@ -4,6 +4,7 @@
  * On 401, attempts a token refresh and retries once before throwing.
  */
 import { getAccessToken } from './hooks/useAuth';
+import { promptSensitiveCredential } from './api-sensitive-action';
 import type { AccountingJournalReport, AiInsight, AiModelOption, AiSettings, AiStaffScore, CashCloseCheckpoint, CashClosePreview, CashCustodyTransfer, CashCustodyTransferPartyType, CustomerCampaignExport, CustomerConsentMap, CustomerDataExport, DeliveryOrder, DeliveryOrderStatus, EcommerceMarketplaceExport, EventBooking, HardwareDevice, HardwareDeviceEvent, IntegrationApiKey, IntegrationWebhookEvent, InventoryAgentApplyResult, InventoryAgentProposal, InventoryAgentStep, InventoryLocation, LaybyOrder, LaybyPaymentMethod, LoyaltyAwardResult, LoyaltyRewardRule, LoyaltyTier, ManagerCashMovement, ManagerCashMovementType, ManagerCashSummary, MarginReport, OperationalReport, ProductLocationStock, Promotion, PromotionValidationResult, RecipeCostingReport, ReorderNotificationRule, ReorderRecommendation, RetentionApplyResult, RetentionPolicy, RetentionPreview, StaffAttendance, StaffAttendanceStatus, StaffCoachingNote, StaffPerformanceReport, StaffShift, StaffTimesheetReport, StockTakeSuggestion, StockTransferOrder, StockValuationReport, TaxPeriod, TipPoolReport, TipPoolRule, VatTaxReport } from './types';
 
 let refreshPromise: Promise<boolean> | null = null;
@@ -113,14 +114,6 @@ function withSensitiveVerification(init: RequestInit, credential: string, action
   }
 }
 
-function promptSensitiveCredential(parsed: any): string | null {
-  if (typeof window === 'undefined' || typeof window.prompt !== 'function') return null;
-  const label = parsed?.actionLabel || 'complete this sensitive action';
-  const credential = window.prompt(`Enter your password or PIN to ${label}.`);
-  const trimmed = credential?.trim();
-  return trimmed ? trimmed : null;
-}
-
 async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<T> {
   if (sessionCleared && getAccessToken()) {
     sessionCleared = false;
@@ -155,7 +148,7 @@ async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<
   if (res.status === 428 && isJsonMutation(currentInit)) {
     const { parsed } = await readJsonishBody(res);
     if (parsed?.sensitiveActionRequired) {
-      const credential = promptSensitiveCredential(parsed);
+      const credential = await promptSensitiveCredential(parsed);
       const retryInit = credential ? withSensitiveVerification(currentInit, credential, parsed?.actionType) : null;
       if (retryInit) {
         currentInit = retryInit;
