@@ -34,9 +34,9 @@ describe("operations scripts and runbooks", () => {
     );
     expect(checks.get("refresh_token_sessions")).toEqual(expect.arrayContaining(["token_hash", "revoked_at"]));
     expect(checks.get("integration_api_keys")).toEqual(expect.arrayContaining(["key_hash", "scopes"]));
-    expect(checks.get("integration_webhook_events")).toEqual(expect.arrayContaining(["external_event_id", "status"]));
-    expect(checks.get("hardware_devices")).toEqual(expect.arrayContaining(["device_type", "connection_type", "config"]));
-    expect(checks.get("hardware_device_events")).toEqual(expect.arrayContaining(["device_id", "event_type", "status"]));
+    expect(checks.get("integration_webhook_events")).toEqual(expect.arrayContaining(["source", "idempotency_key", "status"]));
+    expect(checks.get("hardware_devices")).toEqual(expect.arrayContaining(["device_type", "connection_type", "connection_config"]));
+    expect(checks.get("hardware_device_events")).toEqual(expect.arrayContaining(["device_id", "event_type", "request_payload"]));
     expect(checks.get("realtime_pubsub_events")).toEqual(expect.arrayContaining(["instance_id", "channel", "event_name", "expires_at"]));
     expect(checks.get("stock_batches")).toEqual(expect.arrayContaining(["batch_number", "remaining_quantity", "location_id"]));
     expect(checks.get("ai_agent_runs")).toEqual(expect.arrayContaining(["requires_human_approval", "full_autopilot"]));

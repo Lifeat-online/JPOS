@@ -32,7 +32,6 @@ PHASE2_*.md
 SECURITY_*.md
 Implementation\ Plan
 plans/
-scripts/
 scratch/
 test-express.js
 General

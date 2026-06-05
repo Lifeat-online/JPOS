@@ -38,7 +38,7 @@ export const REQUIRED_SCHEMA_CHECKS: SchemaRequirement[] = [
   },
   {
     table: "stock_movements",
-    columns: ["tenant_id", "product_id", "movement_type", "reason_code", "location_id", "sale_id", "staff_id", "created_at"],
+    columns: ["tenant_id", "product_id", "quantity_delta", "reason", "reason_code", "location_id", "sale_id", "staff_id", "created_at"],
     reason: "stock ledger, variances, receiving, and location stock",
   },
   {
@@ -78,17 +78,17 @@ export const REQUIRED_SCHEMA_CHECKS: SchemaRequirement[] = [
   },
   {
     table: "integration_webhook_events",
-    columns: ["tenant_id", "provider", "event_type", "external_event_id", "status", "payload", "processed_at"],
+    columns: ["tenant_id", "source", "event_type", "idempotency_key", "status", "payload", "processed_at"],
     reason: "ERP and stock-system sync auditability",
   },
   {
     table: "hardware_devices",
-    columns: ["tenant_id", "name", "device_type", "connection_type", "status", "config", "workstation_id"],
+    columns: ["tenant_id", "name", "device_type", "connection_type", "status", "connection_config", "workstation_id"],
     reason: "direct hardware adapter configuration",
   },
   {
     table: "hardware_device_events",
-    columns: ["tenant_id", "device_id", "event_type", "status", "payload", "created_at"],
+    columns: ["tenant_id", "device_id", "event_type", "status", "request_payload", "created_at"],
     reason: "hardware readiness and command audit trail",
   },
   {
@@ -118,22 +118,22 @@ export const REQUIRED_SCHEMA_CHECKS: SchemaRequirement[] = [
   },
   {
     table: "sales",
-    columns: ["tenant_id", "staff_id", "customer_id", "status", "total", "is_tab", "restaurant_table_id", "offline_event_id"],
+    columns: ["tenant_id", "staff_id", "customer_id", "status", "total", "is_tab", "table_number", "offline_event_id"],
     reason: "checkout, tabs, and offline recovery",
   },
   {
     table: "sale_items",
-    columns: ["sale_id", "product_id", "quantity", "unit_price", "status", "workstation_id"],
+    columns: ["sale_id", "product_id", "quantity", "price", "status", "workstation_id"],
     reason: "line-level checkout and kitchen routing",
   },
   {
     table: "table_sections",
-    columns: ["tenant_id", "name", "status"],
+    columns: ["tenant_id", "name", "color", "order"],
     reason: "restaurant table setup",
   },
   {
     table: "restaurant_tables",
-    columns: ["tenant_id", "section_id", "number", "status", "current_sale_id"],
+    columns: ["tenant_id", "section_id", "label", "status"],
     reason: "restaurant floor and handheld flows",
   },
 ];
