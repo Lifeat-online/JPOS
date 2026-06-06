@@ -145,7 +145,7 @@ export function DevDashboard({
     tier: 'business' as LicenceTier,
     maxRegisters: 15,
     expiresInDays: '',
-    features: ['images', 'ai', 'analytics'] as LicenceFeature[],
+    features: ['images', 'ai', 'analytics', 'local_server_sync'] as LicenceFeature[],
   });
   const [generatedLicence, setGeneratedLicence] = useState<GenerateLicenceResponse | null>(null);
   const [licenceActionStatus, setLicenceActionStatus] = useState<{ type: 'ok' | 'error'; message: string } | null>(null);
@@ -1307,7 +1307,7 @@ export function DevDashboard({
                   <div className="mt-4">
                     <p className="text-xs font-bold text-slate-500 mb-2">Features</p>
                     <div className="flex flex-wrap gap-2">
-                      {(['images', 'ai', 'analytics', 'api_access', 'multi_location'] as LicenceFeature[]).map(feature => (
+                      {(['images', 'ai', 'analytics', 'local_server_sync', 'api_access', 'multi_location'] as LicenceFeature[]).map(feature => (
                         <button
                           key={feature}
                           type="button"

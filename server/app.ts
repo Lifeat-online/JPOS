@@ -1539,6 +1539,7 @@ export async function createApp(io: any = null) {
       res.json({
         source: context.source,
         package: pkg,
+        localServerSync: hasPackageFeature(pkg.features, "local_server_sync"),
         usage,
         remaining: {
           products: pkg.maxProducts === -1 ? -1 : Math.max(0, pkg.maxProducts - usage.products),

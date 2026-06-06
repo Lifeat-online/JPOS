@@ -9,7 +9,7 @@ function payload(overrides: Partial<LicencePayload> = {}): LicencePayload {
     licenceId: "11111111-1111-4111-8111-111111111111",
     tenantName: "Acme Bistro",
     maxRegisters: 15,
-    features: ["images", "ai", "analytics"],
+    features: ["images", "ai", "analytics", "local_server_sync"],
     issuedAt: Math.floor(Date.now() / 1000) - 60,
     expiresAt: null,
     tier: "business",
@@ -26,6 +26,7 @@ describe("licence keys", () => {
     expect(result.valid).toBe(true);
     expect(result.payload?.tenantName).toBe("Acme Bistro");
     expect(result.payload?.features).toContain("ai");
+    expect(result.payload?.features).toContain("local_server_sync");
   });
 
   it("rejects tampered signatures without throwing", () => {
@@ -60,8 +61,9 @@ describe("licence keys", () => {
     expect(getPackageByTier("business")).toMatchObject({ maxRegisters: 15, maxProducts: -1, maxStaff: 50, priceLabel: "R999/mo" });
     expect(getPackageByTier("whitelabel")).toMatchObject({ maxRegisters: -1, maxProducts: -1, maxStaff: -1, priceLabel: "R25,000 once-off" });
     expect(featureSetForPackage("whitelabel", true)).toEqual(
-      expect.arrayContaining(["full_branding", "updates", "priority_support"])
+      expect.arrayContaining(["full_branding", "local_server_sync", "updates", "priority_support"])
     );
+    expect(featureSetForPackage("business")).toContain("local_server_sync");
     expect(hasPackageFeature(["full_branding"], "own_logo")).toBe(true);
     expect(hasPackageFeature(["jpos_branding"], "images")).toBe(false);
   });

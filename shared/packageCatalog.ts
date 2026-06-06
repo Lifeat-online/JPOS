@@ -6,6 +6,7 @@ export type PackageFeature =
   | 'images'
   | 'ai'
   | 'analytics'
+  | 'local_server_sync'
   | 'full_branding'
   | 'priority_support'
   | 'updates';
@@ -83,9 +84,9 @@ export const JPOS_PACKAGES: JposPackage[] = [
     maxProducts: -1,
     maxStaff: 50,
     maxCustomers: -1,
-    features: ['own_logo', 'images', 'ai', 'analytics'],
-    limitsLabel: '15 registers, unlimited products, 50 staff, AI features, reports',
-    description: 'Hosted growth tier with reporting and AI assistance for larger teams.',
+    features: ['own_logo', 'images', 'ai', 'analytics', 'local_server_sync'],
+    limitsLabel: '15 registers, unlimited products, 50 staff, AI features, reports, Windows local sync',
+    description: 'Hosted growth tier with reporting, AI assistance, and paid Windows outage sync for larger teams.',
     ctaLabel: 'Choose Business',
     highlighted: true,
   },
@@ -100,9 +101,9 @@ export const JPOS_PACKAGES: JposPackage[] = [
     maxProducts: -1,
     maxStaff: -1,
     maxCustomers: -1,
-    features: ['full_branding', 'own_logo', 'images', 'ai', 'analytics'],
-    limitsLabel: 'Unlimited registers, products, staff, and customers; full branding, source not included',
-    description: 'A Docker image with a signed licence key for self-hosted branded deployments.',
+    features: ['full_branding', 'own_logo', 'images', 'ai', 'analytics', 'local_server_sync'],
+    limitsLabel: 'Unlimited registers, products, staff, and customers; full branding, Windows local sync, source not included',
+    description: 'A Docker image with a signed licence key for self-hosted branded deployments and paid Windows outage sync.',
     ctaLabel: 'Request Licence',
   },
 ];

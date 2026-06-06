@@ -6,6 +6,7 @@ export type LicenceFeature =
   | "images"
   | "ai"
   | "analytics"
+  | "local_server_sync"
   | "api_access"
   | "multi_location"
   | "full_branding"
