@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { applyProductStockDelta, normalizeStockMovementReasonCode, recordAuditEvent } from '../../server/audit.js';
+import { applyProductStockDelta, normalizeStockMovementReasonCode, recordAuditEvent, requestIdFromRequest } from '../../server/audit.js';
 
 describe('audit helpers', () => {
   it('records JSON audit event details', async () => {
@@ -65,5 +65,54 @@ describe('audit helpers', () => {
     expect(normalizeStockMovementReasonCode('damaged')).toBe('wastage');
     expect(normalizeStockMovementReasonCode('missing')).toBe('shrinkage');
     expect(normalizeStockMovementReasonCode(null, 'purchase_order')).toBe('receiving');
+  });
+
+  it('persists request_id when supplied to recordAuditEvent', async () => {
+    const conn = { query: vi.fn().mockResolvedValue([[]]) } as any;
+
+    await recordAuditEvent(conn, {
+      tenantId: 'tenant_1',
+      action: 'sale.refunded',
+      entityType: 'sale',
+      entityId: 'sale_1',
+      requestId: 'req_abc123',
+      details: { refundTotal: 5 },
+    });
+
+    const insertCall = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO audit_events'));
+    expect(insertCall).toBeDefined();
+    const params = insertCall?.[1] || [];
+    expect(params[10]).toBe('req_abc123');
+    expect(JSON.parse(params[11])).toEqual({ refundTotal: 5 });
+  });
+
+  it('falls back to null request_id when omitted', async () => {
+    const conn = { query: vi.fn().mockResolvedValue([[]]) } as any;
+
+    await recordAuditEvent(conn, {
+      tenantId: 'tenant_1',
+      action: 'sale.created',
+      entityType: 'sale',
+      entityId: 'sale_1',
+    });
+
+    const insertCall = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO audit_events'));
+    const params = insertCall?.[1] || [];
+    expect(params[10]).toBeNull();
+  });
+
+  it('extracts requestId from x-request-id header', () => {
+    const req = { headers: { 'x-request-id': 'req_xyz789' }, requestId: undefined } as any;
+    expect(requestIdFromRequest(req)).toBe('req_xyz789');
+  });
+
+  it('prefers an explicit requestId property on the request', () => {
+    const req = { headers: { 'x-request-id': 'req_from_header' }, requestId: 'req_from_middleware' } as any;
+    expect(requestIdFromRequest(req)).toBe('req_from_middleware');
+  });
+
+  it('returns null when no requestId is present', () => {
+    expect(requestIdFromRequest({ headers: {} } as any)).toBeNull();
+    expect(requestIdFromRequest({} as any)).toBeNull();
   });
 });

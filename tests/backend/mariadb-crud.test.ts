@@ -794,7 +794,7 @@ describe('mariadb-crud', () => {
     const conflictAudit = conn.query.mock.calls.find(([sql, params]: any[]) => (
       String(sql).includes('INSERT INTO audit_events') && params?.[2] === 'offline.sync_conflict'
     ));
-    const details = JSON.parse(conflictAudit?.[1]?.[10] || '{}');
+    const details = JSON.parse(conflictAudit?.[1]?.[11] || '{}');
     expect(details).toMatchObject({
       offlineEventId: 'offline_sale_stock_short',
       conflictType: 'negative_stock_after_sync',

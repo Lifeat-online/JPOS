@@ -117,7 +117,10 @@ export async function recordAuditEventSafe(input: AuditEventInput) {
  */
 export function requestIdFromRequest(req: unknown): string | null {
   if (!req || typeof req !== 'object') return null;
-  const id = (req as { requestId?: unknown }).requestId;
+  const r = req as { requestId?: unknown; headers?: Record<string, unknown> };
+  const id = r.requestId
+    ?? r.headers?.['x-request-id']
+    ?? r.headers?.['X-Request-Id'];
   if (typeof id !== 'string' || id.length === 0 || id.length > 64) return null;
   return id;
 }

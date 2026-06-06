@@ -68,7 +68,7 @@ describe('offline sync issue reporting', () => {
       ])
     );
     const auditInsert = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO audit_events'));
-    const details = JSON.parse(auditInsert?.[1]?.[10] || '{}');
+    const details = JSON.parse(auditInsert?.[1]?.[11] || '{}');
     expect(details).toMatchObject({
       conflictType: 'duplicate_local_receipt',
       recommendedAction: expect.stringContaining('local receipt'),

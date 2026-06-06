@@ -560,6 +560,7 @@ async function recordCashMovement(tenantId: string, data: any) {
     relatedSaleId: data.saleId || null,
     staffId: data.createdBy || data.staffId || null,
     staffName: data.staffName || null,
+    requestId: data.requestId || null,
     source: "cash_session",
     details: {
       cashSessionId: data.cashSessionId || null,
@@ -4502,6 +4503,7 @@ export async function createApp(io: any = null) {
         staffId: req.user?.staffId,
         staffName: req.user?.name,
         role: req.user?.role,
+        requestId: req.requestId || null,
       });
       res.status(201).json(result);
     } catch (err: any) {
@@ -4573,6 +4575,7 @@ export async function createApp(io: any = null) {
           staffName: sessionStaffName || "",
           createdBy: sessionStaffId,
           note: "Opening float counted",
+          requestId: req.requestId || null,
         });
       }
       await auditRouteEvent(req, "cash_session.opened", "cash_session", {
