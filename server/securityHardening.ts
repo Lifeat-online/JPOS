@@ -62,7 +62,7 @@ export const corsHandler: RequestHandler = (req, res, next) => {
  * Trust-proxy configuration.
  *
  * Operators set TRUST_PROXY_HOPS to the number of reverse proxies in
- * front of the app (1 for Railway/nginx, 0 for local dev). Without
+ * front of the app (1 for Hetzner/Coolify/nginx, 0 for local dev). Without
  * `trust proxy`, `req.ip` returns the docker/loopback address and the
  * auth rate limiter becomes a global DoS vector.
  */

@@ -748,7 +748,7 @@ export async function createApp(io: any = null) {
   const app = express();
   if (io) app.set("io", io);
   
-  // Force production mode if running on Railway
+  // Force production mode if an older Railway deployment env is still present.
   if (process.env.RAILWAY_ENVIRONMENT_ID || process.env.RAILWAY_PROJECT_ID) {
     process.env.NODE_ENV = "production";
   }

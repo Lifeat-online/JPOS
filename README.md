@@ -105,8 +105,8 @@ See **[Implementation Plan/implementation_plan.md](Implementation%20Plan/impleme
 ## Licence & hosted mode
 
 - **Self-hosted Docker** (default): free tier, all packages, no licence required.
-- **Hosted (Railway / masepos.co.za):** packages enforced via a signed licence key; admin endpoints gated on `JPOS_HOSTED=true`. See `server/licenceServer.ts` and `server/licenceMiddleware.ts`.
-- The Docker image and the Railway build both use the same `server.ts` entry point.
+- **Hosted (Hetzner / masepos.co.za):** packages enforced via a signed licence key; admin endpoints gated on `JPOS_HOSTED=true`. See `server/licenceServer.ts` and `server/licenceMiddleware.ts`.
+- The Docker image and the Hetzner/Coolify build both use the same `server.ts` entry point.
 
 ## Contributing
 

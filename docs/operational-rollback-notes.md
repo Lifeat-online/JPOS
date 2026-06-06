@@ -20,7 +20,7 @@ Use this runbook before production deploys that include database migrations, sta
 
 ## Application Rollback
 
-- Roll back the application artifact or Railway deployment first when the database remains backward-compatible.
+- Roll back the application artifact or Hetzner/Coolify deployment first when the database remains backward-compatible.
 - Keep the database on the newer additive schema unless the migration itself caused the incident.
 - If a route contract changed, validate both browser flows and public API/mobile clients before declaring recovery.
 - For payment-provider incidents, disable the provider integration or route traffic to cash/card-external fallback before rolling back data.

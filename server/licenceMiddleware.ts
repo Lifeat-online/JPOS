@@ -6,7 +6,7 @@ import os from "os";
 import path from "path";
 import { LicenceFeature, LicencePayload, verifyLicenceKey } from "./licenceKey.js";
 
-const DEFAULT_LICENCE_SERVER_URL = "https://jpos-production.up.railway.app";
+const DEFAULT_LICENCE_SERVER_URL = "https://masepos.co.za";
 const LICENCE_SERVER_URL = (process.env.JPOS_LICENCE_SERVER || DEFAULT_LICENCE_SERVER_URL).replace(/\/+$/, "");
 const LICENCE_KEY = process.env.LICENCE_KEY || "";
 const LICENCE_SECRET = process.env.LICENCE_SECRET || "";

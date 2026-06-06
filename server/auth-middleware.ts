@@ -32,7 +32,7 @@ export const DEV_EMAIL = 'jameskoen78@gmail.com';
 export const DEV_TENANT_ID = 'tenant1';
 
 // Dev-bootstrap backdoor is OFF by default. Set ENABLE_DEV_BOOTSTRAP=true
-// in development env only — never on Railway/production. When disabled,
+// in development env only — never on hosted production. When disabled,
 // isDevEmail() always returns false so the hardcoded dev account gets
 // no special role/tenant and is treated as a normal staff member.
 function isDevBootstrapEnabled(): boolean {
