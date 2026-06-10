@@ -774,7 +774,11 @@ export async function createApp(io: any = null) {
     },
   }));
 
-  if (process.env.JPOS_HOSTED === "true") {
+  const shouldExposeLicenceServer =
+    process.env.JPOS_HOSTED === "true" ||
+    Boolean(process.env.LICENCE_SECRET && (process.env.ADMIN_API_KEY || process.env.LICENCE_ADMIN_KEY));
+
+  if (shouldExposeLicenceServer) {
     const { licenceRouter } = await import("./licenceServer.js");
     app.use("/api", licenceRouter);
   }

@@ -48,6 +48,42 @@ describe('api routes', () => {
     );
   });
 
+  it('mounts hosted licence admin routes when licence secrets are configured', async () => {
+    const previousHosted = process.env.JPOS_HOSTED;
+    const previousSecret = process.env.LICENCE_SECRET;
+    const previousAdminKey = process.env.ADMIN_API_KEY;
+
+    delete process.env.JPOS_HOSTED;
+    process.env.LICENCE_SECRET = 'test-licence-secret';
+    process.env.ADMIN_API_KEY = 'test-admin-key';
+
+    try {
+      const hostedApp = await createApp();
+      const response = await request(hostedApp)
+        .post('/api/admin/licence/generate')
+        .send({ tenantName: 'Acme Bistro', tier: 'business' });
+
+      expect(response.status).toBe(401);
+      expect(response.body).toEqual({ error: 'Unauthorized' });
+    } finally {
+      if (previousHosted === undefined) {
+        delete process.env.JPOS_HOSTED;
+      } else {
+        process.env.JPOS_HOSTED = previousHosted;
+      }
+      if (previousSecret === undefined) {
+        delete process.env.LICENCE_SECRET;
+      } else {
+        process.env.LICENCE_SECRET = previousSecret;
+      }
+      if (previousAdminKey === undefined) {
+        delete process.env.ADMIN_API_KEY;
+      } else {
+        process.env.ADMIN_API_KEY = previousAdminKey;
+      }
+    }
+  });
+
   it('accepts POST requests on the auth login endpoint', async () => {
     const response = await request(app)
       .post('/api/auth/login')
