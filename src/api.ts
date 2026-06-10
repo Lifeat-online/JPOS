@@ -1550,6 +1550,94 @@ export function clearAllSales(tenantId: string) {
   return apiDelete<any>(`/api/mariadb/tenants/${tenantId}/sales`);
 }
 
+export interface DatabaseBackupSummary {
+  id: string;
+  filename: string;
+  createdAt: string;
+  createdBy: string | null;
+  note: string | null;
+  scope: 'full-database';
+  dialect: 'postgres' | 'mariadb';
+  databaseName: string | null;
+  schemaName: string | null;
+  tableCount: number;
+  totalRows: number;
+  tables: Array<{ name: string; rows: number }>;
+}
+
+export interface DatabaseBackupFile {
+  version: 1;
+  id: string;
+  createdAt: string;
+  createdBy: string | null;
+  note: string | null;
+  scope: 'full-database';
+  source: {
+    dialect: 'postgres' | 'mariadb';
+    databaseName: string | null;
+    schemaName: string | null;
+  };
+  tables: Array<{
+    name: string;
+    columns: string[];
+    primaryKey: string[];
+    rows: Array<Record<string, unknown>>;
+  }>;
+}
+
+export interface DatabaseRestoreResult {
+  backupId: string;
+  dryRun: boolean;
+  overwriteExisting: boolean;
+  startedAt: string;
+  finishedAt: string;
+  totals: {
+    inserted: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    tables: number;
+    rows: number;
+  };
+  tables: Array<{
+    name: string;
+    rows: number;
+    inserted: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    missingColumns: string[];
+    status: 'ok' | 'skipped' | 'partial' | 'failed';
+    message?: string;
+  }>;
+}
+
+export function runDevSchemaRepair() {
+  return apiPost<{ success: boolean; message: string }>('/api/dev/init-db', {});
+}
+
+export function listDevDatabaseBackups() {
+  return apiGet<{ backupDir: string; backups: DatabaseBackupSummary[] }>('/api/dev/backups');
+}
+
+export function createDevDatabaseBackup(note?: string) {
+  return apiPost<{ success: boolean; backupDir: string; backup: DatabaseBackupSummary }>('/api/dev/backups', { note });
+}
+
+export function getDevDatabaseBackup(backupId: string) {
+  return apiGet<{ backup: DatabaseBackupFile }>(`/api/dev/backups/${encodeURIComponent(backupId)}`);
+}
+
+export function restoreDevDatabaseBackup(
+  backupId: string,
+  options: { dryRun?: boolean; overwriteExisting?: boolean; repairSchemaFirst?: boolean } = {},
+) {
+  return apiPost<{ success: boolean; result: DatabaseRestoreResult }>(
+    `/api/dev/backups/${encodeURIComponent(backupId)}/restore`,
+    options,
+  );
+}
+
 export function createCustomerPayoutRequest(tenantId: string, data: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests`, data);
 }

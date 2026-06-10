@@ -4,13 +4,20 @@ import {
   Product, Customer, Staff, Sale, AppConfig, Workstation, CashSession,
 } from '../types';
 import {
+  createDevDatabaseBackup,
   generateLicence,
   generatePushVapidKeys,
+  getDevDatabaseBackup,
   getLicenceInfo,
   getPushNotificationStatus,
   getTenantCashSessions,
+  listDevDatabaseBackups,
   revokeLicence,
+  restoreDevDatabaseBackup,
+  runDevSchemaRepair,
   sendTestPushNotification,
+  type DatabaseBackupSummary,
+  type DatabaseRestoreResult,
   type GenerateLicenceResponse,
   type LicenceFeature,
   type LicenceInfoResponse,
@@ -129,7 +136,7 @@ export function DevDashboard({
   onClearSeeded,
   onClearSales,
 }: DevDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'health' | 'licences' | 'notifications' | 'console' | 'actions' | 'tests'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'health' | 'licences' | 'notifications' | 'maintenance' | 'console' | 'actions' | 'tests'>('overview');
   const [dataSubTab, setDataSubTab] = useState<'products' | 'customers' | 'staff' | 'sales' | 'workstations'>('products');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logCounter, setLogCounter] = useState(0);
@@ -155,6 +162,15 @@ export function DevDashboard({
   const [pushSubject, setPushSubject] = useState('mailto:dev@masepos.local');
   const [pushActionStatus, setPushActionStatus] = useState<{ type: 'ok' | 'error'; message: string } | null>(null);
   const [pushLastSend, setPushLastSend] = useState<PushSendResult | null>(null);
+  const [backupDir, setBackupDir] = useState('');
+  const [backups, setBackups] = useState<DatabaseBackupSummary[]>([]);
+  const [backupNote, setBackupNote] = useState('');
+  const [selectedBackupId, setSelectedBackupId] = useState('');
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [maintenanceStatus, setMaintenanceStatus] = useState<{ type: 'ok' | 'error'; message: string } | null>(null);
+  const [overwriteRestore, setOverwriteRestore] = useState(true);
+  const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const [lastRestoreResult, setLastRestoreResult] = useState<DatabaseRestoreResult | null>(null);
 
   useEffect(() => {
     if (activeTab !== 'tests' || !tenantId) return;
@@ -245,6 +261,29 @@ export function DevDashboard({
     if (activeTab !== 'notifications') return;
     void loadPushStatus();
   }, [activeTab, tenantId]);
+
+  const loadDatabaseBackups = async () => {
+    setMaintenanceLoading(true);
+    try {
+      const response = await listDevDatabaseBackups();
+      setBackupDir(response.backupDir || '');
+      setBackups(response.backups || []);
+      setSelectedBackupId(current => (
+        current && response.backups.some(backup => backup.id === current)
+          ? current
+          : response.backups[0]?.id || ''
+      ));
+    } catch (err: any) {
+      setMaintenanceStatus({ type: 'error', message: err?.message || 'Failed to load database backups' });
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'maintenance') return;
+    void loadDatabaseBackups();
+  }, [activeTab]);
 
   // ── Test suite state ─────────────────────────────────────────────────
   const TEST_DEFINITIONS: TestDef[] = [
@@ -610,16 +649,106 @@ export function DevDashboard({
     return { noBarcode, zeroStock, belowMin, noRole, stalePending };
   }, [products, staff, sales]);
 
-  // ── Export JSON ──────────────────────────────────────────────────────
-  const handleExport = () => {
-    const data = { products, customers, staff, sales, workstations, exportedAt: new Date().toISOString() };
+  const selectedBackup = useMemo(
+    () => backups.find(backup => backup.id === selectedBackupId) || null,
+    [backups, selectedBackupId],
+  );
+
+  const formatBackupDate = (value: string) => {
+    const date = getDate(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  };
+
+  const downloadJsonFile = (data: unknown, filename: string) => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `masepos-export-${Date.now()}.json`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // ── Export JSON ──────────────────────────────────────────────────────
+  const handleExport = () => {
+    const data = { products, customers, staff, sales, workstations, exportedAt: new Date().toISOString() };
+    downloadJsonFile(data, `masepos-export-${Date.now()}.json`);
+  };
+
+  const handleCreateBackup = async () => {
+    setMaintenanceLoading(true);
+    setMaintenanceStatus(null);
+    setLastRestoreResult(null);
+    try {
+      const response = await createDevDatabaseBackup(backupNote);
+      setMaintenanceStatus({ type: 'ok', message: `Created ${response.backup.filename} with ${response.backup.totalRows} rows.` });
+      setBackupNote('');
+      await loadDatabaseBackups();
+      setSelectedBackupId(response.backup.id);
+    } catch (err: any) {
+      setMaintenanceStatus({ type: 'error', message: err?.message || 'Failed to create database backup' });
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  };
+
+  const handleDownloadBackup = async () => {
+    if (!selectedBackupId) return;
+    setMaintenanceLoading(true);
+    setMaintenanceStatus(null);
+    try {
+      const response = await getDevDatabaseBackup(selectedBackupId);
+      downloadJsonFile(response.backup, `${response.backup.id}.json`);
+      setMaintenanceStatus({ type: 'ok', message: `Downloaded ${response.backup.id}.json.` });
+    } catch (err: any) {
+      setMaintenanceStatus({ type: 'error', message: err?.message || 'Failed to download database backup' });
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  };
+
+  const handleSchemaRepair = async () => {
+    setMaintenanceLoading(true);
+    setMaintenanceStatus(null);
+    try {
+      const response = await runDevSchemaRepair();
+      setMaintenanceStatus({ type: 'ok', message: response.message || 'Database schema repair completed.' });
+      await loadDatabaseBackups();
+    } catch (err: any) {
+      setMaintenanceStatus({ type: 'error', message: err?.message || 'Schema repair failed' });
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  };
+
+  const handleRestoreBackup = async (dryRun: boolean) => {
+    if (!selectedBackupId) return;
+    if (!dryRun && !restoreConfirm) {
+      setRestoreConfirm(true);
+      setMaintenanceStatus({ type: 'error', message: 'Confirm restore before running it. Restore inserts and updates rows, but never deletes rows.' });
+      return;
+    }
+
+    setMaintenanceLoading(true);
+    setMaintenanceStatus(null);
+    try {
+      const response = await restoreDevDatabaseBackup(selectedBackupId, {
+        dryRun,
+        overwriteExisting: overwriteRestore,
+        repairSchemaFirst: true,
+      });
+      setLastRestoreResult(response.result);
+      setRestoreConfirm(false);
+      setMaintenanceStatus({
+        type: response.result.totals.failed > 0 ? 'error' : 'ok',
+        message: `${dryRun ? 'Dry run' : 'Restore'} finished: ${response.result.totals.inserted} inserted, ${response.result.totals.updated} updated, ${response.result.totals.skipped} skipped, ${response.result.totals.failed} failed.`,
+      });
+      if (!dryRun) await loadDatabaseBackups();
+    } catch (err: any) {
+      setMaintenanceStatus({ type: 'error', message: err?.message || 'Database restore failed' });
+    } finally {
+      setMaintenanceLoading(false);
+    }
   };
 
   const toggleLicenceFeature = (feature: LicenceFeature) => {
@@ -731,6 +860,7 @@ export function DevDashboard({
     { id: 'health', label: 'App Health', icon: Activity },
     { id: 'licences', label: 'Licences', icon: KeyRound },
     { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'maintenance', label: 'Maintenance', icon: Shield },
     { id: 'console', label: `Console${logs.length > 0 ? ` (${logs.length})` : ''}`, icon: Terminal },
     { id: 'actions', label: 'Quick Actions', icon: Zap },
     { id: 'tests', label: 'Test Suite', icon: FlaskConical },
@@ -1496,6 +1626,251 @@ export function DevDashboard({
                 {pushActionStatus.message}
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'maintenance' && (
+          <div className="space-y-5 max-w-5xl mx-auto">
+            <div className="grid lg:grid-cols-2 gap-5">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-violet-500" />
+                    <h3 className="font-black text-slate-800 dark:text-white">Database Snapshots</h3>
+                  </div>
+                  <button
+                    onClick={loadDatabaseBackups}
+                    disabled={maintenanceLoading}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-60 active:scale-95 transition-all"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${maintenanceLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                  Full database snapshots are saved on the server and can be downloaded as JSON. Restores merge rows back into the live schema and never delete rows.
+                </p>
+
+                <label className="block text-xs font-black uppercase tracking-widest text-slate-400 mb-2">Backup note</label>
+                <input
+                  value={backupNote}
+                  onChange={(event) => setBackupNote(event.target.value)}
+                  placeholder="Before inventory feature work"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-violet-500/40"
+                />
+
+                <div className="grid sm:grid-cols-2 gap-3 mt-4">
+                  <button
+                    onClick={handleCreateBackup}
+                    disabled={maintenanceLoading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-60 active:scale-95 transition-all"
+                  >
+                    <Database className="w-4 h-4" />
+                    Create Backup
+                  </button>
+                  <button
+                    onClick={handleSchemaRepair}
+                    disabled={maintenanceLoading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-slate-900 dark:bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-60 active:scale-95 transition-all"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Repair Schema
+                  </button>
+                </div>
+
+                <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Backup folder</p>
+                  <p className="text-xs font-mono text-slate-600 dark:text-slate-300 break-all">{backupDir || 'Loading...'}</p>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                <div className="flex items-center gap-2 mb-4">
+                  <Download className="w-4 h-4 text-emerald-500" />
+                  <h3 className="font-black text-slate-800 dark:text-white">Restore / Download</h3>
+                </div>
+
+                <label className="block text-xs font-black uppercase tracking-widest text-slate-400 mb-2">Backup snapshot</label>
+                <select
+                  value={selectedBackupId}
+                  onChange={(event) => {
+                    setSelectedBackupId(event.target.value);
+                    setRestoreConfirm(false);
+                  }}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-violet-500/40"
+                >
+                  {backups.length === 0 ? (
+                    <option value="">No backups found</option>
+                  ) : backups.map(backup => (
+                    <option key={backup.id} value={backup.id}>
+                      {formatBackupDate(backup.createdAt)} - {backup.totalRows} rows
+                    </option>
+                  ))}
+                </select>
+
+                {selectedBackup && (
+                  <div className="mt-4 grid grid-cols-3 gap-3">
+                    {[
+                      { label: 'Rows', value: selectedBackup.totalRows },
+                      { label: 'Tables', value: selectedBackup.tableCount },
+                      { label: 'DB', value: selectedBackup.dialect },
+                    ].map(item => (
+                      <div key={item.label} className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{item.label}</p>
+                        <p className="text-sm font-black text-slate-800 dark:text-white">{item.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedBackup?.note && (
+                  <p className="mt-3 text-xs font-semibold text-slate-500 dark:text-slate-400">{selectedBackup.note}</p>
+                )}
+
+                <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={overwriteRestore}
+                    onChange={(event) => setOverwriteRestore(event.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-sm font-bold text-slate-800 dark:text-white">Update matching rows from backup</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">Useful after a fresh schema repair creates placeholder tenant/admin rows. Rows not in the backup are kept.</span>
+                  </span>
+                </label>
+
+                <div className="grid sm:grid-cols-3 gap-3 mt-4">
+                  <button
+                    onClick={() => handleRestoreBackup(true)}
+                    disabled={!selectedBackupId || maintenanceLoading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 active:scale-95 transition-all"
+                  >
+                    <Activity className="w-4 h-4" />
+                    Dry Run
+                  </button>
+                  <button
+                    onClick={handleDownloadBackup}
+                    disabled={!selectedBackupId || maintenanceLoading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 active:scale-95 transition-all"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download
+                  </button>
+                  <button
+                    onClick={() => handleRestoreBackup(false)}
+                    disabled={!selectedBackupId || maintenanceLoading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60 active:scale-95 transition-all"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Restore
+                  </button>
+                </div>
+
+                {restoreConfirm && (
+                  <div className="mt-4 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-sm font-bold text-amber-800 dark:text-amber-300">Restore this snapshot into the current database?</p>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        onClick={() => handleRestoreBackup(false)}
+                        disabled={maintenanceLoading}
+                        className="px-3 py-1.5 rounded-lg text-sm font-bold bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60 active:scale-95 transition-all"
+                      >
+                        Confirm Restore
+                      </button>
+                      <button
+                        onClick={() => setRestoreConfirm(false)}
+                        className="px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 active:scale-95 transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {maintenanceStatus && (
+              <div className={`rounded-2xl border p-4 text-sm font-semibold ${
+                maintenanceStatus.type === 'ok'
+                  ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+              }`}>
+                {maintenanceStatus.message}
+              </div>
+            )}
+
+            {lastRestoreResult && (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h3 className="font-black text-slate-800 dark:text-white">{lastRestoreResult.dryRun ? 'Dry Run Result' : 'Restore Result'}</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">{lastRestoreResult.backupId}</p>
+                  </div>
+                  <span className="px-2 py-1 rounded-lg text-xs font-black bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                    {lastRestoreResult.totals.rows} scanned
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                  {[
+                    { label: 'Inserted', value: lastRestoreResult.totals.inserted, tone: 'text-emerald-600 dark:text-emerald-400' },
+                    { label: 'Updated', value: lastRestoreResult.totals.updated, tone: 'text-blue-600 dark:text-blue-400' },
+                    { label: 'Skipped', value: lastRestoreResult.totals.skipped, tone: 'text-slate-600 dark:text-slate-300' },
+                    { label: 'Failed', value: lastRestoreResult.totals.failed, tone: 'text-red-600 dark:text-red-400' },
+                  ].map(item => (
+                    <div key={item.label} className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{item.label}</p>
+                      <p className={`text-lg font-black ${item.tone}`}>{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                  {lastRestoreResult.tables.filter(table => table.rows > 0 || table.failed > 0 || table.message).slice(0, 30).map(table => (
+                    <div key={table.name} className="py-2.5 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{table.name}</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">{table.inserted} ins</span>
+                      <span className="text-blue-600 dark:text-blue-400 font-bold">{table.updated} upd</span>
+                      <span className="text-slate-500 font-bold">{table.skipped} skip</span>
+                      {table.failed > 0 && <span className="text-red-600 dark:text-red-400 font-bold">{table.failed} fail</span>}
+                      {table.missingColumns.length > 0 && <span className="text-amber-600 dark:text-amber-400 font-bold">{table.missingColumns.length} old cols ignored</span>}
+                      {table.message && <span className="text-slate-500 dark:text-slate-400">{table.message}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+              <div className="flex items-center gap-2 mb-4">
+                <Database className="w-4 h-4 text-slate-500" />
+                <h3 className="font-black text-slate-800 dark:text-white">Saved Backups</h3>
+              </div>
+              {backups.length === 0 ? (
+                <p className="text-sm text-slate-500 dark:text-slate-400">No server backups found yet.</p>
+              ) : (
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {backups.slice(0, 12).map(backup => (
+                    <button
+                      key={backup.id}
+                      onClick={() => setSelectedBackupId(backup.id)}
+                      className={`w-full text-left py-3 flex flex-wrap items-center justify-between gap-3 transition-colors ${
+                        selectedBackupId === backup.id ? 'text-violet-700 dark:text-violet-300' : 'text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <span>
+                        <span className="block text-sm font-bold">{formatBackupDate(backup.createdAt)}</span>
+                        <span className="block text-xs font-mono text-slate-400">{backup.filename}</span>
+                      </span>
+                      <span className="text-xs font-bold text-slate-500">{backup.tableCount} tables / {backup.totalRows} rows</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

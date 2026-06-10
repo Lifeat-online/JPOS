@@ -6,6 +6,13 @@ import crypto from "crypto";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
 import { getConnection, isPostgres, query } from "./db.js";
+import {
+  createDatabaseBackup,
+  getDatabaseBackupDirectory,
+  listDatabaseBackups,
+  readDatabaseBackup,
+  restoreDatabaseBackup,
+} from "./dbMaintenance.js";
 import { initDb } from "./init-db.js";
 import rateLimit from "express-rate-limit";
 import http from "http";
@@ -309,6 +316,16 @@ function canManageBookings(role: unknown) {
 
 function canGenerateVapidKeys(role: unknown) {
   return normalizeRole(role) === "dev";
+}
+
+function canUseDevMaintenance(role: unknown) {
+  const r = normalizeRole(role);
+  return r === "dev" || r === "admin";
+}
+
+function requireDevMaintenance(req: Request, res: Response, next: NextFunction) {
+  if (canUseDevMaintenance(req.user?.role)) return next();
+  return res.status(403).json({ error: "Dev or admin access is required for database maintenance." });
 }
 
 function auditActorFromRequest(req: Request) {
@@ -1058,6 +1075,60 @@ export async function createApp(io: any = null) {
         res.json({ success: true, message: "Database schema initialized successfully" });
       } catch (err) {
         sendSafeError(res, 500, "Schema initialization failed", err, req);
+      }
+    });
+
+    app.get("/api/dev/backups", requireAuth, requireDevMaintenance, async (req, res) => {
+      try {
+        res.json({
+          backupDir: getDatabaseBackupDirectory(),
+          backups: await listDatabaseBackups(),
+        });
+      } catch (err) {
+        sendSafeError(res, 500, "Failed to list database backups", err, req);
+      }
+    });
+
+    app.post("/api/dev/backups", requireAuth, requireDevMaintenance, async (req, res) => {
+      try {
+        const backup = await createDatabaseBackup({
+          createdBy: req.user?.email || req.user?.name || null,
+          note: typeof req.body?.note === "string" ? req.body.note : null,
+        });
+        res.json({
+          success: true,
+          backupDir: getDatabaseBackupDirectory(),
+          backup,
+        });
+      } catch (err) {
+        sendSafeError(res, 500, "Failed to create database backup", err, req);
+      }
+    });
+
+    app.get("/api/dev/backups/:backupId", requireAuth, requireDevMaintenance, async (req, res) => {
+      try {
+        const backup = await readDatabaseBackup(req.params.backupId);
+        if (req.query.download === "1") {
+          res.setHeader("Content-Disposition", `attachment; filename="${backup.id}.json"`);
+        }
+        res.json({ backup });
+      } catch (err) {
+        sendSafeError(res, 404, "Database backup was not found", err, req);
+      }
+    });
+
+    app.post("/api/dev/backups/:backupId/restore", requireAuth, requireDevMaintenance, async (req, res) => {
+      try {
+        if (req.body?.repairSchemaFirst !== false) {
+          await initDb();
+        }
+        const result = await restoreDatabaseBackup(req.params.backupId, {
+          dryRun: Boolean(req.body?.dryRun),
+          overwriteExisting: Boolean(req.body?.overwriteExisting),
+        });
+        res.json({ success: result.totals.failed === 0, result });
+      } catch (err) {
+        sendSafeError(res, 500, "Failed to restore database backup", err, req);
       }
     });
   }
