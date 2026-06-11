@@ -112,19 +112,28 @@ export async function getProductsByTenant(
   });
 }
 
-export async function getAppConfigByTenant(tenantId: string) {
-  const rows = await query<{
-    payfast_merchant_id: string;
-    payfast_merchant_key: string;
-    payfast_passphrase: string;
-    payfast_sandbox: number;
-    business: string | null;
-    categories: string | null;
-    retention_policy: string | null;
-    slug: string | null;
-    setup_completed: number;
-  }>(
-    `SELECT
+type AppConfigRow = {
+  payfast_merchant_id: string;
+  payfast_merchant_key: string;
+  payfast_passphrase: string;
+  payfast_sandbox: number;
+  business: string | null;
+  categories: string | null;
+  retention_policy?: string | null;
+  slug: string | null;
+  setup_completed: number;
+};
+
+function isMissingColumnError(error: unknown, column: string) {
+  const anyError = error as { code?: string; message?: string };
+  return anyError?.code === 'ER_BAD_FIELD_ERROR' &&
+    String(anyError.message || '').includes(column);
+}
+
+async function getAppConfigRows(tenantId: string) {
+  try {
+    return await query<AppConfigRow>(
+      `SELECT
        payfast_merchant_id,
        payfast_merchant_key,
        payfast_passphrase,
@@ -137,8 +146,30 @@ export async function getAppConfigByTenant(tenantId: string) {
      FROM app_settings
      WHERE tenant_id = ?
      LIMIT 1`,
-    [tenantId]
-  );
+      [tenantId]
+    );
+  } catch (error) {
+    if (!isMissingColumnError(error, 'retention_policy')) throw error;
+    return query<AppConfigRow>(
+      `SELECT
+       payfast_merchant_id,
+       payfast_merchant_key,
+       payfast_passphrase,
+       payfast_sandbox,
+       business,
+       categories,
+       slug,
+       setup_completed
+     FROM app_settings
+     WHERE tenant_id = ?
+     LIMIT 1`,
+      [tenantId]
+    );
+  }
+}
+
+export async function getAppConfigByTenant(tenantId: string) {
+  const rows = await getAppConfigRows(tenantId);
 
   if (rows.length === 0) {
     return null;

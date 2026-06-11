@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { getTenantIdBySlug, getProductsByTenant } from '../../server/mariadb-adapter.js';
+import { getTenantIdBySlug, getProductsByTenant, getAppConfigByTenant } from '../../server/mariadb-adapter.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
@@ -22,6 +22,37 @@ describe('mariadb-adapter', () => {
     (dbModule.query as any).mockResolvedValue([]);
     const id = await getTenantIdBySlug('missing');
     expect(id).toBeNull();
+  });
+
+
+  it('reads app config when older databases do not have retention_policy yet', async () => {
+    const missingColumn = Object.assign(
+      new Error("Unknown column 'retention_policy' in 'SELECT'"),
+      { code: 'ER_BAD_FIELD_ERROR' },
+    );
+    (dbModule.query as any)
+      .mockRejectedValueOnce(missingColumn)
+      .mockResolvedValueOnce([{
+        payfast_merchant_id: '10000100',
+        payfast_merchant_key: 'merchant-key',
+        payfast_passphrase: 'passphrase',
+        payfast_sandbox: 1,
+        business: JSON.stringify({ name: 'Demo', packageTier: 'business' }),
+        categories: JSON.stringify({ food: [] }),
+        slug: 'demo',
+        setup_completed: 1,
+      }]);
+
+    const config = await getAppConfigByTenant('tenant_1');
+
+    expect(config).toMatchObject({
+      payfastMerchantId: '10000100',
+      business: { name: 'Demo', packageTier: 'business' },
+      setupCompleted: true,
+    });
+    expect(config?.retentionPolicy).toBeUndefined();
+    expect(dbModule.query).toHaveBeenCalledTimes(2);
+    expect((dbModule.query as any).mock.calls[1][0]).not.toContain('retention_policy');
   });
 
   it('returns products for tenant', async () => {
