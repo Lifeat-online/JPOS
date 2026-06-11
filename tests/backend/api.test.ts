@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { createApp, setupRoutes } from '../../server/app.js';
+import { createApp, setupRoutes, createTenantLocalSyncSecret } from '../../server/app.js';
 import { generateAccessToken } from '../../server/auth-middleware.js';
 
 let app: any;
@@ -46,6 +46,18 @@ describe('api routes', () => {
         expect.objectContaining({ id: 'whitelabel_support', priceLabel: 'R3,500/mo' }),
       ])
     );
+  });
+
+  it('derives a tenant local sync secret only when paid local sync is enabled', () => {
+    const businessSecret = createTenantLocalSyncSecret('tenant_sync', true, 'test-local-sync-secret');
+    const sameTenantSecret = createTenantLocalSyncSecret('tenant_sync', true, 'test-local-sync-secret');
+    const otherTenantSecret = createTenantLocalSyncSecret('tenant_other', true, 'test-local-sync-secret');
+
+    expect(businessSecret).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+    expect(sameTenantSecret).toBe(businessSecret);
+    expect(otherTenantSecret).not.toBe(businessSecret);
+    expect(createTenantLocalSyncSecret('tenant_sync', false, 'test-local-sync-secret')).toBeNull();
+    expect(createTenantLocalSyncSecret('tenant_sync', true, '')).toBeNull();
   });
 
   it('mounts hosted licence admin routes when licence secrets are configured', async () => {

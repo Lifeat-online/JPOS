@@ -280,6 +280,19 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export function createTenantLocalSyncSecret(
+  tenantId: string,
+  enabled: boolean,
+  secretSeed = process.env.LOCAL_SYNC_SECRET || process.env.LICENCE_SECRET || process.env.ADMIN_API_KEY || ""
+) {
+  if (!enabled) return null;
+  if (!secretSeed.trim()) return null;
+  return crypto
+    .createHmac("sha256", secretSeed)
+    .update(`masepos-local-sync:${tenantId}`)
+    .digest("base64url");
+}
+
 function normalizeRole(role: unknown) {
   return String(role || "").toLowerCase();
 }
@@ -1611,10 +1624,13 @@ export async function createApp(io: any = null) {
         getTenantPackageUsage(req.params.tenantId),
       ]);
       const pkg = context.package;
+      const localServerSync = hasPackageFeature(pkg.features, "local_server_sync");
+      const localSyncSharedSecret = createTenantLocalSyncSecret(req.params.tenantId, localServerSync);
       res.json({
         source: context.source,
         package: pkg,
-        localServerSync: hasPackageFeature(pkg.features, "local_server_sync"),
+        localServerSync,
+        ...(localSyncSharedSecret ? { localSyncSharedSecret } : {}),
         usage,
         remaining: {
           products: pkg.maxProducts === -1 ? -1 : Math.max(0, pkg.maxProducts - usage.products),
