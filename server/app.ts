@@ -121,7 +121,7 @@ import {
 } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
 import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
-import { describeOfflineCapability, featureSetForPackage, getHostedPackage, hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, type PackageFeature } from "../shared/packageCatalog.js";
+import { featureSetForPackage, getHostedPackage, hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, type PackageFeature } from "../shared/packageCatalog.js";
 import {
   canManageAi,
   deleteInsight,
@@ -1626,11 +1626,9 @@ export async function createApp(io: any = null) {
       const pkg = context.package;
       const localServerSync = hasPackageFeature(pkg.features, "local_server_sync");
       const localSyncSharedSecret = createTenantLocalSyncSecret(req.params.tenantId, localServerSync);
-      const offline = describeOfflineCapability(pkg.features);
       res.json({
         source: context.source,
         package: pkg,
-        offline,
         localServerSync,
         ...(localSyncSharedSecret ? { localSyncSharedSecret } : {}),
         usage,
