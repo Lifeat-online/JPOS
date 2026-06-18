@@ -3463,7 +3463,7 @@ export async function ensureAiSchema() {
     CREATE TABLE IF NOT EXISTS ai_insights (
       id VARCHAR(64) PRIMARY KEY,
       tenant_id VARCHAR(64) NOT NULL,
-      category ENUM('sales','stock','cash','staff','restaurant','customer','package') NOT NULL,
+      category ENUM('sales','stock','cash','staff','restaurant','customer','package','integration') NOT NULL,
       severity ENUM('info','success','warning','critical') NOT NULL,
       title VARCHAR(255) NOT NULL,
       summary TEXT NOT NULL,
