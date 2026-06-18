@@ -121,7 +121,7 @@ import {
 } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
 import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
-import { featureSetForPackage, getHostedPackage, hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, type PackageFeature } from "../shared/packageCatalog.js";
+import { describeOfflineCapability, featureSetForPackage, getHostedPackage, hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, type PackageFeature } from "../shared/packageCatalog.js";
 import {
   canManageAi,
   deleteInsight,
@@ -1626,9 +1626,11 @@ export async function createApp(io: any = null) {
       const pkg = context.package;
       const localServerSync = hasPackageFeature(pkg.features, "local_server_sync");
       const localSyncSharedSecret = createTenantLocalSyncSecret(req.params.tenantId, localServerSync);
+      const offline = describeOfflineCapability(pkg.features);
       res.json({
         source: context.source,
         package: pkg,
+        offline,
         localServerSync,
         ...(localSyncSharedSecret ? { localSyncSharedSecret } : {}),
         usage,
@@ -5403,14 +5405,20 @@ export async function createApp(io: any = null) {
 
   // Centralized error handler
   app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-    console.error("Server error:", err.message);
-    
+    console.error("Server error:", err.message, {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      stack: err.stack?.split("\n").slice(0, 5).join("\n"),
+    });
+
     if (res.headersSent) {
       return next(err);
     }
-    
+
     res.status(500).json({
       error: isProduction ? "Internal server error" : err.message,
+      requestId: req.requestId,
       ...(isTest ? { stack: err.stack } : {})
     });
   });

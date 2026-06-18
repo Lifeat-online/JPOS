@@ -38,7 +38,8 @@ describe('security and PCI documentation', () => {
     expect(appSource).toContain('app.post("/api/mariadb/tenants/:tenantId/sales", sensitiveRouteRateLimit');
     expect(appSource).toContain('app.post("/api/mariadb/tenants/:tenantId/sales/:saleId/refund", sensitiveRouteRateLimit');
     expect(appSource).toContain('app.post("/api/mariadb/tenants/:tenantId/products/:id/stock-adjustments", sensitiveRouteRateLimit');
-    expect(appSource).toContain('"/api/mariadb/tenants/:tenantId/ai/test",\n    sensitiveRouteRateLimit');
+    expect(appSource).toContain('"/api/mariadb/tenants/:tenantId/ai/test",');
+    expect(appSource).toMatch(/ai\/test",\s*\n\s*sensitiveRouteRateLimit/);
     expect(appSource).toContain('app.post("/api/payfast/notify", sensitiveRouteRateLimit');
   });
 });

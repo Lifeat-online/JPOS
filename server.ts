@@ -22,62 +22,80 @@ const {
   ensureStaffPermissionsSchema,
   ensureStockBatchSchema,
   ensureStockTakeSchema,
+  ensureDeliveryIntegrationSchema,
+  ensureIntegrationAccessSchema,
+  ensureRefreshTokenSessionSchema,
+  ensureSensitiveActionSchema,
+  ensureTwoFactorSchema,
+  ensureRetentionPolicySchema,
+  ensureCustomerPrivacySchema,
+  ensureCustomerConsentSchema,
+  ensureLoyaltySchema,
+  ensurePromotionSchema,
+  ensureStaffSchedulingSchema,
+  ensureTipPoolingSchema,
+  ensureStaffPerformanceSchema,
+  ensureOfflineSaleSyncSchema,
+  ensureLaybySchema,
+  ensureManagerOverrideSchema,
+  ensureEventBookingSchema,
+  ensureMultiLocationInventorySchema,
+  ensureReorderNotificationRuleSchema,
+  ensureTaxPeriodSchema,
+  ensureRestaurantInventoryTables,
 } = await import("./server/init-db.js");
 const { ensureLicenceSchema } = await import("./server/licenceSchema.js");
-await ensureSalePaymentsTable().catch((err: unknown) => {
-  console.warn("Failed to ensure sale_payments table:", err);
-});
-await ensureStaffRoleSupportsChef().catch((err: unknown) => {
-  console.warn("Failed to ensure staff role schema:", err);
-});
-await ensureStaffPermissionsSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure staff permissions schema:", err);
-});
-await ensureCustomerAccountSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure customer account schema:", err);
-});
-await ensurePersonDiscountSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure person discount schema:", err);
-});
-await ensureCashManagementSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure cash management schema:", err);
-});
-await ensureRefundSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure refund schema:", err);
-});
-await ensureAuditAndStockLedgerSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure audit and stock ledger schema:", err);
-});
-await ensureManagerTaskSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure manager task schema:", err);
-});
-await ensureStockTakeSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure stocktake schema:", err);
-});
-await ensureCompanionDeviceAssignmentsSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure companion device assignment schema:", err);
-});
-await ensureHardwareDeviceSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure hardware device schema:", err);
-});
-await ensurePushNotificationSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure push notification schema:", err);
-});
-await ensureRealtimePubsubSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure realtime pub/sub schema:", err);
-});
-await ensureBulkInventorySchema().catch((err: unknown) => {
-  console.warn("Failed to ensure bulk inventory schema:", err);
-});
-await ensurePurchaseOrderReceivingSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure purchase order receiving schema:", err);
-});
-await ensureStockBatchSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure stock batch schema:", err);
-});
-await ensureReorderRecommendationSchema().catch((err: unknown) => {
-  console.warn("Failed to ensure reorder recommendation schema:", err);
-});
+
+const ensureFns: Array<[() => Promise<unknown>, string]> = [
+  [ensureSalePaymentsTable, "sale_payments table"],
+  [ensureStaffRoleSupportsChef, "staff role schema"],
+  [ensureStaffPermissionsSchema, "staff permissions schema"],
+  [ensureCustomerAccountSchema, "customer account schema"],
+  [ensurePersonDiscountSchema, "person discount schema"],
+  [ensureCashManagementSchema, "cash management schema"],
+  [ensureRefundSchema, "refund schema"],
+  [ensureAuditAndStockLedgerSchema, "audit and stock ledger schema"],
+  [ensureManagerTaskSchema, "manager task schema"],
+  [ensureStockTakeSchema, "stocktake schema"],
+  [ensureCompanionDeviceAssignmentsSchema, "companion device assignment schema"],
+  [ensureHardwareDeviceSchema, "hardware device schema"],
+  [ensurePushNotificationSchema, "push notification schema"],
+  [ensureRealtimePubsubSchema, "realtime pubsub schema"],
+  [ensureBulkInventorySchema, "bulk inventory schema"],
+  [ensurePurchaseOrderReceivingSchema, "purchase order receiving schema"],
+  [ensureStockBatchSchema, "stock batch schema"],
+  [ensureReorderRecommendationSchema, "reorder recommendation schema"],
+  [ensureDeliveryIntegrationSchema, "delivery integration schema"],
+  [ensureIntegrationAccessSchema, "integration access schema"],
+  [ensureRefreshTokenSessionSchema, "refresh token session schema"],
+  [ensureSensitiveActionSchema, "sensitive action schema"],
+  [ensureTwoFactorSchema, "two factor schema"],
+  [ensureRetentionPolicySchema, "retention policy schema"],
+  [ensureCustomerPrivacySchema, "customer privacy schema"],
+  [ensureCustomerConsentSchema, "customer consent schema"],
+  [ensureLoyaltySchema, "loyalty schema"],
+  [ensurePromotionSchema, "promotion schema"],
+  [ensureStaffSchedulingSchema, "staff scheduling schema"],
+  [ensureTipPoolingSchema, "tip pooling schema"],
+  [ensureStaffPerformanceSchema, "staff performance schema"],
+  [ensureOfflineSaleSyncSchema, "offline sale sync schema"],
+  [ensureLaybySchema, "layby schema"],
+  [ensureManagerOverrideSchema, "manager override schema"],
+  [ensureEventBookingSchema, "event booking schema"],
+  [ensureMultiLocationInventorySchema, "multi-location inventory schema"],
+  [ensureReorderNotificationRuleSchema, "reorder notification rule schema"],
+  [ensureTaxPeriodSchema, "tax period schema"],
+  [ensureRestaurantInventoryTables, "restaurant inventory tables"],
+];
+
+for (const [fn, label] of ensureFns) {
+  try {
+    await fn();
+  } catch (err: unknown) {
+    console.warn(`Failed to ensure ${label}:`, err);
+  }
+}
+
 await ensureLicenceSchema().catch((err: unknown) => {
   console.warn("Failed to ensure licence schema:", err);
 });

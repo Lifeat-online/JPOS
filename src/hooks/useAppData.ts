@@ -31,7 +31,16 @@ function isSessionExpiredError(err: unknown) {
 
 function logLoadError(label: string, err: unknown) {
   if (isSessionExpiredError(err)) return;
-  console.error(`${label} load error:`, err);
+  const message = err instanceof Error ? err.message : (() => {
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  })();
+  const stack = err instanceof Error ? err.stack : undefined;
+  console.error(`${label} load error: ${message}`, err);
+  if (stack) console.error(`${label} stack:`, stack);
 }
 
 export function useAppData(user: User | null) {
