@@ -37,6 +37,7 @@ export function useMessaging({ user, tenantId, currentUserStaff, staff }: UseMes
       const data = await apiGet<Message[]>(`/api/mariadb/tenants/${tenantId}/messages?limit=200`);
       setMessages(data || []);
     } catch (err) {
+      if ((err as { isRateLimit?: boolean } | null)?.isRateLimit) return;
       console.error('Messages fetch error:', err);
     }
   }, [user, tenantId]);

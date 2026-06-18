@@ -197,8 +197,24 @@ async function apiFetch<T>(input: RequestInfo, init: RequestInit = {}): Promise<
   if (!res.ok) {
     const { raw: body, parsed } = await readJsonishBody(res);
     const message = parsed?.error || parsed?.message || parsed?.detail;
-    if (message) throw new Error(String(message));
-    throw new Error(`API request failed [${res.status}]: ${body}`);
+    if (message) {
+      const err = new Error(String(message)) as Error & { status?: number; isRateLimit?: boolean; retryAfter?: number };
+      err.status = res.status;
+      if (res.status === 429) {
+        err.isRateLimit = true;
+        const ra = Number(res.headers.get('Retry-After') || parsed?.retryAfter || 30);
+        err.retryAfter = Number.isFinite(ra) && ra > 0 ? ra : 30;
+      }
+      throw err;
+    }
+    const err = new Error(`API request failed [${res.status}]: ${body}`) as Error & { status?: number; isRateLimit?: boolean; retryAfter?: number };
+    err.status = res.status;
+    if (res.status === 429) {
+      err.isRateLimit = true;
+      const ra = Number(res.headers.get('Retry-After') || 30);
+      err.retryAfter = Number.isFinite(ra) && ra > 0 ? ra : 30;
+    }
+    throw err;
   }
 
   return res.json() as Promise<T>;

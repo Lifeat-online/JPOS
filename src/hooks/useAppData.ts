@@ -29,8 +29,26 @@ function isSessionExpiredError(err: unknown) {
   return err instanceof Error && err.message.includes('Session expired');
 }
 
+function isRateLimitError(err: unknown): boolean {
+  return Boolean((err as { isRateLimit?: boolean } | null)?.isRateLimit);
+}
+
+let rateLimitPausedUntil = 0;
+function noteRateLimitPause(seconds: number) {
+  const until = Date.now() + seconds * 1000;
+  if (until > rateLimitPausedUntil) rateLimitPausedUntil = until;
+}
+function isPollingPaused(): boolean {
+  return Date.now() < rateLimitPausedUntil;
+}
+
 function logLoadError(label: string, err: unknown) {
   if (isSessionExpiredError(err)) return;
+  if (isRateLimitError(err)) {
+    const retry = Number((err as { retryAfter?: number } | null)?.retryAfter) || 30;
+    noteRateLimitPause(retry);
+    return;
+  }
   const message = err instanceof Error ? err.message : (() => {
     try {
       return JSON.stringify(err);
@@ -88,6 +106,7 @@ export function useAppData(user: User | null) {
   }), [config.business?.isRestaurantMode, activeSession, storeActiveSession, currentUserStaff?.permissions]);
 
   const loadSales = useCallback(async () => {
+    if (isPollingPaused()) return;
     if (!canLoadTenantData || !tenantId || !canLoadDataset(currentUserRole, 'sales', tableAccessOptions)) {
       setSales([]);
       return;
@@ -255,6 +274,7 @@ export function useAppData(user: User | null) {
     let interval: number | null = null;
 
     async function loadProducts() {
+      if (isPollingPaused()) return;
       try {
         const fetched = await getTenantProducts(tenantId!);
         if (!active) return;
@@ -298,7 +318,8 @@ export function useAppData(user: User | null) {
 
     async function loadCustomers() {
       try {
-        const fetched = await getTenantCustomers(tenantId!);
+    if (isPollingPaused()) return;
+    const fetched = await getTenantCustomers(tenantId!);
         if (!active) return;
         const sanitized = (fetched || []).map((c: any) => ({
           ...c,
@@ -342,6 +363,7 @@ export function useAppData(user: User | null) {
     setIsStaffLoading(true);
 
     async function loadStaff() {
+      if (isPollingPaused()) return;
       try {
         const fetched = await getTenantStaff(tenantId!);
         if (!active) return;
@@ -388,6 +410,7 @@ export function useAppData(user: User | null) {
     let active = true;
     setConfigLoading(true);
     async function loadConfig() {
+      if (isPollingPaused()) return;
       try {
         const fetched = await getTenantConfig(tenantId!);
         if (!active) return;
@@ -446,6 +469,7 @@ export function useAppData(user: User | null) {
     let interval: number | null = null;
 
     async function loadWorkstations() {
+      if (isPollingPaused()) return;
       try {
         const fetched = await getTenantWorkstations(tenantId!);
         if (!active) return;
@@ -479,6 +503,7 @@ export function useAppData(user: User | null) {
     }
     let active = true;
     async function loadActiveSession() {
+      if (isPollingPaused()) return;
       try {
         const fetched = await getOpenCashSession(tenantId!, currentUserStaff!.id);
         if (!active) return;
@@ -499,6 +524,7 @@ export function useAppData(user: User | null) {
     }
     let active = true;
     async function loadSections() {
+      if (isPollingPaused()) return;
       try {
         const fetched = await getTenantTableSections(tenantId!);
         if (!active) return;
@@ -521,6 +547,7 @@ export function useAppData(user: User | null) {
     let interval: number | null = null;
 
     async function loadTables() {
+      if (isPollingPaused()) return;
       try {
         const fetched = await getTenantRestaurantTables(tenantId!);
         if (!active) return;
