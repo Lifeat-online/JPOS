@@ -799,6 +799,8 @@ export async function ensureIntegrationAccessSchema() {
       FOREIGN KEY (api_key_id) REFERENCES integration_api_keys(id) ON DELETE SET NULL
     )
   `);
+  await query(`ALTER TABLE integration_api_keys ADD COLUMN IF NOT EXISTS updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`);
+  await query(`ALTER TABLE integration_webhook_events ADD COLUMN IF NOT EXISTS updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`);
 }
 
 export async function ensureRefreshTokenSessionSchema() {
@@ -2464,6 +2466,7 @@ export async function ensureCashManagementSchema() {
     )
   `);
   await query(`ALTER TABLE cash_movements MODIFY type ENUM('opening_float','cash_sale','refund','cash_drop','cash_added','cash_removed','cash_out','tip','manager_adjustment','no_sale','wallet_cash_in','wallet_cash_out') NOT NULL`);
+  await query(`ALTER TABLE cash_movements ADD COLUMN IF NOT EXISTS updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`);
   await query(`
     CREATE TABLE IF NOT EXISTS manager_cash_movements (
       id VARCHAR(64) PRIMARY KEY,
@@ -2511,6 +2514,7 @@ export async function ensureCashManagementSchema() {
   await addManagerCashColumn(`approved_by VARCHAR(64) AFTER counted_breakdown`);
   await addManagerCashColumn(`approved_by_name VARCHAR(255) AFTER approved_by`);
   await addManagerCashColumn(`approved_at DATETIME AFTER approved_by_name`);
+  await addManagerCashColumn(`updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
   try {
     await query(`CREATE INDEX idx_manager_cash_source ON manager_cash_movements (tenant_id, cash_source, created_at)`);
   } catch (err: any) {

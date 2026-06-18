@@ -990,7 +990,7 @@ async function getBusinessDataset(tenantId: string) {
     query<any>("SELECT id, staff_id, device_label, disabled_at, last_seen_at, created_at, updated_at FROM push_subscriptions WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 200", [tenantId]),
     query<any>("SELECT id, name, code, status, discount_type, discount_value, applies_to, target_product_ids, target_categories, starts_at, ends_at, redemption_count FROM promotions WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 100", [tenantId]),
     query<any>("SELECT id, name, status, scopes, last_used_at, created_at, updated_at FROM integration_api_keys WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 100", [tenantId]),
-    query<any>("SELECT id, provider, event_type, external_event_id, status, error_message, processed_at, created_at FROM integration_webhook_events WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 200", [tenantId]),
+    query<any>("SELECT id, source, event_type, status, error_message, processed_at, created_at FROM integration_webhook_events WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 200", [tenantId]),
     query<any>("SELECT business FROM app_settings WHERE tenant_id = ? LIMIT 1", [tenantId]),
     query<any>("SELECT COUNT(*) AS active_registers FROM cash_sessions WHERE tenant_id = ? AND status = 'open'", [tenantId]),
   ]);
