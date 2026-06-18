@@ -12,7 +12,7 @@ declare global {
 
 const ANON_RATE_BYPASS = process.env.API_RATE_LIMIT_PER_MIN === '0';
 function getAnonRateDefault(): number {
-  return Number(process.env.API_RATE_LIMIT_PER_MIN || 300);
+  return Number(process.env.API_RATE_LIMIT_PER_MIN || 1000);
 }
 
 const ALLOW_HEADERS = ['Origin', 'Content-Type', 'Accept', 'Authorization', 'X-Requested-With', 'X-Request-Id'];
