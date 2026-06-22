@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import * as crudModule from '../../server/mariadb-crud.js';
+import * as crudModule from '../../server/db-crud.js';
 import * as reorderModule from '../../server/reorderRecommendations.js';
 import * as stockTakeModule from '../../server/stockTake.js';
 import { createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue } from '../../server/managerTasks.js';
@@ -11,7 +11,7 @@ vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
 }));
 
-vi.mock('../../server/mariadb-crud.js', () => ({
+vi.mock('../../server/db-crud.js', () => ({
   processSaleRefund: vi.fn(),
   processSaleVoid: vi.fn(),
 }));

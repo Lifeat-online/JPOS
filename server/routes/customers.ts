@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../auth-middleware.js";
-import { getCustomersByTenant } from "../mariadb-adapter.js";
-import { createCustomer, updateCustomer, deleteCustomer } from "../mariadb-crud.js";
+import { getCustomersByTenant } from "../db-adapter.js";
+import { createCustomer, updateCustomer, deleteCustomer } from "../db-crud.js";
 import { validateSchema, CustomerSchema, CustomerUpdateSchema } from "../validation.js";
 import { exportCustomersCsv, importCustomers } from "../batchOperations.js";
 import { getCustomerCampaignExport } from "../customerSegments.js";

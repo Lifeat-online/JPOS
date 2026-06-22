@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
 import * as auditModule from '../../server/audit.js';
-import * as crudModule from '../../server/mariadb-crud.js';
+import * as crudModule from '../../server/db-crud.js';
 import {
   approveReorderRecommendation,
   createReorderNotificationRule,
@@ -18,7 +18,7 @@ vi.mock('../../server/audit.js', () => ({
   recordAuditEvent: vi.fn(),
 }));
 
-vi.mock('../../server/mariadb-crud.js', () => ({
+vi.mock('../../server/db-crud.js', () => ({
   createPurchaseOrder: vi.fn(),
 }));
 

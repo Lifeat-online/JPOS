@@ -1,7 +1,7 @@
 import { query } from "./db.js";
 import { extractInvoiceWithAi } from "./ai.js";
-import { getProductsByTenant } from "./mariadb-adapter.js";
-import { createBulkItem, createProduct, createPurchaseOrder, createVendor, getBulkItems, getVendors, receivePurchaseOrder } from "./mariadb-crud.js";
+import { getProductsByTenant } from "./db-adapter.js";
+import { createBulkItem, createProduct, createPurchaseOrder, createVendor, getBulkItems, getVendors, receivePurchaseOrder } from "./db-crud.js";
 
 type AgentMode = "invoice" | "low_stock" | "event";
 type StepType =

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../auth-middleware.js";
-import { getWorkstationsByTenant, getMessagesByTenant, getMessagesByChannel } from "../mariadb-adapter.js";
-import { createWorkstation, deleteWorkstation, createMessage, markMessageRead } from "../mariadb-crud.js";
+import { getWorkstationsByTenant, getMessagesByTenant, getMessagesByChannel } from "../db-adapter.js";
+import { createWorkstation, deleteWorkstation, createMessage, markMessageRead } from "../db-crud.js";
 import { validateSchema, WorkstationSchema } from "../validation.js";
 import { broadcastToMessages } from "../socket.js";
 import { sendPushNotification } from "../pushNotifications.js";

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../auth-middleware.js";
-import { getStaffByTenant } from "../mariadb-adapter.js";
-import { createStaff, updateStaff, deleteStaff } from "../mariadb-crud.js";
+import { getStaffByTenant } from "../db-adapter.js";
+import { createStaff, updateStaff, deleteStaff } from "../db-crud.js";
 import { validateSchema, StaffSchema, StaffUpdateSchema } from "../validation.js";
 import { denyWithAudit, auditRouteEvent, auditActorFromRequest, canUseActionCenter } from "./_helpers.js";
 import {

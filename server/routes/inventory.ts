@@ -7,7 +7,7 @@ import {
   getStockBatches,
   updateProductRecipe, getProductRecipe, getRecipeCostingReport,
   createModifierGroup, updateModifierOptions, getProductModifiers, deleteModifierGroup,
-} from "../mariadb-crud.js";
+} from "../db-crud.js";
 import {
   listInventoryLocations, createInventoryLocation, updateInventoryLocation,
   listProductLocationStocks, upsertProductLocationStock,

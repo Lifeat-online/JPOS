@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { getTenantIdBySlug, getProductsByTenant, getAppConfigByTenant } from '../../server/mariadb-adapter.js';
+import { getTenantIdBySlug, getProductsByTenant, getAppConfigByTenant } from '../../server/db-adapter.js';
 
 const dbChain: any = {
   select: vi.fn(() => dbChain),
@@ -17,7 +17,7 @@ vi.mock('../../server/db.js', () => ({
   },
 }));
 
-describe('mariadb-adapter', () => {
+describe('db-adapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (dbModule.db.selectFrom as any).mockReturnValue(dbChain);

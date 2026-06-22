@@ -38,7 +38,7 @@ export type DbConnection = {
 
 /**
  * Converts MySQL-style `?` positional placeholders to PostgreSQL-style `$1`, `$2`, ...
- * so legacy query strings from mariadb-adapter / mariadb-crud work with node-postgres.
+ * so legacy query strings from db-adapter / db-crud work with node-postgres.
  * Placeholders inside string literals and comments are intentionally left untouched by
  * targeting only bare `?` tokens that are not preceded by a backslash.
  */

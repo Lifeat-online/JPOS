@@ -13,7 +13,7 @@ import { getTaxPeriods, getVatTaxReport, lockTaxPeriod } from "../taxReports.js"
 import { getEcommerceMarketplaceExport } from "../ecommerceIntegrations.js";
 import { ingestDeliveryOrder, listDeliveryOrders, updateDeliveryOrderStatus } from "../deliveryIntegrations.js";
 import { authenticateIntegrationApiKey, createIntegrationApiKey, ingestStockWebhook, listIntegrationApiKeys, listIntegrationWebhookEvents, revokeIntegrationApiKey } from "../integrationAccess.js";
-import { getActiveSalesByTenant, getRestaurantTablesByTenant, getWorkstationsByTenant, getStaffByTenant } from "../mariadb-adapter.js";
+import { getActiveSalesByTenant, getRestaurantTablesByTenant, getWorkstationsByTenant, getStaffByTenant } from "../db-adapter.js";
 import { broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "../socket.js";
 import { canUseActionCenter, canManageInventory, auditActorFromRequest, auditRouteEvent, denyWithAudit, enforceSensitiveAction, stripSensitiveVerification, integrationSecretFromRequest } from "./_helpers.js";
 

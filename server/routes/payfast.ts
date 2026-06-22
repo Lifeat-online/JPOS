@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { Router } from "express";
 import { Request } from "express";
 import { requireAuth } from "../auth-middleware.js";
-import { getAppConfigByTenant } from "../mariadb-adapter.js";
+import { getAppConfigByTenant } from "../db-adapter.js";
 import { sensitiveRouteRateLimit } from "./_helpers.js";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;

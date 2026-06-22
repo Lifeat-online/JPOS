@@ -3,7 +3,7 @@ import { requireAuth } from "../auth-middleware.js";
 import {
   createSale, updateSale, getSaleById, updateSalePaymentProviderStatus,
   processSaleRefund, processSaleVoid, updateSaleItem, clearAllSales,
-} from "../mariadb-crud.js";
+} from "../db-crud.js";
 import { validateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema } from "../validation.js";
 import { broadcastSalesUpdate } from "../socket.js";
 import { sendPushNotification } from "../pushNotifications.js";
@@ -49,7 +49,7 @@ async function sendWorkstationOrderPush(tenantId: string, sale: any) {
 }
 
 salesRouter.get("/", requireAuth, async (req: any, res) => {
-  const { getActiveSalesByTenant } = await import("../mariadb-adapter.js");
+  const { getActiveSalesByTenant } = await import("../db-adapter.js");
   try {
     res.json(await getActiveSalesByTenant(req.params.tenantId));
   } catch (err: any) {

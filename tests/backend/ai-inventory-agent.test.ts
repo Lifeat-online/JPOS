@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
 import * as aiModule from '../../server/ai.js';
-import * as adapterModule from '../../server/mariadb-adapter.js';
-import * as crudModule from '../../server/mariadb-crud.js';
+import * as adapterModule from '../../server/db-adapter.js';
+import * as crudModule from '../../server/db-crud.js';
 import { applyApprovedInventoryAgentSteps, generateInventoryAgentProposal } from '../../server/aiInventoryAgent.js';
 
 vi.mock('../../server/db.js', () => ({
@@ -13,11 +13,11 @@ vi.mock('../../server/ai.js', () => ({
   extractInvoiceWithAi: vi.fn(),
 }));
 
-vi.mock('../../server/mariadb-adapter.js', () => ({
+vi.mock('../../server/db-adapter.js', () => ({
   getProductsByTenant: vi.fn(),
 }));
 
-vi.mock('../../server/mariadb-crud.js', () => ({
+vi.mock('../../server/db-crud.js', () => ({
   createBulkItem: vi.fn(),
   createProduct: vi.fn(),
   createPurchaseOrder: vi.fn(),

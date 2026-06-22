@@ -1,5 +1,5 @@
-import { createCustomer, createProduct, updateCustomer, updateProduct } from "./mariadb-crud.js";
-import { getCustomersByTenant, getProductsByTenant } from "./mariadb-adapter.js";
+import { createCustomer, createProduct, updateCustomer, updateProduct } from "./db-crud.js";
+import { getCustomersByTenant, getProductsByTenant } from "./db-adapter.js";
 import { DEFAULT_INVENTORY_LOCATION_ID, listProductLocationStocks, upsertProductLocationStock } from "./inventoryLocations.js";
 import type { Customer, Product } from "./types.js";
 

@@ -1,6 +1,6 @@
 import { query } from "./db.js";
 import { recordAuditEvent } from "./audit.js";
-import { createPurchaseOrder } from "./mariadb-crud.js";
+import { createPurchaseOrder } from "./db-crud.js";
 import { DEFAULT_INVENTORY_LOCATION_ID, ensureDefaultInventoryLocation } from "./inventoryLocations.js";
 
 type ReorderStatus = "open" | "in_review" | "approved" | "ordered" | "dismissed";

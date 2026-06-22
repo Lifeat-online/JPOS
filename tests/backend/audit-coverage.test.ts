@@ -45,7 +45,7 @@ describe('immutable audit coverage instrumentation', () => {
 
   it('records cash movement audit rows at each server insertion path', () => {
     expect(readRepoFile('server/routes/cash.ts')).toContain('cash_movement.recorded');
-    expect(readRepoFile('server/mariadb-crud.ts')).toContain('cash_movement.recorded');
+    expect(readRepoFile('server/db-crud.ts')).toContain('cash_movement.recorded');
     expect(readRepoFile('server/managerCash.ts')).toContain('cash_movement.recorded');
   });
 });

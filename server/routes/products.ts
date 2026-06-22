@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../auth-middleware.js";
-import { getProductsByTenant } from "../mariadb-adapter.js";
-import { createProduct, updateProduct, deleteProduct } from "../mariadb-crud.js";
+import { getProductsByTenant } from "../db-adapter.js";
+import { createProduct, updateProduct, deleteProduct } from "../db-crud.js";
 import { validateSchema, ProductSchema } from "../validation.js";
 
 export const productsRouter = Router({ mergeParams: true });

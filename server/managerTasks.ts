@@ -1,6 +1,6 @@
 import { getConnection, isPostgres, query } from "./db.js";
 import { applyProductStockDelta, normalizeStockMovementReasonCode, recordAuditEvent } from "./audit.js";
-import { processSaleRefund, processSaleVoid } from "./mariadb-crud.js";
+import { processSaleRefund, processSaleVoid } from "./db-crud.js";
 import { approveStockTakeSession } from "./stockTake.js";
 import { approveReorderRecommendation, dismissReorderRecommendation } from "./reorderRecommendations.js";
 import { recordManagerOverride } from "./managerOverrides.js";

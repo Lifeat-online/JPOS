@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { requireAuth } from "../auth-middleware.js";
-import { getPayoutRequestsByTenant, getCustomerPayoutRequestsByTenant, getOpenCashSessionByStaff } from "../mariadb-adapter.js";
+import { getPayoutRequestsByTenant, getCustomerPayoutRequestsByTenant, getOpenCashSessionByStaff } from "../db-adapter.js";
 import {
   createPayoutRequest, updatePayoutRequest, updateCustomerPayoutRequest, createCustomerPayoutRequest,
-} from "../mariadb-crud.js";
+} from "../db-crud.js";
 import {
   getManagerCashSummary, getManagerCashMovements, exportManagerCashMovementsCsv,
   recordManagerCashMovement, createCashCustodyTransfer, getCashCustodyTransfers,
@@ -12,7 +12,7 @@ import {
   recordWalletCashMovement, recordRegisterWalletCashMovement,
   transferCashSessionToManagerFloat,
 } from "../managerCash.js";
-import { getAppConfigByTenant } from "../mariadb-adapter.js";
+import { getAppConfigByTenant } from "../db-adapter.js";
 import { getConnection, isPostgres, query } from "../db.js";
 import { getHostedPackage } from "../../shared/packageCatalog.js";
 import { recordAuditEventSafe } from "../audit.js";

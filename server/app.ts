@@ -37,7 +37,7 @@ import {
   getMessagesByChannel,
   getTableSectionsByTenant,
   getRestaurantTablesByTenant,
-} from "./mariadb-adapter.js";
+} from "./db-adapter.js";
 import {
   createProduct,
   updateProduct,
@@ -55,7 +55,7 @@ import {
   getProductModifiers,
   updateModifierOptions,
   deleteModifierGroup,
-} from "./mariadb-crud.js";
+} from "./db-crud.js";
 import { broadcastSalesUpdate } from "./socket.js";
 import { handleEnrollment, handleStartDemo } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";

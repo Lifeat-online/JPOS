@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import * as adapter from '../../server/mariadb-adapter.js';
-import * as crud from '../../server/mariadb-crud.js';
+import * as adapter from '../../server/db-adapter.js';
+import * as crud from '../../server/db-crud.js';
 import * as inventory from '../../server/inventoryLocations.js';
 import {
   batchCreateProducts,
@@ -13,12 +13,12 @@ import {
   toCsv,
 } from '../../server/batchOperations.js';
 
-vi.mock('../../server/mariadb-adapter.js', () => ({
+vi.mock('../../server/db-adapter.js', () => ({
   getProductsByTenant: vi.fn(),
   getCustomersByTenant: vi.fn(),
 }));
 
-vi.mock('../../server/mariadb-crud.js', () => ({
+vi.mock('../../server/db-crud.js', () => ({
   createProduct: vi.fn(),
   updateProduct: vi.fn(),
   createCustomer: vi.fn(),

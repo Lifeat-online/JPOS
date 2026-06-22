@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { createCustomerPayoutRequest, createPayoutRequest, createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale, updateSaleItem, receivePurchaseOrder, getStockBatches, processSaleRefund, updateSalePaymentProviderStatus, updateProductRecipe, getProductRecipe, getRecipeCostingReport } from '../../server/mariadb-crud.js';
+import { createCustomerPayoutRequest, createPayoutRequest, createProduct, createSale, updateProduct, deleteProduct, seedProducts, updateSale, updateSaleItem, receivePurchaseOrder, getStockBatches, processSaleRefund, updateSalePaymentProviderStatus, updateProductRecipe, getProductRecipe, getRecipeCostingReport } from '../../server/db-crud.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
@@ -8,7 +8,7 @@ vi.mock('../../server/db.js', () => ({
   isPostgres: vi.fn(() => false),
 }));
 
-describe('mariadb-crud', () => {
+describe('db-crud', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

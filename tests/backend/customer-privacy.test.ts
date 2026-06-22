@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { deleteCustomer } from '../../server/mariadb-crud.js';
+import { deleteCustomer } from '../../server/db-crud.js';
 import { recordAuditEvent } from '../../server/audit.js';
 
 const conn = {
