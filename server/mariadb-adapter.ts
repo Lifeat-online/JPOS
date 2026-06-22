@@ -1,4 +1,4 @@
-import { isPostgres, query } from "./db.js";
+import { db, isPostgres, query } from "./db.js";
 import {
   cashierCanAccessLocation,
   DEFAULT_INVENTORY_LOCATION_ID,
@@ -21,24 +21,22 @@ function safeParse(str: any, fallback: any) {
   }
 }
 export async function getTenantIdBySlug(slug: string) {
-  const rows = await query<{ tenant_id: string }>(
-    "SELECT tenant_id FROM slugs WHERE slug = ? LIMIT 1",
-    [slug.toLowerCase()]
-  );
-  return rows.length > 0 ? rows[0].tenant_id : null;
+  const row = await db
+    .selectFrom("slugs")
+    .select("tenant_id")
+    .where("slug", "=", slug.toLowerCase())
+    .limit(1)
+    .executeTakeFirst();
+  return row?.tenant_id ?? null;
 }
 
 export async function getUserByUid(uid: string) {
-  const rows = await query<{
-    uid: string;
-    tenant_id: string | null;
-    email: string;
-    name: string;
-  }>(
-    `SELECT uid, tenant_id, email, name FROM users WHERE uid = ? LIMIT 1`,
-    [uid]
-  );
-  return rows.length > 0 ? rows[0] : null;
+  return db
+    .selectFrom("users")
+    .select(["uid", "tenant_id", "email", "name"])
+    .where("uid", "=", uid)
+    .limit(1)
+    .executeTakeFirst();
 }
 
 export async function getStaffTenantByEmail(email: string) {

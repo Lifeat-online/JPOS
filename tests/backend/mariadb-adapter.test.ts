@@ -2,24 +2,36 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as dbModule from '../../server/db.js';
 import { getTenantIdBySlug, getProductsByTenant, getAppConfigByTenant } from '../../server/mariadb-adapter.js';
 
+const dbChain: any = {
+  select: vi.fn(() => dbChain),
+  where: vi.fn(() => dbChain),
+  limit: vi.fn(() => dbChain),
+  executeTakeFirst: vi.fn(() => Promise.resolve(undefined)),
+};
+
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
   isPostgres: vi.fn(() => false),
+  db: {
+    selectFrom: vi.fn(() => dbChain),
+  },
 }));
 
 describe('mariadb-adapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (dbModule.db.selectFrom as any).mockReturnValue(dbChain);
+    dbChain.executeTakeFirst.mockResolvedValue(undefined);
   });
 
   it('returns tenant id by slug when found', async () => {
-    (dbModule.query as any).mockResolvedValue([{ tenant_id: 'tenant_1' }]);
+    dbChain.executeTakeFirst.mockResolvedValue({ tenant_id: 'tenant_1' });
     const id = await getTenantIdBySlug('demo');
     expect(id).toBe('tenant_1');
   });
 
   it('returns null when slug is not found', async () => {
-    (dbModule.query as any).mockResolvedValue([]);
+    dbChain.executeTakeFirst.mockResolvedValue(undefined);
     const id = await getTenantIdBySlug('missing');
     expect(id).toBeNull();
   });
