@@ -246,7 +246,7 @@ export const authRateLimit = makeRateLimit(
 export const integrationWebhookRateLimit = makeRateLimit(
   parsePositiveEnvInt(process.env.INTEGRATION_WEBHOOK_RATE_LIMIT_WINDOW_MS, 60_000),
   parsePositiveEnvInt(process.env.INTEGRATION_WEBHOOK_RATE_LIMIT_MAX, isProduction ? 120 : 500)
-);────
+);
 
 export function safeJsonField(value: unknown, fallback: any) {
   if (value === null || value === undefined || value === "") return fallback;
@@ -266,4 +266,19 @@ export function createTenantLocalSyncSecret(
 ) {
   if (!enabled || !secretSeed.trim()) return null;
   return crypto.createHmac("sha256", secretSeed).update(`masepos-local-sync:${tenantId}`).digest("base64url");
+}
+
+export function parseImageDataUrl(dataUrl: unknown) {
+  const value = String(dataUrl || "");
+  const match = value.match(/^data:(image\/(?:png|jpeg|jpg|webp|gif|svg\+xml));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+  const mimeType = match[1] === "image/jpg" ? "image/jpeg" : match[1];
+  const buffer = Buffer.from(match[2], "base64");
+  const extension =
+    mimeType === "image/png" ? "png" :
+    mimeType === "image/jpeg" ? "jpg" :
+    mimeType === "image/webp" ? "webp" :
+    mimeType === "image/gif" ? "gif" :
+    "svg";
+  return { buffer, mimeType, extension };
 }

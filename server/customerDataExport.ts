@@ -1,4 +1,5 @@
 import { query } from "./db.js";
+import type { QueryResultRow } from "pg";
 import { listCustomerConsents, type CustomerConsentMap } from "./customerConsents.js";
 
 type CustomerProfileRow = {
@@ -85,7 +86,7 @@ function consentSummary(consents: CustomerConsentMap) {
   );
 }
 
-async function listSaleChildren<T>(table: string, saleIds: string[], select: string): Promise<T[]> {
+async function listSaleChildren<T extends QueryResultRow>(table: string, saleIds: string[], select: string): Promise<T[]> {
   if (saleIds.length === 0) return [];
   return query<T>(
     `${select}

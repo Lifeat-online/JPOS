@@ -1,5 +1,5 @@
 import { recordAuditEvent } from "./audit.js";
-import { getConnection } from "./db.js";
+import { getConnection, query } from "./db.js";
 
 type OfflineSyncIssueInput = {
   offlineEventId?: string | null;
@@ -113,4 +113,41 @@ export async function recordOfflineSyncIssue(tenantId: string, input: OfflineSyn
   } finally {
     conn.release();
   }
+}
+
+export async function syncOfflineSaleIssues(
+  tenantId: string,
+  input: { limit?: number; status?: string; deviceId?: string } = {}
+) {
+  const limit = Math.min(Math.max(Number(input.limit) || 50, 1), 200);
+  const status = input.status ? String(input.status) : null;
+  const deviceId = input.deviceId ? String(input.deviceId) : null;
+  const rows = await query<any>(
+    `SELECT id, action, entity_id, related_sale_id, staff_id, staff_name, source, details, created_at
+       FROM audit_events
+      WHERE tenant_id = ?
+        AND source = 'offline_queue'
+        AND (action = 'offline.sync_conflict' OR action = 'offline.sync_failed')
+        AND ($1::text IS NULL OR action = $1)
+        AND ($2::text IS NULL OR (details->>'deviceId') = $2)
+      ORDER BY created_at DESC
+      LIMIT $3`,
+    [tenantId, status === "conflict" ? "offline.sync_conflict" : status === "failed" ? "offline.sync_failed" : null, deviceId, limit]
+  );
+  return {
+    count: rows.length,
+    issues: rows.map((r: any) => ({
+      id: r.id,
+      action: r.action,
+      saleId: r.related_sale_id || r.entity_id,
+      staffId: r.staff_id,
+      staffName: r.staff_name,
+      deviceId: typeof r.details === "object" && r.details ? r.details.deviceId : null,
+      conflictType: typeof r.details === "object" && r.details ? r.details.conflictType : null,
+      recommendedAction: typeof r.details === "object" && r.details ? r.details.recommendedAction : null,
+      message: typeof r.details === "object" && r.details ? r.details.message : null,
+      attempts: typeof r.details === "object" && r.details ? Number(r.details.attempts || 0) : 0,
+      createdAt: r.created_at,
+    })),
+  };
 }

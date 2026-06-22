@@ -27,10 +27,8 @@ export const licenceRouter = Router();
 
 const validateLimiter = rateLimit({
   windowMs: 24 * 60 * 60 * 1000,
-  limit: Number(process.env.LICENCE_VALIDATE_DAILY_LIMIT || 5),
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
-  message: { valid: false, reason: "Too many licence validation requests" },
+  max: Number(process.env.LICENCE_VALIDATE_DAILY_LIMIT || 5),
+  message: JSON.stringify({ valid: false, reason: "Too many licence validation requests" }),
 });
 
 licenceRouter.post("/admin/licence/generate", requireAdminKey, async (req, res) => {

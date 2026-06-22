@@ -1,4 +1,5 @@
 import { getConnection, isPostgres, query } from "./db.js";
+import type { QueryResultRow } from "pg";
 import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
 
 type StockTakeType = "full" | "cycle" | "spot_check";
@@ -355,7 +356,7 @@ function addSignal(map: Map<string, StockTakeSuggestionSignal>, row: any, quanti
   map.set(productId, signal);
 }
 
-async function recentRows<T = any>(postgresSql: string, mariaSql: string, params: any[]) {
+async function recentRows<T extends QueryResultRow = any>(postgresSql: string, mariaSql: string, params: any[]) {
   return query<T>(isPostgres() ? postgresSql : mariaSql, params);
 }
 

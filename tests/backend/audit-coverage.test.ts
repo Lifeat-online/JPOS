@@ -21,27 +21,30 @@ describe('immutable audit coverage instrumentation', () => {
   });
 
   it('records high-risk route mutations and denied role checks', () => {
-    const source = readRepoFile('server/app.ts');
+    const appSource = readRepoFile('server/app.ts');
+    const settingsSource = readRepoFile('server/routes/settings.ts');
+    const cashSource = readRepoFile('server/routes/cash.ts');
+    const helpers = readRepoFile('server/routes/_helpers.ts');
 
-    expect(source).toContain('function denyWithAudit');
-    expect(source).toContain('settings.app_updated');
-    expect(source).toContain('settings.logo_uploaded');
-    expect(source).toContain('customer.created');
-    expect(source).toContain('customer.updated');
-    expect(source).toContain('customer.deleted');
-    expect(source).toContain('staff.created');
-    expect(source).toContain('staff.updated');
-    expect(source).toContain('staff.deleted');
-    expect(source).toContain('cash_session.opened');
-    expect(source).toContain('cash_session.updated');
-    expect(source).toContain('cash_session.reviewed');
-    expect(source).toContain('ai.settings_updated');
-    expect(source).toContain('ai.provider_tested');
-    expect(source).toContain('ai.inventory_steps_applied');
+    expect(helpers).toContain('function denyWithAudit');
+    expect(settingsSource).toContain('settings.app_updated');
+    expect(settingsSource).toContain('settings.logo_uploaded');
+    expect(appSource).toContain('customer.created');
+    expect(appSource).toContain('customer.updated');
+    expect(appSource).toContain('customer.deleted');
+    expect(appSource).toContain('staff.created');
+    expect(appSource).toContain('staff.updated');
+    expect(appSource).toContain('staff.deleted');
+    expect(cashSource).toContain('cash_session.opened');
+    expect(cashSource).toContain('cash_session.updated');
+    expect(cashSource).toContain('cash_session.reviewed');
+    expect(settingsSource).toContain('ai.settings_updated');
+    expect(settingsSource).toContain('ai.provider_tested');
+    expect(settingsSource).toContain('ai.inventory_steps_applied');
   });
 
   it('records cash movement audit rows at each server insertion path', () => {
-    expect(readRepoFile('server/app.ts')).toContain('cash_movement.recorded');
+    expect(readRepoFile('server/routes/cash.ts')).toContain('cash_movement.recorded');
     expect(readRepoFile('server/mariadb-crud.ts')).toContain('cash_movement.recorded');
     expect(readRepoFile('server/managerCash.ts')).toContain('cash_movement.recorded');
   });

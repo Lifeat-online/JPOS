@@ -23,23 +23,14 @@ import { hasPackageFeature, type PackageFeature } from "../../shared/packageCata
 import {
   canUseActionCenter, canManageBookings, canManagePush, canGenerateVapidKeys,
   auditActorFromRequest, auditRouteEvent, denyWithAudit, enforceSensitiveAction,
-  stripSensitiveVerification, auditChangedFields, normalizeRole,
+  stripSensitiveVerification, auditChangedFields, normalizeRole, parseImageDataUrl,
+  sensitiveRouteRateLimit,
 } from "./_helpers.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const settingsRouter = Router({ mergeParams: true });
-
-function parseImageDataUrl(dataUrl: unknown) {
-  const value = String(dataUrl || "");
-  const match = value.match(/^data:(image\/(?:png|jpeg|jpg|webp|gif|svg\+xml));base64,([A-Za-z0-9+/=]+)$/);
-  if (!match) return null;
-  const mimeType = match[1] === "image/jpg" ? "image/jpeg" : match[1];
-  const buffer = Buffer.from(match[2], "base64");
-  const extension = mimeType === "image/png" ? "png" : mimeType === "image/jpeg" ? "jpg" : mimeType === "image/webp" ? "webp" : mimeType === "image/gif" ? "gif" : "svg";
-  return { buffer, mimeType, extension };
-}
 
 // ── App config ─────────────────────────────────────────────────────────────
 
@@ -53,7 +44,7 @@ settingsRouter.put("/settings/app", requireAuth, async (req: any, res) => {
     const settingsUpdate = stripSensitiveVerification(req.body || {});
     const r = await enforceSensitiveAction(req, res, "settings_change", { changedFields: auditChangedFields(settingsUpdate || {}), businessFields: auditChangedFields((settingsUpdate as any)?.business || {}) });
     if (r) return;
-    await updateAppConfig(req.params.tenantId, settingsUpdate);
+    await updateAppConfig(req.params.tenantId, settingsUpdate as any);
     await auditRouteEvent(req, "settings.app_updated", "settings", { changedFields: auditChangedFields(settingsUpdate || {}), businessFields: auditChangedFields((settingsUpdate as any)?.business || {}) }, req.params.tenantId, "settings");
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -239,7 +230,7 @@ settingsRouter.post("/ai/models", requireAuth, async (req: any, res) => {
     res.json({ models });
   } catch (err: any) { res.status(400).json({ error: err.message }); }
 });
-settingsRouter.post("/ai/test", requireAuth, async (req: any, res) => {
+settingsRouter.post("/ai/test", requireAuth, sensitiveRouteRateLimit, async (req: any, res) => {
   try {
     if (!canManageAi(req.user?.role)) return denyWithAudit(req, res, "ai.provider_test", "Only managers, admins, and devs can test AI provider credentials");
     const result = await testAiProviderContact(req.params.tenantId, req.body || {});

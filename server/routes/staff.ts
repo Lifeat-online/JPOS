@@ -3,7 +3,7 @@ import { requireAuth } from "../auth-middleware.js";
 import { getStaffByTenant } from "../mariadb-adapter.js";
 import { createStaff, updateStaff, deleteStaff } from "../mariadb-crud.js";
 import { validateSchema, StaffSchema, StaffUpdateSchema } from "../validation.js";
-import { denyWithAudit, auditRouteEvent, auditActorFromRequest } from "../audit.js";
+import { denyWithAudit, auditRouteEvent, auditActorFromRequest, canUseActionCenter } from "./_helpers.js";
 import {
   cancelStaffShift, clockIn, clockOut, createStaffShift, endBreak, getMyAttendanceStatus,
   getTimesheetPayrollReport, listStaffShifts, publishRoster, startBreak, updateStaffShift
@@ -14,10 +14,9 @@ import {
   previewTipPoolPayouts, updateTipPoolRule
 } from "../tipPooling.js";
 
-function canUseActionCenter(role: string | undefined | null) {
-  const r = String(role || "").toLowerCase();
-  return r === "admin" || r === "manager" || r === "dev";
-}
+import {
+  createManagerSaleApprovalRequest, decideManagerTask, getManagerTaskQueue, syncManagerTasksFromSignals
+} from "../managerTasks.js";
 
 export const staffRouter = Router({ mergeParams: true });
 
@@ -231,5 +230,76 @@ staffRouter.get("/tip-pool-payouts", requireAuth, async (req: any, res) => {
     }));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Workforce attendance/breaks/clock-in (mounted at /workforce too) ────
+
+staffRouter.get("/attendance/me", requireAuth, async (req: any, res) => {
+  try {
+    const actor = auditActorFromRequest(req);
+    const requestedStaffId = req.query.staffId ? String(req.query.staffId) : actor.staffId;
+    if (!requestedStaffId) return res.status(400).json({ error: "Staff member is required." });
+    if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+      return denyWithAudit(req, res, "workforce.attendance.view", "Manager access is required to view another staff member's attendance.");
+    }
+    res.json(await getMyAttendanceStatus(req.params.tenantId, requestedStaffId));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+staffRouter.post("/clock-in", requireAuth, async (req: any, res) => {
+  try {
+    const actor = auditActorFromRequest(req);
+    const requestedStaffId = req.body?.staffId || actor.staffId;
+    if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+      return denyWithAudit(req, res, "workforce.clock_in", "Manager access is required to clock in another staff member.");
+    }
+    res.json(await clockIn(req.params.tenantId, { ...req.body, staffId: requestedStaffId }, actor));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+staffRouter.post("/break/start", requireAuth, async (req: any, res) => {
+  try {
+    const actor = auditActorFromRequest(req);
+    const requestedStaffId = req.body?.staffId || actor.staffId;
+    if (!requestedStaffId) return res.status(400).json({ error: "Staff member is required." });
+    if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+      return denyWithAudit(req, res, "workforce.break_start", "Manager access is required to start another staff member's break.");
+    }
+    res.json(await startBreak(req.params.tenantId, requestedStaffId, req.body?.at || null));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+staffRouter.post("/break/end", requireAuth, async (req: any, res) => {
+  try {
+    const actor = auditActorFromRequest(req);
+    const requestedStaffId = req.body?.staffId || actor.staffId;
+    if (!requestedStaffId) return res.status(400).json({ error: "Staff member is required." });
+    if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+      return denyWithAudit(req, res, "workforce.break_end", "Manager access is required to end another staff member's break.");
+    }
+    res.json(await endBreak(req.params.tenantId, requestedStaffId, req.body?.at || null));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+staffRouter.post("/clock-out", requireAuth, async (req: any, res) => {
+  try {
+    const actor = auditActorFromRequest(req);
+    const requestedStaffId = req.body?.staffId || actor.staffId;
+    if (!requestedStaffId) return res.status(400).json({ error: "Staff member is required." });
+    if (requestedStaffId !== actor.staffId && !canUseActionCenter(req.user?.role)) {
+      return denyWithAudit(req, res, "workforce.clock_out", "Manager access is required to clock out another staff member.");
+    }
+    res.json(await clockOut(req.params.tenantId, { ...req.body, staffId: requestedStaffId }, actor));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
   }
 });

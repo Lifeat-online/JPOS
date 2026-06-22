@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { 
-  ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote, 
+import {
+  ShoppingBag, Search, Plus, Minus, Trash2, CreditCard, Banknote,
   ShoppingCart, Loader2, QrCode, Users, ChefHat, Utensils, Lock, X, StickyNote, Wallet, TabletSmartphone, Rows, Printer, ReceiptText,
-  AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronLeft, LayoutGrid, PanelLeft, CheckCircle2, RefreshCw, ListChecks, PackageCheck, Sparkles
+  AlertTriangle, PauseCircle, PlayCircle, ScanLine, ChevronDown, ChevronLeft, LayoutGrid, PanelLeft, CheckCircle2, RefreshCw, ListChecks, PackageCheck, Sparkles
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';

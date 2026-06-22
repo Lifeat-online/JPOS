@@ -15,17 +15,17 @@ import { canUseActionCenter, denyWithAudit } from "./_helpers.js";
 
 export const workstationsRouter = Router({ mergeParams: true });
 
-workstationsRouter.get("/", requireAuth, async (req: any, res) => {
+workstationsRouter.get("/workstations", requireAuth, async (req: any, res) => {
   try { res.json(await getWorkstationsByTenant(req.params.tenantId)); }
   catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-workstationsRouter.post("/", requireAuth, validateSchema(WorkstationSchema), async (req: any, res) => {
+workstationsRouter.post("/workstations", requireAuth, validateSchema(WorkstationSchema), async (req: any, res) => {
   try { res.json(await createWorkstation(req.params.tenantId, req.body)); }
   catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-workstationsRouter.delete("/:id", requireAuth, async (req: any, res) => {
+workstationsRouter.delete("/workstations/:id", requireAuth, async (req: any, res) => {
   try { await deleteWorkstation(req.params.tenantId, req.params.id); res.json({ success: true }); }
   catch (err: any) { res.status(500).json({ error: err.message }); }
 });

@@ -1687,6 +1687,7 @@ export interface TenantPackageLimitsResponse {
     activeRegisters: number;
   };
   localServerSync?: boolean;
+  offline?: { fullOffline?: boolean };
 }
 
 export interface LicenceInfoResponse {

@@ -1,10 +1,10 @@
 import { Router } from "express";
 import { requireAuth } from "../auth-middleware.js";
+import { getTableSectionsByTenant, getRestaurantTablesByTenant } from "../mariadb-adapter.js";
 import {
-  getTableSectionsByTenant, getRestaurantTablesByTenant,
   createTableSection, updateTableSection, deleteTableSection,
   createRestaurantTable, updateRestaurantTable, deleteRestaurantTable,
-} from "../mariadb-adapter.js";
+} from "../mariadb-crud.js";
 import { validateSchema, TableSectionSchema, RestaurantTableSchema } from "../validation.js";
 
 export const tablesRouter = Router({ mergeParams: true });

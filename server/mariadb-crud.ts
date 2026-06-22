@@ -3177,6 +3177,7 @@ export type SaleRefundInput = {
   staffName?: string | null;
   cashSessionId?: string | null;
   provider?: string | null;
+  requestId?: string | null;
   providerReference?: string | null;
   providerStatus?: "refunded" | "partial_refund" | "reversed" | "settled" | string | null;
   providerNote?: string | null;

@@ -7,7 +7,7 @@ import { exportCustomersCsv, importCustomers } from "../batchOperations.js";
 import { getCustomerCampaignExport } from "../customerSegments.js";
 import { listCustomerConsents, upsertCustomerConsents } from "../customerConsents.js";
 import { getCustomerDataExport } from "../customerDataExport.js";
-import { denyWithAudit, auditRouteEvent, auditActorFromRequest } from "../audit.js";
+import { denyWithAudit, auditRouteEvent, auditActorFromRequest } from "./_helpers.js";
 
 function canUseActionCenter(role: string | undefined | null) {
   const r = String(role || "").toLowerCase();

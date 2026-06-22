@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../auth-middleware.js";
 import {
   createSale, updateSale, getSaleById, updateSalePaymentProviderStatus,
-  processSaleRefund, processSaleVoid, updateSaleItem,
+  processSaleRefund, processSaleVoid, updateSaleItem, clearAllSales,
 } from "../mariadb-crud.js";
 import { validateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema } from "../validation.js";
 import { broadcastSalesUpdate } from "../socket.js";
@@ -11,7 +11,6 @@ import { queueKitchenPrintJobsForSale } from "../hardwareAdapters.js";
 import { createManagerSaleApprovalRequest } from "../managerTasks.js";
 import { syncOfflineSaleIssues } from "../offlineSync.js";
 import {
-  requireAuth as _requireAuth,
   auditActorFromRequest, auditRouteEvent, denyWithAudit,
   enforceSensitiveAction, saleMutationSensitiveAction,
   stripSensitiveVerification, auditChangedFields, canUseActionCenter,
@@ -162,7 +161,7 @@ salesRouter.post("/:saleId/refund", requireAuth, sensitiveRouteRateLimit, valida
       staffId: (refundInput as any).staffId || req.user?.staffId || null,
       staffName: (refundInput as any).staffName || req.user?.name || null,
       requestId: req.requestId || null,
-    });
+    } as any);
     const io = req.app.get("io");
     if (io) broadcastSalesUpdate(io, req.params.tenantId, refund.id);
     res.json(refund);
@@ -194,7 +193,7 @@ salesRouter.post("/:saleId/void", requireAuth, sensitiveRouteRateLimit, validate
       staffId: (voidInput as any).staffId || req.user?.staffId || null,
       staffName: (voidInput as any).staffName || req.user?.name || null,
       requestId: req.requestId || null,
-    });
+    } as any);
     const io = req.app.get("io");
     if (io) broadcastSalesUpdate(io, req.params.tenantId, voided.id);
     res.json(voided);
@@ -221,4 +220,9 @@ salesRouter.post("/offline-sync/issues", requireAuth, async (req: any, res) => {
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
+});
+
+salesRouter.delete("/", requireAuth, async (req: any, res) => {
+  try { await clearAllSales(req.params.tenantId); res.json({ success: true }); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
 });

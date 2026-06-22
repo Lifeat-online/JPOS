@@ -9,12 +9,16 @@ type Actor = {
 };
 
 type ManagerCashMovementInput = {
+  type?: string | null;
   movementType?: string | null;
   direction?: string | null;
   amount?: number | string | null;
   cashSessionId?: string | null;
+  saleId?: string | null;
+  paymentId?: string | null;
   staffId?: string | null;
   staffName?: string | null;
+  role?: string | null;
   customerId?: string | null;
   customerName?: string | null;
   sourceType?: string | null;
@@ -70,6 +74,9 @@ type CashCustodyTransferDecisionInput = {
   countedAmount?: number | string | null;
   countedBreakdown?: Record<string, number> | null;
   note?: string | null;
+  staffId?: string | null;
+  staffName?: string | null;
+  role?: string | null;
 };
 
 type CashCloseCheckpointInput = {
