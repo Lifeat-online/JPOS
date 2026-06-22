@@ -20,7 +20,7 @@ import * as licence from "../licenceMiddleware.js";
 import {
   canManageCash, auditActorFromRequest, auditRouteEvent, denyWithAudit,
   enforceSensitiveAction, drawerMovementSensitiveAction,
-  stripSensitiveVerification, auditChangedFields,
+  stripSensitiveVerification, auditChangedFields, safeJsonField,
 } from "./_helpers.js";
 import { optionalAuth } from "../auth-middleware.js";
 import { queueCashDrawerPulseForNoSale } from "../hardwareAdapters.js";
@@ -34,12 +34,6 @@ function toMoneyNumber(value: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
-}
-
-function safeJsonField(value: unknown, fallback: any) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value !== "string") return value;
-  try { return JSON.parse(value); } catch { return fallback; }
 }
 
 function cashSessionResponse(r: any) {

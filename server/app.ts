@@ -1,7 +1,6 @@
 import dotenv from "dotenv";
 import express from "express";
 import path from "path";
-import crypto from "crypto";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
 import { getConnection, isPostgres, query } from "./db.js";
@@ -10,7 +9,7 @@ import http from "http";
 import { setupSocketIO, broadcastToMessages, broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "./socket.js";
 import { buildLiveWorkstationQueueRows } from "./workstationStats.js";
 import { getDashboardKpis } from "./dashboardKpis.js";
-import { validateSchema, LoginSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema, PasswordSetupSchema } from "./validation.js";
+import { validateSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema } from "./validation.js";
 import { NextFunction, Request, Response } from "express";
 import {
   applyTrustProxy,
@@ -96,20 +95,7 @@ import {
   deleteModifierGroup,
 } from "./mariadb-crud.js";
 import { broadcastSalesUpdate } from "./socket.js";
-import {
-  handleEnrollment,
-  handleLogin,
-  handleLogout,
-  handleRefreshToken,
-  handleRevokeRefreshTokens,
-  handleGetMe,
-  handleSetupPassword,
-  handleStartDemo,
-  handleTwoFactorConfirm,
-  handleTwoFactorDisable,
-  handleTwoFactorSetup,
-  handleTwoFactorStatus,
-} from "./auth-handler.js";
+import { handleEnrollment, handleStartDemo } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
 import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
 import { featureSetForPackage, getHostedPackage, hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, type PackageFeature } from "../shared/packageCatalog.js";
@@ -225,7 +211,6 @@ import {
   testHardwareDevice,
   updateHardwareDevice,
 } from "./hardwareAdapters.js";
-import { recordOfflineSyncIssue } from "./offlineSync.js";
 import {
   addLaybyPayment,
   cancelLaybyOrder,
@@ -266,13 +251,12 @@ import {
   importInventory,
 } from "./batchOperations.js";
 import {
-  normalizeRole, canManageCash, canManageCompanionDevices, canManagePush, canUseActionCenter,
-  canManageInventory, canManageBookings, canGenerateVapidKeys, canUseDevMaintenance,
+  normalizeRole, canManageCash, canManagePush, canUseActionCenter,
+  canManageInventory, canGenerateVapidKeys, canUseDevMaintenance,
   requireDevMaintenance, auditActorFromRequest, tenantIdFromRequest, auditChangedFields,
   integrationSecretFromRequest, auditRouteEvent, denyWithAudit, requireTenantRouteAccess,
-  enforceSensitiveAction, hasOwn, customerSensitiveAction, staffSensitiveAction,
-  saleMutationSensitiveAction, drawerMovementSensitiveAction, safeJsonField,
-  parseImageDataUrl, createTenantLocalSyncSecret,
+  enforceSensitiveAction, customerSensitiveAction, staffSensitiveAction,
+  createTenantLocalSyncSecret,
 } from "./routes/_helpers.js";
 export { createTenantLocalSyncSecret };
 
@@ -280,68 +264,6 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-let PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
-let PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY;
-let PAYFAST_PASSPHRASE = process.env.PAYFAST_PASSPHRASE;
-let PAYFAST_SANDBOX = process.env.PAYFAST_SANDBOX === "true";
-
-if (!PAYFAST_MERCHANT_ID || !PAYFAST_MERCHANT_KEY || !PAYFAST_PASSPHRASE) {
-  console.warn("⚠️  PayFast credentials not configured. Payment processing will fail.");
-}
-
-async function getAppConfig(tenantId: string) {
-  try {
-    const config = await getAppConfigByTenant(tenantId);
-    if (config) {
-      return {
-        merchant_id: config.payfastMerchantId || PAYFAST_MERCHANT_ID,
-        merchant_key: config.payfastMerchantKey || PAYFAST_MERCHANT_KEY,
-        passphrase: config.payfastPassphrase || PAYFAST_PASSPHRASE,
-        sandbox: config.payfastSandbox !== undefined ? config.payfastSandbox : PAYFAST_SANDBOX,
-      };
-    }
-  } catch (err) {
-    console.error("Error fetching config from database:", err);
-  }
-  return {
-    merchant_id: PAYFAST_MERCHANT_ID,
-    merchant_key: PAYFAST_MERCHANT_KEY,
-    passphrase: PAYFAST_PASSPHRASE,
-    sandbox: PAYFAST_SANDBOX,
-  };
-}
-
-function generatePayFastSignature(data: any, passphrase?: string) {
-  let queryString = "";
-  Object.keys(data).forEach((key) => {
-    if (data[key] !== "" && key !== "signature") {
-      queryString += `${key}=${encodeURIComponent(data[key]).replace(/%20/g, "+")}&`;
-    }
-  });
-
-  queryString = queryString.substring(0, queryString.length - 1);
-  if (passphrase) {
-    queryString += `&passphrase=${encodeURIComponent(passphrase.trim()).replace(/%20/g, "+")}`;
-  }
-
-  return crypto.createHash("md5").update(queryString).digest("hex");
-}
-
-function getPublicBaseUrl(req: Request) {
-  const configured = String(process.env.PUBLIC_APP_URL || process.env.APP_URL || "").trim().replace(/\/+$/, "");
-  if (configured) return configured;
-
-  const forwardedProto = String(req.get("x-forwarded-proto") || "").split(",")[0]?.trim();
-  const protocol = forwardedProto || req.protocol || "https";
-  const host = req.get("host");
-  return host ? `${protocol}://${host}` : "";
-}
-
-function safePayFastText(value: unknown, fallback: string, maxLength = 100) {
-  const text = String(value || "").trim();
-  return (text || fallback).slice(0, maxLength);
-}
 
 export async function createApp(io: any = null) {
   const app = express();
@@ -604,16 +526,8 @@ export async function createApp(io: any = null) {
     app.use("/api/dev", devRouter);
   }
 
-  app.post("/api/auth/login", authRateLimit, validateSchema(LoginSchema), handleLogin);
-  app.post("/api/auth/logout", handleLogout);
-  app.post("/api/auth/refresh", authRateLimit, handleRefreshToken);
-  app.post("/api/auth/refresh-tokens/revoke", requireAuth, handleRevokeRefreshTokens);
-  app.get("/api/auth/me", requireAuth, handleGetMe);
-  app.post("/api/auth/setup-password", sensitiveRouteRateLimit, requireAuth, validateSchema(PasswordSetupSchema), handleSetupPassword);
-  app.get("/api/auth/2fa", requireAuth, handleTwoFactorStatus);
-  app.post("/api/auth/2fa/setup", sensitiveRouteRateLimit, requireAuth, handleTwoFactorSetup);
-  app.post("/api/auth/2fa/confirm", sensitiveRouteRateLimit, requireAuth, handleTwoFactorConfirm);
-  app.post("/api/auth/2fa/disable", sensitiveRouteRateLimit, requireAuth, handleTwoFactorDisable);
+  const { authRouter } = await import("./routes/auth.js");
+  app.use("/api/auth", authRouter);
 
   app.use("/api/mariadb/tenants/:tenantId", requireAuth, requireTenantRouteAccess);
 
@@ -722,15 +636,6 @@ export async function createApp(io: any = null) {
   const { staffRouter } = await import("./routes/staff.js");
   app.use("/api/mariadb/tenants/:tenantId/staff", staffRouter);
   app.use("/api/mariadb/tenants/:tenantId/workforce", staffRouter);
-
-  app.post("/api/mariadb/tenants/:tenantId/offline-sync/issues", requireAuth, async (req, res) => {
-    try {
-      const result = await recordOfflineSyncIssue(req.params.tenantId, req.body || {});
-      res.json(result);
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
 
   app.get("/api/mariadb/tenants/:tenantId/live", requireAuth, async (req, res) => {
     try {
@@ -1324,64 +1229,8 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.post("/api/payfast/generate", requireAuth, async (req, res) => {
-    try {
-      const amount = Number(req.body?.amount);
-      if (!Number.isFinite(amount) || amount <= 0) {
-        res.status(400).json({ error: "Valid amount is required" });
-        return;
-      }
-
-      const config = await getAppConfig(req.user!.tenantId);
-      if (!config.merchant_id || !config.merchant_key) {
-        res.status(400).json({ error: "PayFast credentials are not configured" });
-        return;
-      }
-
-      const publicBaseUrl = getPublicBaseUrl(req);
-      const fields: Record<string, string> = {
-        merchant_id: String(config.merchant_id),
-        merchant_key: String(config.merchant_key),
-        amount: amount.toFixed(2),
-        item_name: safePayFastText(req.body?.item_name || req.body?.itemName, "MasePOS Purchase"),
-      };
-
-      const saleId = safePayFastText(req.body?.sale_id || req.body?.saleId, "", 64);
-      if (saleId) fields.m_payment_id = saleId;
-      if (req.body?.return_url) fields.return_url = String(req.body.return_url);
-      if (req.body?.cancel_url) fields.cancel_url = String(req.body.cancel_url);
-      if (publicBaseUrl) fields.notify_url = `${publicBaseUrl}/api/payfast/notify`;
-
-      fields.signature = generatePayFastSignature(fields, config.passphrase);
-      res.json({
-        url: config.sandbox ? "https://sandbox.payfast.co.za/eng/process" : "https://www.payfast.co.za/eng/process",
-        fields,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/payfast/notify", sensitiveRouteRateLimit, async (req, res) => {
-    try {
-      const { m_payment_id, pf_payment_id, payment_status, signature, ...otherData } = req.body;
-      const calculatedSignature = generatePayFastSignature({ m_payment_id, pf_payment_id, payment_status, ...otherData }, PAYFAST_PASSPHRASE);
-
-      if (signature !== calculatedSignature) {
-        console.warn("Invalid PayFast signature");
-        return res.status(400).send("Invalid signature");
-      }
-
-      if (payment_status === "COMPLETE") {
-        console.log("Payment completed:", pf_payment_id);
-      }
-
-      res.status(200).send("OK");
-    } catch (err: any) {
-      console.error("PayFast webhook error:", err);
-      res.status(500).send("Internal Server Error");
-    }
-  });
+  const { payfastRouter } = await import("./routes/payfast.js");
+  app.use("/api/payfast", payfastRouter);
 
   if (!isProduction && !isTest) {
     const { createServer: createViteServer } = await import("vite");

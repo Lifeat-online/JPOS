@@ -19,11 +19,6 @@ export function canManageCash(role: unknown) {
   return r === "admin" || r === "manager" || r === "dev";
 }
 
-export function canManageCompanionDevices(role: unknown) {
-  const r = normalizeRole(role);
-  return r === "admin" || r === "dev";
-}
-
 export function canManagePush(role: unknown) {
   const r = normalizeRole(role);
   return r === "admin" || r === "manager" || r === "dev";

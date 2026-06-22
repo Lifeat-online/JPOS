@@ -35,12 +35,14 @@ describe('security and PCI documentation', () => {
   it('applies a dedicated sensitive-route rate limiter to payment, refund, stock, setup, and AI-test routes', () => {
     const salesSource = fs.readFileSync(path.join(process.cwd(), 'server', 'routes', 'sales.ts'), 'utf8');
     const settingsSource = fs.readFileSync(path.join(process.cwd(), 'server', 'routes', 'settings.ts'), 'utf8');
+    const authSource = fs.readFileSync(path.join(process.cwd(), 'server', 'routes', 'auth.ts'), 'utf8');
+    const payfastSource = fs.readFileSync(path.join(process.cwd(), 'server', 'routes', 'payfast.ts'), 'utf8');
     expect(appSource).toContain('SENSITIVE_ROUTE_RATE_LIMIT_MAX');
-    expect(appSource).toContain('app.post("/api/auth/setup-password", sensitiveRouteRateLimit');
+    expect(authSource).toMatch(/authRouter\.post\("\/setup-password"[^,]*,\s*[^\n]*sensitiveRouteRateLimit/);
     expect(salesSource).toMatch(/salesRouter\.post\("\/"\s*,\s*[^\n]*sensitiveRouteRateLimit/);
     expect(salesSource).toMatch(/salesRouter\.post\("\/:saleId\/refund"[^,]*,\s*[^\n]*sensitiveRouteRateLimit/);
     expect(appSource).toContain('app.post("/api/mariadb/tenants/:tenantId/products/:id/stock-adjustments", sensitiveRouteRateLimit');
     expect(settingsSource).toMatch(/"\/ai\/test",\s*requireAuth,\s*sensitiveRouteRateLimit/);
-    expect(appSource).toContain('app.post("/api/payfast/notify", sensitiveRouteRateLimit');
+    expect(payfastSource).toMatch(/payfastRouter\.post\("\/notify"[^,]*,\s*[^\n]*sensitiveRouteRateLimit/);
   });
 });
