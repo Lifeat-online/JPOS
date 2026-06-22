@@ -3039,14 +3039,6 @@ export async function updateSaleItem(
   );
 }
 
-export async function updateSaleStatus(
-  tenantId: string,
-  saleId: string,
-  status: Sale["status"]
-): Promise<Sale> {
-  return updateSale(tenantId, saleId, { status });
-}
-
 export type SalePaymentProviderStatusInput = {
   provider?: string | null;
   providerDeviceId?: string | null;
