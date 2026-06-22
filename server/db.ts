@@ -1,15 +1,6 @@
-import mysql from "mysql2/promise";
-// @ts-expect-error - @types/pg is not installed; the runtime is fine
-import { Pool } from "pg";
-
-export type DbConnection = {
-  beginTransaction(): Promise<void>;
-  commit(): Promise<void>;
-  rollback(): Promise<void>;
-  execute<T = any>(sql: string, params?: any[]): Promise<readonly [T[]]>;
-  query<T = any>(sql: string, params?: any[]): Promise<readonly [T[]]>;
-  release(): void;
-};
+import { Pool, PoolClient, QueryResultRow } from "pg";
+import { Kysely, PostgresDialect } from "kysely";
+import { DB } from "./db-types.js";
 
 function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
   for (const v of values) {
@@ -20,207 +11,59 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
   return undefined;
 }
 
-export function isPostgres() {
-  return Boolean(
-    firstNonEmpty(
-      process.env.DATABASE_URL,
-      process.env.SUPABASE_DB_URL,
-      process.env.SUPABASE_DATABASE_URL
-    )
-  );
-}
+export const pgPool = new Pool({
+  connectionString: firstNonEmpty(
+    process.env.DATABASE_URL,
+    process.env.SUPABASE_DB_URL,
+    process.env.SUPABASE_DATABASE_URL
+  ) || "",
+  max: Number(process.env.DB_CONNECTION_LIMIT || 10),
+  ssl: { rejectUnauthorized: false },
+});
 
-function toPgPlaceholders(sql: string) {
-  let out = "";
-  let inSingle = false;
-  let inDouble = false;
-  let paramIndex = 0;
+export const db = new Kysely<DB>({
+  dialect: new PostgresDialect({
+    pool: pgPool,
+  }),
+});
 
-  for (let i = 0; i < sql.length; i += 1) {
-    const ch = sql[i];
-    const prev = i > 0 ? sql[i - 1] : "";
+export type DbConnection = {
+  beginTransaction(): Promise<void>;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+  execute<T extends QueryResultRow = any>(sql: string, params?: any[]): Promise<readonly [T[]]>;
+  query<T extends QueryResultRow = any>(sql: string, params?: any[]): Promise<readonly [T[]]>;
+  release(): void;
+};
 
-    if (ch === "'" && !inDouble) {
-      if (!inSingle) inSingle = true;
-      else if (prev !== "\\") inSingle = false;
-      out += ch;
-      continue;
-    }
-
-    if (ch === '"' && !inSingle) {
-      if (!inDouble) inDouble = true;
-      else if (prev !== "\\") inDouble = false;
-      out += ch;
-      continue;
-    }
-
-    if (ch === "?" && !inSingle && !inDouble) {
-      paramIndex += 1;
-      out += `$${paramIndex}`;
-      continue;
-    }
-
-    out += ch;
-  }
-
-  return out;
-}
-
-let mariaPool: mysql.Pool | null = null;
-
-if (!isPostgres()) {
-  mariaPool = mysql.createPool({
-    host: firstNonEmpty(process.env.DB_HOST, process.env.MARIADB_HOST, process.env.MYSQL_HOST) || "localhost",
-    port: Number(firstNonEmpty(process.env.DB_PORT, process.env.MARIADB_PORT, process.env.MYSQL_PORT) || 3306),
-    user: firstNonEmpty(process.env.DB_USER, process.env.MARIADB_USER, process.env.MYSQL_USER) || "root",
-    password: firstNonEmpty(
-      process.env.DB_PASSWORD,
-      process.env.MARIADB_PASSWORD,
-      process.env.MYSQL_PASSWORD,
-      process.env.DB_ROOT_PASSWORD,
-      process.env.MARIADB_ROOT_PASSWORD,
-      process.env.MYSQL_ROOT_PASSWORD
-    ) || "",
-    database: firstNonEmpty(process.env.DB_DATABASE, process.env.MARIADB_DATABASE, process.env.MYSQL_DATABASE) || "jimmy_pos",
-    waitForConnections: true,
-    connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
-    timezone: "Z",
-  });
-}
-
-const pgPool = isPostgres()
-  ? new Pool({
-      connectionString:
-        firstNonEmpty(process.env.DATABASE_URL, process.env.SUPABASE_DB_URL, process.env.SUPABASE_DATABASE_URL) || "",
-      max: Number(process.env.DB_CONNECTION_LIMIT || 10),
-      ssl: { rejectUnauthorized: false },
-    })
-  : null;
-
-export async function query<T = any>(sql: string, params: any[] = []) {
-  if (pgPool) {
-    let pgSql = toPgPlaceholders(sql);
-    // Find all aliases after AS and wrap them in double quotes
-    const aliases: string[] = [];
-    pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match, p1) => {
-      aliases.push(p1);
-      return `AS "${p1}"`;
-    });
-
-    // Also wrap these same aliases if they appear in ORDER BY
-    if (aliases.length > 0) {
-      const orderMatch = pgSql.match(/\b[oO][rR][dD][eE][rR]\s+[bB][yY]\s+([\s\S]+)$/i);
-      if (orderMatch) {
-        let orderPart = orderMatch[1];
-        for (const alias of aliases) {
-          const aliasRegex = new RegExp(`\\b${alias}\\b`, "g");
-          orderPart = orderPart.replace(aliasRegex, `"${alias}"`);
-        }
-        pgSql = pgSql.substring(0, orderMatch.index) + pgSql.substring(orderMatch.index!).replace(orderMatch[1], orderPart);
-      }
-    }
-
-    const res = await pgPool.query(pgSql, params);
-    return res.rows as T[];
-  }
-
-  if (!mariaPool) {
-    throw new Error("MariaDB connection not initialized. Check your environment variables (DATABASE_URL missing).");
-  }
-  const [rows] = await mariaPool.execute(sql, params);
-  return rows as T[];
+export async function query<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
+  const res = await pgPool.query<T>(sql, params);
+  return res.rows;
 }
 
 export async function getConnection() {
-  if (pgPool) {
-    const client = await pgPool.connect();
-    const conn: DbConnection = {
-      async beginTransaction() {
-        await client.query("BEGIN");
-      },
-      async commit() {
-        await client.query("COMMIT");
-      },
-      async rollback() {
-        await client.query("ROLLBACK");
-      },
-      async execute<T = any>(sql: string, params: any[] = []) {
-        let pgSql = toPgPlaceholders(sql);
-        const aliases: string[] = [];
-        pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match, p1) => {
-          aliases.push(p1);
-          return `AS "${p1}"`;
-        });
-        if (aliases.length > 0) {
-          const orderMatch = pgSql.match(/\b[oO][rR][dD][eE][rR]\s+[bB][yY]\s+([\s\S]+)$/i);
-          if (orderMatch) {
-            let orderPart = orderMatch[1];
-            for (const alias of aliases) {
-              const aliasRegex = new RegExp(`\\b${alias}\\b`, "g");
-              orderPart = orderPart.replace(aliasRegex, `"${alias}"`);
-            }
-            pgSql = pgSql.substring(0, orderMatch.index) + pgSql.substring(orderMatch.index!).replace(orderMatch[1], orderPart);
-          }
-        }
-        const res = await client.query(pgSql, params);
-        return [res.rows as T[]] as const;
-      },
-      async query<T = any>(sql: string, params: any[] = []) {
-        let pgSql = toPgPlaceholders(sql);
-        const aliases: string[] = [];
-        pgSql = pgSql.replace(/\b[aA][sS]\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match, p1) => {
-          aliases.push(p1);
-          return `AS "${p1}"`;
-        });
-        if (aliases.length > 0) {
-          const orderMatch = pgSql.match(/\b[oO][rR][dD][eE][rR]\s+[bB][yY]\s+([\s\S]+)$/i);
-          if (orderMatch) {
-            let orderPart = orderMatch[1];
-            for (const alias of aliases) {
-              const aliasRegex = new RegExp(`\\b${alias}\\b`, "g");
-              orderPart = orderPart.replace(aliasRegex, `"${alias}"`);
-            }
-            pgSql = pgSql.substring(0, orderMatch.index) + pgSql.substring(orderMatch.index!).replace(orderMatch[1], orderPart);
-          }
-        }
-        const res = await client.query(pgSql, params);
-        return [res.rows as T[]] as const;
-      },
-      release() {
-        client.release();
-      },
-    };
-    return conn;
-  }
-
-  if (!mariaPool) {
-    throw new Error("MariaDB connection not initialized. Check your environment variables (DATABASE_URL missing).");
-  }
-  const mariaConn = await mariaPool.getConnection();
+  const client = await pgPool.connect();
   const conn: DbConnection = {
     async beginTransaction() {
-      await mariaConn.beginTransaction();
+      await client.query("BEGIN");
     },
     async commit() {
-      await mariaConn.commit();
+      await client.query("COMMIT");
     },
     async rollback() {
-      await mariaConn.rollback();
+      await client.query("ROLLBACK");
     },
-    async execute<T = any>(sql: string, params: any[] = []) {
-      const [rows] = await (mariaConn as any).execute(sql, params);
-      return [rows as T[]] as const;
+    async execute<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
+      const res = await client.query<T>(sql, params);
+      return [res.rows] as const;
     },
-    async query<T = any>(sql: string, params: any[] = []) {
-      const [rows] = await (mariaConn as any).query(sql, params);
-      return [rows as T[]] as const;
+    async query<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
+      const res = await client.query<T>(sql, params);
+      return [res.rows] as const;
     },
     release() {
-      mariaConn.release();
+      client.release();
     },
   };
-
   return conn;
 }
-
-export default mariaPool;

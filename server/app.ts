@@ -1,7 +1,6 @@
 import dotenv from "dotenv";
 import express from "express";
 import path from "path";
-import bodyParser from "body-parser";
 import crypto from "crypto";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
@@ -793,8 +792,8 @@ export async function createApp(io: any = null) {
   app.use(apiRateLimit);
   app.use(corsHandler);
   app.use(securityHeaders(isProduction));
-  app.use(bodyParser.json({ limit: "1mb" }));
-  app.use(bodyParser.urlencoded({ extended: false, limit: "1mb" }));
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "1mb" }));
   app.use('/uploads', express.static(path.resolve(__dirname, '..', 'public', 'uploads'), {
     dotfiles: 'deny',
     index: false,
@@ -1185,19 +1184,11 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.get("/api/mariadb/tenants/:tenantId/products", requireAuth, async (req, res) => {
-    try {
-      const products = await getProductsByTenant(req.params.tenantId, {
-        locationId: typeof req.query.locationId === "string" ? req.query.locationId : null,
-        staffId: req.user?.staffId || null,
-        role: req.user?.role || null,
-      });
-      res.json(products);
-    } catch (err: any) {
-      const status = String(err?.message || "").includes("not assigned") ? 403 : 500;
-      res.status(status).json({ error: err.message });
-    }
-  });
+  const { productsRouter } = await import("./routes/products.js");
+  app.use("/api/mariadb/tenants/:tenantId/products", productsRouter);
+
+  const { customersRouter } = await import("./routes/customers.js");
+  app.use("/api/mariadb/tenants/:tenantId/customers", customersRouter);
 
   app.post("/api/mariadb/tenants/:tenantId/batch/products/create", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
     try {
@@ -2613,291 +2604,11 @@ export async function createApp(io: any = null) {
     }
   });
 
-  app.get("/api/mariadb/tenants/:tenantId/batch/customers/export", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "batch.customers_export", "Manager access is required for customer exports.");
-      }
-      const pack = await exportCustomersCsv(req.params.tenantId);
-      await auditRouteEvent(req, "batch.customers_exported", "customer", {
-        count: pack.count,
-      }, null, "customer_batch");
-      res.json(pack);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  const { staffRouter } = await import("./routes/staff.js");
+  app.use("/api/mariadb/tenants/:tenantId/staff", staffRouter);
+  app.use("/api/mariadb/tenants/:tenantId/workforce", staffRouter);
 
-  app.post("/api/mariadb/tenants/:tenantId/batch/customers/import", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "batch.customers_import", "Manager access is required for customer imports.");
-      }
-      const result = await importCustomers(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
-      await auditRouteEvent(req, "batch.customers_imported", "customer", {
-        dryRun: result.dryRun,
-        created: result.created,
-        updated: result.updated,
-        skipped: result.skipped,
-        errorCount: result.errors.length,
-      }, null, "customer_batch");
-      res.json(result);
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/mariadb/tenants/:tenantId/customers/campaign-export", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "customers.campaign_export", "Manager access is required for customer campaign exports.");
-      }
-      const report = await getCustomerCampaignExport(req.params.tenantId, {
-        segment: typeof req.query.segment === "string" ? req.query.segment : undefined,
-        limit: typeof req.query.limit === "string" ? req.query.limit : undefined,
-      });
-      await auditRouteEvent(req, "customers.campaign_exported", "customer_campaign_export", {
-        segment: report.segment,
-        rowCount: report.count,
-        totalCustomers: report.totalCustomers,
-        contactableCount: report.contactableCount,
-      }, null, "customer_campaigns");
-      res.json(report);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/mariadb/tenants/:tenantId/customers/:id/consents", requireAuth, async (req, res) => {
-    try {
-      res.json(await listCustomerConsents(req.params.tenantId, req.params.id));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/mariadb/tenants/:tenantId/customers/:id/data-export", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "customers.data_export", "Manager access is required for customer data exports.", {
-          customerId: req.params.id,
-        });
-      }
-      const report = await getCustomerDataExport(req.params.tenantId, req.params.id);
-      await auditRouteEvent(req, "customers.data_exported", "customer_data_export", {
-        customerId: req.params.id,
-        saleCount: report.summary.saleCount,
-        payoutRequestCount: report.summary.payoutRequestCount,
-        laybyCount: report.summary.laybyCount,
-      }, req.params.id, "customer_data");
-      res.json(report);
-    } catch (err: any) {
-      const status = String(err?.message || "").includes("not found") ? 404 : 500;
-      res.status(status).json({ error: err.message });
-    }
-  });
-
-  app.put("/api/mariadb/tenants/:tenantId/customers/:id/consents", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "customers.consent_update", "Manager access is required to update customer consent records.", {
-          customerId: req.params.id,
-        });
-      }
-      res.json(await upsertCustomerConsents(
-        req.params.tenantId,
-        req.params.id,
-        req.body?.consents || req.body || {},
-        auditActorFromRequest(req),
-      ));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/mariadb/tenants/:tenantId/staff", requireAuth, async (req, res) => {
-    try {
-      const staff = await getStaffByTenant(req.params.tenantId);
-      res.json(staff);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/mariadb/tenants/:tenantId/workforce/shifts", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.shifts.view", "Manager access is required to view staff rosters.");
-      }
-      res.json(await listStaffShifts(req.params.tenantId, {
-        startDate: String(req.query.startDate || req.query.from || ""),
-        endDate: String(req.query.endDate || req.query.to || ""),
-        staffId: req.query.staffId ? String(req.query.staffId) : undefined,
-      }));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/mariadb/tenants/:tenantId/workforce/shifts", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.shifts.create", "Manager access is required to schedule shifts.");
-      }
-      res.json(await createStaffShift(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.put("/api/mariadb/tenants/:tenantId/workforce/shifts/:shiftId", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.shifts.update", "Manager access is required to edit shifts.");
-      }
-      res.json(await updateStaffShift(req.params.tenantId, req.params.shiftId, req.body || {}, auditActorFromRequest(req)));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.delete("/api/mariadb/tenants/:tenantId/workforce/shifts/:shiftId", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.shifts.cancel", "Manager access is required to cancel shifts.");
-      }
-      res.json(await cancelStaffShift(req.params.tenantId, req.params.shiftId, auditActorFromRequest(req)));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/mariadb/tenants/:tenantId/workforce/roster/publish", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.roster.publish", "Manager access is required to publish rosters.");
-      }
-      res.json(await publishRoster(
-        req.params.tenantId,
-        String(req.body?.startDate || req.body?.from || ""),
-        String(req.body?.endDate || req.body?.to || req.body?.startDate || ""),
-        auditActorFromRequest(req),
-      ));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/mariadb/tenants/:tenantId/workforce/timesheet-payroll", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.payroll.export", "Manager access is required to export timesheets.");
-      }
-      const report = await getTimesheetPayrollReport(req.params.tenantId, {
-        startDate: String(req.query.startDate || req.query.from || ""),
-        endDate: String(req.query.endDate || req.query.to || ""),
-        staffId: req.query.staffId ? String(req.query.staffId) : undefined,
-      });
-      res.json(report);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/mariadb/tenants/:tenantId/workforce/staff-performance", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.staff_performance.view", "Manager access is required to view staff performance insights.");
-      }
-      res.json(await getStaffPerformanceReport(req.params.tenantId, {
-        startDate: String(req.query.startDate || req.query.from || ""),
-        endDate: String(req.query.endDate || req.query.to || ""),
-        staffId: req.query.staffId ? String(req.query.staffId) : undefined,
-      }));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/mariadb/tenants/:tenantId/workforce/staff-performance/coaching-notes", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.staff_performance.coaching_note", "Manager access is required to add staff coaching notes.");
-      }
-      res.json(await addStaffCoachingNote(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/mariadb/tenants/:tenantId/workforce/tip-pool-rules", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.tip_pool_rules.view", "Manager access is required to view tip pool rules.");
-      }
-      res.json(await listTipPoolRules(req.params.tenantId));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/mariadb/tenants/:tenantId/workforce/tip-pool-rules", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.tip_pool_rules.create", "Manager access is required to create tip pool rules.");
-      }
-      res.json(await createTipPoolRule(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.put("/api/mariadb/tenants/:tenantId/workforce/tip-pool-rules/:ruleId", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.tip_pool_rules.update", "Manager access is required to update tip pool rules.");
-      }
-      res.json(await updateTipPoolRule(req.params.tenantId, req.params.ruleId, req.body || {}, auditActorFromRequest(req)));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/mariadb/tenants/:tenantId/workforce/tip-pools/preview", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.tip_pool.preview", "Manager access is required to preview tip pool payouts.");
-      }
-      res.json(await previewTipPoolPayouts(req.params.tenantId, req.body || {}));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/mariadb/tenants/:tenantId/workforce/tip-pools/generate", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.tip_pool.generate", "Manager access is required to generate tip pool payouts.");
-      }
-      res.json(await generateTipPoolPayouts(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/mariadb/tenants/:tenantId/workforce/tip-pool-payouts", requireAuth, async (req, res) => {
-    try {
-      if (!canUseActionCenter(req.user?.role)) {
-        return denyWithAudit(req, res, "workforce.tip_pool_payouts.view", "Manager access is required to view tip pool payouts.");
-      }
-      res.json(await listTipPoolPayouts(req.params.tenantId, {
-        ruleId: req.query.ruleId ? String(req.query.ruleId) : undefined,
-        startDate: req.query.startDate ? String(req.query.startDate) : undefined,
-        endDate: req.query.endDate ? String(req.query.endDate) : undefined,
-        staffId: req.query.staffId ? String(req.query.staffId) : undefined,
-      }));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+  app.get("/api/mariadb/tenants/:tenantId/inventory-locations", requireAuth, async (req, res) => {
     }
   });
 
