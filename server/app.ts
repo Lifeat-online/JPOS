@@ -684,8 +684,8 @@ export async function createApp(io: any = null) {
                 SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
                 SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN 1 ELSE 0 END) AS lastHourCompletedCount,
                 SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN total ELSE 0 END) AS lastHourCompletedRevenue,
-                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) AS todayCompletedCount,
-                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURDATE() THEN total ELSE 0 END) AS todayCompletedRevenue,
+                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURRENT_DATE THEN 1 ELSE 0 END) AS todayCompletedCount,
+                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURRENT_DATE THEN total ELSE 0 END) AS todayCompletedRevenue,
                 SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
               FROM sales
               WHERE tenant_id = ?

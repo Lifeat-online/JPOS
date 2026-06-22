@@ -866,9 +866,7 @@ export async function createTableSection(
 ): Promise<any> {
   const id = `sec_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   // Whitelist column names to prevent SQL injection
-  const orderCol = isPostgres() 
-    ? '"order"' 
-    : '`order`';
+  const orderCol = '"order"';
   await query(
     `INSERT INTO table_sections (id, tenant_id, name, color, ${orderCol}, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,

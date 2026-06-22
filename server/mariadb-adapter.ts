@@ -538,9 +538,7 @@ export async function getMessagesByChannel(tenantId: string, channel: string, li
 
 export async function getTableSectionsByTenant(tenantId: string) {
   // Whitelist column names to prevent SQL injection
-  const orderCol = isPostgres() 
-    ? '"order"' 
-    : '`order`';
+  const orderCol = '"order"';
   return query(
     `SELECT
        id,

@@ -95,19 +95,10 @@ export async function publishRealtimeEvent(
   const id = `rt_${crypto.randomUUID()}`;
   const payload = JSON.stringify(event.payload ?? null);
 
-  if (postgres) {
-    await runQuery(
-      `INSERT INTO realtime_pubsub_events (id, instance_id, channel, event_name, payload, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, NOW(), NOW() + (?::text || ' minutes')::interval)`,
-      [id, instanceId, event.channel, event.eventName, payload, String(ttlMinutes)]
-    );
-    return id;
-  }
-
   await runQuery(
     `INSERT INTO realtime_pubsub_events (id, instance_id, channel, event_name, payload, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
-    [id, instanceId, event.channel, event.eventName, payload, ttlMinutes]
+     VALUES (?, ?, ?, ?, ?, NOW(), NOW() + (?::text || ' minutes')::interval)`,
+    [id, instanceId, event.channel, event.eventName, payload, String(ttlMinutes)]
   );
   return id;
 }

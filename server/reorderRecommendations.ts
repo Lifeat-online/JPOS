@@ -195,7 +195,7 @@ async function getProductVelocity(tenantId: string) {
      INNER JOIN sales s ON s.id = si.sale_id
      WHERE s.tenant_id = ?
        AND s.status = 'completed'
-       AND s.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+        AND s.created_at >= NOW() - INTERVAL '90 days'
      GROUP BY si.product_id, si.product_name`,
     [tenantId]
   ));

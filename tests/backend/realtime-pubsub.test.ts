@@ -42,7 +42,6 @@ describe("database realtime pub/sub fan-out", () => {
     const id = await publishRealtimeEvent(
       { channel: "tenant:tenant_1", eventName: "sales_update", payload: { saleId: "sale_1" } },
       {
-        postgres: false,
         instanceId: "instance_a",
         ttlMinutes: 7,
         runQuery: async (sql, params = []) => {
@@ -54,13 +53,13 @@ describe("database realtime pub/sub fan-out", () => {
 
     expect(id).toMatch(/^rt_/);
     expect(calls[0].sql).toContain("INSERT INTO realtime_pubsub_events");
-    expect(calls[0].sql).toContain("DATE_ADD(NOW(), INTERVAL ? MINUTE)");
+    expect(calls[0].sql).toContain("(?::text || ' minutes')::interval");
     expect(calls[0].params.slice(1)).toEqual([
       "instance_a",
       "tenant:tenant_1",
       "sales_update",
       '{"saleId":"sale_1"}',
-      7,
+      "7",
     ]);
   });
 
