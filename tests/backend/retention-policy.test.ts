@@ -3,9 +3,19 @@ import * as dbModule from '../../server/db.js';
 import { recordAuditEventSafe } from '../../server/audit.js';
 import { applyRetentionPolicy, getRetentionPreview, normalizeRetentionPolicy, saveRetentionPolicy } from '../../server/retentionPolicy.js';
 
+const dbSelectChain: any = {
+  select: vi.fn(() => dbSelectChain),
+  where: vi.fn(() => dbSelectChain),
+  limit: vi.fn(() => dbSelectChain),
+  executeTakeFirst: vi.fn(() => Promise.resolve({ retentionPolicy: null })),
+};
+
 vi.mock('../../server/db.js', () => ({
   isPostgres: vi.fn(() => false),
   query: vi.fn(),
+  db: {
+    selectFrom: vi.fn(() => dbSelectChain),
+  },
 }));
 
 vi.mock('../../server/audit.js', () => ({
@@ -20,10 +30,9 @@ const storedPolicy = {
 };
 
 function mockRetentionQueries() {
+  (dbModule.db.selectFrom as any).mockReturnValue(dbSelectChain);
+  dbSelectChain.executeTakeFirst.mockResolvedValue({ retentionPolicy: JSON.stringify(storedPolicy) });
   (dbModule.query as any).mockImplementation((sql: string) => {
-    if (sql.includes('SELECT retention_policy')) {
-      return Promise.resolve([{ retentionPolicy: JSON.stringify(storedPolicy) }]);
-    }
     if (sql.includes('FROM customers')) return Promise.resolve([{ count: 2 }]);
     if (sql.includes('FROM messages')) return Promise.resolve([{ count: 3 }]);
     if (sql.includes('FROM push_subscriptions')) return Promise.resolve([{ count: 5 }]);
@@ -75,8 +84,9 @@ describe('retention policy', () => {
   });
 
   it('saves the policy and records an audit event', async () => {
+    (dbModule.db.selectFrom as any).mockReturnValue(dbSelectChain);
+    dbSelectChain.executeTakeFirst.mockResolvedValue({ retentionPolicy: JSON.stringify(storedPolicy) });
     (dbModule.query as any)
-      .mockResolvedValueOnce([{ retentionPolicy: JSON.stringify(storedPolicy) }])
       .mockResolvedValueOnce([]);
 
     const saved = await saveRetentionPolicy('tenant_1', { messagesDays: 300 }, {

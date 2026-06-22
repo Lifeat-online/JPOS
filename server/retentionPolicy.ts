@@ -1,4 +1,4 @@
-import { isPostgres, query } from "./db.js";
+import { db, isPostgres, query } from "./db.js";
 import { recordAuditEventSafe } from "./audit.js";
 
 type RetentionSummary = {
@@ -99,14 +99,13 @@ async function countRows(sql: string, params: any[]) {
 }
 
 export async function getRetentionPolicy(tenantId: string): Promise<RetentionPolicy> {
-  const rows = await query<{ retentionPolicy?: string | null; retention_policy?: string | null }>(
-    `SELECT retention_policy AS retentionPolicy
-       FROM app_settings
-      WHERE tenant_id = ?
-      LIMIT 1`,
-    [tenantId],
-  );
-  return normalizeRetentionPolicy(parseJson(rows[0]?.retentionPolicy ?? rows[0]?.retention_policy, {}));
+  const row = await db
+    .selectFrom("app_settings")
+    .select("retention_policy as retentionPolicy")
+    .where("tenant_id", "=", tenantId)
+    .limit(1)
+    .executeTakeFirst();
+  return normalizeRetentionPolicy(parseJson(row?.retentionPolicy, {}));
 }
 
 export async function saveRetentionPolicy(tenantId: string, policyInput: unknown, actor: Actor = {}) {
