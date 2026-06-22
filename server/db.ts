@@ -36,13 +36,38 @@ export type DbConnection = {
   release(): void;
 };
 
+/**
+ * Always returns true – the app now exclusively uses PostgreSQL.
+ * Kept for backward compatibility with existing conditional SQL branches
+ * (e.g. `isPostgres() ? "RANDOM()" : "RAND()"`) spread across the codebase.
+ */
+export function isPostgres(): boolean {
+  return true;
+}
+
+/**
+ * Converts MySQL-style `?` positional placeholders to PostgreSQL-style `$1`, `$2`, ...
+ * so that legacy query strings from mariadb-adapter / mariadb-crud work with node-postgres.
+ * Placeholders inside string literals and comments are intentionally left untouched by
+ * targeting only bare `?` tokens that are not preceded by a backslash.
+ */
+function convertPlaceholders(sql: string): string {
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
+}
+
 export async function query<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
-  const res = await pgPool.query<T>(sql, params);
+  const res = await pgPool.query<T>(convertPlaceholders(sql), params);
   return res.rows;
 }
 
 export async function getConnection() {
   const client = await pgPool.connect();
+
+  function wrapQuery<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
+    return client.query<T>(convertPlaceholders(sql), params);
+  }
+
   const conn: DbConnection = {
     async beginTransaction() {
       await client.query("BEGIN");
@@ -54,11 +79,11 @@ export async function getConnection() {
       await client.query("ROLLBACK");
     },
     async execute<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
-      const res = await client.query<T>(sql, params);
+      const res = await wrapQuery<T>(sql, params);
       return [res.rows] as const;
     },
     async query<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
-      const res = await client.query<T>(sql, params);
+      const res = await wrapQuery<T>(sql, params);
       return [res.rows] as const;
     },
     release() {

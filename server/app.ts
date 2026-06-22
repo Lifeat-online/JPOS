@@ -13,7 +13,6 @@ import {
   restoreDatabaseBackup,
 } from "./dbMaintenance.js";
 import { initDb } from "./init-db.js";
-import rateLimit from "express-rate-limit";
 import http from "http";
 import { setupSocketIO, broadcastToMessages, broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "./socket.js";
 import { buildLiveWorkstationQueueRows } from "./workstationStats.js";
@@ -1189,6 +1188,29 @@ export async function createApp(io: any = null) {
 
   const { customersRouter } = await import("./routes/customers.js");
   app.use("/api/mariadb/tenants/:tenantId/customers", customersRouter);
+
+  // ── Extracted routers (ponytail refactor) ────────────────────────────────
+  const { salesRouter } = await import("./routes/sales.js");
+  app.use("/api/mariadb/tenants/:tenantId/sales", salesRouter);
+
+  const { cashRouter } = await import("./routes/cash.js");
+  app.use("/api/mariadb/tenants/:tenantId", cashRouter);
+
+  const { inventoryRouter } = await import("./routes/inventory.js");
+  app.use("/api/mariadb/tenants/:tenantId", inventoryRouter);
+
+  const { settingsRouter } = await import("./routes/settings.js");
+  app.use("/api/mariadb/tenants/:tenantId", settingsRouter);
+
+  const { reportsRouter } = await import("./routes/reports.js");
+  app.use("/api/mariadb/tenants/:tenantId", reportsRouter);
+
+  const { tablesRouter } = await import("./routes/tables.js");
+  app.use("/api/mariadb/tenants/:tenantId", tablesRouter);
+
+  const { workstationsRouter } = await import("./routes/workstations.js");
+  app.use("/api/mariadb/tenants/:tenantId", workstationsRouter);
+  // ─────────────────────────────────────────────────────────────────────────
 
   app.post("/api/mariadb/tenants/:tenantId/batch/products/create", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
     try {
