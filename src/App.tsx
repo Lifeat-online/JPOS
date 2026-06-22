@@ -1216,22 +1216,24 @@ export default function App() {
         })}
       </nav>
 
-      <RoleOnboardingChecklist
-        role={roleForPermissions}
-        isDev={isDev}
-        isRestaurant={Boolean(config.business?.isRestaurantMode)}
-        hasOpenRegister={Boolean(effectiveActiveSession)}
-        products={products}
-        customers={posCustomerProfiles}
-        staff={staff}
-        sales={sales}
-        workstations={workstations}
-        restaurantTables={restaurantTables}
-        pendingWorkstationCount={pendingWorkstationCount}
-        openTabsCount={openTabsCount}
-        currentView={view}
-        onNavigate={navigate}
-      />
+      {!['pos', 'handheld', 'workstation', 'tables', 'tabs', 'history', 'messages', 'delivery'].includes(view) && (
+        <RoleOnboardingChecklist
+          role={roleForPermissions}
+          isDev={isDev}
+          isRestaurant={Boolean(config.business?.isRestaurantMode)}
+          hasOpenRegister={Boolean(effectiveActiveSession)}
+          products={products}
+          customers={posCustomerProfiles}
+          staff={staff}
+          sales={sales}
+          workstations={workstations}
+          restaurantTables={restaurantTables}
+          pendingWorkstationCount={pendingWorkstationCount}
+          openTabsCount={openTabsCount}
+          currentView={view}
+          onNavigate={navigate}
+        />
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">

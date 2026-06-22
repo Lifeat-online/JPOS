@@ -181,6 +181,20 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [laybyCreateOpen, setLaybyCreateOpen] = useState(false);
   const [laybyManagerOpen, setLaybyManagerOpen] = useState(false);
   const [laybyReceiptOrder, setLaybyReceiptOrder] = useState<LaybyOrder | null>(null);
+  const [showQuickActions, setShowQuickActions] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('masepos-show-quick-actions');
+      return saved !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('masepos-show-quick-actions', String(showQuickActions));
+    } catch {}
+  }, [showQuickActions]);
 
   const drawerReasons = [
     'Make change',
@@ -1152,105 +1166,118 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
           )}
         </div>
 
-        <div role="group" aria-label="Daily POS actions" className="mx-4 lg:mx-6 mb-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-7">
-          <button
-            type="button"
-            onClick={openCashDrawer}
-            className={`${quickActionBase} border-emerald-100 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}
+        <div className="mx-4 lg:mx-6 mb-2 flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+          <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Terminal Tools</h3>
+          <button 
+            onClick={() => setShowQuickActions(!showQuickActions)} 
+            className="text-[10px] font-bold text-primary flex items-center gap-1 hover:underline"
           >
-            <span className="flex items-center justify-between gap-2">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Register</span>
-            </span>
-            <span className="mt-2 block truncate text-sm font-black text-slate-900 dark:text-white">{activeRegisterName}</span>
-            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Expected R{activeRegisterExpectedCash.toFixed(2)}</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={!lastReceiptSale || !onPrintLastReceipt}
-            onClick={onPrintLastReceipt}
-            className={`${quickActionBase} border-slate-200 text-slate-600 hover:border-primary/40 hover:bg-primary/5 dark:border-slate-800 dark:text-slate-300`}
-          >
-            <span className="flex items-center justify-between gap-2">
-              <Printer className="h-4 w-4 shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Receipt</span>
-            </span>
-            <span className="mt-2 block truncate text-sm font-black text-slate-900 dark:text-white">
-              {lastReceiptSale ? `#${lastReceiptSale.id.slice(-8).toUpperCase()}` : 'No receipt'}
-            </span>
-            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Reprint last</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={openDrawerModal}
-            className={`${quickActionBase} border-emerald-100 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}
-          >
-            <span className="flex items-center justify-between gap-2">
-              <Banknote className="h-4 w-4 shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Drawer</span>
-            </span>
-            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">No sale</span>
-            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Record reason</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={cart.length === 0 && parkedSales.length === 0}
-            onClick={openParkedQuickAction}
-            className={`${quickActionBase} border-indigo-100 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-300 dark:hover:bg-indigo-950/30`}
-          >
-            <span className="flex items-center justify-between gap-2">
-              <PauseCircle className="h-4 w-4 shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Parked</span>
-            </span>
-            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{parkedSales.length} waiting</span>
-            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{cart.length > 0 ? 'Park current' : 'Resume latest'}</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={!config?.business?.isRestaurantMode}
-            onClick={openTablesQuickAction}
-            className={`${quickActionBase} border-orange-100 text-orange-700 hover:border-orange-300 hover:bg-orange-50 dark:border-orange-900/50 dark:text-orange-300 dark:hover:bg-orange-950/30`}
-          >
-            <span className="flex items-center justify-between gap-2">
-              <Utensils className="h-4 w-4 shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Tables</span>
-            </span>
-            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{openTableCount} open</span>
-            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{cart.length > 0 ? 'Save to table' : 'Floor view'}</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={!config?.business?.isRestaurantMode}
-            onClick={() => navigate('/tabs')}
-            className={`${quickActionBase} border-indigo-100 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-300 dark:hover:bg-indigo-950/30`}
-          >
-            <span className="flex items-center justify-between gap-2">
-              <TabletSmartphone className="h-4 w-4 shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Tabs</span>
-            </span>
-            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{openTabsCount} open</span>
-            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Review tabs</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={!config?.business?.isRestaurantMode || activeWorkstations.length === 0}
-            onClick={openWorkstationQuickAction}
-            className={`${quickActionBase} border-amber-100 text-amber-700 hover:border-amber-300 hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30`}
-          >
-            <span className="flex items-center justify-between gap-2">
-              <ChefHat className="h-4 w-4 shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Queue</span>
-            </span>
-            <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{pendingWorkstationItems} pending</span>
-            <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{attachedWorkstation ? attachedWorkstation.name : 'Workstations'}</span>
+            {showQuickActions ? 'Hide tools' : 'Show tools'}
+            <ChevronDown className={`w-3 h-3 transition-transform ${showQuickActions ? 'rotate-180' : ''}`} />
           </button>
         </div>
+
+        {showQuickActions && (
+          <div role="group" aria-label="Daily POS actions" className="mx-4 lg:mx-6 mb-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-7">
+            <button
+              type="button"
+              onClick={openCashDrawer}
+              className={`${quickActionBase} border-emerald-100 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Register</span>
+              </span>
+              <span className="mt-2 block truncate text-sm font-black text-slate-900 dark:text-white">{activeRegisterName}</span>
+              <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Expected R{activeRegisterExpectedCash.toFixed(2)}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={!lastReceiptSale || !onPrintLastReceipt}
+              onClick={onPrintLastReceipt}
+              className={`${quickActionBase} border-slate-200 text-slate-600 hover:border-primary/40 hover:bg-primary/5 dark:border-slate-800 dark:text-slate-300`}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <Printer className="h-4 w-4 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Receipt</span>
+              </span>
+              <span className="mt-2 block truncate text-sm font-black text-slate-900 dark:text-white">
+                {lastReceiptSale ? `#${lastReceiptSale.id.slice(-8).toUpperCase()}` : 'No receipt'}
+              </span>
+              <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Reprint last</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={openDrawerModal}
+              className={`${quickActionBase} border-emerald-100 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <Banknote className="h-4 w-4 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Drawer</span>
+              </span>
+              <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">No sale</span>
+              <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Record reason</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={cart.length === 0 && parkedSales.length === 0}
+              onClick={openParkedQuickAction}
+              className={`${quickActionBase} border-indigo-100 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-300 dark:hover:bg-indigo-950/30`}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <PauseCircle className="h-4 w-4 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Parked</span>
+              </span>
+              <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{parkedSales.length} waiting</span>
+              <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{cart.length > 0 ? 'Park current' : 'Resume latest'}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={!config?.business?.isRestaurantMode}
+              onClick={openTablesQuickAction}
+              className={`${quickActionBase} border-orange-100 text-orange-700 hover:border-orange-300 hover:bg-orange-50 dark:border-orange-900/50 dark:text-orange-300 dark:hover:bg-orange-950/30`}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <Utensils className="h-4 w-4 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Tables</span>
+              </span>
+              <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{openTableCount} open</span>
+              <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{cart.length > 0 ? 'Save to table' : 'Floor view'}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={!config?.business?.isRestaurantMode}
+              onClick={() => navigate('/tabs')}
+              className={`${quickActionBase} border-indigo-100 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-300 dark:hover:bg-indigo-950/30`}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <TabletSmartphone className="h-4 w-4 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Tabs</span>
+              </span>
+              <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{openTabsCount} open</span>
+              <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Review tabs</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={!config?.business?.isRestaurantMode || activeWorkstations.length === 0}
+              onClick={openWorkstationQuickAction}
+              className={`${quickActionBase} border-amber-100 text-amber-700 hover:border-amber-300 hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30`}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <ChefHat className="h-4 w-4 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Queue</span>
+              </span>
+              <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{pendingWorkstationItems} pending</span>
+              <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{attachedWorkstation ? attachedWorkstation.name : 'Workstations'}</span>
+            </button>
+          </div>
+        )}
 
         {hasRecoveryWork && (
           <section aria-label="POS recovery actions" className="mx-4 lg:mx-6 mb-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
