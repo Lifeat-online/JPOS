@@ -356,8 +356,8 @@ function addSignal(map: Map<string, StockTakeSuggestionSignal>, row: any, quanti
   map.set(productId, signal);
 }
 
-async function recentRows<T extends QueryResultRow = any>(postgresSql: string, mariaSql: string, params: any[]) {
-  return query<T>(isPostgres() ? postgresSql : mariaSql, params);
+async function recentRows<T extends QueryResultRow = any>(sql: string, params: any[]) {
+  return query<T>(sql, params);
 }
 
 export async function getStockTakeSuggestions(tenantId: string, input: { limit?: string | number } = {}) {
@@ -389,17 +389,6 @@ export async function getStockTakeSuggestions(tenantId: string, input: { limit?:
           AND reason_code = 'shrinkage'
           AND created_at >= NOW() - INTERVAL '90 days'
         GROUP BY product_id`,
-      `SELECT product_id AS productId,
-              MAX(item_name) AS productName,
-              SUM(ABS(quantity_delta)) AS signalQuantity,
-              COUNT(*) AS signalCount,
-              MAX(created_at) AS lastSeenAt
-         FROM stock_movements
-        WHERE tenant_id = ?
-          AND product_id IS NOT NULL
-          AND reason_code = 'shrinkage'
-          AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
-        GROUP BY product_id`,
       [tenantId]
     ),
     recentRows<any>(
@@ -413,17 +402,6 @@ export async function getStockTakeSuggestions(tenantId: string, input: { limit?:
           AND product_id IS NOT NULL
           AND reason_code = 'wastage'
           AND created_at >= NOW() - INTERVAL '90 days'
-        GROUP BY product_id`,
-      `SELECT product_id AS productId,
-              MAX(item_name) AS productName,
-              SUM(ABS(quantity_delta)) AS signalQuantity,
-              COUNT(*) AS signalCount,
-              MAX(created_at) AS lastSeenAt
-         FROM stock_movements
-        WHERE tenant_id = ?
-          AND product_id IS NOT NULL
-          AND reason_code = 'wastage'
-          AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
         GROUP BY product_id`,
       [tenantId]
     ),
@@ -439,43 +417,20 @@ export async function getStockTakeSuggestions(tenantId: string, input: { limit?:
           AND ABS(variance_quantity) > 0.0001
           AND updated_at >= NOW() - INTERVAL '90 days'
         GROUP BY product_id`,
-      `SELECT product_id AS productId,
-              MAX(product_name) AS productName,
-              SUM(ABS(variance_quantity)) AS varianceQuantity,
-              COUNT(*) AS varianceCount,
-              MAX(updated_at) AS lastVarianceAt
-         FROM stock_take_items
-        WHERE tenant_id = ?
-          AND variance_quantity IS NOT NULL
-          AND ABS(variance_quantity) > 0.0001
-          AND updated_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
-        GROUP BY product_id`,
       [tenantId]
     ),
     query<any>(
-      isPostgres()
-        ? `SELECT product_id AS productId,
-                  MAX(product_name) AS productName,
-                  SUM(remaining_quantity) AS expiryQuantity,
-                  MIN(expiry_date) AS nextExpiryDate
-             FROM stock_batches
-            WHERE tenant_id = ?
-              AND status = 'active'
-              AND remaining_quantity > 0
-              AND expiry_date IS NOT NULL
-              AND expiry_date <= CURRENT_DATE + INTERVAL '14 days'
-            GROUP BY product_id`
-        : `SELECT product_id AS productId,
-                  MAX(product_name) AS productName,
-                  SUM(remaining_quantity) AS expiryQuantity,
-                  MIN(expiry_date) AS nextExpiryDate
-             FROM stock_batches
-            WHERE tenant_id = ?
-              AND status = 'active'
-              AND remaining_quantity > 0
-              AND expiry_date IS NOT NULL
-              AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
-            GROUP BY product_id`,
+      `SELECT product_id AS productId,
+              MAX(product_name) AS productName,
+              SUM(remaining_quantity) AS expiryQuantity,
+              MIN(expiry_date) AS nextExpiryDate
+         FROM stock_batches
+        WHERE tenant_id = ?
+          AND status = 'active'
+          AND remaining_quantity > 0
+          AND expiry_date IS NOT NULL
+          AND expiry_date <= CURRENT_DATE + INTERVAL '14 days'
+        GROUP BY product_id`,
       [tenantId]
     ),
     recentRows<any>(
@@ -488,16 +443,6 @@ export async function getStockTakeSuggestions(tenantId: string, input: { limit?:
         WHERE s.tenant_id = ?
           AND s.status = 'completed'
           AND s.created_at >= NOW() - INTERVAL '90 days'
-        GROUP BY si.product_id`,
-      `SELECT si.product_id AS productId,
-              MAX(si.product_name) AS productName,
-              SUM(si.quantity) AS quantitySold,
-              COUNT(DISTINCT s.id) AS saleCount
-         FROM sale_items si
-         JOIN sales s ON s.id = si.sale_id
-        WHERE s.tenant_id = ?
-          AND s.status = 'completed'
-          AND s.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
         GROUP BY si.product_id`,
       [tenantId]
     ),
@@ -675,7 +620,7 @@ async function selectRuleProducts(tenantId: string, rule: any) {
     `SELECT id, name, stock, min_stock AS minStock, barcode
        FROM products
       WHERE tenant_id = ?
-      ORDER BY ${isPostgres() ? "RANDOM()" : "RAND()"}
+      ORDER BY RANDOM()
       LIMIT ?`,
     [tenantId, count]
   );

@@ -1281,7 +1281,7 @@ export async function startServer() {
   
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
-    console.log(`${isPostgres() ? "Postgres" : "MariaDB"}-connected POS system ready`);
+    console.log("Postgres-connected POS system ready");
     console.log(`Socket.IO server initialized`);
     console.log(`__dirname is: ${__dirname}`);
     console.log(`distDir is: ${path.resolve(__dirname, '..', 'dist')}`);

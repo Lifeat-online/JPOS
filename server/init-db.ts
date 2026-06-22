@@ -539,7 +539,7 @@ export async function initDb() {
     isProd ? ".." : "",
     "..",
     "db",
-    isPostgres() ? "schema.postgres.sql" : "schema.sql"
+    "schema.postgres.sql"
   );
   
   const sql = fs.existsSync(schemaPath)

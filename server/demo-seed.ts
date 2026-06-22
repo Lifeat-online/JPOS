@@ -2592,7 +2592,7 @@ async function seedRestaurantFloor(conn: any, tenantId: string) {
     ["demo_section_patio", tenantId, "Patio", "sky", 2],
     ["demo_section_bar", tenantId, "Bar", "amber", 3],
   ];
-  const orderColumn = isPostgres() ? `"order"` : "`order`";
+  const orderColumn = `"order"`;
   await insertRows(conn, "table_sections", ["id", "tenant_id", "name", "color", orderColumn, "created_at", "updated_at"], sections.map((s) => [...s, sqlDateTime(new Date()), sqlDateTime(new Date())]));
   const tables: any[][] = [];
   for (let i = 1; i <= 18; i += 1) {

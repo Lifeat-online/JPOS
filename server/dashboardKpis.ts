@@ -35,7 +35,7 @@ function average(amount: number, count: number) {
 export async function getDashboardKpis(tenantId: string, now = new Date()) {
   const dayStart = startOfUtcDay(now);
   const lastHour = new Date(now.getTime() - 60 * 60 * 1000);
-  const tabPredicate = isPostgres() ? "is_tab = TRUE" : "is_tab = 1";
+  const tabPredicate = "is_tab = TRUE";
 
   const [salesRows, activeTableRows, cashRows, lowStockSummaryRows, lowStockRows, staffRows] = await Promise.all([
     query<any>(

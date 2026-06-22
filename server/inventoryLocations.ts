@@ -187,13 +187,13 @@ export async function ensureDefaultInventoryLocation(tenantId: string, runner?: 
 
   await run(
     runner,
-    `INSERT ${isPostgres() ? "" : "IGNORE "}INTO product_location_stock (
+    `INSERT INTO product_location_stock (
        tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold, created_at, updated_at
      )
      SELECT tenant_id, id, ?, COALESCE(stock, 0), COALESCE(min_stock, 0), COALESCE(min_stock, 0), NOW(), NOW()
        FROM products
       WHERE tenant_id = ?
-     ${isPostgres() ? "ON CONFLICT (tenant_id, product_id, location_id) DO NOTHING" : ""}`,
+     ON CONFLICT (tenant_id, product_id, location_id) DO NOTHING`,
     [DEFAULT_INVENTORY_LOCATION_ID, tenantId]
   );
 }

@@ -1372,7 +1372,7 @@ export async function updateTableSection(
     values.push(updates.color);
   }
   if (updates.order !== undefined) {
-    const orderCol = isPostgres() ? '"order"' : "`order`";
+    const orderCol = '"order"';
     fields.push(`${orderCol} = ?`);
     values.push(updates.order);
   }
@@ -2543,7 +2543,7 @@ function timestampExpression(value: unknown, fallbackSql = "NULL") {
 }
 
 function timerNowExpression() {
-  return typeof isPostgres === "function" && isPostgres() ? "CURRENT_TIMESTAMP" : "UTC_TIMESTAMP()";
+  return "CURRENT_TIMESTAMP";
 }
 
 export async function updateSale(

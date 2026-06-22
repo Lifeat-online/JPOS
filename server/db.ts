@@ -37,23 +37,19 @@ export type DbConnection = {
 };
 
 /**
- * Always returns true – the app now exclusively uses PostgreSQL.
- * Kept for backward compatibility with existing conditional SQL branches
- * (e.g. `isPostgres() ? "RANDOM()" : "RAND()"`) spread across the codebase.
- */
-export function isPostgres(): boolean {
-  return true;
-}
-
-/**
  * Converts MySQL-style `?` positional placeholders to PostgreSQL-style `$1`, `$2`, ...
- * so that legacy query strings from mariadb-adapter / mariadb-crud work with node-postgres.
+ * so legacy query strings from mariadb-adapter / mariadb-crud work with node-postgres.
  * Placeholders inside string literals and comments are intentionally left untouched by
  * targeting only bare `?` tokens that are not preceded by a backslash.
  */
 function convertPlaceholders(sql: string): string {
   let i = 0;
   return sql.replace(/\?/g, () => `$${++i}`);
+}
+
+/** @deprecated postgres-only now; kept for the dozens of call sites still to be collapsed. */
+export function isPostgres(): boolean {
+  return true;
 }
 
 export async function query<T extends QueryResultRow = any>(sql: string, params: any[] = []) {

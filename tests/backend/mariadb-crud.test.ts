@@ -225,7 +225,7 @@ describe('mariadb-crud', () => {
     });
 
     const itemInsert = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes('INSERT INTO sale_items'));
-    expect(String(itemInsert?.[0]).replace(/\s+/g, ' ')).toContain('?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), NOW(), NOW())');
+    expect(String(itemInsert?.[0]).replace(/\s+/g, ' ')).toContain('?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NOW(), NOW())');
   });
 
   it('updates a sale and replaces its items', async () => {
@@ -332,7 +332,7 @@ describe('mariadb-crud', () => {
     expect(String(itemInserts[0][0]).replace(/\s+/g, ' ')).toContain('?, ?, NULL, NULL, ?, NOW(), NOW())');
     expect(itemInserts[0][1]).toEqual(expect.arrayContaining([orderedAt, acceptedAt]));
     expect(itemInserts[0][1]).not.toContain(clientClockValue);
-    expect(String(itemInserts[1][0]).replace(/\s+/g, ' ')).toContain('UTC_TIMESTAMP(), NULL, NULL, NULL, ?, NOW(), NOW())');
+    expect(String(itemInserts[1][0]).replace(/\s+/g, ' ')).toContain('CURRENT_TIMESTAMP, NULL, NULL, NULL, ?, NOW(), NOW())');
     expect(itemInserts[1][1]).not.toContain(clientClockValue);
   });
 
@@ -353,7 +353,7 @@ describe('mariadb-crud', () => {
     });
 
     const [sql, values] = (dbModule.query as any).mock.calls[0];
-    expect(sql).toContain(`${column} = COALESCE(${column}, UTC_TIMESTAMP())`);
+    expect(sql).toContain(`${column} = COALESCE(${column}, CURRENT_TIMESTAMP)`);
     expect(sql).not.toContain('ordered_at = ?');
     expect(values).toEqual([status, 'staff_1', 'sale_1', 'item_1']);
   });

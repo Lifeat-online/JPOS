@@ -90,7 +90,7 @@ function backupDir() {
 }
 
 function dialect(): "postgres" | "mariadb" {
-  return isPostgres() ? "postgres" : "mariadb";
+  return "postgres";
 }
 
 function quoteIdentifier(value: string) {
