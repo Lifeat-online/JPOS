@@ -2820,6 +2820,19 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                     Apply cleanup
                   </button>
                 </div>
+                <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+                  <input
+                    type="checkbox"
+                    id="laybuyMode"
+                    checked={formData.business?.enableLaybuys || false}
+                    onChange={e => setFormData({...formData, business: {...formData.business, enableLaybuys: e.target.checked}} as AppConfig)}
+                    className="w-5 h-5 rounded text-primary focus:ring-primary accent-primary cursor-pointer"
+                  />
+                  <div>
+                    <label htmlFor="laybuyMode" className="text-sm font-bold text-slate-900 dark:text-white cursor-pointer block">Lay-bys</label>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Allow customers to reserve products and pay for them in installments over time.</p>
+                  </div>
+                </div>
               </div>
             </div>
           )}

@@ -1520,6 +1520,7 @@ export interface BusinessSettings {
   isRestaurantMode?: boolean;
   // Loyalty
   enableLoyalty?: boolean;
+    enableLaybuys?: boolean;
   pointsEarnedPerCurrency?: number;
   pointsRequiredForDiscount?: number;
   discountAmountForPoints?: number;

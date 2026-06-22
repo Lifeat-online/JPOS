@@ -1222,18 +1222,33 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             </button>
 
             <button
-              type="button"
-              disabled={cart.length === 0 && parkedSales.length === 0}
-              onClick={openParkedQuickAction}
-              className={`${quickActionBase} border-indigo-100 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-300 dark:hover:bg-indigo-950/30`}
-            >
-              <span className="flex items-center justify-between gap-2">
-                <PauseCircle className="h-4 w-4 shrink-0" />
-                <span className="text-[10px] font-black uppercase tracking-widest">Parked</span>
-              </span>
-              <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{parkedSales.length} waiting</span>
-              <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{cart.length > 0 ? 'Park current' : 'Resume latest'}</span>
-            </button>
+                type="button"
+                disabled={cart.length === 0 && parkedSales.length === 0}
+                onClick={openParkedQuickAction}
+                className={`${quickActionBase} border-indigo-100 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-300 dark:hover:bg-indigo-950/30`}
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <PauseCircle className="h-4 w-4 shrink-0" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Parked</span>
+                </span>
+                <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">{parkedSales.length} waiting</span>
+                <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{cart.length > 0 ? 'Park current' : 'Resume latest'}</span>
+              </button>
+
+              {config?.business?.enableLaybuys && (
+                <button
+                  type="button"
+                  onClick={() => setLaybyManagerOpen(true)}
+                  className={`${quickActionBase} border-indigo-100 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-300 dark:hover:bg-indigo-950/30`}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <PackageCheck className="h-4 w-4 shrink-0" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Lay-bys</span>
+                  </span>
+                  <span className="mt-2 block text-sm font-black text-slate-900 dark:text-white">Active Lay-bys</span>
+                  <span className="mt-0.5 block text-[10px] font-bold text-slate-400">Review & pay</span>
+                </button>
+              )}
 
             <button
               type="button"
@@ -2117,6 +2132,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   Print Bill
                 </button>
 
+              {config?.business?.enableLaybuys && (
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <button
                     disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || !selectedCustomer}
@@ -2136,6 +2152,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <span className="truncate">Lay-bys</span>
                   </button>
                 </div>
+              )}
 
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <button 
