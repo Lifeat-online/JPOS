@@ -41,3 +41,8 @@ nginx/nginx-*.local.conf
 nginx/nginx-windows.conf
 codex-*.log
 .codex-*.log
+
+# Build artifacts
+artifacts/
+artifacts-*/
+release/
