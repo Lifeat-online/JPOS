@@ -1658,7 +1658,7 @@ export function createCustomerPayoutRequest(tenantId: string, data: any) {
   return apiPost<any>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests`, data);
 }
 
-export type LicenceFeature = 'jpos_branding' | 'own_logo' | 'images' | 'ai' | 'analytics' | 'local_server_sync' | 'api_access' | 'multi_location' | 'full_branding' | 'priority_support' | 'updates';
+export type LicenceFeature = 'jpos_branding' | 'own_logo' | 'images' | 'ai' | 'analytics' | 'local_server_sync' | 'api_access' | 'multi_location' | 'full_branding' | 'priority_support' | 'updates' | 'offline_sales_basic' | 'offline_sales_full';
 export type LicenceTier = 'free' | 'starter' | 'business' | 'whitelabel';
 
 export interface TenantPackageLimitsResponse {
@@ -1687,7 +1687,13 @@ export interface TenantPackageLimitsResponse {
     activeRegisters: number;
   };
   localServerSync?: boolean;
-  offline?: { fullOffline?: boolean };
+  offline?: {
+    level?: string;
+    canQueueSales?: boolean;
+    fullOffline?: boolean;
+    maxQueuedSales?: number;
+    label?: string;
+  };
 }
 
 export interface LicenceInfoResponse {

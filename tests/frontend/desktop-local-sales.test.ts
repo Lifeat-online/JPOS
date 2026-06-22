@@ -36,7 +36,7 @@ describe('desktop local sales journal', () => {
         maxProducts: -1,
         maxStaff: 50,
         maxCustomers: -1,
-        features: ['offline_sales_basic', 'offline_sales_full', 'local_server_sync'] as any,
+        features: ['offline_sales_basic', 'offline_sales_full', 'local_server_sync'],
         limitsLabel: 'Business',
       },
       offline: {
@@ -45,11 +45,11 @@ describe('desktop local sales journal', () => {
         fullOffline: true,
         maxQueuedSales: 500,
         label: 'Premium offline',
-      } as any,
+      },
       usage: { products: 0, staff: 0, customers: 0, activeRegisters: 0 },
       remaining: { products: -1, staff: -1, customers: -1, activeRegisters: 15 },
       localServerSync: true,
-    } as any);
+    });
 
     syncDesktopLocalSale({
       id: 'offline_sale_1',
@@ -71,7 +71,7 @@ describe('desktop local sales journal', () => {
       lastError: null,
       createdAt: '2026-06-14T00:00:00.000Z',
       updatedAt: '2026-06-14T00:00:00.000Z',
-    } as any);
+    });
 
     expect(listDesktopLocalSales('tenant-premium')).toEqual([
       expect.objectContaining({
@@ -95,7 +95,7 @@ describe('desktop local sales journal', () => {
         maxProducts: -1,
         maxStaff: 50,
         maxCustomers: -1,
-        features: ['offline_sales_basic', 'offline_sales_full', 'local_server_sync'] as any,
+        features: ['offline_sales_basic', 'offline_sales_full', 'local_server_sync'],
         limitsLabel: 'Business',
       },
       offline: {
@@ -104,11 +104,11 @@ describe('desktop local sales journal', () => {
         fullOffline: true,
         maxQueuedSales: 500,
         label: 'Premium offline',
-      } as any,
+      },
       usage: { products: 0, staff: 0, customers: 0, activeRegisters: 0 },
       remaining: { products: -1, staff: -1, customers: -1, activeRegisters: 15 },
       localServerSync: true,
-    } as any);
+    });
 
     syncDesktopLocalSale({
       id: 'offline_sale_2',
@@ -130,7 +130,7 @@ describe('desktop local sales journal', () => {
       lastError: null,
       createdAt: '2026-06-14T00:00:00.000Z',
       updatedAt: '2026-06-14T00:00:01.000Z',
-    } as any);
+    });
 
     dismissDesktopLocalSale('tenant-premium', 'offline_sale_2');
 
