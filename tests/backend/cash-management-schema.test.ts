@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 describe('cash management schema', () => {
-  const schema = fs.readFileSync(path.join(process.cwd(), 'db', 'schema.sql'), 'utf8');
+  const schema = fs.readFileSync(path.join(process.cwd(), 'db', 'schema.postgres.sql'), 'utf8');
 
   it('keeps manager review fields on cash sessions', () => {
     for (const column of [
@@ -26,7 +26,7 @@ describe('cash management schema', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS cash_movements');
     expect(schema).toContain('cash_session_id');
     expect(schema).toContain('manager_adjustment');
-    expect(schema).toContain("direction ENUM('in','out','neutral')");
+    expect(schema).toContain("direction TEXT NOT NULL DEFAULT 'neutral' CHECK (direction IN ('in','out','neutral'))");
   });
 
   it('defines the manager float and cash-in-system ledger', () => {
@@ -56,6 +56,6 @@ describe('cash management schema', () => {
     expect(schema).toContain('expected_physical_cash');
     expect(schema).toContain('counted_physical_cash');
     expect(schema).toContain('wallet_cash_in_today');
-    expect(schema).toContain('uniq_cash_close_business_date');
+    expect(schema).toContain('idx_cash_close_tenant_status');
   });
 });

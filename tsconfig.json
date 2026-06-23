@@ -35,8 +35,6 @@
   "exclude": [
     "node_modules",
     "dist",
-    "capacitor.config.ts",
-    "tests/backend/db-tables.test.ts",
-    "tests/backend/db-test-utils.ts"
+    "capacitor.config.ts"
   ]
 }
