@@ -366,41 +366,23 @@ export async function saveAiSettings(tenantId: string, input: Partial<AiSettings
     visibleRoles: sanitizeRoles(input.visibleRoles || current.visibleRoles),
     staffScoreVisibleRoles: sanitizeRoles(input.staffScoreVisibleRoles || current.staffScoreVisibleRoles),
   };
-  const pg = isPostgres();
   await query(
-    pg
-      ? `INSERT INTO ai_settings (
-          tenant_id, enabled, provider, model, api_key, base_url, workspace_slug, insights_enabled, staff_scoring_enabled,
-          visible_roles, staff_score_visible_roles, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-        ON CONFLICT (tenant_id) DO UPDATE SET
-          enabled = EXCLUDED.enabled,
-          provider = EXCLUDED.provider,
-          model = EXCLUDED.model,
-          api_key = COALESCE(EXCLUDED.api_key, ai_settings.api_key),
-          base_url = EXCLUDED.base_url,
-          workspace_slug = EXCLUDED.workspace_slug,
-          insights_enabled = EXCLUDED.insights_enabled,
-          staff_scoring_enabled = EXCLUDED.staff_scoring_enabled,
-          visible_roles = EXCLUDED.visible_roles,
-          staff_score_visible_roles = EXCLUDED.staff_score_visible_roles,
-          updated_at = NOW()`
-      : `INSERT INTO ai_settings (
-          tenant_id, enabled, provider, model, api_key, base_url, workspace_slug, insights_enabled, staff_scoring_enabled,
-          visible_roles, staff_score_visible_roles, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-        ON DUPLICATE KEY UPDATE
-          enabled = VALUES(enabled),
-          provider = VALUES(provider),
-          model = VALUES(model),
-          api_key = COALESCE(VALUES(api_key), api_key),
-          base_url = VALUES(base_url),
-          workspace_slug = VALUES(workspace_slug),
-          insights_enabled = VALUES(insights_enabled),
-          staff_scoring_enabled = VALUES(staff_scoring_enabled),
-          visible_roles = VALUES(visible_roles),
-          staff_score_visible_roles = VALUES(staff_score_visible_roles),
-          updated_at = NOW()`,
+    `INSERT INTO ai_settings (
+        tenant_id, enabled, provider, model, api_key, base_url, workspace_slug, insights_enabled, staff_scoring_enabled,
+        visible_roles, staff_score_visible_roles, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      ON CONFLICT (tenant_id) DO UPDATE SET
+        enabled = EXCLUDED.enabled,
+        provider = EXCLUDED.provider,
+        model = EXCLUDED.model,
+        api_key = COALESCE(EXCLUDED.api_key, ai_settings.api_key),
+        base_url = EXCLUDED.base_url,
+        workspace_slug = EXCLUDED.workspace_slug,
+        insights_enabled = EXCLUDED.insights_enabled,
+        staff_scoring_enabled = EXCLUDED.staff_scoring_enabled,
+        visible_roles = EXCLUDED.visible_roles,
+        staff_score_visible_roles = EXCLUDED.staff_score_visible_roles,
+        updated_at = NOW()`,
     [
       tenantId,
       next.enabled ? 1 : 0,

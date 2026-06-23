@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { isPostgres, query } from "./db.js";
+import { query } from "./db.js";
 import { recordAuditEventSafe, recordStockMovement } from "./audit.js";
 
 export type IntegrationApiKeyStatus = "active" | "revoked";
@@ -369,31 +369,16 @@ async function upsertLocationStock(
   quantityValue: number,
   actor: IntegrationActor
 ) {
-  if (isPostgres()) {
-    await query(
-      `INSERT INTO product_location_stock (
-         tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold,
-         updated_by, updated_by_name, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, 0, 0, ?, ?, NOW(), NOW())
-       ON CONFLICT (tenant_id, product_id, location_id)
-       DO UPDATE SET quantity = EXCLUDED.quantity,
-                     updated_by = EXCLUDED.updated_by,
-                     updated_by_name = EXCLUDED.updated_by_name,
-                     updated_at = NOW()`,
-      [tenantId, productId, locationId, quantityValue, actor.staffId || null, actor.staffName || null]
-    );
-    return;
-  }
-
   await query(
     `INSERT INTO product_location_stock (
        tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold,
        updated_by, updated_by_name, created_at, updated_at
      ) VALUES (?, ?, ?, ?, 0, 0, ?, ?, NOW(), NOW())
-     ON DUPLICATE KEY UPDATE quantity = VALUES(quantity),
-                             updated_by = VALUES(updated_by),
-                             updated_by_name = VALUES(updated_by_name),
-                             updated_at = NOW()`,
+     ON CONFLICT (tenant_id, product_id, location_id)
+     DO UPDATE SET quantity = EXCLUDED.quantity,
+                   updated_by = EXCLUDED.updated_by,
+                   updated_by_name = EXCLUDED.updated_by_name,
+                   updated_at = NOW()`,
     [tenantId, productId, locationId, quantityValue, actor.staffId || null, actor.staffName || null]
   );
 }

@@ -19,7 +19,7 @@ devRouter.get("/db-test", async (req, res) => {
     const conn = await getConnection();
     try {
       const rows = await conn.query("SELECT 1 as val");
-      res.json({ status: "ok", postgres: isPostgres(), rows });
+      res.json({ status: "ok", postgres: true, rows });
     } finally {
       conn.release();
     }

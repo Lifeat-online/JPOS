@@ -666,9 +666,7 @@ async function updateDemoConfig(conn: any, tenantId: string, categories: any, is
 async function clearSeededDemoDataWithConnection(conn: any, tenantId: string, resetSettings: boolean) {
   const legacyClause = legacyWhereClause();
   const legacyValues = legacyWhereValues();
-  const auditDetailsText = isPostgres()
-    ? "LOWER(COALESCE(details, ''))"
-    : "LOWER(CAST(COALESCE(details, '{}') AS CHAR))";
+  const auditDetailsText = "LOWER(COALESCE(details, ''))";
 
   await conn.query(`DELETE FROM ai_agent_run_steps WHERE tenant_id = ? AND (id LIKE 'demo_%' OR run_id LIKE 'demo_%')`, [tenantId]);
   await conn.query(`DELETE FROM ai_agent_runs WHERE tenant_id = ? AND id LIKE 'demo_%'`, [tenantId]);

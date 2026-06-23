@@ -1,4 +1,4 @@
-import { getConnection, isPostgres, query } from "./db.js";
+import { getConnection, query } from "./db.js";
 import { recordAuditEvent } from "./audit.js";
 
 type Actor = {
@@ -1490,35 +1490,18 @@ async function syncCashCloseTask(conn: Pick<Awaited<ReturnType<typeof getConnect
     }),
   ];
 
-  if (isPostgres()) {
-    await conn.query(
-      `INSERT INTO manager_tasks (
-         id, tenant_id, task_type, title, summary, priority, status,
-         source_type, source_id, requested_by, details, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-       ON CONFLICT (tenant_id, task_type, source_type, source_id)
-       DO UPDATE SET
-         title = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.title ELSE manager_tasks.title END,
-         summary = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.summary ELSE manager_tasks.summary END,
-         priority = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.priority ELSE manager_tasks.priority END,
-         details = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.details ELSE manager_tasks.details END,
-         updated_at = CASE WHEN manager_tasks.status IN ('open','in_review') THEN NOW() ELSE manager_tasks.updated_at END`,
-      values
-    );
-    return;
-  }
-
   await conn.query(
     `INSERT INTO manager_tasks (
        id, tenant_id, task_type, title, summary, priority, status,
        source_type, source_id, requested_by, details, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-     ON DUPLICATE KEY UPDATE
-       title = IF(status IN ('open','in_review'), VALUES(title), title),
-       summary = IF(status IN ('open','in_review'), VALUES(summary), summary),
-       priority = IF(status IN ('open','in_review'), VALUES(priority), priority),
-       details = IF(status IN ('open','in_review'), VALUES(details), details),
-       updated_at = IF(status IN ('open','in_review'), NOW(), updated_at)`,
+     ON CONFLICT (tenant_id, task_type, source_type, source_id)
+     DO UPDATE SET
+       title = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.title ELSE manager_tasks.title END,
+       summary = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.summary ELSE manager_tasks.summary END,
+       priority = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.priority ELSE manager_tasks.priority END,
+       details = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.details ELSE manager_tasks.details END,
+       updated_at = CASE WHEN manager_tasks.status IN ('open','in_review') THEN NOW() ELSE manager_tasks.updated_at END`,
     values
   );
 }

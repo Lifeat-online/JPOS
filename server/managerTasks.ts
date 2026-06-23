@@ -1,4 +1,4 @@
-import { getConnection, isPostgres, query } from "./db.js";
+import { getConnection, query } from "./db.js";
 import { applyProductStockDelta, normalizeStockMovementReasonCode, recordAuditEvent } from "./audit.js";
 import { processSaleRefund, processSaleVoid } from "./db-crud.js";
 import { approveStockTakeSession } from "./stockTake.js";
@@ -151,41 +151,21 @@ async function upsertTask(draft: TaskDraft) {
     draft.dueAt || null,
   ];
 
-  if (isPostgres()) {
-    await query(
-      `INSERT INTO manager_tasks (
-         id, tenant_id, task_type, title, summary, priority, status,
-         source_type, source_id, related_sale_id, related_product_id,
-         assigned_to, requested_by, details, due_at, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-       ON CONFLICT (tenant_id, task_type, source_type, source_id)
-       DO UPDATE SET
-         title = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.title ELSE manager_tasks.title END,
-         summary = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.summary ELSE manager_tasks.summary END,
-         priority = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.priority ELSE manager_tasks.priority END,
-         assigned_to = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.assigned_to ELSE manager_tasks.assigned_to END,
-         details = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.details ELSE manager_tasks.details END,
-         due_at = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.due_at ELSE manager_tasks.due_at END,
-         updated_at = CASE WHEN manager_tasks.status IN ('open','in_review') THEN NOW() ELSE manager_tasks.updated_at END`,
-      values
-    );
-    return;
-  }
-
   await query(
     `INSERT INTO manager_tasks (
        id, tenant_id, task_type, title, summary, priority, status,
        source_type, source_id, related_sale_id, related_product_id,
        assigned_to, requested_by, details, due_at, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-     ON DUPLICATE KEY UPDATE
-       title = IF(status IN ('open','in_review'), VALUES(title), title),
-       summary = IF(status IN ('open','in_review'), VALUES(summary), summary),
-       priority = IF(status IN ('open','in_review'), VALUES(priority), priority),
-       assigned_to = IF(status IN ('open','in_review'), VALUES(assigned_to), assigned_to),
-       details = IF(status IN ('open','in_review'), VALUES(details), details),
-       due_at = IF(status IN ('open','in_review'), VALUES(due_at), due_at),
-       updated_at = IF(status IN ('open','in_review'), NOW(), updated_at)`,
+     ON CONFLICT (tenant_id, task_type, source_type, source_id)
+     DO UPDATE SET
+       title = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.title ELSE manager_tasks.title END,
+       summary = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.summary ELSE manager_tasks.summary END,
+       priority = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.priority ELSE manager_tasks.priority END,
+       assigned_to = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.assigned_to ELSE manager_tasks.assigned_to END,
+       details = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.details ELSE manager_tasks.details END,
+       due_at = CASE WHEN manager_tasks.status IN ('open','in_review') THEN EXCLUDED.due_at ELSE manager_tasks.due_at END,
+       updated_at = CASE WHEN manager_tasks.status IN ('open','in_review') THEN NOW() ELSE manager_tasks.updated_at END`,
     values
   );
 }

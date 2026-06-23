@@ -1,4 +1,4 @@
-import { getConnection, isPostgres, query, type DbConnection } from "./db.js";
+import { getConnection, query, type DbConnection } from "./db.js";
 import { recordAuditEvent, recordStockMovement } from "./audit.js";
 
 export const DEFAULT_INVENTORY_LOCATION_ID = "main";
@@ -168,22 +168,13 @@ async function run(runner: Queryable | null | undefined, sql: string, params: an
 
 export async function ensureDefaultInventoryLocation(tenantId: string, runner?: Queryable) {
   if (!tenantId) throw new Error("Tenant is required");
-  if (isPostgres()) {
-    await run(
-      runner,
-      `INSERT INTO inventory_locations (id, tenant_id, name, type, status, is_default, created_at, updated_at)
-       VALUES (?, ?, ?, 'branch', 'active', 1, NOW(), NOW())
-       ON CONFLICT (tenant_id, id) DO NOTHING`,
-      [DEFAULT_INVENTORY_LOCATION_ID, tenantId, DEFAULT_INVENTORY_LOCATION_NAME]
-    );
-  } else {
-    await run(
-      runner,
-      `INSERT IGNORE INTO inventory_locations (id, tenant_id, name, type, status, is_default, created_at, updated_at)
-       VALUES (?, ?, ?, 'branch', 'active', 1, NOW(), NOW())`,
-      [DEFAULT_INVENTORY_LOCATION_ID, tenantId, DEFAULT_INVENTORY_LOCATION_NAME]
-    );
-  }
+  await run(
+    runner,
+    `INSERT INTO inventory_locations (id, tenant_id, name, type, status, is_default, created_at, updated_at)
+     VALUES (?, ?, ?, 'branch', 'active', 1, NOW(), NOW())
+     ON CONFLICT (tenant_id, id) DO NOTHING`,
+    [DEFAULT_INVENTORY_LOCATION_ID, tenantId, DEFAULT_INVENTORY_LOCATION_NAME]
+  );
 
   await run(
     runner,

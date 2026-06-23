@@ -3,7 +3,7 @@ import express from "express";
 import path from "path";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
-import { getConnection, isPostgres, query } from "./db.js";
+import { getConnection, query } from "./db.js";
 import { initDb } from "./init-db.js";
 import http from "http";
 import { setupSocketIO, broadcastToMessages, broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "./socket.js";
@@ -665,31 +665,18 @@ export async function createApp(io: any = null) {
         walletRevenue: toNumber(r.walletRevenue),
       }));
 
-      const pg = isPostgres();
       const salesSummaryRows = await query<any>(
-        pg
-          ? `
-              SELECT
-                SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
-                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN 1 ELSE 0 END) AS lastHourCompletedCount,
-                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN total ELSE 0 END) AS lastHourCompletedRevenue,
-                SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN 1 ELSE 0 END) AS todayCompletedCount,
-                SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN total ELSE 0 END) AS todayCompletedRevenue,
-                SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
-              FROM sales
-              WHERE tenant_id = ?
-            `
-          : `
-              SELECT
-                SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
-                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN 1 ELSE 0 END) AS lastHourCompletedCount,
-                SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL 60 MINUTE) THEN total ELSE 0 END) AS lastHourCompletedRevenue,
-                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURRENT_DATE THEN 1 ELSE 0 END) AS todayCompletedCount,
-                SUM(CASE WHEN status = 'completed' AND DATE(created_at) = CURRENT_DATE THEN total ELSE 0 END) AS todayCompletedRevenue,
-                SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
-              FROM sales
-              WHERE tenant_id = ?
-            `,
+        `
+            SELECT
+              SUM(CASE WHEN status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrdersCount,
+              SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN 1 ELSE 0 END) AS lastHourCompletedCount,
+              SUM(CASE WHEN status = 'completed' AND created_at >= (NOW() - INTERVAL '60 minutes') THEN total ELSE 0 END) AS lastHourCompletedRevenue,
+              SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN 1 ELSE 0 END) AS todayCompletedCount,
+              SUM(CASE WHEN status = 'completed' AND created_at::date = CURRENT_DATE THEN total ELSE 0 END) AS todayCompletedRevenue,
+              SUM(CASE WHEN is_tab = 1 AND status = 'open' THEN 1 ELSE 0 END) AS openTabsCount
+            FROM sales
+            WHERE tenant_id = ?
+          `,
         [tenantId]
       );
       const salesSummary = salesSummaryRows[0] || {};
@@ -720,45 +707,25 @@ export async function createApp(io: any = null) {
         );
 
         const staffRows = await query<any>(
-          pg
-            ? `
-                SELECT
-                  st.id AS staffId,
-                  st.name AS staffName,
-                  st.role AS staffRole,
-                  SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
-                  SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
-                  MAX(s.created_at) AS lastSaleAt
-                FROM staff st
-                LEFT JOIN sales s
-                  ON s.tenant_id = st.tenant_id
-                 AND s.staff_id = st.id
-                 AND s.created_at >= (NOW() - INTERVAL '60 minutes')
-                WHERE st.tenant_id = ?
-                  AND st.status = 'active'
-                GROUP BY st.id
-                ORDER BY completedRevenue DESC, completedCount DESC
-              `
-            : `
-                SELECT
-                  st.id AS staffId,
-                  st.name AS staffName,
-                  st.role AS staffRole,
-                  SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
-                  SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
-                  SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
-                  MAX(s.created_at) AS lastSaleAt
-                FROM staff st
-                LEFT JOIN sales s
-                  ON s.tenant_id = st.tenant_id
-                 AND s.staff_id = st.id
-                 AND s.created_at >= (NOW() - INTERVAL 60 MINUTE)
-                WHERE st.tenant_id = ?
-                  AND st.status = 'active'
-                GROUP BY st.id
-                ORDER BY completedRevenue DESC, completedCount DESC
-              `,
+          `
+              SELECT
+                st.id AS staffId,
+                st.name AS staffName,
+                st.role AS staffRole,
+                SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
+                SUM(CASE WHEN s.status = 'completed' THEN s.total ELSE 0 END) AS completedRevenue,
+                SUM(CASE WHEN s.status IN ('open','kitchen','pending') THEN 1 ELSE 0 END) AS activeOrders,
+                MAX(s.created_at) AS lastSaleAt
+              FROM staff st
+              LEFT JOIN sales s
+                ON s.tenant_id = st.tenant_id
+               AND s.staff_id = st.id
+               AND s.created_at >= (NOW() - INTERVAL '60 minutes')
+              WHERE st.tenant_id = ?
+                AND st.status = 'active'
+              GROUP BY st.id
+              ORDER BY completedRevenue DESC, completedCount DESC
+            `,
           [tenantId]
         );
 

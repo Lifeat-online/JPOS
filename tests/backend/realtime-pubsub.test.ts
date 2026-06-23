@@ -20,20 +20,18 @@ describe("database realtime pub/sub fan-out", () => {
     expect(realtimeFanoutEnabled({ JPOS_REALTIME_FANOUT_ENABLED: "true" } as NodeJS.ProcessEnv)).toBe(true);
   });
 
-  it("creates a shared event table for MariaDB and Postgres", async () => {
-    const mariaStatements = buildRealtimePubsubSchemaStatements(false);
-    const postgresStatements = buildRealtimePubsubSchemaStatements(true);
+  it("creates the realtime event table", async () => {
+    const statements = buildRealtimePubsubSchemaStatements();
     const executed: string[] = [];
 
     await ensureRealtimePubsubSchema(async (sql) => {
       executed.push(sql);
       return [];
-    }, false);
+    });
 
-    expect(mariaStatements.join("\n")).toContain("CREATE TABLE IF NOT EXISTS realtime_pubsub_events");
-    expect(mariaStatements.join("\n")).toContain("idx_realtime_pubsub_poll");
-    expect(postgresStatements.join("\n")).toContain("CREATE INDEX IF NOT EXISTS idx_realtime_pubsub_poll");
-    expect(executed).toEqual(mariaStatements);
+    expect(statements.join("\n")).toContain("CREATE TABLE IF NOT EXISTS realtime_pubsub_events");
+    expect(statements.join("\n")).toContain("CREATE INDEX IF NOT EXISTS idx_realtime_pubsub_poll");
+    expect(executed).toEqual(statements);
   });
 
   it("publishes room events with instance id, channel, event name, payload, and expiry", async () => {
@@ -66,7 +64,6 @@ describe("database realtime pub/sub fan-out", () => {
   it("fetches only sibling-instance events after the cursor", async () => {
     const cursor = { createdAt: "2026-06-05T10:00:00.000Z", id: "rt_a" };
     const events = await fetchRealtimeEvents(cursor, {
-      postgres: true,
       instanceId: "instance_a",
       runQuery: async (sql, params = []) => {
         expect(sql).toContain("instance_id <> ?");
@@ -105,7 +102,7 @@ describe("database realtime pub/sub fan-out", () => {
       createdAt: "2026-06-05T09:59:59.000Z",
       id: "",
     });
-    expect(buildFetchRealtimeEventsQuery(false).sql).toContain("ORDER BY created_at ASC, id ASC");
+    expect(buildFetchRealtimeEventsQuery().sql).toContain("ORDER BY created_at ASC, id ASC");
     expect(parseRealtimeEventRow({ id: "", channel: "tenant:1", event_name: "sales_update" })).toBeNull();
   });
 });

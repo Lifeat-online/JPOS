@@ -1,4 +1,4 @@
-import { isPostgres, query } from "./db.js";
+import { query } from "./db.js";
 import { recordAuditEventSafe } from "./audit.js";
 
 export const CUSTOMER_CONSENT_TYPES = [
@@ -214,64 +214,34 @@ export async function upsertCustomerConsents(
     const previousStatus = await selectCurrentConsentStatus(tenantId, customerId, entry.consentType);
     const id = makeId("consent");
     const capturedAt = entry.capturedAt || null;
-    if (isPostgres()) {
-      await query(
-        `INSERT INTO customer_consents (
-           id, tenant_id, customer_id, consent_type, status, source, note,
-           captured_by, captured_by_name, captured_at, expires_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, NOW()), ?::timestamptz, NOW(), NOW())
-         ON CONFLICT (tenant_id, customer_id, consent_type)
-         DO UPDATE SET status = EXCLUDED.status,
-                       source = EXCLUDED.source,
-                       note = EXCLUDED.note,
-                       captured_by = EXCLUDED.captured_by,
-                       captured_by_name = EXCLUDED.captured_by_name,
-                       captured_at = EXCLUDED.captured_at,
-                       expires_at = EXCLUDED.expires_at,
-                       updated_at = NOW()`,
-        [
-          id,
-          tenantId,
-          customerId,
-          entry.consentType,
-          entry.status,
-          entry.source,
-          entry.note,
-          actor.staffId || null,
-          actor.staffName || null,
-          capturedAt,
-          entry.expiresAt,
-        ],
-      );
-    } else {
-      await query(
-        `INSERT INTO customer_consents (
-           id, tenant_id, customer_id, consent_type, status, source, note,
-           captured_by, captured_by_name, captured_at, expires_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()), ?, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE status = VALUES(status),
-                                 source = VALUES(source),
-                                 note = VALUES(note),
-                                 captured_by = VALUES(captured_by),
-                                 captured_by_name = VALUES(captured_by_name),
-                                 captured_at = VALUES(captured_at),
-                                 expires_at = VALUES(expires_at),
-                                 updated_at = NOW()`,
-        [
-          id,
-          tenantId,
-          customerId,
-          entry.consentType,
-          entry.status,
-          entry.source,
-          entry.note,
-          actor.staffId || null,
-          actor.staffName || null,
-          capturedAt,
-          entry.expiresAt,
-        ],
-      );
-    }
+    await query(
+      `INSERT INTO customer_consents (
+         id, tenant_id, customer_id, consent_type, status, source, note,
+         captured_by, captured_by_name, captured_at, expires_at, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, NOW()), ?::timestamptz, NOW(), NOW())
+       ON CONFLICT (tenant_id, customer_id, consent_type)
+       DO UPDATE SET status = EXCLUDED.status,
+                     source = EXCLUDED.source,
+                     note = EXCLUDED.note,
+                     captured_by = EXCLUDED.captured_by,
+                     captured_by_name = EXCLUDED.captured_by_name,
+                     captured_at = EXCLUDED.captured_at,
+                     expires_at = EXCLUDED.expires_at,
+                     updated_at = NOW()`,
+      [
+        id,
+        tenantId,
+        customerId,
+        entry.consentType,
+        entry.status,
+        entry.source,
+        entry.note,
+        actor.staffId || null,
+        actor.staffName || null,
+        capturedAt,
+        entry.expiresAt,
+      ],
+    );
 
     await query(
       `INSERT INTO customer_consent_events (

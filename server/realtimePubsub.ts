@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-import { isPostgres, query } from "./db.js";
+import { query } from "./db.js";
 
 export type RealtimePubsubEvent = {
   id: string;
@@ -41,40 +41,24 @@ export function realtimeEventTtlMinutes(env: NodeJS.ProcessEnv = process.env) {
   return Math.max(1, Number(env.JPOS_REALTIME_EVENT_TTL_MINUTES || 10));
 }
 
-export function buildRealtimePubsubSchemaStatements(postgres: boolean) {
-  if (postgres) {
-    return [
-      `CREATE TABLE IF NOT EXISTS realtime_pubsub_events (
-        id TEXT PRIMARY KEY,
-        instance_id TEXT NOT NULL,
-        channel TEXT NOT NULL,
-        event_name TEXT NOT NULL,
-        payload TEXT NOT NULL DEFAULT '{}',
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        expires_at TIMESTAMPTZ
-      )`,
-      `CREATE INDEX IF NOT EXISTS idx_realtime_pubsub_poll ON realtime_pubsub_events (created_at, id)`,
-      `CREATE INDEX IF NOT EXISTS idx_realtime_pubsub_expiry ON realtime_pubsub_events (expires_at)`,
-    ];
-  }
-
+export function buildRealtimePubsubSchemaStatements() {
   return [
     `CREATE TABLE IF NOT EXISTS realtime_pubsub_events (
-      id VARCHAR(64) PRIMARY KEY,
-      instance_id VARCHAR(128) NOT NULL,
-      channel VARCHAR(255) NOT NULL,
-      event_name VARCHAR(128) NOT NULL,
-      payload LONGTEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      expires_at DATETIME,
-      INDEX idx_realtime_pubsub_poll (created_at, id),
-      INDEX idx_realtime_pubsub_expiry (expires_at)
+      id TEXT PRIMARY KEY,
+      instance_id TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      event_name TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at TIMESTAMPTZ
     )`,
+    `CREATE INDEX IF NOT EXISTS idx_realtime_pubsub_poll ON realtime_pubsub_events (created_at, id)`,
+    `CREATE INDEX IF NOT EXISTS idx_realtime_pubsub_expiry ON realtime_pubsub_events (expires_at)`,
   ];
 }
 
-export async function ensureRealtimePubsubSchema(runQuery: RealtimeQueryRunner = query, postgres = isPostgres()) {
-  for (const statement of buildRealtimePubsubSchemaStatements(postgres)) {
+export async function ensureRealtimePubsubSchema(runQuery: RealtimeQueryRunner = query) {
+  for (const statement of buildRealtimePubsubSchemaStatements()) {
     await runQuery(statement);
   }
 }
@@ -83,13 +67,11 @@ export async function publishRealtimeEvent(
   event: Pick<RealtimePubsubEvent, "channel" | "eventName" | "payload">,
   options: {
     runQuery?: RealtimeQueryRunner;
-    postgres?: boolean;
     instanceId?: string;
     ttlMinutes?: number;
   } = {}
 ) {
   const runQuery = options.runQuery || query;
-  const postgres = options.postgres ?? isPostgres();
   const instanceId = options.instanceId || REALTIME_INSTANCE_ID;
   const ttlMinutes = options.ttlMinutes || realtimeEventTtlMinutes();
   const id = `rt_${crypto.randomUUID()}`;
@@ -117,7 +99,7 @@ export function initialRealtimeCursor(now = new Date(), replayWindowMs = realtim
   };
 }
 
-export function buildFetchRealtimeEventsQuery(postgres: boolean) {
+export function buildFetchRealtimeEventsQuery() {
   return {
     sql: `SELECT id, instance_id, channel, event_name, payload, created_at
       FROM realtime_pubsub_events
@@ -125,7 +107,6 @@ export function buildFetchRealtimeEventsQuery(postgres: boolean) {
         AND (created_at > ? OR (created_at = ? AND id > ?))
       ORDER BY created_at ASC, id ASC
       LIMIT ?`,
-    postgres,
   };
 }
 
@@ -133,16 +114,14 @@ export async function fetchRealtimeEvents(
   cursor: RealtimePubsubCursor,
   options: {
     runQuery?: RealtimeQueryRunner;
-    postgres?: boolean;
     instanceId?: string;
     batchSize?: number;
   } = {}
 ) {
   const runQuery = options.runQuery || query;
-  const postgres = options.postgres ?? isPostgres();
   const instanceId = options.instanceId || REALTIME_INSTANCE_ID;
   const batchSize = Math.max(1, Math.min(500, options.batchSize || 100));
-  const fetchQuery = buildFetchRealtimeEventsQuery(postgres);
+  const fetchQuery = buildFetchRealtimeEventsQuery();
   const rows = await runQuery(fetchQuery.sql, [
     instanceId,
     cursor.createdAt,
@@ -190,7 +169,6 @@ export async function deleteExpiredRealtimeEvents(
 export function startRealtimePubsubPoller(options: {
   emitLocal: (event: RealtimePubsubEvent) => void | Promise<void>;
   runQuery?: RealtimeQueryRunner;
-  postgres?: boolean;
   instanceId?: string;
   intervalMs?: number;
   replayWindowMs?: number;
@@ -210,7 +188,6 @@ export function startRealtimePubsubPoller(options: {
     try {
       const events = await fetchRealtimeEvents(cursor, {
         runQuery: options.runQuery,
-        postgres: options.postgres,
         instanceId: options.instanceId,
       });
       for (const event of events) {
