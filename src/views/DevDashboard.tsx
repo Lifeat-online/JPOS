@@ -2801,15 +2801,15 @@ export function DevDashboard({
                     ✓ All passing
                   </div>
                 </div>
-                <div className="bg-white dark:bg-slate-800/50 rounded-xl p-3 border border-amber-100 dark:border-amber-800">
-                  <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
-                    E2E
+                <div className="bg-white dark:bg-slate-800/50 rounded-xl p-3 border border-emerald-100 dark:border-emerald-800">
+                  <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                    15+
                   </div>
                   <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 mt-1">
                     E2E Tests
                   </div>
-                  <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                    ⚠ Pending setup
+                  <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
+                    ✓ Playwright configured
                   </div>
                 </div>
               </div>
@@ -2833,7 +2833,7 @@ export function DevDashboard({
                   </li>
                   <li className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                     <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                    <span>React component rendering</span>
+                    <span>E2E (Playwright, Chromium + WebKit)</span>
                   </li>
                 </ul>
               </div>
@@ -2848,6 +2848,9 @@ export function DevDashboard({
                   </code>
                   <code className="block px-3 py-2 rounded-lg bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto">
                     npm run test:api
+                  </code>
+                  <code className="block px-3 py-2 rounded-lg bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto">
+                    npm run test:e2e
                   </code>
                   <code className="block px-3 py-2 rounded-lg bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto">
                     npm run test:watch
