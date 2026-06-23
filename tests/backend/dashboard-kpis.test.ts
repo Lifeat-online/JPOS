@@ -3,14 +3,12 @@ import * as dbModule from '../../server/db.js';
 import { getDashboardKpis } from '../../server/dashboardKpis.js';
 
 vi.mock('../../server/db.js', () => ({
-  isPostgres: vi.fn(() => false),
   query: vi.fn(),
 }));
 
 describe('dashboard KPIs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (dbModule.isPostgres as any).mockReturnValue(false);
   });
 
   it('aggregates live sales, baskets, tables, tabs, cash variance, low stock, and active staff', async () => {

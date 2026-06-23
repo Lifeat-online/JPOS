@@ -13,7 +13,7 @@ import {
   transferCashSessionToManagerFloat,
 } from "../managerCash.js";
 import { getAppConfigByTenant } from "../db-adapter.js";
-import { getConnection, isPostgres, query } from "../db.js";
+import { getConnection, query } from "../db.js";
 import { getHostedPackage } from "../../shared/packageCatalog.js";
 import { recordAuditEventSafe } from "../audit.js";
 import * as licence from "../licenceMiddleware.js";

@@ -138,20 +138,16 @@ export const REQUIRED_SCHEMA_CHECKS: SchemaRequirement[] = [
   },
 ];
 
-export function buildTableLookupQuery(table: string, postgres: boolean) {
+export function buildTableLookupQuery(table: string) {
   return {
-    sql: postgres
-      ? "SELECT table_name AS tableName FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ? LIMIT 1"
-      : "SELECT TABLE_NAME AS tableName FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1",
+    sql: "SELECT table_name AS tableName FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ? LIMIT 1",
     params: [table],
   };
 }
 
-export function buildColumnLookupQuery(table: string, column: string, postgres: boolean) {
+export function buildColumnLookupQuery(table: string, column: string) {
   return {
-    sql: postgres
-      ? "SELECT column_name AS columnName FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ? AND column_name = ? LIMIT 1"
-      : "SELECT COLUMN_NAME AS columnName FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1",
+    sql: "SELECT column_name AS columnName FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ? AND column_name = ? LIMIT 1",
     params: [table, column],
   };
 }
@@ -162,7 +158,6 @@ function hasRows(rows: unknown) {
 
 export async function verifyRequiredSchema(
   runQuery: QueryRunner,
-  postgres: boolean,
   checkedAt = new Date().toISOString()
 ): Promise<SchemaVerificationResult> {
   const missingTables: string[] = [];
@@ -170,7 +165,7 @@ export async function verifyRequiredSchema(
   let checkedColumns = 0;
 
   for (const requirement of REQUIRED_SCHEMA_CHECKS) {
-    const tableLookup = buildTableLookupQuery(requirement.table, postgres);
+    const tableLookup = buildTableLookupQuery(requirement.table);
     const tableRows = await runQuery(tableLookup.sql, tableLookup.params);
     if (!hasRows(tableRows)) {
       missingTables.push(requirement.table);
@@ -180,7 +175,7 @@ export async function verifyRequiredSchema(
 
     for (const column of requirement.columns) {
       checkedColumns += 1;
-      const columnLookup = buildColumnLookupQuery(requirement.table, column, postgres);
+      const columnLookup = buildColumnLookupQuery(requirement.table, column);
       const columnRows = await runQuery(columnLookup.sql, columnLookup.params);
       if (!hasRows(columnRows)) {
         missingColumns.push({ table: requirement.table, column });
@@ -189,7 +184,7 @@ export async function verifyRequiredSchema(
   }
 
   return {
-    provider: postgres ? "postgres" : "mariadb",
+    provider: "postgres",
     checkedAt,
     checkedTables: REQUIRED_SCHEMA_CHECKS.length,
     checkedColumns,
@@ -223,7 +218,7 @@ export function isDirectRun(metaUrl: string, argv: string[]) {
 export async function runSchemaVerificationCli() {
   dotenv.config({ override: false });
   const db = await import("../server/db.js");
-  const result = await verifyRequiredSchema((sql, params) => db.query(sql, params || []), db.isPostgres());
+  const result = await verifyRequiredSchema((sql, params) => db.query(sql, params || []));
   console.log(JSON.stringify(result, null, 2));
   const summary = summarizeSchemaVerification(result);
   if (!result.ok) {

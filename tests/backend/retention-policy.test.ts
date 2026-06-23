@@ -11,7 +11,6 @@ const dbSelectChain: any = {
 };
 
 vi.mock('../../server/db.js', () => ({
-  isPostgres: vi.fn(() => false),
   query: vi.fn(),
   db: {
     selectFrom: vi.fn(() => dbSelectChain),

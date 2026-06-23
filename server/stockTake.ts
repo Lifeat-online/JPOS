@@ -1,4 +1,4 @@
-import { getConnection, isPostgres, query } from "./db.js";
+import { getConnection, query } from "./db.js";
 import type { QueryResultRow } from "pg";
 import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
 

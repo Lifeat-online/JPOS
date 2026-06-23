@@ -11,7 +11,6 @@ import {
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
-  isPostgres: vi.fn(() => false),
 }));
 
 vi.mock('../../server/audit.js', () => ({

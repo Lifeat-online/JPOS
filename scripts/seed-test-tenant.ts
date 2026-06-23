@@ -58,7 +58,6 @@ export function parseSeedArgs(args = process.argv.slice(2), env = process.env): 
 
 export async function ensureTestTenant(
   runQuery: QueryRunner,
-  postgres: boolean,
   options: Pick<SeedTestTenantOptions, "tenantId" | "tenantName" | "mode">
 ) {
   const business = JSON.stringify({
@@ -72,40 +71,20 @@ export async function ensureTestTenant(
   });
   const categories = JSON.stringify({});
 
-  if (postgres) {
-    await runQuery(
-      `INSERT INTO tenants (id, name, created_at, updated_at)
-       VALUES (?, ?, NOW(), NOW())
-       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`,
-      [options.tenantId, options.tenantName]
-    );
-    await runQuery(
-      `INSERT INTO app_settings (tenant_id, business, categories, setup_completed, created_at, updated_at)
-       VALUES (?, ?, ?, 1, NOW(), NOW())
-       ON CONFLICT (tenant_id) DO UPDATE
-         SET business = EXCLUDED.business,
-             categories = EXCLUDED.categories,
-             setup_completed = 1,
-             updated_at = NOW()`,
-      [options.tenantId, business, categories]
-    );
-    return;
-  }
-
   await runQuery(
     `INSERT INTO tenants (id, name, created_at, updated_at)
      VALUES (?, ?, NOW(), NOW())
-     ON DUPLICATE KEY UPDATE name = VALUES(name), updated_at = NOW()`,
+     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`,
     [options.tenantId, options.tenantName]
   );
   await runQuery(
     `INSERT INTO app_settings (tenant_id, business, categories, setup_completed, created_at, updated_at)
      VALUES (?, ?, ?, 1, NOW(), NOW())
-     ON DUPLICATE KEY UPDATE
-       business = VALUES(business),
-       categories = VALUES(categories),
-       setup_completed = 1,
-       updated_at = NOW()`,
+     ON CONFLICT (tenant_id) DO UPDATE
+       SET business = EXCLUDED.business,
+           categories = EXCLUDED.categories,
+           setup_completed = 1,
+           updated_at = NOW()`,
     [options.tenantId, business, categories]
   );
 }
@@ -148,7 +127,7 @@ export async function runSeedTestTenantCli(options = parseSeedArgs()) {
     await initDb();
   }
 
-  await ensureTestTenant((sql, params) => db.query(sql, params || []), db.isPostgres(), options);
+  await ensureTestTenant((sql, params) => db.query(sql, params || []), options);
 
   if (options.clearFirst) {
     await clearSeededDemoData(options.tenantId);

@@ -9,7 +9,6 @@ import {
 } from '../../server/integrationAccess.js';
 
 vi.mock('../../server/db.js', () => ({
-  isPostgres: vi.fn(() => false),
   query: vi.fn(),
 }));
 
@@ -24,7 +23,6 @@ vi.mock('../../server/audit.js', async () => {
 describe('integration access and stock webhooks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (dbModule.isPostgres as any).mockReturnValue(false);
     (dbModule.query as any).mockResolvedValue([]);
   });
 

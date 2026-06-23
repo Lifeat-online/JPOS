@@ -4,7 +4,6 @@ import { clearSeededDemoData, seedDemoData } from '../../server/demo-seed.js';
 
 vi.mock('../../server/db.js', () => ({
   getConnection: vi.fn(),
-  isPostgres: vi.fn(() => false),
 }));
 
 describe('demo seed data', () => {

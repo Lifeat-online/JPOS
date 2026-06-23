@@ -47,11 +47,6 @@ function convertPlaceholders(sql: string): string {
   return sql.replace(/\?/g, () => `$${++i}`);
 }
 
-/** @deprecated postgres-only now; kept for the dozens of call sites still to be collapsed. */
-export function isPostgres(): boolean {
-  return true;
-}
-
 export async function query<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
   const res = await pgPool.query<T>(convertPlaceholders(sql), params);
   return res.rows;

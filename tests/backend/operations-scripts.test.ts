@@ -43,16 +43,12 @@ describe("operations scripts and runbooks", () => {
     expect(checks.get("ai_agent_run_steps")).toEqual(expect.arrayContaining(["step_id", "approved", "payload", "result"]));
   });
 
-  it("builds database-specific information_schema column lookups", () => {
-    const postgres = buildColumnLookupQuery("staff", "password_hash", true);
-    const maria = buildColumnLookupQuery("staff", "password_hash", false);
+  it("builds information_schema column lookups scoped to current_schema()", () => {
+    const lookup = buildColumnLookupQuery("staff", "password_hash");
 
-    expect(postgres.sql).toContain("information_schema.columns");
-    expect(postgres.sql).toContain("current_schema()");
-    expect(postgres.params).toEqual(["staff", "password_hash"]);
-    expect(maria.sql).toContain("information_schema.COLUMNS");
-    expect(maria.sql).toContain("DATABASE()");
-    expect(maria.params).toEqual(["staff", "password_hash"]);
+    expect(lookup.sql).toContain("information_schema.columns");
+    expect(lookup.sql).toContain("current_schema()");
+    expect(lookup.params).toEqual(["staff", "password_hash"]);
   });
 
   it("reports missing production schema items with table and column precision", async () => {
@@ -61,13 +57,12 @@ describe("operations scripts and runbooks", () => {
 
     const result = await verifyRequiredSchema(
       async (sql, params = []) => {
-        if (sql.includes("TABLES") || sql.includes("tables")) {
+        if (sql.includes("tables")) {
           return params[0] === missingTable ? [] : [{ tableName: params[0] }];
         }
         const key = `${params[0]}.${params[1]}`;
         return key === missingColumn ? [] : [{ columnName: params[1] }];
       },
-      false,
       "2026-06-05T00:00:00.000Z"
     );
 
@@ -85,12 +80,11 @@ describe("operations scripts and runbooks", () => {
         calls.push({ sql, params });
         return [];
       },
-      false,
       { tenantId: "test_tenant", tenantName: "Test Tenant", mode: "restaurant" }
     );
 
     expect(calls[0].sql).toContain("INSERT INTO tenants");
-    expect(calls[0].sql).toContain("ON DUPLICATE KEY UPDATE");
+    expect(calls[0].sql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(calls[0].params).toEqual(["test_tenant", "Test Tenant"]);
     expect(calls[1].sql).toContain("INSERT INTO app_settings");
     expect(calls[1].params[0]).toBe("test_tenant");

@@ -1,4 +1,4 @@
-import { db, isPostgres, query } from "./db.js";
+import { db, query } from "./db.js";
 import {
   cashierCanAccessLocation,
   DEFAULT_INVENTORY_LOCATION_ID,

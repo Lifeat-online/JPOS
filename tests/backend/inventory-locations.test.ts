@@ -9,7 +9,6 @@ import {
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
   getConnection: vi.fn(),
-  isPostgres: vi.fn(() => false),
 }));
 
 describe('inventory locations', () => {

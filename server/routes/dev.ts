@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../auth-middleware.js";
-import { getConnection, isPostgres } from "../db.js";
+import { getConnection } from "../db.js";
 import { initDb } from "../init-db.js";
 import {
   createDatabaseBackup,

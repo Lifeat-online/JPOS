@@ -7,7 +7,6 @@ import { createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, 
 
 vi.mock('../../server/db.js', () => ({
   getConnection: vi.fn(),
-  isPostgres: vi.fn(() => false),
   query: vi.fn(),
 }));
 

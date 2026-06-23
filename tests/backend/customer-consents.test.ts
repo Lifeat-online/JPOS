@@ -4,7 +4,6 @@ import { recordAuditEventSafe } from '../../server/audit.js';
 import { listTenantCustomerConsents, upsertCustomerConsents } from '../../server/customerConsents.js';
 
 vi.mock('../../server/db.js', () => ({
-  isPostgres: vi.fn(() => false),
   query: vi.fn(),
 }));
 

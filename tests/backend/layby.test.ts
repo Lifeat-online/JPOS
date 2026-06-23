@@ -5,7 +5,6 @@ import { cancelLaybyOrder, completeLaybyOrder, createLaybyOrder } from '../../se
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
   getConnection: vi.fn(),
-  isPostgres: vi.fn(() => false),
 }));
 
 function makeConn(queryImpl: (sql: string, params?: any[]) => Promise<any> = async () => [[]]) {

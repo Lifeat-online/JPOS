@@ -1,4 +1,4 @@
-import { getConnection, isPostgres } from "./db.js";
+import { getConnection } from "./db.js";
 import { getHostedPackage } from "../shared/packageCatalog.js";
 
 export type DemoSeedMode = "retail" | "restaurant";

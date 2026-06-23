@@ -12,7 +12,6 @@ import {
 
 vi.mock('../../server/db.js', () => ({
   getConnection: vi.fn(),
-  isPostgres: vi.fn(() => false),
   query: vi.fn(),
 }));
 
@@ -296,7 +295,6 @@ describe('stocktake workflow', () => {
   });
 
   it('ranks spot-check suggestions from shrinkage, expiry, velocity, and variance signals', async () => {
-    (dbModule.isPostgres as any).mockReturnValue(false);
     (dbModule.query as any).mockImplementation((sql: string) => {
       if (sql.includes('FROM products')) {
         return Promise.resolve([

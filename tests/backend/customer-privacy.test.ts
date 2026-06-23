@@ -12,7 +12,6 @@ const conn = {
 
 vi.mock('../../server/db.js', () => ({
   getConnection: vi.fn(() => conn),
-  isPostgres: vi.fn(() => false),
   query: vi.fn(),
 }));
 

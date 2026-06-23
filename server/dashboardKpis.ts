@@ -1,4 +1,4 @@
-import { isPostgres, query } from "./db.js";
+import { query } from "./db.js";
 
 function toNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;

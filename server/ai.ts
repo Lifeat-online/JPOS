@@ -1,4 +1,4 @@
-import { query, isPostgres } from "./db.js";
+import { query } from "./db.js";
 import type { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import { recordAuditEventSafe } from "./audit.js";

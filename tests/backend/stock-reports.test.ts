@@ -4,7 +4,6 @@ import { getStockValuationReport } from '../../server/stockReports.js';
 
 vi.mock('../../server/db.js', () => ({
   query: vi.fn(),
-  isPostgres: vi.fn(() => false),
 }));
 
 describe('stock valuation reports', () => {

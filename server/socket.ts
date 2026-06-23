@@ -1,6 +1,5 @@
 import { Server as SocketIOServer } from "socket.io";
 import { query } from "./db.js";
-import { isPostgres } from "./db.js";
 import { publishRealtimeEventIfEnabled, startRealtimePubsubPoller } from "./realtimePubsub.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
