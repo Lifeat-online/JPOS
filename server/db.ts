@@ -2,7 +2,9 @@ import { Pool, PoolClient, QueryResultRow } from "pg";
 import { Kysely, PostgresDialect } from "kysely";
 import { DB } from "./db-types.js";
 
-function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+function firstNonEmpty(
+  ...values: Array<string | undefined>
+): string | undefined {
   for (const v of values) {
     if (v === undefined) continue;
     const trimmed = v.trim();
@@ -11,15 +13,27 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
   return undefined;
 }
 
-export const pgPool = new Pool({
-  connectionString: firstNonEmpty(
-    process.env.DATABASE_URL,
-    process.env.SUPABASE_DB_URL,
-    process.env.SUPABASE_DATABASE_URL
-  ) || "",
-  max: Number(process.env.DB_CONNECTION_LIMIT || 10),
-  ssl: { rejectUnauthorized: false },
-});
+const connectionString = firstNonEmpty(
+  process.env.DATABASE_URL,
+  process.env.SUPABASE_DB_URL,
+  process.env.SUPABASE_DATABASE_URL,
+);
+
+export const pgPool = connectionString
+  ? new Pool({
+      connectionString,
+      max: Number(process.env.DB_CONNECTION_LIMIT || 10),
+      ssl: { rejectUnauthorized: false },
+    })
+  : new Pool({
+      host: process.env.DB_HOST || "localhost",
+      port: Number(process.env.DB_PORT || 5432),
+      user: process.env.DB_USER || "postgres",
+      password: process.env.DB_PASSWORD || "",
+      database: process.env.DB_DATABASE || "jims_pos",
+      max: Number(process.env.DB_CONNECTION_LIMIT || 10),
+      ssl: { rejectUnauthorized: false },
+    });
 
 export const db = new Kysely<DB>({
   dialect: new PostgresDialect({
@@ -31,12 +45,21 @@ export type DbConnection = {
   beginTransaction(): Promise<void>;
   commit(): Promise<void>;
   rollback(): Promise<void>;
-  execute<T extends QueryResultRow = any>(sql: string, params?: any[]): Promise<readonly [T[]]>;
-  query<T extends QueryResultRow = any>(sql: string, params?: any[]): Promise<readonly [T[]]>;
+  execute<T extends QueryResultRow = any>(
+    sql: string,
+    params?: any[],
+  ): Promise<readonly [T[]]>;
+  query<T extends QueryResultRow = any>(
+    sql: string,
+    params?: any[],
+  ): Promise<readonly [T[]]>;
   release(): void;
 };
 
-export async function query<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
+export async function query<T extends QueryResultRow = any>(
+  sql: string,
+  params: any[] = [],
+) {
   const res = await pgPool.query<T>(sql, params);
   return res.rows;
 }
@@ -44,7 +67,10 @@ export async function query<T extends QueryResultRow = any>(sql: string, params:
 export async function getConnection() {
   const client = await pgPool.connect();
 
-  function wrapQuery<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
+  function wrapQuery<T extends QueryResultRow = any>(
+    sql: string,
+    params: any[] = [],
+  ) {
     return client.query<T>(sql, params);
   }
 
@@ -58,11 +84,17 @@ export async function getConnection() {
     async rollback() {
       await client.query("ROLLBACK");
     },
-    async execute<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
+    async execute<T extends QueryResultRow = any>(
+      sql: string,
+      params: any[] = [],
+    ) {
       const res = await wrapQuery<T>(sql, params);
       return [res.rows] as const;
     },
-    async query<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
+    async query<T extends QueryResultRow = any>(
+      sql: string,
+      params: any[] = [],
+    ) {
       const res = await wrapQuery<T>(sql, params);
       return [res.rows] as const;
     },
