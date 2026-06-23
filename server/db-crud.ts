@@ -1,4 +1,4 @@
-import { getConnection, isPostgres, query } from "./db.js";
+import { getConnection, query } from "./db.js";
 import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
 import { assertSafePaymentProviderEvidence } from "./paymentProviderBoundary.js";
 import { assertCurrentTaxPeriodOpen, assertSaleNotInLockedTaxPeriod } from "./taxReports.js";
@@ -131,28 +131,15 @@ async function syncDefaultProductLocationStock(tenantId: string, productId: stri
   const quantity = Math.max(0, Number(stock || 0));
   const threshold = Math.max(0, Number(minStock || 0));
   try {
-    if (isPostgres()) {
-      await query(
-        `INSERT INTO product_location_stock (
-           tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
-         ON CONFLICT (tenant_id, product_id, location_id)
-         DO UPDATE SET quantity = EXCLUDED.quantity,
-                       min_stock = EXCLUDED.min_stock,
-                       reorder_threshold = EXCLUDED.reorder_threshold,
-                       updated_at = NOW()`,
-        [tenantId, productId, DEFAULT_INVENTORY_LOCATION_ID, quantity, threshold, threshold]
-      );
-      return;
-    }
     await query(
       `INSERT INTO product_location_stock (
          tenant_id, product_id, location_id, quantity, min_stock, reorder_threshold, created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
-       ON DUPLICATE KEY UPDATE quantity = VALUES(quantity),
-                               min_stock = VALUES(min_stock),
-                               reorder_threshold = VALUES(reorder_threshold),
-                               updated_at = NOW()`,
+       ON CONFLICT (tenant_id, product_id, location_id)
+       DO UPDATE SET quantity = EXCLUDED.quantity,
+                     min_stock = EXCLUDED.min_stock,
+                     reorder_threshold = EXCLUDED.reorder_threshold,
+                     updated_at = NOW()`,
       [tenantId, productId, DEFAULT_INVENTORY_LOCATION_ID, quantity, threshold, threshold]
     );
   } catch (error: any) {
@@ -2095,40 +2082,22 @@ export async function deleteCustomer(
         [tenantId, customerId, consentType],
       );
       const previousStatus = (consentRows as any[])[0]?.status || "unknown";
-      if (isPostgres()) {
-        await conn.query(
-          `INSERT INTO customer_consents (
-             id, tenant_id, customer_id, consent_type, status, source, note,
-             captured_by, captured_by_name, captured_at, expires_at, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, 'revoked', 'customer_anonymization', ?, ?, ?, NOW(), NULL, NOW(), NOW())
-           ON CONFLICT (tenant_id, customer_id, consent_type)
-           DO UPDATE SET status = 'revoked',
-                         source = EXCLUDED.source,
-                         note = EXCLUDED.note,
-                         captured_by = EXCLUDED.captured_by,
-                         captured_by_name = EXCLUDED.captured_by_name,
-                         captured_at = EXCLUDED.captured_at,
-                         expires_at = NULL,
-                         updated_at = NOW()`,
-          [`consent_${Date.now()}_${Math.random().toString(36).substring(7)}`, tenantId, customerId, consentType, reason, actor.staffId || null, actor.staffName || null],
-        );
-      } else {
-        await conn.query(
-          `INSERT INTO customer_consents (
-             id, tenant_id, customer_id, consent_type, status, source, note,
-             captured_by, captured_by_name, captured_at, expires_at, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, 'revoked', 'customer_anonymization', ?, ?, ?, NOW(), NULL, NOW(), NOW())
-           ON DUPLICATE KEY UPDATE status = 'revoked',
-                                   source = VALUES(source),
-                                   note = VALUES(note),
-                                   captured_by = VALUES(captured_by),
-                                   captured_by_name = VALUES(captured_by_name),
-                                   captured_at = VALUES(captured_at),
-                                   expires_at = NULL,
-                                   updated_at = NOW()`,
-          [`consent_${Date.now()}_${Math.random().toString(36).substring(7)}`, tenantId, customerId, consentType, reason, actor.staffId || null, actor.staffName || null],
-        );
-      }
+      await conn.query(
+        `INSERT INTO customer_consents (
+           id, tenant_id, customer_id, consent_type, status, source, note,
+           captured_by, captured_by_name, captured_at, expires_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'revoked', 'customer_anonymization', ?, ?, ?, NOW(), NULL, NOW(), NOW())
+         ON CONFLICT (tenant_id, customer_id, consent_type)
+         DO UPDATE SET status = 'revoked',
+                       source = EXCLUDED.source,
+                       note = EXCLUDED.note,
+                       captured_by = EXCLUDED.captured_by,
+                       captured_by_name = EXCLUDED.captured_by_name,
+                       captured_at = EXCLUDED.captured_at,
+                       expires_at = NULL,
+                       updated_at = NOW()`,
+        [`consent_${Date.now()}_${Math.random().toString(36).substring(7)}`, tenantId, customerId, consentType, reason, actor.staffId || null, actor.staffName || null],
+      );
       await conn.query(
         `INSERT INTO customer_consent_events (
            id, tenant_id, customer_id, consent_type, previous_status, status,
@@ -3920,13 +3889,9 @@ export async function updateAppConfig(
   const businessName = String(config.business?.name || tenantId).trim() || tenantId;
 
   await query(
-    isPostgres()
-      ? `INSERT INTO tenants (id, name, created_at, updated_at)
-         VALUES (?, ?, NOW(), NOW())
-         ON CONFLICT (id) DO NOTHING`
-      : `INSERT INTO tenants (id, name, created_at, updated_at)
-         VALUES (?, ?, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE id = id`,
+    `INSERT INTO tenants (id, name, created_at, updated_at)
+     VALUES (?, ?, NOW(), NOW())
+     ON CONFLICT (id) DO NOTHING`,
     [tenantId, businessName]
   );
 
@@ -3944,57 +3909,31 @@ export async function updateAppConfig(
   ];
 
   await query(
-    isPostgres()
-      ? `INSERT INTO app_settings (
-           tenant_id,
-           payfast_merchant_id,
-           payfast_merchant_key,
-           payfast_passphrase,
-           payfast_sandbox,
-           business,
-           categories,
-           retention_policy,
-           slug,
-           setup_completed,
-           created_at,
-           updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-         ON CONFLICT (tenant_id) DO UPDATE SET
-           payfast_merchant_id = EXCLUDED.payfast_merchant_id,
-           payfast_merchant_key = EXCLUDED.payfast_merchant_key,
-           payfast_passphrase = EXCLUDED.payfast_passphrase,
-           payfast_sandbox = EXCLUDED.payfast_sandbox,
-           business = EXCLUDED.business,
-           categories = EXCLUDED.categories,
-           retention_policy = EXCLUDED.retention_policy,
-           slug = EXCLUDED.slug,
-           setup_completed = EXCLUDED.setup_completed,
-           updated_at = NOW()`
-      : `INSERT INTO app_settings (
-           tenant_id,
-           payfast_merchant_id,
-           payfast_merchant_key,
-           payfast_passphrase,
-           payfast_sandbox,
-           business,
-           categories,
-           retention_policy,
-           slug,
-           setup_completed,
-           created_at,
-           updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE
-           payfast_merchant_id = VALUES(payfast_merchant_id),
-           payfast_merchant_key = VALUES(payfast_merchant_key),
-           payfast_passphrase = VALUES(payfast_passphrase),
-           payfast_sandbox = VALUES(payfast_sandbox),
-           business = VALUES(business),
-           categories = VALUES(categories),
-           retention_policy = VALUES(retention_policy),
-           slug = VALUES(slug),
-           setup_completed = VALUES(setup_completed),
-           updated_at = NOW()`,
+    `INSERT INTO app_settings (
+         tenant_id,
+         payfast_merchant_id,
+         payfast_merchant_key,
+         payfast_passphrase,
+         payfast_sandbox,
+         business,
+         categories,
+         retention_policy,
+         slug,
+         setup_completed,
+         created_at,
+         updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+       ON CONFLICT (tenant_id) DO UPDATE SET
+         payfast_merchant_id = EXCLUDED.payfast_merchant_id,
+         payfast_merchant_key = EXCLUDED.payfast_merchant_key,
+         payfast_passphrase = EXCLUDED.payfast_passphrase,
+         payfast_sandbox = EXCLUDED.payfast_sandbox,
+         business = EXCLUDED.business,
+         categories = EXCLUDED.categories,
+         retention_policy = EXCLUDED.retention_policy,
+         slug = EXCLUDED.slug,
+         setup_completed = EXCLUDED.setup_completed,
+         updated_at = NOW()`,
     values
   );
 }
@@ -4071,7 +4010,6 @@ export async function setupTenant(data: {
   const conn = await getConnection();
   try {
     await conn.beginTransaction();
-    const pg = isPostgres();
 
     // 1. Create tenant
     await conn.query(
@@ -4081,27 +4019,19 @@ export async function setupTenant(data: {
 
     // 2. Create or update user association
     await conn.query(
-      pg
-        ? `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at)
-           VALUES (?, ?, ?, ?, NOW(), NOW())
-           ON CONFLICT (uid) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, name = EXCLUDED.name, updated_at = NOW()`
-        : `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at) 
-           VALUES (?, ?, ?, ?, NOW(), NOW())
-           ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), name = VALUES(name), updated_at = NOW()`,
+      `INSERT INTO users (uid, tenant_id, email, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, NOW(), NOW())
+       ON CONFLICT (uid) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, name = EXCLUDED.name, updated_at = NOW()`,
       [data.user.uid, tenantId, data.user.email, data.user.displayName]
     );
-    
+
     // 3. Create staff (admin) — dev role only when the env-gated bootstrap
     // backdoor is enabled (dev/staging only, never in production).
     const assignedRole = isDevEmail(data.user.email) ? 'dev' : 'admin';
     await conn.query(
-      pg
-        ? `INSERT INTO staff (id, tenant_id, name, email, role, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())
-           ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, role = EXCLUDED.role, updated_at = NOW()`
-        : `INSERT INTO staff (id, tenant_id, name, email, role, status, created_at, updated_at) 
-           VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())
-           ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), role = VALUES(role), updated_at = NOW()`,
+      `INSERT INTO staff (id, tenant_id, name, email, role, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())
+       ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, role = EXCLUDED.role, updated_at = NOW()`,
       [data.user.uid, tenantId, data.user.displayName, data.user.email, assignedRole]
     );
 

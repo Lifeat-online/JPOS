@@ -1,4 +1,4 @@
-import { db, isPostgres, query } from "./db.js";
+import { db, query } from "./db.js";
 import { recordAuditEventSafe } from "./audit.js";
 
 type RetentionSummary = {
@@ -113,15 +113,10 @@ export async function saveRetentionPolicy(tenantId: string, policyInput: unknown
   const policy = normalizeRetentionPolicy({ ...current, ...(policyInput as any || {}) });
   const serialized = JSON.stringify(policy);
   await query(
-    isPostgres()
-      ? `INSERT INTO app_settings (tenant_id, retention_policy, created_at, updated_at)
-           VALUES (?, ?, NOW(), NOW())
-           ON CONFLICT (tenant_id) DO UPDATE SET retention_policy = EXCLUDED.retention_policy,
-                                                 updated_at = NOW()`
-      : `INSERT INTO app_settings (tenant_id, retention_policy, created_at, updated_at)
-           VALUES (?, ?, NOW(), NOW())
-           ON DUPLICATE KEY UPDATE retention_policy = VALUES(retention_policy),
-                                   updated_at = NOW()`,
+    `INSERT INTO app_settings (tenant_id, retention_policy, created_at, updated_at)
+         VALUES (?, ?, NOW(), NOW())
+         ON CONFLICT (tenant_id) DO UPDATE SET retention_policy = EXCLUDED.retention_policy,
+                                               updated_at = NOW()`,
     [tenantId, serialized],
   );
   await recordAuditEventSafe({
@@ -238,15 +233,10 @@ export async function applyRetentionPolicy(tenantId: string, policyInput?: unkno
     lastResult: preview.summary,
   });
   await query(
-    isPostgres()
-      ? `INSERT INTO app_settings (tenant_id, retention_policy, created_at, updated_at)
-           VALUES (?, ?, NOW(), NOW())
-           ON CONFLICT (tenant_id) DO UPDATE SET retention_policy = EXCLUDED.retention_policy,
-                                                 updated_at = NOW()`
-      : `INSERT INTO app_settings (tenant_id, retention_policy, created_at, updated_at)
-           VALUES (?, ?, NOW(), NOW())
-           ON DUPLICATE KEY UPDATE retention_policy = VALUES(retention_policy),
-                                   updated_at = NOW()`,
+    `INSERT INTO app_settings (tenant_id, retention_policy, created_at, updated_at)
+         VALUES (?, ?, NOW(), NOW())
+         ON CONFLICT (tenant_id) DO UPDATE SET retention_policy = EXCLUDED.retention_policy,
+                                               updated_at = NOW()`,
     [tenantId, JSON.stringify(appliedPolicy)],
   );
   await recordAuditEventSafe({

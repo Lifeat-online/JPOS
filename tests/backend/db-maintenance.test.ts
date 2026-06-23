@@ -10,36 +10,35 @@ import {
 } from "../../server/dbMaintenance.js";
 
 vi.mock("../../server/db.js", () => ({
-  isPostgres: vi.fn(() => false),
   query: vi.fn(),
 }));
 
 const backupDir = path.join(process.cwd(), "temp", "test-db-backups");
 
 function schemaQueryMock(sql: string) {
-  if (sql.includes("SELECT DATABASE()")) {
-    return [{ databaseName: "jimmy_pos" }];
+  if (sql.includes("SELECT current_database()")) {
+    return [{ databaseName: "jimmy_pos", schemaName: "public" }];
   }
-  if (sql.includes("information_schema.TABLES")) {
+  if (sql.includes("FROM information_schema.tables")) {
     return [{ tableName: "products" }, { tableName: "tenants" }];
   }
-  if (sql.includes("information_schema.COLUMNS")) {
+  if (sql.includes("FROM information_schema.columns")) {
     return [
       { tableName: "tenants", columnName: "id", dataType: "varchar", ordinalPosition: 1 },
       { tableName: "tenants", columnName: "name", dataType: "varchar", ordinalPosition: 2 },
       { tableName: "products", columnName: "id", dataType: "varchar", ordinalPosition: 1 },
       { tableName: "products", columnName: "tenant_id", dataType: "varchar", ordinalPosition: 2 },
       { tableName: "products", columnName: "name", dataType: "varchar", ordinalPosition: 3 },
-      { tableName: "products", columnName: "created_at", dataType: "datetime", ordinalPosition: 4 },
+      { tableName: "products", columnName: "created_at", dataType: "timestamp", ordinalPosition: 4 },
     ];
   }
-  if (sql.includes("CONSTRAINT_NAME = 'PRIMARY'")) {
+  if (sql.includes("constraint_type = 'PRIMARY KEY'")) {
     return [
       { tableName: "tenants", columnName: "id" },
       { tableName: "products", columnName: "id" },
     ];
   }
-  if (sql.includes("REFERENCED_TABLE_NAME")) {
+  if (sql.includes("constraint_column_usage")) {
     return [{ tableName: "products", referencedTableName: "tenants" }];
   }
   return null;
@@ -49,10 +48,10 @@ function mockBackupQueries() {
   (dbModule.query as any).mockImplementation((sql: string) => {
     const schemaRows = schemaQueryMock(sql);
     if (schemaRows) return Promise.resolve(schemaRows);
-    if (sql.includes("FROM `tenants`")) {
+    if (sql.includes('FROM "tenants"')) {
       return Promise.resolve([{ id: "tenant1", name: "Main Store" }]);
     }
-    if (sql.includes("FROM `products`")) {
+    if (sql.includes('FROM "products"')) {
       return Promise.resolve([{
         id: "prod1",
         tenant_id: "tenant1",
@@ -69,7 +68,6 @@ describe("database maintenance backups", () => {
     process.env.DB_BACKUP_DIR = backupDir;
     await fs.rm(backupDir, { recursive: true, force: true });
     vi.clearAllMocks();
-    (dbModule.isPostgres as any).mockReturnValue(false);
   });
 
   afterEach(async () => {
@@ -121,18 +119,18 @@ describe("database maintenance backups", () => {
     (dbModule.query as any).mockImplementation((sql: string, params: any[] = []) => {
       const schemaRows = schemaQueryMock(sql);
       if (schemaRows) return Promise.resolve(schemaRows);
-      if (sql.includes("SELECT 1 AS found FROM `tenants`")) return Promise.resolve([]);
-      if (sql.includes("SELECT 1 AS found FROM `products`")) return Promise.resolve([{ found: 1 }]);
+      if (sql.includes('SELECT 1 AS found FROM "tenants"')) return Promise.resolve([]);
+      if (sql.includes('SELECT 1 AS found FROM "products"')) return Promise.resolve([{ found: 1 }]);
       if (sql.startsWith("INSERT") || sql.startsWith("UPDATE")) mutations.push({ sql, params });
       return Promise.resolve([]);
     });
 
     const result = await restoreDatabaseBackup(summary.id, { overwriteExisting: true });
-    const productUpdate = mutations.find(call => call.sql.startsWith("UPDATE `products`"));
+    const productUpdate = mutations.find(call => call.sql.startsWith('UPDATE "products"'));
 
     expect(result.totals.inserted).toBe(1);
     expect(result.totals.updated).toBe(1);
-    expect(productUpdate?.params).toContain("2026-06-10 12:30:00");
+    expect(productUpdate?.params).toContain("2026-06-10T12:30:00.000Z");
     expect(mutations.some(call => call.sql.startsWith("DELETE"))).toBe(false);
   });
 });

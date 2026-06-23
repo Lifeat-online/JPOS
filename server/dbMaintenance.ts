@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
-import { isPostgres, query } from "./db.js";
+import { query } from "./db.js";
 
 export type BackupScope = "full-database";
 
@@ -98,9 +98,7 @@ function quoteIdentifier(value: string) {
     throw new Error(`Unsafe database identifier: ${value}`);
   }
 
-  return isPostgres()
-    ? `"${value.replace(/"/g, '""')}"`
-    : `\`${value.replace(/`/g, "``")}\``;
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function backupTimestamp(date = new Date()) {
@@ -135,63 +133,37 @@ async function ensureBackupDir() {
 }
 
 async function getDatabaseIdentity() {
-  if (isPostgres()) {
-    const rows = await query<{ databaseName: string; schemaName: string }>(
-      `SELECT current_database() AS databaseName, current_schema() AS schemaName`
-    );
-    return {
-      databaseName: String(rows[0]?.databaseName || ""),
-      schemaName: String(rows[0]?.schemaName || ""),
-    };
-  }
-
-  const rows = await query<{ databaseName: string }>(`SELECT DATABASE() AS databaseName`);
+  const rows = await query<{ databaseName: string; schemaName: string }>(
+    `SELECT current_database() AS databaseName, current_schema() AS schemaName`
+  );
   return {
     databaseName: String(rows[0]?.databaseName || ""),
-    schemaName: null,
+    schemaName: String(rows[0]?.schemaName || ""),
   };
 }
 
 export async function listDatabaseTables() {
-  const rows = isPostgres()
-    ? await query<{ tableName: string }>(
-      `SELECT table_name AS tableName
-       FROM information_schema.tables
-       WHERE table_schema = current_schema()
-         AND table_type = 'BASE TABLE'
-       ORDER BY table_name`
-    )
-    : await query<{ tableName: string }>(
-      `SELECT TABLE_NAME AS tableName
-       FROM information_schema.TABLES
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_TYPE = 'BASE TABLE'
-       ORDER BY TABLE_NAME`
-    );
+  const rows = await query<{ tableName: string }>(
+    `SELECT table_name AS tableName
+     FROM information_schema.tables
+     WHERE table_schema = current_schema()
+       AND table_type = 'BASE TABLE'
+     ORDER BY table_name`
+  );
 
   return rows.map((row) => String(rowValue(row as any, "tableName") || "")).filter(Boolean);
 }
 
 async function listColumnMetadata() {
-  const rows = isPostgres()
-    ? await query<{ tableName: string; columnName: string; dataType: string; ordinalPosition: number }>(
-      `SELECT table_name AS tableName,
-              column_name AS columnName,
-              data_type AS dataType,
-              ordinal_position AS ordinalPosition
-       FROM information_schema.columns
-       WHERE table_schema = current_schema()
-       ORDER BY table_name, ordinal_position`
-    )
-    : await query<{ tableName: string; columnName: string; dataType: string; ordinalPosition: number }>(
-      `SELECT TABLE_NAME AS tableName,
-              COLUMN_NAME AS columnName,
-              DATA_TYPE AS dataType,
-              ORDINAL_POSITION AS ordinalPosition
-       FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE()
-       ORDER BY TABLE_NAME, ORDINAL_POSITION`
-    );
+  const rows = await query<{ tableName: string; columnName: string; dataType: string; ordinalPosition: number }>(
+    `SELECT table_name AS tableName,
+            column_name AS columnName,
+            data_type AS dataType,
+            ordinal_position AS ordinalPosition
+     FROM information_schema.columns
+     WHERE table_schema = current_schema()
+     ORDER BY table_name, ordinal_position`
+  );
 
   const columns = new Map<string, ColumnMetadata[]>();
   for (const row of rows as any[]) {
@@ -211,27 +183,18 @@ async function listColumnMetadata() {
 }
 
 async function listPrimaryKeys() {
-  const rows = isPostgres()
-    ? await query<{ tableName: string; columnName: string }>(
-      `SELECT kcu.table_name AS tableName,
-              kcu.column_name AS columnName
-       FROM information_schema.table_constraints tc
-       JOIN information_schema.key_column_usage kcu
-         ON kcu.constraint_name = tc.constraint_name
-        AND kcu.constraint_schema = tc.constraint_schema
-        AND kcu.table_name = tc.table_name
-       WHERE tc.constraint_type = 'PRIMARY KEY'
-         AND tc.table_schema = current_schema()
-       ORDER BY kcu.table_name, kcu.ordinal_position`
-    )
-    : await query<{ tableName: string; columnName: string }>(
-      `SELECT TABLE_NAME AS tableName,
-              COLUMN_NAME AS columnName
-       FROM information_schema.KEY_COLUMN_USAGE
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND CONSTRAINT_NAME = 'PRIMARY'
-       ORDER BY TABLE_NAME, ORDINAL_POSITION`
-    );
+  const rows = await query<{ tableName: string; columnName: string }>(
+    `SELECT kcu.table_name AS tableName,
+            kcu.column_name AS columnName
+     FROM information_schema.table_constraints tc
+     JOIN information_schema.key_column_usage kcu
+       ON kcu.constraint_name = tc.constraint_name
+      AND kcu.constraint_schema = tc.constraint_schema
+      AND kcu.table_name = tc.table_name
+     WHERE tc.constraint_type = 'PRIMARY KEY'
+       AND tc.table_schema = current_schema()
+     ORDER BY kcu.table_name, kcu.ordinal_position`
+  );
 
   const keys = new Map<string, string[]>();
   for (const row of rows as any[]) {
@@ -244,26 +207,17 @@ async function listPrimaryKeys() {
 }
 
 async function listForeignKeyDependencies() {
-  const rows = isPostgres()
-    ? await query<{ tableName: string; referencedTableName: string }>(
-      `SELECT DISTINCT tc.table_name AS tableName,
-              ccu.table_name AS referencedTableName
-       FROM information_schema.table_constraints tc
-       JOIN information_schema.constraint_column_usage ccu
-         ON ccu.constraint_name = tc.constraint_name
-        AND ccu.constraint_schema = tc.constraint_schema
-       WHERE tc.constraint_type = 'FOREIGN KEY'
-         AND tc.table_schema = current_schema()
-       ORDER BY tc.table_name, ccu.table_name`
-    )
-    : await query<{ tableName: string; referencedTableName: string }>(
-      `SELECT DISTINCT TABLE_NAME AS tableName,
-              REFERENCED_TABLE_NAME AS referencedTableName
-       FROM information_schema.KEY_COLUMN_USAGE
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND REFERENCED_TABLE_NAME IS NOT NULL
-       ORDER BY TABLE_NAME, REFERENCED_TABLE_NAME`
-    );
+  const rows = await query<{ tableName: string; referencedTableName: string }>(
+    `SELECT DISTINCT tc.table_name AS tableName,
+            ccu.table_name AS referencedTableName
+     FROM information_schema.table_constraints tc
+     JOIN information_schema.constraint_column_usage ccu
+       ON ccu.constraint_name = tc.constraint_name
+      AND ccu.constraint_schema = tc.constraint_schema
+     WHERE tc.constraint_type = 'FOREIGN KEY'
+       AND tc.table_schema = current_schema()
+     ORDER BY tc.table_name, ccu.table_name`
+  );
 
   const dependencies = new Map<string, Set<string>>();
   for (const row of rows as any[]) {
@@ -425,9 +379,6 @@ function normalizeValueForColumn(value: unknown, column: ColumnMetadata) {
     if (!Number.isNaN(parsed.getTime())) {
       if (column.dataType === "date") {
         return parsed.toISOString().slice(0, 10);
-      }
-      if (!isPostgres()) {
-        return parsed.toISOString().slice(0, 19).replace("T", " ");
       }
     }
   }

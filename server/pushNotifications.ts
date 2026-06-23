@@ -1,5 +1,5 @@
 import webPush from "web-push";
-import { isPostgres, query } from "./db.js";
+import { query } from "./db.js";
 
 export type PushNotificationPayload = {
   title: string;
@@ -44,72 +44,37 @@ function normalizeSubscription(input: any) {
 }
 
 export async function ensurePushNotificationSchema() {
-  if (isPostgres()) {
-    await query(`
-      CREATE TABLE IF NOT EXISTS push_notification_settings (
-        tenant_id TEXT PRIMARY KEY,
-        vapid_public_key TEXT,
-        vapid_private_key TEXT,
-        subject TEXT NOT NULL DEFAULT '${DEFAULT_SUBJECT.replace(/'/g, "''")}',
-        enabled SMALLINT DEFAULT 1 CHECK (enabled IN (0, 1)),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    await query(`
-      CREATE TABLE IF NOT EXISTS push_subscriptions (
-        id TEXT PRIMARY KEY,
-        tenant_id TEXT NOT NULL,
-        staff_id TEXT,
-        endpoint TEXT NOT NULL,
-        p256dh TEXT NOT NULL,
-        auth TEXT NOT NULL,
-        expiration_time TIMESTAMP NULL,
-        device_label TEXT,
-        user_agent TEXT,
-        disabled_at TIMESTAMP NULL,
-        last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (tenant_id, endpoint)
-      )
-    `);
-    await query(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_tenant ON push_subscriptions (tenant_id)`);
-    await query(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_staff ON push_subscriptions (tenant_id, staff_id)`);
-    return;
-  }
-
   await query(`
     CREATE TABLE IF NOT EXISTS push_notification_settings (
-      tenant_id VARCHAR(64) PRIMARY KEY,
+      tenant_id TEXT PRIMARY KEY,
       vapid_public_key TEXT,
       vapid_private_key TEXT,
-      subject VARCHAR(255) NOT NULL DEFAULT '${DEFAULT_SUBJECT.replace(/'/g, "''")}',
-      enabled BOOLEAN DEFAULT TRUE,
+      subject TEXT NOT NULL DEFAULT '${DEFAULT_SUBJECT.replace(/'/g, "''")}',
+      enabled SMALLINT DEFAULT 1 CHECK (enabled IN (0, 1)),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
   await query(`
     CREATE TABLE IF NOT EXISTS push_subscriptions (
-      id VARCHAR(64) PRIMARY KEY,
-      tenant_id VARCHAR(64) NOT NULL,
-      staff_id VARCHAR(64),
-      endpoint VARCHAR(500) NOT NULL,
-      p256dh VARCHAR(255) NOT NULL,
-      auth VARCHAR(255) NOT NULL,
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      staff_id TEXT,
+      endpoint TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
       expiration_time TIMESTAMP NULL,
-      device_label VARCHAR(160),
-      user_agent VARCHAR(500),
+      device_label TEXT,
+      user_agent TEXT,
       disabled_at TIMESTAMP NULL,
       last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY uniq_push_subscription_endpoint (tenant_id, endpoint),
-      INDEX idx_push_subscriptions_tenant (tenant_id),
-      INDEX idx_push_subscriptions_staff (tenant_id, staff_id)
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (tenant_id, endpoint)
     )
   `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_tenant ON push_subscriptions (tenant_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_staff ON push_subscriptions (tenant_id, staff_id)`);
 }
 
 export async function getPushSettings(tenantId: string): Promise<PushSettings> {
@@ -164,32 +129,18 @@ export async function generateTenantVapidKeys(tenantId: string, subject?: string
   const keys = webPush.generateVAPIDKeys();
   const finalSubject = String(subject || DEFAULT_SUBJECT).trim() || DEFAULT_SUBJECT;
 
-  if (isPostgres()) {
-    await query(
-      `INSERT INTO push_notification_settings
-         (tenant_id, vapid_public_key, vapid_private_key, subject, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 1, NOW(), NOW())
-       ON CONFLICT (tenant_id)
-       DO UPDATE SET vapid_public_key = EXCLUDED.vapid_public_key,
-                     vapid_private_key = EXCLUDED.vapid_private_key,
-                     subject = EXCLUDED.subject,
-                     enabled = 1,
-                     updated_at = NOW()`,
-      [tenantId, keys.publicKey, keys.privateKey, finalSubject]
-    );
-  } else {
-    await query(
-      `INSERT INTO push_notification_settings
-         (tenant_id, vapid_public_key, vapid_private_key, subject, enabled)
-       VALUES (?, ?, ?, ?, 1)
-       ON DUPLICATE KEY UPDATE vapid_public_key = VALUES(vapid_public_key),
-                               vapid_private_key = VALUES(vapid_private_key),
-                               subject = VALUES(subject),
-                               enabled = 1,
-                               updated_at = NOW()`,
-      [tenantId, keys.publicKey, keys.privateKey, finalSubject]
-    );
-  }
+  await query(
+    `INSERT INTO push_notification_settings
+       (tenant_id, vapid_public_key, vapid_private_key, subject, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 1, NOW(), NOW())
+     ON CONFLICT (tenant_id)
+     DO UPDATE SET vapid_public_key = EXCLUDED.vapid_public_key,
+                   vapid_private_key = EXCLUDED.vapid_private_key,
+                   subject = EXCLUDED.subject,
+                   enabled = 1,
+                   updated_at = NOW()`,
+    [tenantId, keys.publicKey, keys.privateKey, finalSubject]
+  );
 
   return getPushOverview(tenantId);
 }
@@ -200,40 +151,22 @@ export async function savePushSubscription(tenantId: string, staffId: string | n
   const deviceLabel = String(meta.deviceLabel || "Browser device").slice(0, 160);
   const userAgent = String(meta.userAgent || "").slice(0, 500);
 
-  if (isPostgres()) {
-    await query(
-      `INSERT INTO push_subscriptions
-         (id, tenant_id, staff_id, endpoint, p256dh, auth, expiration_time, device_label, user_agent, disabled_at, last_seen_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW(), NOW(), NOW())
-       ON CONFLICT (tenant_id, endpoint)
-       DO UPDATE SET staff_id = EXCLUDED.staff_id,
-                     p256dh = EXCLUDED.p256dh,
-                     auth = EXCLUDED.auth,
-                     expiration_time = EXCLUDED.expiration_time,
-                     device_label = EXCLUDED.device_label,
-                     user_agent = EXCLUDED.user_agent,
-                     disabled_at = NULL,
-                     last_seen_at = NOW(),
-                     updated_at = NOW()`,
-      [id, tenantId, staffId, sub.endpoint, sub.p256dh, sub.auth, sub.expirationTime, deviceLabel, userAgent]
-    );
-  } else {
-    await query(
-      `INSERT INTO push_subscriptions
-         (id, tenant_id, staff_id, endpoint, p256dh, auth, expiration_time, device_label, user_agent, disabled_at, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW())
-       ON DUPLICATE KEY UPDATE staff_id = VALUES(staff_id),
-                               p256dh = VALUES(p256dh),
-                               auth = VALUES(auth),
-                               expiration_time = VALUES(expiration_time),
-                               device_label = VALUES(device_label),
-                               user_agent = VALUES(user_agent),
-                               disabled_at = NULL,
-                               last_seen_at = NOW(),
-                               updated_at = NOW()`,
-      [id, tenantId, staffId, sub.endpoint, sub.p256dh, sub.auth, sub.expirationTime, deviceLabel, userAgent]
-    );
-  }
+  await query(
+    `INSERT INTO push_subscriptions
+       (id, tenant_id, staff_id, endpoint, p256dh, auth, expiration_time, device_label, user_agent, disabled_at, last_seen_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW(), NOW(), NOW())
+     ON CONFLICT (tenant_id, endpoint)
+     DO UPDATE SET staff_id = EXCLUDED.staff_id,
+                   p256dh = EXCLUDED.p256dh,
+                   auth = EXCLUDED.auth,
+                   expiration_time = EXCLUDED.expiration_time,
+                   device_label = EXCLUDED.device_label,
+                   user_agent = EXCLUDED.user_agent,
+                   disabled_at = NULL,
+                   last_seen_at = NOW(),
+                   updated_at = NOW()`,
+    [id, tenantId, staffId, sub.endpoint, sub.p256dh, sub.auth, sub.expirationTime, deviceLabel, userAgent]
+  );
 
   return getPushOverview(tenantId);
 }
