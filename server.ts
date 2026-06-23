@@ -43,8 +43,23 @@ const {
   ensureReorderNotificationRuleSchema,
   ensureTaxPeriodSchema,
   ensureRestaurantInventoryTables,
+  initDb,
 } = await import("./server/init-db.js");
 const { ensureLicenceSchema } = await import("./server/licenceSchema.js");
+const { seedDevStaffIfMissing } = await import("./server/seed-dev-staff.js");
+
+try {
+  await initDb();
+  console.log("Base schema initialized (initDb).");
+} catch (err: unknown) {
+  console.warn("initDb() failed, falling back to individual ensure functions:", err);
+}
+
+try {
+  await seedDevStaffIfMissing();
+} catch (err: unknown) {
+  console.warn("Dev staff seed failed:", err);
+}
 
 const ensureFns: Array<[() => Promise<unknown>, string]> = [
   [ensureSalePaymentsTable, "sale_payments table"],
