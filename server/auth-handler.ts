@@ -346,11 +346,11 @@ export async function handleLogin(req: Request, res: Response) {
     `;
         const params: any[] = [emailValue];
         if (!isDev && tenantId) {
-            sql += ` AND s.tenant_id = $1`;
+            sql += ` AND s.tenant_id = $2`;
             params.push(tenantId);
         }
         if (isDev) {
-            sql += ` ORDER BY CASE WHEN s.tenant_id = $1 THEN 0 ELSE 1 END`;
+            sql += ` ORDER BY CASE WHEN s.tenant_id = $2 THEN 0 ELSE 1 END`;
             params.push(DEV_TENANT_ID);
         }
         if (!isDev) {

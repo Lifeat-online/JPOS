@@ -10,7 +10,7 @@ export interface DatabaseBackupSummary {
     createdBy: string | null;
     note: string | null;
     scope: BackupScope;
-    dialect: "postgres" | "mariadb";
+    dialect: "postgres";
     databaseName: string | null;
     schemaName: string | null;
     tableCount: number;
@@ -28,7 +28,7 @@ export interface DatabaseBackupFile {
     note: string | null;
     scope: BackupScope;
     source: {
-        dialect: "postgres" | "mariadb";
+        dialect: "postgres";
         databaseName: string | null;
         schemaName: string | null;
     };
@@ -81,7 +81,7 @@ const DEFAULT_BACKUP_DIR = path.resolve(process.cwd(), "db", "backups");
 function backupDir() {
     return path.resolve(process.env.DB_BACKUP_DIR?.trim() || DEFAULT_BACKUP_DIR);
 }
-function dialect(): "postgres" | "mariadb" {
+function dialect(): "postgres" {
     return "postgres";
 }
 function quoteIdentifier(value: string) {
