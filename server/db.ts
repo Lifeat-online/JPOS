@@ -36,19 +36,8 @@ export type DbConnection = {
   release(): void;
 };
 
-/**
- * Converts MySQL-style `?` positional placeholders to PostgreSQL-style `$1`, `$2`, ...
- * so legacy query strings from db-adapter / db-crud work with node-postgres.
- * Placeholders inside string literals and comments are intentionally left untouched by
- * targeting only bare `?` tokens that are not preceded by a backslash.
- */
-function convertPlaceholders(sql: string): string {
-  let i = 0;
-  return sql.replace(/\?/g, () => `$${++i}`);
-}
-
 export async function query<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
-  const res = await pgPool.query<T>(convertPlaceholders(sql), params);
+  const res = await pgPool.query<T>(sql, params);
   return res.rows;
 }
 
@@ -56,7 +45,7 @@ export async function getConnection() {
   const client = await pgPool.connect();
 
   function wrapQuery<T extends QueryResultRow = any>(sql: string, params: any[] = []) {
-    return client.query<T>(convertPlaceholders(sql), params);
+    return client.query<T>(sql, params);
   }
 
   const conn: DbConnection = {

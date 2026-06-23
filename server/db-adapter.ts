@@ -1,70 +1,58 @@
 import { db, query } from "./db.js";
-import {
-  cashierCanAccessLocation,
-  DEFAULT_INVENTORY_LOCATION_ID,
-  getStaffInventoryLocationAccess,
-  listProductLocationStocks,
-} from "./inventoryLocations.js";
+import { cashierCanAccessLocation, DEFAULT_INVENTORY_LOCATION_ID, getStaffInventoryLocationAccess, listProductLocationStocks, } from "./inventoryLocations.js";
 import { defaultCustomerConsentMap, listTenantCustomerConsents } from "./customerConsents.js";
-
 // ─────────────────────────────────────────────────────────────────────────
 // Helper Functions
 // ─────────────────────────────────────────────────────────────────────────
-
 function safeParse(str: any, fallback: any) {
-  if (typeof str !== 'string') return str || fallback;
-  try {
-    return JSON.parse(str || JSON.stringify(fallback));
-  } catch (e) {
-    console.error('Failed to parse JSON field:', str, e);
-    return fallback;
-  }
+    if (typeof str !== 'string')
+        return str || fallback;
+    try {
+        return JSON.parse(str || JSON.stringify(fallback));
+    }
+    catch (e) {
+        console.error('Failed to parse JSON field:', str, e);
+        return fallback;
+    }
 }
 export async function getTenantIdBySlug(slug: string) {
-  const row = await db
-    .selectFrom("slugs")
-    .select("tenant_id")
-    .where("slug", "=", slug.toLowerCase())
-    .limit(1)
-    .executeTakeFirst();
-  return row?.tenant_id ?? null;
+    const row = await db
+        .selectFrom("slugs")
+        .select("tenant_id")
+        .where("slug", "=", slug.toLowerCase())
+        .limit(1)
+        .executeTakeFirst();
+    return row?.tenant_id ?? null;
 }
-
 export async function getUserByUid(uid: string) {
-  return db
-    .selectFrom("users")
-    .select(["uid", "tenant_id", "email", "name"])
-    .where("uid", "=", uid)
-    .limit(1)
-    .executeTakeFirst();
+    return db
+        .selectFrom("users")
+        .select(["uid", "tenant_id", "email", "name"])
+        .where("uid", "=", uid)
+        .limit(1)
+        .executeTakeFirst();
 }
-
 export async function getStaffTenantByEmail(email: string) {
-  const rows = await query<{
-    tenant_id: string;
-    id: string;
-    name: string;
-    role: string;
-    email: string;
-  }>(
-    `SELECT tenant_id, id, name, role, email FROM staff WHERE email = ? LIMIT 1`,
-    [email]
-  );
-  return rows.length > 0 ? rows[0] : null;
+    const rows = await query<{
+        tenant_id: string;
+        id: string;
+        name: string;
+        role: string;
+        email: string;
+    }>(`SELECT tenant_id, id, name, role, email FROM staff WHERE email = $1 LIMIT 1`, [email]);
+    return rows.length > 0 ? rows[0] : null;
 }
-
-export async function getProductsByTenant(
-  tenantId: string,
-  options: { locationId?: string | null; staffId?: string | null; role?: string | null } = {}
-) {
-  const locationAccess = await getStaffInventoryLocationAccess(tenantId, options.staffId);
-  const activeLocationId = String(options.locationId || locationAccess.defaultLocationId || DEFAULT_INVENTORY_LOCATION_ID);
-  if (!cashierCanAccessLocation(options.role || locationAccess.role, locationAccess, activeLocationId)) {
-    throw new Error("This staff member is not assigned to the selected inventory location.");
-  }
-
-  const products = await query<any>(
-    `
+export async function getProductsByTenant(tenantId: string, options: {
+    locationId?: string | null;
+    staffId?: string | null;
+    role?: string | null;
+} = {}) {
+    const locationAccess = await getStaffInventoryLocationAccess(tenantId, options.staffId);
+    const activeLocationId = String(options.locationId || locationAccess.defaultLocationId || DEFAULT_INVENTORY_LOCATION_ID);
+    if (!cashierCanAccessLocation(options.role || locationAccess.role, locationAccess, activeLocationId)) {
+        throw new Error("This staff member is not assigned to the selected inventory location.");
+    }
+    const products = await query<any>(`
     SELECT
       id,
       name,
@@ -81,57 +69,53 @@ export async function getProductsByTenant(
       created_at AS createdAt,
       updated_at AS updatedAt
     FROM products
-    WHERE tenant_id = ?
+    WHERE tenant_id = $1
     ORDER BY name ASC
-    `,
-    [tenantId]
-  );
-  const locationStocks = await listProductLocationStocks(tenantId);
-  const stocksByProduct = new Map<string, any[]>();
-  for (const stock of locationStocks) {
-    const key = String(stock.productId || "");
-    stocksByProduct.set(key, [...(stocksByProduct.get(key) || []), stock]);
-  }
-
-  return products.map((product: any) => {
-    const stocks = stocksByProduct.get(String(product.id)) || [];
-    const active = stocks.find((stock) => stock.locationId === activeLocationId)
-      || stocks.find((stock) => stock.locationId === DEFAULT_INVENTORY_LOCATION_ID)
-      || null;
-    return {
-      ...product,
-      stock: active ? active.quantity : Number(product.stock || 0),
-      minStock: active ? active.minStock : Number(product.minStock ?? product.min_stock ?? 0),
-      aggregateStock: Number(product.stock || 0),
-      activeLocationId,
-      locationStock: active || null,
-      locationStocks: stocks,
-    };
-  });
+    `, [tenantId]);
+    const locationStocks = await listProductLocationStocks(tenantId);
+    const stocksByProduct = new Map<string, any[]>();
+    for (const stock of locationStocks) {
+        const key = String(stock.productId || "");
+        stocksByProduct.set(key, [...(stocksByProduct.get(key) || []), stock]);
+    }
+    return products.map((product: any) => {
+        const stocks = stocksByProduct.get(String(product.id)) || [];
+        const active = stocks.find((stock) => stock.locationId === activeLocationId)
+            || stocks.find((stock) => stock.locationId === DEFAULT_INVENTORY_LOCATION_ID)
+            || null;
+        return {
+            ...product,
+            stock: active ? active.quantity : Number(product.stock || 0),
+            minStock: active ? active.minStock : Number(product.minStock ?? product.min_stock ?? 0),
+            aggregateStock: Number(product.stock || 0),
+            activeLocationId,
+            locationStock: active || null,
+            locationStocks: stocks,
+        };
+    });
 }
-
 type AppConfigRow = {
-  payfast_merchant_id: string;
-  payfast_merchant_key: string;
-  payfast_passphrase: string;
-  payfast_sandbox: number;
-  business: string | null;
-  categories: string | null;
-  retention_policy?: string | null;
-  slug: string | null;
-  setup_completed: number;
+    payfast_merchant_id: string;
+    payfast_merchant_key: string;
+    payfast_passphrase: string;
+    payfast_sandbox: number;
+    business: string | null;
+    categories: string | null;
+    retention_policy?: string | null;
+    slug: string | null;
+    setup_completed: number;
 };
-
 function isMissingColumnError(error: unknown, column: string) {
-  const anyError = error as { code?: string; message?: string };
-  return anyError?.code === 'ER_BAD_FIELD_ERROR' &&
-    String(anyError.message || '').includes(column);
+    const anyError = error as {
+        code?: string;
+        message?: string;
+    };
+    return anyError?.code === 'ER_BAD_FIELD_ERROR' &&
+        String(anyError.message || '').includes(column);
 }
-
 async function getAppConfigRows(tenantId: string) {
-  try {
-    return await query<AppConfigRow>(
-      `SELECT
+    try {
+        return await query<AppConfigRow>(`SELECT
        payfast_merchant_id,
        payfast_merchant_key,
        payfast_passphrase,
@@ -142,14 +126,13 @@ async function getAppConfigRows(tenantId: string) {
        slug,
        setup_completed
      FROM app_settings
-     WHERE tenant_id = ?
-     LIMIT 1`,
-      [tenantId]
-    );
-  } catch (error) {
-    if (!isMissingColumnError(error, 'retention_policy')) throw error;
-    return query<AppConfigRow>(
-      `SELECT
+     WHERE tenant_id = $1
+     LIMIT 1`, [tenantId]);
+    }
+    catch (error) {
+        if (!isMissingColumnError(error, 'retention_policy'))
+            throw error;
+        return query<AppConfigRow>(`SELECT
        payfast_merchant_id,
        payfast_merchant_key,
        payfast_passphrase,
@@ -159,47 +142,37 @@ async function getAppConfigRows(tenantId: string) {
        slug,
        setup_completed
      FROM app_settings
-     WHERE tenant_id = ?
-     LIMIT 1`,
-      [tenantId]
-    );
-  }
+     WHERE tenant_id = $1
+     LIMIT 1`, [tenantId]);
+    }
 }
-
 export async function getAppConfigByTenant(tenantId: string) {
-  const rows = await getAppConfigRows(tenantId);
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  const row = rows[0];
-  const business =
-    typeof row.business === "string" ? (row.business ? JSON.parse(row.business) : undefined) : (row.business ?? undefined);
-  const categories =
-    typeof row.categories === "string"
-      ? (row.categories ? JSON.parse(row.categories) : undefined)
-      : (row.categories ?? undefined);
-  const retentionPolicy =
-    typeof row.retention_policy === "string"
-      ? (row.retention_policy ? JSON.parse(row.retention_policy) : undefined)
-      : (row.retention_policy ?? undefined);
-  return {
-    payfastMerchantId: row.payfast_merchant_id,
-    payfastMerchantKey: row.payfast_merchant_key,
-    payfastPassphrase: row.payfast_passphrase,
-    payfastSandbox: Boolean(row.payfast_sandbox),
-    business,
-    categories,
-    retentionPolicy,
-    slug: row.slug || undefined,
-    setupCompleted: Boolean(row.setup_completed),
-  };
+    const rows = await getAppConfigRows(tenantId);
+    if (rows.length === 0) {
+        return null;
+    }
+    const row = rows[0];
+    const business = typeof row.business === "string" ? (row.business ? JSON.parse(row.business) : undefined) : (row.business ?? undefined);
+    const categories = typeof row.categories === "string"
+        ? (row.categories ? JSON.parse(row.categories) : undefined)
+        : (row.categories ?? undefined);
+    const retentionPolicy = typeof row.retention_policy === "string"
+        ? (row.retention_policy ? JSON.parse(row.retention_policy) : undefined)
+        : (row.retention_policy ?? undefined);
+    return {
+        payfastMerchantId: row.payfast_merchant_id,
+        payfastMerchantKey: row.payfast_merchant_key,
+        payfastPassphrase: row.payfast_passphrase,
+        payfastSandbox: Boolean(row.payfast_sandbox),
+        business,
+        categories,
+        retentionPolicy,
+        slug: row.slug || undefined,
+        setupCompleted: Boolean(row.setup_completed),
+    };
 }
-
 export async function getCustomersByTenant(tenantId: string) {
-  const rows = await query(
-    `SELECT
+    const rows = await query(`SELECT
        id,
        name,
        email,
@@ -226,36 +199,32 @@ export async function getCustomersByTenant(tenantId: string) {
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM customers
-     WHERE tenant_id = ?
-     ORDER BY name ASC`,
-    [tenantId]
-  );
-  const consentsByCustomer = await listTenantCustomerConsents(tenantId);
-  return rows.map((r: any) => ({
-    ...r,
-    loyaltyPoints: r.loyaltyPoints !== null ? Number(r.loyaltyPoints) : 0,
-    loyaltyMemberStatus: r.loyaltyMemberStatus || "active",
-    loyaltyTierId: r.loyaltyTierId || null,
-    membershipCardId: r.membershipCardId || null,
-    membershipBarcode: r.membershipBarcode || null,
-    membershipStartedAt: r.membershipStartedAt || null,
-    walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
-    accountEnabled: Boolean(r.accountEnabled),
-    accountLimit: r.accountLimit !== null ? Number(r.accountLimit) : 0,
-    accountBalance: r.accountBalance !== null ? Number(r.accountBalance) : 0,
-    discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
-    isAnonymized: Boolean(r.isAnonymized),
-    anonymizedAt: r.anonymizedAt || null,
-    anonymizedBy: r.anonymizedBy || null,
-    anonymizedByName: r.anonymizedByName || null,
-    anonymizationReason: r.anonymizationReason || null,
-    consents: consentsByCustomer.get(String(r.id)) || defaultCustomerConsentMap(),
-  }));
+     WHERE tenant_id = $1
+     ORDER BY name ASC`, [tenantId]);
+    const consentsByCustomer = await listTenantCustomerConsents(tenantId);
+    return rows.map((r: any) => ({
+        ...r,
+        loyaltyPoints: r.loyaltyPoints !== null ? Number(r.loyaltyPoints) : 0,
+        loyaltyMemberStatus: r.loyaltyMemberStatus || "active",
+        loyaltyTierId: r.loyaltyTierId || null,
+        membershipCardId: r.membershipCardId || null,
+        membershipBarcode: r.membershipBarcode || null,
+        membershipStartedAt: r.membershipStartedAt || null,
+        walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
+        accountEnabled: Boolean(r.accountEnabled),
+        accountLimit: r.accountLimit !== null ? Number(r.accountLimit) : 0,
+        accountBalance: r.accountBalance !== null ? Number(r.accountBalance) : 0,
+        discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
+        isAnonymized: Boolean(r.isAnonymized),
+        anonymizedAt: r.anonymizedAt || null,
+        anonymizedBy: r.anonymizedBy || null,
+        anonymizedByName: r.anonymizedByName || null,
+        anonymizationReason: r.anonymizationReason || null,
+        consents: consentsByCustomer.get(String(r.id)) || defaultCustomerConsentMap(),
+    }));
 }
-
 export async function getStaffByTenant(tenantId: string) {
-  const rows = await query(
-    `SELECT
+    const rows = await query(`SELECT
        id,
        name,
        role,
@@ -279,27 +248,22 @@ export async function getStaffByTenant(tenantId: string) {
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM staff
-     WHERE tenant_id = ?
-     ORDER BY name ASC`,
-    [tenantId]
-  );
-  
-  return rows.map((r: any) => ({
-    ...r,
-    permissions: safeParse(r.permissions, {}),
-    assignedSections: safeParse(r.assignedSections, []),
-    assignedCategories: safeParse(r.assignedCategories, []),
-    assignedLocationIds: safeParse(r.assignedLocationIds, []),
-    walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
-    discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
-    metrics: safeParse(r.metrics, {}),
-    badges: safeParse(r.badges, []),
-  }));
+     WHERE tenant_id = $1
+     ORDER BY name ASC`, [tenantId]);
+    return rows.map((r: any) => ({
+        ...r,
+        permissions: safeParse(r.permissions, {}),
+        assignedSections: safeParse(r.assignedSections, []),
+        assignedCategories: safeParse(r.assignedCategories, []),
+        assignedLocationIds: safeParse(r.assignedLocationIds, []),
+        walletBalance: r.walletBalance !== null ? Number(r.walletBalance) : 0,
+        discountPercent: r.discountPercent !== null ? Number(r.discountPercent) : 0,
+        metrics: safeParse(r.metrics, {}),
+        badges: safeParse(r.badges, []),
+    }));
 }
-
 export async function getWorkstationsByTenant(tenantId: string) {
-  return query(
-    `SELECT
+    return query(`SELECT
        id,
        name,
        type,
@@ -307,15 +271,11 @@ export async function getWorkstationsByTenant(tenantId: string) {
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM workstations
-     WHERE tenant_id = ?
-     ORDER BY name ASC`,
-    [tenantId]
-  );
+     WHERE tenant_id = $1
+     ORDER BY name ASC`, [tenantId]);
 }
-
 export async function getActiveSalesByTenant(tenantId: string) {
-  const sales = await query<any>(
-    `
+    const sales = await query<any>(`
       SELECT
         id,
         tenant_id AS tenantId,
@@ -354,18 +314,14 @@ export async function getActiveSalesByTenant(tenantId: string) {
         created_at AS createdAt,
         updated_at AS updatedAt
       FROM sales
-      WHERE tenant_id = ?
+      WHERE tenant_id = $1
         AND (status IN ('completed','pending','open','kitchen') OR transaction_type = 'void')
       ORDER BY created_at DESC
       LIMIT 100
-    `,
-    [tenantId]
-  );
-
-  // Fetch items for each sale
-  for (const sale of sales) {
-    sale.items = await query(
-      `SELECT
+    `, [tenantId]);
+    // Fetch items for each sale
+    for (const sale of sales) {
+        sale.items = await query(`SELECT
          id,
          product_id AS productId,
          product_name AS name,
@@ -379,12 +335,8 @@ export async function getActiveSalesByTenant(tenantId: string) {
          delivered_at AS deliveredAt,
          action_staff_id AS actionStaffId
        FROM sale_items
-       WHERE sale_id = ?`,
-      [sale.id]
-    );
-
-    sale.payments = await query(
-      `SELECT
+       WHERE sale_id = $1`, [sale.id]);
+        sale.payments = await query(`SELECT
          id,
          sale_id AS saleId,
          method,
@@ -402,17 +354,12 @@ export async function getActiveSalesByTenant(tenantId: string) {
          qr_payload AS qrPayload,
          created_at AS createdAt
        FROM sale_payments
-       WHERE sale_id = ?`,
-      [sale.id]
-    );
-  }
-
-  return sales;
+       WHERE sale_id = $1`, [sale.id]);
+    }
+    return sales;
 }
-
 export async function getOpenCashSessionByStaff(tenant_id: string, staff_id: string) {
-  const rows = await query(
-    `SELECT
+    const rows = await query(`SELECT
       id,
       tenant_id,
       staff_id,
@@ -440,18 +387,14 @@ export async function getOpenCashSessionByStaff(tenant_id: string, staff_id: str
       created_at,
       updated_at
      FROM cash_sessions
-     WHERE tenant_id = ?
-       AND staff_id = ?
+     WHERE tenant_id = $1
+       AND staff_id = $2
        AND status = 'open'
-     LIMIT 1`,
-    [tenant_id, staff_id]
-  );
-  return rows.length > 0 ? rows[0] : null;
+     LIMIT 1`, [tenant_id, staff_id]);
+    return rows.length > 0 ? rows[0] : null;
 }
-
 export async function getPayoutRequestsByTenant(tenant_id: string) {
-  return query(
-    `SELECT
+    return query(`SELECT
        id,
        tenant_id AS tenantId,
        staff_id AS staffId,
@@ -463,15 +406,11 @@ export async function getPayoutRequestsByTenant(tenant_id: string) {
        processed_by AS processedBy,
        note
      FROM payout_requests
-     WHERE tenant_id = ?
-     ORDER BY created_at DESC`,
-    [tenant_id]
-  );
+     WHERE tenant_id = $1
+     ORDER BY created_at DESC`, [tenant_id]);
 }
-
 export async function getCustomerPayoutRequestsByTenant(tenant_id: string) {
-  return query(
-    `SELECT
+    return query(`SELECT
        id,
        tenant_id AS tenantId,
        customer_id AS customerId,
@@ -484,15 +423,11 @@ export async function getCustomerPayoutRequestsByTenant(tenant_id: string) {
        processed_by AS processedBy,
        note
      FROM customer_payout_requests
-     WHERE tenant_id = ?
-     ORDER BY created_at DESC`,
-    [tenant_id]
-  );
+     WHERE tenant_id = $1
+     ORDER BY created_at DESC`, [tenant_id]);
 }
-
 export async function getMessagesByTenant(tenantId: string, limit = 100) {
-  return query(
-    `SELECT
+    return query(`SELECT
        id,
        tenant_id AS tenantId,
        channel,
@@ -506,16 +441,12 @@ export async function getMessagesByTenant(tenantId: string, limit = 100) {
        is_system AS isSystem,
        is_system AS isSystemNotification
      FROM messages
-     WHERE tenant_id = ?
+     WHERE tenant_id = $1
      ORDER BY created_at DESC
-     LIMIT ?`,
-    [tenantId, limit]
-  );
+     LIMIT $2`, [tenantId, limit]);
 }
-
 export async function getMessagesByChannel(tenantId: string, channel: string, limit = 100) {
-  return query(
-    `SELECT
+    return query(`SELECT
        id,
        tenant_id AS tenantId,
        channel,
@@ -529,18 +460,14 @@ export async function getMessagesByChannel(tenantId: string, channel: string, li
        is_system AS isSystem,
        is_system AS isSystemNotification
      FROM messages
-     WHERE tenant_id = ? AND channel = ?
+     WHERE tenant_id = $1 AND channel = $2
      ORDER BY created_at ASC
-     LIMIT ?`,
-    [tenantId, channel, limit]
-  );
+     LIMIT $3`, [tenantId, channel, limit]);
 }
-
 export async function getTableSectionsByTenant(tenantId: string) {
-  // Whitelist column names to prevent SQL injection
-  const orderCol = '"order"';
-  return query(
-    `SELECT
+    // Whitelist column names to prevent SQL injection
+    const orderCol = '"order"';
+    return query(`SELECT
        id,
        tenant_id AS tenantId,
        name,
@@ -549,15 +476,11 @@ export async function getTableSectionsByTenant(tenantId: string) {
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM table_sections
-     WHERE tenant_id = ?
-     ORDER BY ${orderCol} ASC`,
-    [tenantId]
-  );
+     WHERE tenant_id = $1
+     ORDER BY ${orderCol} ASC`, [tenantId]);
 }
-
 export async function getRestaurantTablesByTenant(tenantId: string) {
-  return query(
-    `SELECT
+    return query(`SELECT
        id,
        tenant_id AS tenantId,
        label,
@@ -567,8 +490,6 @@ export async function getRestaurantTablesByTenant(tenantId: string) {
        created_at AS createdAt,
        updated_at AS updatedAt
      FROM restaurant_tables
-     WHERE tenant_id = ?
-     ORDER BY label ASC`,
-    [tenantId]
-  );
+     WHERE tenant_id = $1
+     ORDER BY label ASC`, [tenantId]);
 }
