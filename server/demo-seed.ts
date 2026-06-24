@@ -1557,7 +1557,7 @@ async function insertRows(
       })
       .join(", ");
     await conn.query(
-      `INSERT INTO ${table} (${columns.join(", ")}) VALUES ${rowPlaceholders} ON CONFLICT (id) DO NOTHING`,
+      `INSERT INTO ${table} (${columns.join(", ")}) VALUES ${rowPlaceholders}`,
       chunk.flat(),
     );
   }
