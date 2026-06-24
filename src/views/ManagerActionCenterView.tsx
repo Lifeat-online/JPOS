@@ -620,7 +620,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                 type="button"
                 onClick={() => loadActivity()}
                 disabled={!tenantId || activityLoading}
-                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-900"
+                className="inline-flex min-h-10.5 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-900"
               >
                 <Search className="h-4 w-4" />
                 {activityLoading ? 'Searching...' : 'Search'}
@@ -631,7 +631,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                   setActivityFilters(defaultActivityFilters);
                   void loadActivity(defaultActivityFilters);
                 }}
-                className="inline-flex min-h-[42px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-slate-500 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                className="inline-flex min-h-10.5 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-slate-500 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
               >
                 Clear
               </button>
@@ -639,7 +639,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                 type="button"
                 onClick={exportActivity}
                 disabled={!tenantId || activityExporting}
-                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
+                className="inline-flex min-h-10.5 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
               >
                 <Download className="h-4 w-4" />
                 {activityExporting ? 'Exporting...' : 'CSV'}
@@ -647,7 +647,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
               <select
                 value={activityReportAudience}
                 onChange={(event) => setActivityReportAudience(event.target.value as AuditReportAudience)}
-                className="min-h-[42px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-indigo-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                className="min-h-10.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-indigo-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
               >
                 <option value="owner">Owner Report</option>
                 <option value="accountant">Accounting Report</option>
@@ -657,7 +657,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                 type="button"
                 onClick={() => exportAuditReport('csv')}
                 disabled={!tenantId || Boolean(activityReportExporting)}
-                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-indigo-700 shadow-sm transition hover:bg-indigo-100 disabled:opacity-60 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-300"
+                className="inline-flex min-h-10.5 items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-indigo-700 shadow-sm transition hover:bg-indigo-100 disabled:opacity-60 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-300"
               >
                 <Download className="h-4 w-4" />
                 {activityReportExporting === 'csv' ? 'Exporting...' : 'Report CSV'}
@@ -666,7 +666,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                 type="button"
                 onClick={() => exportAuditReport('pdf')}
                 disabled={!tenantId || Boolean(activityReportExporting)}
-                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:opacity-60 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300"
+                className="inline-flex min-h-10.5 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:opacity-60 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300"
               >
                 <Download className="h-4 w-4" />
                 {activityReportExporting === 'pdf' ? 'Exporting...' : 'Report PDF'}
@@ -674,7 +674,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
               <select
                 value={providerReportMethod}
                 onChange={(event) => setProviderReportMethod(event.target.value)}
-                className="min-h-[42px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                className="min-h-10.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
               >
                 <option value="">Provider Methods</option>
                 <option value="card">Card</option>
@@ -685,7 +685,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
               <select
                 value={providerReportStatus}
                 onChange={(event) => setProviderReportStatus(event.target.value)}
-                className="min-h-[42px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                className="min-h-10.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
               >
                 <option value="">Provider Status</option>
                 <option value="pending">Pending</option>
@@ -701,13 +701,13 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                 value={providerReportProvider}
                 onChange={(event) => setProviderReportProvider(event.target.value)}
                 placeholder="Provider"
-                className="min-h-[42px] w-32 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                className="min-h-10.5 w-32 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm outline-none focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
               />
               <button
                 type="button"
                 onClick={() => exportProviderReport('csv')}
                 disabled={!tenantId || Boolean(providerReportExporting)}
-                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-cyan-700 shadow-sm transition hover:bg-cyan-100 disabled:opacity-60 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-300"
+                className="inline-flex min-h-10.5 items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-cyan-700 shadow-sm transition hover:bg-cyan-100 disabled:opacity-60 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-300"
               >
                 <Download className="h-4 w-4" />
                 {providerReportExporting === 'csv' ? 'Exporting...' : 'Provider CSV'}
@@ -716,7 +716,7 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                 type="button"
                 onClick={() => exportProviderReport('pdf')}
                 disabled={!tenantId || Boolean(providerReportExporting)}
-                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:opacity-60 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300"
+                className="inline-flex min-h-10.5 items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:opacity-60 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300"
               >
                 <Download className="h-4 w-4" />
                 {providerReportExporting === 'pdf' ? 'Exporting...' : 'Provider PDF'}
