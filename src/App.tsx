@@ -566,7 +566,7 @@ function DesktopNav({
                         <item.icon className="w-3.5 h-3.5 shrink-0" />
                         {item.label}
                         {badge > 0 && (
-                            <span className="min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
+                            <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
                                 {badge > 99 ? '99+' : badge}
                             </span>
                         )}
@@ -1078,9 +1078,9 @@ export default function App() {
                 updatedAt: new Date().toISOString(),
             };
             if (id) {
-                await apiPut(`/api/tenants/${tenantId}/products/${id}`, cleanData);
+                await apiPut(`/api/mariadb/tenants/${tenantId}/products/${id}`, cleanData);
             } else {
-                await apiPost(`/api/tenants/${tenantId}/products`, {
+                await apiPost(`/api/mariadb/tenants/${tenantId}/products`, {
                     ...cleanData,
                     createdAt: new Date().toISOString(),
                 });
@@ -1099,9 +1099,9 @@ export default function App() {
         try {
             const { id, ...data } = customerModal.customer;
             if (id) {
-                await apiPut(`/api/tenants/${tenantId}/customers/${id}`, data);
+                await apiPut(`/api/mariadb/tenants/${tenantId}/customers/${id}`, data);
             } else {
-                await apiPost(`/api/tenants/${tenantId}/customers`, {
+                await apiPost(`/api/mariadb/tenants/${tenantId}/customers`, {
                     ...data,
                     createdAt: new Date().toISOString(),
                 });
@@ -1121,7 +1121,7 @@ export default function App() {
             const { id, newPassword, ...data } = staffModal.staff;
             let targetId = id;
             if (id) {
-                await apiPut(`/api/tenants/${tenantId}/staff/${id}`, {
+                await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${id}`, {
                     ...data,
                     updatedAt: new Date().toISOString(),
                 });
@@ -1132,7 +1132,7 @@ export default function App() {
                     setIsProcessingCrud(false);
                     return;
                 }
-                const created = await apiPost(`/api/tenants/${tenantId}/staff`, { ...data, status: 'active', createdAt: new Date().toISOString() });
+                const created = await apiPost(`/api/mariadb/tenants/${tenantId}/staff`, { ...data, status: 'active', createdAt: new Date().toISOString() });
                 targetId = (created as any).id;
             }
 
@@ -1159,7 +1159,7 @@ export default function App() {
         if (!tenantId) return;
         setIsProcessingCrud(true);
         try {
-            await apiDelete(`/api/tenants/${tenantId}/staff/${id}`);
+            await apiDelete(`/api/mariadb/tenants/${tenantId}/staff/${id}`);
             setStaffToDelete(null);
         } catch (err) {
             console.error('Failed to delete staff:', err);
@@ -1334,7 +1334,7 @@ export default function App() {
     return (
         <div className="h-screen w-full bg-slate-50 dark:bg-slate-950 flex flex-col font-sans overflow-hidden">
             {/* Header */}
-            <header className="h-14 lg:h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700/60 px-4 lg:px-6 flex items-center justify-between shrink-0 z-40 sticky top-0">
+            <header className="h-14 lg:h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700/60 px-4 lg:px-6 flex items-center justify-between flex-shrink-0 z-40 sticky top-0">
                 <div className="flex items-center gap-4 lg:gap-8">
                     <div className="font-extrabold text-lg lg:text-xl tracking-tighter text-primary shrink-0">MasePOS</div>
                     <DesktopNav
@@ -1408,7 +1408,7 @@ export default function App() {
                             <item.icon className="w-3.5 h-3.5" />
                             {item.label}
                             {badge > 0 && (
-                                <span className="min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
+                                <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
                                     {badge > 99 ? '99+' : badge}
                                 </span>
                             )}
@@ -1707,7 +1707,7 @@ export default function App() {
             <AnimatePresence>
                 {/* Kiosk mode exit button — always visible when kiosk is active */}
                 {isKioskMode && (
-                    <div className="fixed bottom-6 right-6 z-200">
+                    <div className="fixed bottom-6 right-6 z-[200]">
                         <button
                             onClick={exitKioskMode}
                             className="flex items-center gap-2 px-4 py-3 bg-amber-500 text-white rounded-2xl font-black text-sm shadow-2xl shadow-amber-500/40 hover:bg-amber-600 active:scale-95 transition-all border-2 border-amber-400"
