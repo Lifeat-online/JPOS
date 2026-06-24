@@ -3,89 +3,131 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
-  LayoutGrid, History as HistoryIcon, Settings, Package, Banknote,
-  Users, UserCog, Moon, Sun, ShoppingCart, AlertCircle, ChefHat, Utensils, Trophy,
-  ChevronDown, LogOut, Wallet, TabletSmartphone, Maximize2, Minimize2, Monitor, Download,
-  Activity, Building2, BarChart3, Code2, MessageSquare, BrainCircuit,
-  Smartphone, ScanLine, MonitorUp
-} from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { apiPost, apiPut, apiDelete, seedDemoData, clearSeededDemoData, clearAllSales } from './api';
+  LayoutGrid,
+  History as HistoryIcon,
+  Settings,
+  Package,
+  Banknote,
+  Users,
+  UserCog,
+  Moon,
+  Sun,
+  ShoppingCart,
+  AlertCircle,
+  ChefHat,
+  Utensils,
+  Trophy,
+  ChevronDown,
+  LogOut,
+  Wallet,
+  TabletSmartphone,
+  Maximize2,
+  Minimize2,
+  Monitor,
+  Download,
+  Activity,
+  Building2,
+  BarChart3,
+  Code2,
+  MessageSquare,
+  BrainCircuit,
+  Smartphone,
+  ScanLine,
+  MonitorUp,
+} from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { useNavigate, useLocation } from "react-router-dom";
+import {
+  apiPost,
+  apiPut,
+  apiDelete,
+  seedDemoData,
+  clearSeededDemoData,
+  clearAllSales,
+} from "./api";
 
-import { useAuth, type DemoMode } from './hooks/useAuth';
-import { useAppData } from './hooks/useAppData';
-import { useCheckout } from './hooks/useCheckout';
-import { useSocket } from './hooks/useSocket';
-import { usePosStore } from './store/usePosStore';
+import { useAuth, type DemoMode } from "./hooks/useAuth";
+import { useAppData } from "./hooks/useAppData";
+import { useCheckout } from "./hooks/useCheckout";
+import { useSocket } from "./hooks/useSocket";
+import { usePosStore } from "./store/usePosStore";
 
-import { WelcomeView } from './components/WelcomeView';
-import { LoginModal } from './components/LoginModal';
-import { EnrollmentModal } from './components/EnrollmentModal';
-import { SensitiveActionModal } from './components/SensitiveActionModal';
-import { ToastContainer } from './components/ToastContainer';
-import { SetupWizard } from './components/SetupWizard';
-import { PointOfSaleView } from './views/PointOfSaleView';
-import { HistoryView } from './views/HistoryView';
-import { InventoryView } from './views/InventoryView';
-import { StockTakeView } from './views/StockTakeView';
-import { CustomersView } from './views/CustomersView';
-import { AccountsView } from './views/AccountsView';
-import { EventBookingsView } from './views/EventBookingsView';
-import { DeliveryOrdersView } from './views/DeliveryOrdersView';
-import { StaffView } from './views/StaffView';
-import { ReportsView } from './views/ReportsView';
-import { LiveView } from './views/LiveView';
-import { ManagerActionCenterView } from './views/ManagerActionCenterView';
-import { SettingsView } from './components/SettingsView';
-import { CashManagementView } from './components/CashManagementView';
-import { StaffProfileView } from './components/StaffProfileView';
-import { TablesView } from './components/TablesView';
-import { WorkstationView } from './components/WorkstationView';
-import { LeaderboardView } from './views/LeaderboardView';
-import { DevDashboard } from './views/DevDashboard';
-import { WalletAdminView } from './views/WalletAdminView';
-import { ClientPortalView } from './views/ClientPortalView';
-import { PackagesView } from './views/PackagesView';
-import { PublicPackagesPage } from './views/PublicPackagesPage';
-import { AiCopilotView } from './views/AiCopilotView';
-import { useClientPortal } from './hooks/useClientPortal';
-import { TabsView } from './views/TabsView';
-import { HandheldView } from './views/HandheldView';
-import { BarcodeScanner } from './components/BarcodeScanner';
-import { Receipt } from './components/Receipt';
-import { PrinterReadinessPanel } from './components/PrinterReadinessPanel';
-import { RoleOnboardingChecklist } from './components/RoleOnboardingChecklist';
+import { WelcomeView } from "./components/WelcomeView";
+import { LoginModal } from "./components/LoginModal";
+import { EnrollmentModal } from "./components/EnrollmentModal";
+import { SensitiveActionModal } from "./components/SensitiveActionModal";
+import { ToastContainer } from "./components/ToastContainer";
+import { SetupWizard } from "./components/SetupWizard";
+import { PointOfSaleView } from "./views/PointOfSaleView";
+import { HistoryView } from "./views/HistoryView";
+import { InventoryView } from "./views/InventoryView";
+import { StockTakeView } from "./views/StockTakeView";
+import { CustomersView } from "./views/CustomersView";
+import { AccountsView } from "./views/AccountsView";
+import { EventBookingsView } from "./views/EventBookingsView";
+import { DeliveryOrdersView } from "./views/DeliveryOrdersView";
+import { StaffView } from "./views/StaffView";
+import { ReportsView } from "./views/ReportsView";
+import { LiveView } from "./views/LiveView";
+import { ManagerActionCenterView } from "./views/ManagerActionCenterView";
+import { SettingsView } from "./components/SettingsView";
+import { CashManagementView } from "./components/CashManagementView";
+import { StaffProfileView } from "./components/StaffProfileView";
+import { TablesView } from "./components/TablesView";
+import { WorkstationView } from "./components/WorkstationView";
+import { LeaderboardView } from "./views/LeaderboardView";
+import { DevDashboard } from "./views/DevDashboard";
+import { WalletAdminView } from "./views/WalletAdminView";
+import { ClientPortalView } from "./views/ClientPortalView";
+import { PackagesView } from "./views/PackagesView";
+import { PublicPackagesPage } from "./views/PublicPackagesPage";
+import { AiCopilotView } from "./views/AiCopilotView";
+import { useClientPortal } from "./hooks/useClientPortal";
+import { TabsView } from "./views/TabsView";
+import { HandheldView } from "./views/HandheldView";
+import { BarcodeScanner } from "./components/BarcodeScanner";
+import { Receipt } from "./components/Receipt";
+import { PrinterReadinessPanel } from "./components/PrinterReadinessPanel";
+import { RoleOnboardingChecklist } from "./components/RoleOnboardingChecklist";
 
-import { ProductModal } from './components/modals/ProductModal';
-import { CustomerModal } from './components/modals/CustomerModal';
-import { StaffModal } from './components/modals/StaffModal';
-import { TenderModal } from './components/modals/TenderModal';
-import { CheckoutSuccessModal } from './components/modals/CheckoutSuccessModal';
-import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
-import { SplitPaymentModal } from './components/modals/SplitPaymentModal';
+import { ProductModal } from "./components/modals/ProductModal";
+import { CustomerModal } from "./components/modals/CustomerModal";
+import { StaffModal } from "./components/modals/StaffModal";
+import { TenderModal } from "./components/modals/TenderModal";
+import { CheckoutSuccessModal } from "./components/modals/CheckoutSuccessModal";
+import { DeleteConfirmModal } from "./components/modals/DeleteConfirmModal";
+import { SplitPaymentModal } from "./components/modals/SplitPaymentModal";
 
-import { Product, Customer, Staff, Sale } from './types';
-import { DEFAULT_CATEGORY_TREE, getCategoryIcon, getProductImage } from './constants';
-import { toast } from './utils/toast';
-import { buildPosCustomerProfiles } from './utils/customerProfiles';
-import { playRealtimeAttention } from './utils/pushNotifications';
+import { Product, Customer, Staff, Sale } from "./types";
+import {
+  DEFAULT_CATEGORY_TREE,
+  getCategoryIcon,
+  getProductImage,
+} from "./constants";
+import { toast } from "./utils/toast";
+import { buildPosCustomerProfiles } from "./utils/customerProfiles";
+import { playRealtimeAttention } from "./utils/pushNotifications";
 
-import { MessagingView } from './views/MessagingView';
-import { useMessaging } from './hooks/useMessaging';
-import { usePWA } from './hooks/usePWA';
-import { buildNavigation, canAccessView, getDefaultView, type StaffRole } from './permissions';
-import { isDevEmail } from './utils/devMode';
+import { MessagingView } from "./views/MessagingView";
+import { useMessaging } from "./hooks/useMessaging";
+import { usePWA } from "./hooks/usePWA";
+import {
+  buildNavigation,
+  canAccessView,
+  getDefaultView,
+  type StaffRole,
+} from "./permissions";
+import { isDevEmail } from "./utils/devMode";
 
 export { DEFAULT_CATEGORY_TREE };
 
-type CompanionMenuMode = 'terminal' | 'wireless_scanner' | 'pole_display';
+type CompanionMenuMode = "terminal" | "wireless_scanner" | "pole_display";
 
 interface CompanionMenuState {
   companionMode: CompanionMenuMode;
-  assignedCompanionMode: Exclude<CompanionMenuMode, 'terminal'> | null;
+  assignedCompanionMode: Exclude<CompanionMenuMode, "terminal"> | null;
   poleDisplayDeviceId: string | null;
   companionDeviceId: string | null;
   activeTerminalDeviceId: string | null;
@@ -96,9 +138,24 @@ interface CompanionMenuState {
 }
 
 // ── User Menu Component ────────────────────────────────────────────────────────
-function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDarkMode, logout, navigate,
-  isFullscreen, toggleFullscreen, isKioskMode, enterKioskMode, exitKioskMode,
-  canInstall, isInstalled, installApp, onShowInstallGuide, tenantId,
+function UserMenu({
+  user,
+  currentUserStaff,
+  currentUserRole,
+  isDarkMode,
+  setIsDarkMode,
+  logout,
+  navigate,
+  isFullscreen,
+  toggleFullscreen,
+  isKioskMode,
+  enterKioskMode,
+  exitKioskMode,
+  canInstall,
+  isInstalled,
+  installApp,
+  onShowInstallGuide,
+  tenantId,
   showCompanionTools,
 }: {
   user: any;
@@ -122,7 +179,7 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
 }) {
   const [open, setOpen] = useState(false);
   const [companionState, setCompanionState] = useState<CompanionMenuState>({
-    companionMode: 'terminal',
+    companionMode: "terminal",
     assignedCompanionMode: null,
     poleDisplayDeviceId: null,
     companionDeviceId: null,
@@ -137,81 +194,98 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   useEffect(() => {
-    setCompanionState(prev => ({ ...prev, staffName: currentUserStaff?.name || null }));
+    setCompanionState((prev) => ({
+      ...prev,
+      staffName: currentUserStaff?.name || null,
+    }));
   }, [currentUserStaff?.name]);
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<Partial<CompanionMenuState>>).detail || {};
-      setCompanionState(prev => ({ ...prev, ...detail }));
+      const detail =
+        (event as CustomEvent<Partial<CompanionMenuState>>).detail || {};
+      setCompanionState((prev) => ({ ...prev, ...detail }));
     };
-    window.addEventListener('masepos:companion-state', handler);
-    window.addEventListener('jpos:companion-state', handler);
+    window.addEventListener("masepos:companion-state", handler);
+    window.addEventListener("jpos:companion-state", handler);
     return () => {
-      window.removeEventListener('masepos:companion-state', handler);
-      window.removeEventListener('jpos:companion-state', handler);
+      window.removeEventListener("masepos:companion-state", handler);
+      window.removeEventListener("jpos:companion-state", handler);
     };
   }, []);
 
   useEffect(() => {
     if (open) {
-      window.dispatchEvent(new CustomEvent('masepos:companion-state-request'));
-      window.dispatchEvent(new CustomEvent('jpos:companion-state-request'));
+      window.dispatchEvent(new CustomEvent("masepos:companion-state-request"));
+      window.dispatchEvent(new CustomEvent("jpos:companion-state-request"));
     }
   }, [open]);
 
   const changeCompanionMode = (mode: CompanionMenuMode) => {
-    setCompanionState(prev => ({
+    setCompanionState((prev) => ({
       ...prev,
       companionMode: mode,
-      assignedCompanionMode: mode === 'terminal' ? null : prev.assignedCompanionMode,
+      assignedCompanionMode:
+        mode === "terminal" ? null : prev.assignedCompanionMode,
     }));
-    window.dispatchEvent(new CustomEvent('masepos:companion-mode-change', { detail: { mode } }));
-    window.dispatchEvent(new CustomEvent('jpos:companion-mode-change', { detail: { mode } }));
+    window.dispatchEvent(
+      new CustomEvent("masepos:companion-mode-change", { detail: { mode } }),
+    );
+    window.dispatchEvent(
+      new CustomEvent("jpos:companion-mode-change", { detail: { mode } }),
+    );
   };
   const markThisDeviceAsTerminal = () => {
-    setCompanionState(prev => ({
+    setCompanionState((prev) => ({
       ...prev,
-      companionMode: 'terminal',
+      companionMode: "terminal",
       assignedCompanionMode: null,
       activeTerminalDeviceId: prev.companionDeviceId,
     }));
-    window.dispatchEvent(new CustomEvent('masepos:companion-mark-terminal'));
-    window.dispatchEvent(new CustomEvent('jpos:companion-mark-terminal'));
+    window.dispatchEvent(new CustomEvent("masepos:companion-mark-terminal"));
+    window.dispatchEvent(new CustomEvent("jpos:companion-mark-terminal"));
   };
   const isThisActiveTerminal = Boolean(
     companionState.companionDeviceId &&
-    companionState.activeTerminalDeviceId === companionState.companionDeviceId
+    companionState.activeTerminalDeviceId === companionState.companionDeviceId,
   );
 
-  const companionStatus = companionState.companionMode === 'terminal'
-    ? companionState.longTermAssignment
-      ? `${isThisActiveTerminal ? 'Active target for companion devices. ' : ''}Full sale mode on ${companionState.longTermAssignment.workstationName || 'this workstation'}; sales use the open register for one cash-up.${companionState.poleDisplayDeviceId ? ' Display paired.' : ''}`
-      : `${isThisActiveTerminal ? 'Active target for companion devices. ' : ''}Full sale mode on this device; sales use the open register for one cash-up.${companionState.poleDisplayDeviceId ? ' Display paired.' : ''}`
-    : companionState.assignedCompanionMode === 'pole_display'
-      ? 'This device is acting as the customer display.'
-    : companionState.assignedCompanionMode === 'wireless_scanner'
-      ? 'This device scans barcodes to the active terminal.'
-      : 'Choose how this device should help this account.';
+  const companionStatus =
+    companionState.companionMode === "terminal"
+      ? companionState.longTermAssignment
+        ? `${isThisActiveTerminal ? "Active target for companion devices. " : ""}Full sale mode on ${companionState.longTermAssignment.workstationName || "this workstation"}; sales use the open register for one cash-up.${companionState.poleDisplayDeviceId ? " Display paired." : ""}`
+        : `${isThisActiveTerminal ? "Active target for companion devices. " : ""}Full sale mode on this device; sales use the open register for one cash-up.${companionState.poleDisplayDeviceId ? " Display paired." : ""}`
+      : companionState.assignedCompanionMode === "pole_display"
+        ? "This device is acting as the customer display."
+        : companionState.assignedCompanionMode === "wireless_scanner"
+          ? "This device scans barcodes to the active terminal."
+          : "Choose how this device should help this account.";
 
-  const companionModeOptions: Array<{ id: CompanionMenuMode; label: string; icon: React.ElementType; disabled?: boolean }> = [
-    { id: 'terminal', label: 'Terminal', icon: MonitorUp },
-    { id: 'wireless_scanner', label: 'Scanner', icon: ScanLine },
+  const companionModeOptions: Array<{
+    id: CompanionMenuMode;
+    label: string;
+    icon: React.ElementType;
+    disabled?: boolean;
+  }> = [
+    { id: "terminal", label: "Terminal", icon: MonitorUp },
+    { id: "wireless_scanner", label: "Scanner", icon: ScanLine },
     {
-      id: 'pole_display',
-      label: 'Display',
+      id: "pole_display",
+      label: "Display",
       icon: MonitorUp,
       disabled: Boolean(
         companionState.poleDisplayDeviceId &&
-        companionState.poleDisplayDeviceId !== companionState.companionDeviceId &&
-        companionState.assignedCompanionMode !== 'pole_display'
+        companionState.poleDisplayDeviceId !==
+          companionState.companionDeviceId &&
+        companionState.assignedCompanionMode !== "pole_display",
       ),
     },
   ];
@@ -224,14 +298,19 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
         aria-label="User menu"
       >
         <img
-          src={user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'Admin')}&background=2563EB&color=fff`}
+          src={
+            user.photoURL ||
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || "Admin")}&background=2563EB&color=fff`
+          }
           alt="Avatar"
           className="w-8 h-8 rounded-full border-2 border-slate-200 dark:border-slate-700"
         />
         <div className="hidden sm:flex flex-col items-start">
-          <span className="text-xs font-bold text-slate-900 dark:text-white leading-none">{user.displayName?.split(' ')[0] || 'User'}</span>
+          <span className="text-xs font-bold text-slate-900 dark:text-white leading-none">
+            {user.displayName?.split(" ")[0] || "User"}
+          </span>
           <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-            {currentUserRole || 'staff'}
+            {currentUserRole || "staff"}
           </span>
         </div>
       </button>
@@ -242,13 +321,20 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
           <div className="p-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3">
               <img
-                src={user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'Admin')}&background=2563EB&color=fff`}
+                src={
+                  user.photoURL ||
+                  `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || "Admin")}&background=2563EB&color=fff`
+                }
                 alt="Avatar"
                 className="w-10 h-10 rounded-full"
               />
               <div className="min-w-0">
-                <p className="font-bold text-slate-900 dark:text-white text-sm truncate">{user.displayName || 'Admin'}</p>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">{user.email}</p>
+                <p className="font-bold text-slate-900 dark:text-white text-sm truncate">
+                  {user.displayName || "Admin"}
+                </p>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                  {user.email}
+                </p>
               </div>
             </div>
           </div>
@@ -257,11 +343,18 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
           <div className="p-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Wallet Balance</p>
-                <p className="text-xl font-black text-slate-900 dark:text-white mt-0.5">R{walletBalance.toFixed(2)}</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  Wallet Balance
+                </p>
+                <p className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
+                  R{walletBalance.toFixed(2)}
+                </p>
               </div>
               <button
-                onClick={() => { navigate('/profile'); setOpen(false); }}
+                onClick={() => {
+                  navigate("/profile");
+                  setOpen(false);
+                }}
                 className="px-3 py-1.5 bg-primary/10 text-primary rounded-xl text-xs font-bold hover:bg-primary/20 transition-all"
               >
                 My Profile
@@ -275,86 +368,113 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
           </div>
 
           {showCompanionTools && (
-          <div className="p-3 border-b border-slate-100 dark:border-slate-800">
-            <div className="flex items-start gap-3">
-              <Smartphone className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Companion device</p>
-                <p className="mt-0.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 leading-snug">{companionStatus}</p>
+            <div className="p-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-start gap-3">
+                <Smartphone className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
+                    Companion device
+                  </p>
+                  <p className="mt-0.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 leading-snug">
+                    {companionStatus}
+                  </p>
+                </div>
               </div>
-            </div>
-            <div className="mt-3 grid grid-cols-4 gap-1.5">
-              {companionModeOptions.map(option => (
-                <button
-                  key={option.id}
-                  type="button"
-                  disabled={Boolean(option.disabled)}
-                  onClick={() => changeCompanionMode(option.id)}
-                  title={option.disabled ? 'A display is already paired to this terminal' : option.label}
-                  className={`h-10 rounded-xl text-[9px] font-black uppercase tracking-widest flex flex-col items-center justify-center gap-0.5 border transition-all disabled:opacity-40 ${
-                    companionState.companionMode === option.id
-                      ? 'bg-primary text-white border-primary shadow-sm'
-                      : 'bg-slate-50 dark:bg-slate-950/50 text-slate-500 dark:text-slate-300 border-slate-100 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <option.icon className="w-3.5 h-3.5" />
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={markThisDeviceAsTerminal}
-              disabled={isThisActiveTerminal}
-              className={`mt-3 w-full h-11 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 border transition-all disabled:cursor-default ${
-                isThisActiveTerminal
-                  ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300'
-                  : 'bg-slate-900 dark:bg-white border-slate-900 dark:border-white text-white dark:text-slate-950 active:scale-95'
-              }`}
-            >
-              <MonitorUp className="w-4 h-4" />
-              {isThisActiveTerminal ? 'Active companion target' : 'Use as companion target'}
-            </button>
-            {companionState.assignedCompanionMode === 'wireless_scanner' && (
+              <div className="mt-3 grid grid-cols-4 gap-1.5">
+                {companionModeOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    disabled={Boolean(option.disabled)}
+                    onClick={() => changeCompanionMode(option.id)}
+                    title={
+                      option.disabled
+                        ? "A display is already paired to this terminal"
+                        : option.label
+                    }
+                    className={`h-10 rounded-xl text-[9px] font-black uppercase tracking-widest flex flex-col items-center justify-center gap-0.5 border transition-all disabled:opacity-40 ${
+                      companionState.companionMode === option.id
+                        ? "bg-primary text-white border-primary shadow-sm"
+                        : "bg-slate-50 dark:bg-slate-950/50 text-slate-500 dark:text-slate-300 border-slate-100 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    <option.icon className="w-3.5 h-3.5" />
+                    {option.label}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('masepos:companion-open-scanner'));
-                  window.dispatchEvent(new CustomEvent('jpos:companion-open-scanner'));
-                }}
-                className="mt-3 w-full h-11 rounded-xl bg-primary text-white text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95"
+                onClick={markThisDeviceAsTerminal}
+                disabled={isThisActiveTerminal}
+                className={`mt-3 w-full h-11 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 border transition-all disabled:cursor-default ${
+                  isThisActiveTerminal
+                    ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300"
+                    : "bg-slate-900 dark:bg-white border-slate-900 dark:border-white text-white dark:text-slate-950 active:scale-95"
+                }`}
               >
-                <ScanLine className="w-4 h-4" />
-                Scan to terminal
+                <MonitorUp className="w-4 h-4" />
+                {isThisActiveTerminal
+                  ? "Active companion target"
+                  : "Use as companion target"}
               </button>
-            )}
-          </div>
+              {companionState.assignedCompanionMode === "wireless_scanner" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent("masepos:companion-open-scanner"),
+                    );
+                    window.dispatchEvent(
+                      new CustomEvent("jpos:companion-open-scanner"),
+                    );
+                  }}
+                  className="mt-3 w-full h-11 rounded-xl bg-primary text-white text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <ScanLine className="w-4 h-4" />
+                  Scan to terminal
+                </button>
+              )}
+            </div>
           )}
 
           {/* Actions */}
           <div className="p-2">
             {/* Fullscreen toggle */}
             <button
-              onClick={() => { toggleFullscreen(); }}
+              onClick={() => {
+                toggleFullscreen();
+              }}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
             >
-              {isFullscreen
-                ? <><Minimize2 className="w-4 h-4 text-slate-500" /> Exit Fullscreen</>
-                : <><Maximize2 className="w-4 h-4 text-slate-500" /> Fullscreen</>
-              }
+              {isFullscreen ? (
+                <>
+                  <Minimize2 className="w-4 h-4 text-slate-500" /> Exit
+                  Fullscreen
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-4 h-4 text-slate-500" /> Fullscreen
+                </>
+              )}
             </button>
 
             {/* Kiosk mode — fullscreen + Escape blocked */}
             <button
-              onClick={() => { isKioskMode ? exitKioskMode() : enterKioskMode(); setOpen(false); }}
+              onClick={() => {
+                isKioskMode ? exitKioskMode() : enterKioskMode();
+                setOpen(false);
+              }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                 isKioskMode
-                  ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  ? "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                  : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
               }`}
             >
-              <Monitor className={`w-4 h-4 ${isKioskMode ? 'text-amber-500' : 'text-slate-500'}`} />
-              {isKioskMode ? 'Exit Kiosk Mode' : 'Kiosk Mode'}
+              <Monitor
+                className={`w-4 h-4 ${isKioskMode ? "text-amber-500" : "text-slate-500"}`}
+              />
+              {isKioskMode ? "Exit Kiosk Mode" : "Kiosk Mode"}
               {isKioskMode && (
                 <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 uppercase tracking-widest">
                   Active
@@ -364,21 +484,33 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
 
             {/* Dark mode */}
             <button
-              onClick={() => { setIsDarkMode(!isDarkMode); }}
+              onClick={() => {
+                setIsDarkMode(!isDarkMode);
+              }}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
             >
-              {isDarkMode
-                ? <><Sun className="w-4 h-4 text-amber-500" /> Light Mode</>
-                : <><Moon className="w-4 h-4 text-slate-500" /> Dark Mode</>
-              }
+              {isDarkMode ? (
+                <>
+                  <Sun className="w-4 h-4 text-amber-500" /> Light Mode
+                </>
+              ) : (
+                <>
+                  <Moon className="w-4 h-4 text-slate-500" /> Dark Mode
+                </>
+              )}
             </button>
 
             {/* Install PWA */}
             {!isInstalled && (
               <button
                 onClick={() => {
-                  if (canInstall) { installApp(); setOpen(false); }
-                  else { onShowInstallGuide(); setOpen(false); }
+                  if (canInstall) {
+                    installApp();
+                    setOpen(false);
+                  } else {
+                    onShowInstallGuide();
+                    setOpen(false);
+                  }
                 }}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-primary hover:bg-primary/10 transition-all"
               >
@@ -398,7 +530,11 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
 
             {/* Sign out */}
             <button
-              onClick={() => { logout(); navigate('/'); setOpen(false); }}
+              onClick={() => {
+                logout();
+                navigate("/");
+                setOpen(false);
+              }}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
             >
               <LogOut className="w-4 h-4" />
@@ -410,9 +546,23 @@ function UserMenu({ user, currentUserStaff, currentUserRole, isDarkMode, setIsDa
     </div>
   );
 }
-interface NavItem { id: string; icon: React.ElementType; label: string; group?: string }
+interface NavItem {
+  id: string;
+  icon: React.ElementType;
+  label: string;
+  group?: string;
+}
 
-function DesktopNav({ primaryNav, secondaryNav, isDev, view, unreadCount, workstationCount, tabsCount, navigate }: {
+function DesktopNav({
+  primaryNav,
+  secondaryNav,
+  isDev,
+  view,
+  unreadCount,
+  workstationCount,
+  tabsCount,
+  navigate,
+}: {
   primaryNav: NavItem[];
   secondaryNav: NavItem[];
   isDev: boolean;
@@ -428,48 +578,57 @@ function DesktopNav({ primaryNav, secondaryNav, isDev, view, unreadCount, workst
   // Close dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
         setMoreOpen(false);
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const secondaryActive = secondaryNav.some(i => i.id === view);
+  const secondaryActive = secondaryNav.some((i) => i.id === view);
 
   // Group secondary items
-  const groups = secondaryNav.reduce((acc, item) => {
-    const g = item.group || 'Other';
-    if (!acc[g]) acc[g] = [];
-    acc[g].push(item);
-    return acc;
-  }, {} as Record<string, NavItem[]>);
+  const groups = secondaryNav.reduce(
+    (acc, item) => {
+      const g = item.group || "Other";
+      if (!acc[g]) acc[g] = [];
+      acc[g].push(item);
+      return acc;
+    },
+    {} as Record<string, NavItem[]>,
+  );
 
   return (
     <nav className="hidden lg:flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
       {/* Primary items */}
-      {primaryNav.map(item => {
+      {primaryNav.map((item) => {
         const badge =
-          item.id === 'messages' && unreadCount > 0 ? unreadCount :
-          item.id === 'workstation' && workstationCount > 0 ? workstationCount :
-          item.id === 'tabs' && tabsCount > 0 ? tabsCount :
-          0;
+          item.id === "messages" && unreadCount > 0
+            ? unreadCount
+            : item.id === "workstation" && workstationCount > 0
+              ? workstationCount
+              : item.id === "tabs" && tabsCount > 0
+                ? tabsCount
+                : 0;
         return (
           <button
             key={item.id}
             onClick={() => navigate(`/${item.id}`)}
             className={`relative px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
               view === item.id
-                ? 'bg-white dark:bg-slate-900 text-primary shadow-sm'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                ? "bg-white dark:bg-slate-900 text-primary shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
             }`}
           >
             <item.icon className="w-3.5 h-3.5 shrink-0" />
             {item.label}
             {badge > 0 && (
               <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
-                {badge > 99 ? '99+' : badge}
+                {badge > 99 ? "99+" : badge}
               </span>
             )}
           </button>
@@ -488,41 +647,51 @@ function DesktopNav({ primaryNav, secondaryNav, isDev, view, unreadCount, workst
             onClick={() => setMoreOpen(!moreOpen)}
             className={`relative px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
               secondaryActive || moreOpen
-                ? 'bg-white dark:bg-slate-900 text-primary shadow-sm'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                ? "bg-white dark:bg-slate-900 text-primary shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
             }`}
           >
             {secondaryActive
               ? (() => {
-                  const active = secondaryNav.find(i => i.id === view);
+                  const active = secondaryNav.find((i) => i.id === view);
                   return active ? (
                     <>
                       <active.icon className="w-3.5 h-3.5 shrink-0" />
                       {active.label}
                     </>
-                  ) : 'More'
+                  ) : (
+                    "More"
+                  );
                 })()
-              : 'More'
-            }
-            <ChevronDown className={`w-3 h-3 transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
+              : "More"}
+            <ChevronDown
+              className={`w-3 h-3 transition-transform ${moreOpen ? "rotate-180" : ""}`}
+            />
           </button>
 
           {moreOpen && (
             <div className="absolute top-full left-0 mt-2 w-52 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700/60 overflow-hidden z-50 py-1">
               {Object.entries(groups).map(([groupName, items], gIdx) => (
                 <div key={groupName}>
-                  {gIdx > 0 && <div className="h-px bg-slate-100 dark:bg-slate-800 mx-3 my-1" />}
+                  {gIdx > 0 && (
+                    <div className="h-px bg-slate-100 dark:bg-slate-800 mx-3 my-1" />
+                  )}
                   <div className="px-3 py-1.5">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">{groupName}</span>
+                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                      {groupName}
+                    </span>
                   </div>
-                  {items.map(item => (
+                  {items.map((item) => (
                     <button
                       key={item.id}
-                      onClick={() => { navigate(`/${item.id}`); setMoreOpen(false); }}
+                      onClick={() => {
+                        navigate(`/${item.id}`);
+                        setMoreOpen(false);
+                      }}
                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-all ${
                         view === item.id
-                          ? 'bg-primary/10 text-primary'
-                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                          ? "bg-primary/10 text-primary"
+                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
                       }`}
                     >
                       <item.icon className="w-4 h-4 shrink-0" />
@@ -541,11 +710,11 @@ function DesktopNav({ primaryNav, secondaryNav, isDev, view, unreadCount, workst
         <>
           <div className="w-px h-5 bg-slate-300 dark:bg-slate-600 mx-1" />
           <button
-            onClick={() => navigate('/dev')}
+            onClick={() => navigate("/dev")}
             className={`px-2 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
-              view === 'dev'
-                ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 shadow-sm'
-                : 'text-slate-400 dark:text-slate-500 hover:text-violet-600 dark:hover:text-violet-400'
+              view === "dev"
+                ? "bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 shadow-sm"
+                : "text-slate-400 dark:text-slate-500 hover:text-violet-600 dark:hover:text-violet-400"
             }`}
             title="Dev Dashboard"
           >
@@ -560,61 +729,127 @@ function DesktopNav({ primaryNav, secondaryNav, isDev, view, unreadCount, workst
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
-  const view = location.pathname.substring(1) || 'pos';
+  const view = location.pathname.substring(1) || "pos";
 
-  const { user, authLoading, login, startDemo, enroll, logout, error: authError, clearError } = useAuth();
+  const {
+    user,
+    authLoading,
+    login,
+    startDemo,
+    enroll,
+    logout,
+    error: authError,
+    clearError,
+  } = useAuth();
   const clientPortal = useClientPortal(user);
 
   // Track which login mode was chosen so we can route correctly
-  const [loginMode, setLoginMode] = useState<'staff' | 'client' | null>(null);
+  const [loginMode, setLoginMode] = useState<"staff" | "client" | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [enrollmentModalOpen, setEnrollmentModalOpen] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [enrollmentLoading, setEnrollmentLoading] = useState(false);
 
-  const handleAdminLogin = () => { setLoginMode('staff'); clearError(); setLoginModalOpen(true); };
-  const handleTryNow = async (mode: DemoMode = 'restaurant') => { setLoginMode('staff'); clearError(); await startDemo(mode); };
-  const handleStartSetup = () => { setLoginMode('staff'); clearError(); setEnrollmentModalOpen(true); };
-  const handleClientLogin = async () => { setLoginMode('client'); await login(); };
-  const handleLogout = async () => { setLoginMode(null); await logout(); navigate('/'); };
+  const handleAdminLogin = () => {
+    setLoginMode("staff");
+    clearError();
+    setLoginModalOpen(true);
+  };
+  const handleTryNow = async (mode: DemoMode = "restaurant") => {
+    setLoginMode("staff");
+    clearError();
+    await startDemo(mode);
+  };
+  const handleStartSetup = () => {
+    setLoginMode("staff");
+    clearError();
+    setEnrollmentModalOpen(true);
+  };
+  const handleClientLogin = async () => {
+    setLoginMode("client");
+    await login();
+  };
+  const handleLogout = async () => {
+    setLoginMode(null);
+    await logout();
+    navigate("/");
+  };
   // Called by LoginModal on form submit
-  const handleLoginSubmit = async (email: string, password: string, twoFactorCode?: string) => {
+  const handleLoginSubmit = async (
+    email: string,
+    password: string,
+    twoFactorCode?: string,
+  ) => {
     setLoginLoading(true);
-    const ok = await login({ email, password, ...(twoFactorCode ? { twoFactorCode } : {}) });
+    const ok = await login({
+      email,
+      password,
+      ...(twoFactorCode ? { twoFactorCode } : {}),
+    });
     setLoginLoading(false);
     // Modal stays open on error; useAuth sets authError.
     // On success user becomes non-null, App re-renders past the WelcomeView.
     if (ok) setLoginModalOpen(false);
   };
-  const handleEnrollmentSubmit = async (details: { businessName: string; ownerName: string; email: string; password: string; packageTier: 'free' | 'starter' | 'business' | 'whitelabel' }) => {
+  const handleEnrollmentSubmit = async (details: {
+    businessName: string;
+    ownerName: string;
+    email: string;
+    password: string;
+    packageTier: "free" | "starter" | "business" | "whitelabel";
+  }) => {
     setEnrollmentLoading(true);
     const ok = await enroll(details);
     setEnrollmentLoading(false);
     if (ok) setEnrollmentModalOpen(false);
   };
   const {
-    products, customers, staff, sales, config, setConfig,
-    workstations, activeSession, currentUserStaff, currentUserRole,
-    tableSections, restaurantTables,
-    refreshSales, refreshProducts, refreshCustomers, refreshStaff,
-    tenantLoading, configLoading, isStaffLoading,
+    products,
+    customers,
+    staff,
+    sales,
+    config,
+    setConfig,
+    workstations,
+    activeSession,
+    currentUserStaff,
+    currentUserRole,
+    tableSections,
+    restaurantTables,
+    refreshSales,
+    refreshProducts,
+    refreshCustomers,
+    refreshStaff,
+    tenantLoading,
+    configLoading,
+    isStaffLoading,
   } = useAppData(authLoading ? null : user);
 
-  const { cart, setCart, setActiveCategory, setSelectedCustomerId, setActiveTableNumber, setActiveOrderId, selectedCustomerId, activeTableNumber } = usePosStore();
-  const setIsCartOpen = usePosStore(s => s.setIsCartOpen);
-  const storeActiveSession = usePosStore(s => s.activeSession);
-  const addToCart = usePosStore(s => s.addToCart);
-  const tenantId = usePosStore(s => s.tenantId);
+  const {
+    cart,
+    setCart,
+    setActiveCategory,
+    setSelectedCustomerId,
+    setActiveTableNumber,
+    setActiveOrderId,
+    selectedCustomerId,
+    activeTableNumber,
+  } = usePosStore();
+  const setIsCartOpen = usePosStore((s) => s.setIsCartOpen);
+  const storeActiveSession = usePosStore((s) => s.activeSession);
+  const addToCart = usePosStore((s) => s.addToCart);
+  const tenantId = usePosStore((s) => s.tenantId);
   const effectiveActiveSession = storeActiveSession || activeSession;
   const posCustomerProfiles = useMemo(
     () => buildPosCustomerProfiles(customers, staff),
-    [customers, staff]
+    [customers, staff],
   );
   const [activeAccountDeviceCount, setActiveAccountDeviceCount] = useState(1);
-  const [activeAccountTerminalDeviceId, setActiveAccountTerminalDeviceId] = useState<string | null>(null);
+  const [activeAccountTerminalDeviceId, setActiveAccountTerminalDeviceId] =
+    useState<string | null>(null);
   const accountDeviceId = useMemo(() => {
-    const staffId = currentUserStaff?.id || user?.id || 'staff';
-    const key = `companion-device-id:${tenantId || 'local'}:${staffId}`;
+    const staffId = currentUserStaff?.id || user?.id || "staff";
+    const key = `companion-device-id:${tenantId || "local"}:${staffId}`;
     try {
       const existing = window.localStorage.getItem(key);
       if (existing) return existing;
@@ -634,28 +869,48 @@ export default function App() {
   const showCompanionTools = activeAccountDeviceCount > 1;
 
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent('masepos:account-terminal-presence', {
-      detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
-    }));
-    window.dispatchEvent(new CustomEvent('jpos:account-terminal-presence', {
-      detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
-    }));
+    window.dispatchEvent(
+      new CustomEvent("masepos:account-terminal-presence", {
+        detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
+      }),
+    );
+    window.dispatchEvent(
+      new CustomEvent("jpos:account-terminal-presence", {
+        detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
+      }),
+    );
   }, [activeAccountTerminalDeviceId]);
 
   useEffect(() => {
     const resendPresence = () => {
-      window.dispatchEvent(new CustomEvent('masepos:companion-state', {
-        detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
-      }));
-      window.dispatchEvent(new CustomEvent('jpos:companion-state', {
-        detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("masepos:companion-state", {
+          detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
+        }),
+      );
+      window.dispatchEvent(
+        new CustomEvent("jpos:companion-state", {
+          detail: { activeTerminalDeviceId: activeAccountTerminalDeviceId },
+        }),
+      );
     };
-    window.addEventListener('masepos:account-terminal-presence-request', resendPresence);
-    window.addEventListener('jpos:account-terminal-presence-request', resendPresence);
+    window.addEventListener(
+      "masepos:account-terminal-presence-request",
+      resendPresence,
+    );
+    window.addEventListener(
+      "jpos:account-terminal-presence-request",
+      resendPresence,
+    );
     return () => {
-      window.removeEventListener('masepos:account-terminal-presence-request', resendPresence);
-      window.removeEventListener('jpos:account-terminal-presence-request', resendPresence);
+      window.removeEventListener(
+        "masepos:account-terminal-presence-request",
+        resendPresence,
+      );
+      window.removeEventListener(
+        "jpos:account-terminal-presence-request",
+        resendPresence,
+      );
     };
   }, [activeAccountTerminalDeviceId]);
 
@@ -666,25 +921,39 @@ export default function App() {
     const onPresence = (payload: any) => {
       setActiveAccountDeviceCount(Number(payload?.activeDeviceCount || 1));
       setActiveAccountTerminalDeviceId(payload?.activeTerminalDeviceId || null);
-      window.dispatchEvent(new CustomEvent('masepos:companion-state', {
-        detail: { activeTerminalDeviceId: payload?.activeTerminalDeviceId || null },
-      }));
-      window.dispatchEvent(new CustomEvent('jpos:companion-state', {
-        detail: { activeTerminalDeviceId: payload?.activeTerminalDeviceId || null },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("masepos:companion-state", {
+          detail: {
+            activeTerminalDeviceId: payload?.activeTerminalDeviceId || null,
+          },
+        }),
+      );
+      window.dispatchEvent(
+        new CustomEvent("jpos:companion-state", {
+          detail: {
+            activeTerminalDeviceId: payload?.activeTerminalDeviceId || null,
+          },
+        }),
+      );
     };
 
-    socket.on('account_device_presence', onPresence);
-    accountPresenceSocket.emit('account_device_active', {
+    socket.on("account_device_presence", onPresence);
+    accountPresenceSocket.emit("account_device_active", {
       tenantId,
       staffId: currentUserStaff.id,
       deviceId: accountDeviceId,
     });
 
     return () => {
-      socket.off('account_device_presence', onPresence);
+      socket.off("account_device_presence", onPresence);
     };
-  }, [accountPresenceSocket.socket, accountPresenceSocket.emit, tenantId, currentUserStaff?.id, accountDeviceId]);
+  }, [
+    accountPresenceSocket.socket,
+    accountPresenceSocket.emit,
+    tenantId,
+    currentUserStaff?.id,
+    accountDeviceId,
+  ]);
 
   useEffect(() => {
     const socket = accountPresenceSocket.socket;
@@ -699,42 +968,63 @@ export default function App() {
 
     const onSalesUpdate = (payload: any) => {
       const saleId = payload?.sale?.id || payload?.saleId || Date.now();
-      alertOnce(`sale:${payload?.type || 'update'}:${saleId}`, [150, 70, 150]);
+      alertOnce(`sale:${payload?.type || "update"}:${saleId}`, [150, 70, 150]);
     };
 
     const onMessagesUpdate = (payload: any) => {
       const message = payload?.message;
-      if (!message?.isSystemNotification && !message?.isSystem && message?.senderRole !== 'workstation') return;
+      if (
+        !message?.isSystemNotification &&
+        !message?.isSystem &&
+        message?.senderRole !== "workstation"
+      )
+        return;
       alertOnce(`message:${message.id || Date.now()}`, [120, 60, 120]);
     };
 
     accountPresenceSocket.joinMessages(tenantId);
-    socket.on('sales_update', onSalesUpdate);
-    socket.on('messages_update', onMessagesUpdate);
+    socket.on("sales_update", onSalesUpdate);
+    socket.on("messages_update", onMessagesUpdate);
 
     return () => {
-      socket.off('sales_update', onSalesUpdate);
-      socket.off('messages_update', onMessagesUpdate);
+      socket.off("sales_update", onSalesUpdate);
+      socket.off("messages_update", onMessagesUpdate);
       accountPresenceSocket.leaveMessages(tenantId);
     };
-  }, [accountPresenceSocket.socket, accountPresenceSocket.joinMessages, accountPresenceSocket.leaveMessages, tenantId]);
+  }, [
+    accountPresenceSocket.socket,
+    accountPresenceSocket.joinMessages,
+    accountPresenceSocket.leaveMessages,
+    tenantId,
+  ]);
 
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return;
+    if (!("serviceWorker" in navigator)) return;
 
     const onServiceWorkerMessage = (event: MessageEvent) => {
       const message = event.data || {};
-      if (message.type === 'masepos-push-notification' || message.type === 'jpos-push-notification') {
+      if (
+        message.type === "masepos-push-notification" ||
+        message.type === "jpos-push-notification"
+      ) {
         playRealtimeAttention([90, 45, 90]);
       }
-      if ((message.type === 'masepos-notification-open' || message.type === 'jpos-notification-open') && message.url) {
-        const target = String(message.url || '/');
-        navigate(target.startsWith('/') ? target : `/${target}`);
+      if (
+        (message.type === "masepos-notification-open" ||
+          message.type === "jpos-notification-open") &&
+        message.url
+      ) {
+        const target = String(message.url || "/");
+        navigate(target.startsWith("/") ? target : `/${target}`);
       }
     };
 
-    navigator.serviceWorker.addEventListener('message', onServiceWorkerMessage);
-    return () => navigator.serviceWorker.removeEventListener('message', onServiceWorkerMessage);
+    navigator.serviceWorker.addEventListener("message", onServiceWorkerMessage);
+    return () =>
+      navigator.serviceWorker.removeEventListener(
+        "message",
+        onServiceWorkerMessage,
+      );
   }, [navigate]);
 
   // Sync server-side data into the Zustand store so components can read it without prop drilling
@@ -754,21 +1044,41 @@ export default function App() {
     usePosStore.getState().setWorkstations(workstations);
   }, [workstations]);
 
-  const checkout = useCheckout({ user, tenantId, currentUserStaff, customers: posCustomerProfiles, activeSession: effectiveActiveSession, config, refreshSales, refreshCustomers });
+  const checkout = useCheckout({
+    user,
+    tenantId,
+    currentUserStaff,
+    customers: posCustomerProfiles,
+    activeSession: effectiveActiveSession,
+    config,
+    refreshSales,
+    refreshCustomers,
+  });
 
   // Messaging
   const messaging = useMessaging({ user, tenantId, currentUserStaff, staff });
 
   // PWA + Kiosk
-  const { isKioskMode, enterKioskMode, exitKioskMode, isFullscreen, toggleFullscreen, canInstall, isInstalled, installApp } = usePWA();
+  const {
+    isKioskMode,
+    enterKioskMode,
+    exitKioskMode,
+    isFullscreen,
+    toggleFullscreen,
+    canInstall,
+    isInstalled,
+    installApp,
+  } = usePWA();
 
   // Dark mode
   const [isDarkMode, setIsDarkMode] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('darkMode') === 'true' : false
+    typeof window !== "undefined"
+      ? localStorage.getItem("darkMode") === "true"
+      : false,
   );
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDarkMode);
-    localStorage.setItem('darkMode', String(isDarkMode));
+    document.documentElement.classList.toggle("dark", isDarkMode);
+    localStorage.setItem("darkMode", String(isDarkMode));
   }, [isDarkMode]);
 
   // Barcode scanner
@@ -782,9 +1092,18 @@ export default function App() {
   const { searchQuery, setSearchQuery } = usePosStore();
 
   // Modals
-  const [productModal, setProductModal] = useState<{ isOpen: boolean; product: Partial<Product> | null }>({ isOpen: false, product: null });
-  const [customerModal, setCustomerModal] = useState<{ isOpen: boolean; customer: Partial<Customer> | null }>({ isOpen: false, customer: null });
-  const [staffModal, setStaffModal] = useState<{ isOpen: boolean; staff: Partial<Staff> | null }>({ isOpen: false, staff: null });
+  const [productModal, setProductModal] = useState<{
+    isOpen: boolean;
+    product: Partial<Product> | null;
+  }>({ isOpen: false, product: null });
+  const [customerModal, setCustomerModal] = useState<{
+    isOpen: boolean;
+    customer: Partial<Customer> | null;
+  }>({ isOpen: false, customer: null });
+  const [staffModal, setStaffModal] = useState<{
+    isOpen: boolean;
+    staff: Partial<Staff> | null;
+  }>({ isOpen: false, staff: null });
   const [staffToDelete, setStaffToDelete] = useState<string | null>(null);
   const [isProcessingCrud, setIsProcessingCrud] = useState(false);
 
@@ -792,41 +1111,56 @@ export default function App() {
   const categoryTree = config?.categories || DEFAULT_CATEGORY_TREE;
   const SECTIONS = Object.keys(categoryTree);
   const CATEGORIES = useMemo(() => {
-    const cats = SECTIONS.flatMap(sec => Object.keys(categoryTree[sec]));
-    return ['All', ...cats];
+    const cats = SECTIONS.flatMap((sec) => Object.keys(categoryTree[sec]));
+    return ["All", ...cats];
   }, [categoryTree]);
 
   // Count pending/accepted workstation items across all active orders
   const pendingWorkstationCount = useMemo(() => {
     return sales.reduce((count, sale) => {
-      if (sale.status !== 'kitchen' && sale.status !== 'open') return count;
-      return count + sale.items.filter(item => {
-        const o = item as any;
-        return o.workstationId && (o.status === 'pending' || o.status === 'accepted');
-      }).length;
+      if (sale.status !== "kitchen" && sale.status !== "open") return count;
+      return (
+        count +
+        sale.items.filter((item) => {
+          const o = item as any;
+          return (
+            o.workstationId &&
+            (o.status === "pending" || o.status === "accepted")
+          );
+        }).length
+      );
     }, 0);
   }, [sales]);
 
   // Count open bar tabs
   const openTabsCount = useMemo(
-    () => sales.filter(s => s.isTab && s.status === 'open').length,
-    [sales]
+    () => sales.filter((s) => s.isTab && s.status === "open").length,
+    [sales],
   );
 
   const receiptEligibleSales = useMemo(() => {
-    return sales.filter(sale => {
-      if (sale.status !== 'completed') return false;
-      if (currentUserRole === 'cashier' && (sale as any).staffId !== currentUserStaff?.id) return false;
+    return sales.filter((sale) => {
+      if (sale.status !== "completed") return false;
+      if (
+        currentUserRole === "cashier" &&
+        (sale as any).staffId !== currentUserStaff?.id
+      )
+        return false;
       return true;
     });
   }, [sales, currentUserRole, currentUserStaff?.id]);
 
   const lastReceiptSale = useMemo(() => {
-    return [...receiptEligibleSales].sort((a, b) => {
-      const bTime = new Date(b.createdAt || 0).getTime();
-      const aTime = new Date(a.createdAt || 0).getTime();
-      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
-    })[0] || null;
+    return (
+      [...receiptEligibleSales].sort((a, b) => {
+        const bTime = new Date(b.createdAt || 0).getTime();
+        const aTime = new Date(a.createdAt || 0).getTime();
+        return (
+          (Number.isFinite(bTime) ? bTime : 0) -
+          (Number.isFinite(aTime) ? aTime : 0)
+        );
+      })[0] || null
+    );
   }, [receiptEligibleSales]);
 
   const printReceipt = (sale: Sale | null) => {
@@ -845,20 +1179,22 @@ export default function App() {
     const printTimer = window.setTimeout(() => window.print(), 75);
     const fallbackTimer = window.setTimeout(cleanup, 5000);
 
-    window.addEventListener('afterprint', cleanup, { once: true });
+    window.addEventListener("afterprint", cleanup, { once: true });
 
     return () => {
       window.clearTimeout(printTimer);
       window.clearTimeout(fallbackTimer);
-      window.removeEventListener('afterprint', cleanup);
+      window.removeEventListener("afterprint", cleanup);
     };
   }, [receiptPrintPending, receiptToPrint]);
 
   // Dev role — gated by VITE_ENABLE_DEV_BOOTSTRAP in production builds
-  const isDev = isDevEmail(user?.email) || user?.role === 'dev';
+  const isDev = isDevEmail(user?.email) || user?.role === "dev";
 
   // Nav items based on role — split into primary (always visible) and secondary (dropdown)
-  const roleForPermissions = (isDev ? 'dev' : currentUserRole) as StaffRole | null;
+  const roleForPermissions = (
+    isDev ? "dev" : currentUserRole
+  ) as StaffRole | null;
   const permissionOptions = useMemo(
     () => ({
       isDev,
@@ -866,7 +1202,12 @@ export default function App() {
       hasOpenTerminal: Boolean(effectiveActiveSession),
       permissions: currentUserStaff?.permissions,
     }),
-    [isDev, config.business?.isRestaurantMode, effectiveActiveSession, currentUserStaff?.permissions]
+    [
+      isDev,
+      config.business?.isRestaurantMode,
+      effectiveActiveSession,
+      currentUserStaff?.permissions,
+    ],
   );
 
   const { primaryNav, secondaryNav, navItems } = useMemo(() => {
@@ -875,13 +1216,13 @@ export default function App() {
       ...built,
       navItems: [
         ...built.navItems,
-        ...(isDev ? [{ id: 'dev' as const, icon: Code2, label: 'Dev' }] : []),
+        ...(isDev ? [{ id: "dev" as const, icon: Code2, label: "Dev" }] : []),
       ],
     };
   }, [roleForPermissions, permissionOptions, isDev]);
 
   // All nav items combined (for redirect logic and mobile nav)
-  
+
   // Redirect if current view is not allowed — but never redirect a dev user away from /dev or anyone from /profile
   useEffect(() => {
     if (!roleForPermissions) return;
@@ -906,13 +1247,19 @@ export default function App() {
         updatedAt: new Date().toISOString(),
       };
       if (id) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/products/${id}`, cleanData);
+        await apiPut(
+          `/api/mariadb/tenants/${tenantId}/products/${id}`,
+          cleanData,
+        );
       } else {
-        await apiPost(`/api/mariadb/tenants/${tenantId}/products`, { ...cleanData, createdAt: new Date().toISOString() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/products`, {
+          ...cleanData,
+          createdAt: new Date().toISOString(),
+        });
       }
       setProductModal({ isOpen: false, product: null });
     } catch (err) {
-      console.error('Failed to save product:', err);
+      console.error("Failed to save product:", err);
     }
     setIsProcessingCrud(false);
   };
@@ -926,11 +1273,14 @@ export default function App() {
       if (id) {
         await apiPut(`/api/mariadb/tenants/${tenantId}/customers/${id}`, data);
       } else {
-        await apiPost(`/api/mariadb/tenants/${tenantId}/customers`, { ...data, createdAt: new Date().toISOString() });
+        await apiPost(`/api/mariadb/tenants/${tenantId}/customers`, {
+          ...data,
+          createdAt: new Date().toISOString(),
+        });
       }
       setCustomerModal({ isOpen: false, customer: null });
     } catch (err) {
-      console.error('Failed to save customer:', err);
+      console.error("Failed to save customer:", err);
     }
     setIsProcessingCrud(false);
   };
@@ -943,30 +1293,44 @@ export default function App() {
       const { id, newPassword, ...data } = staffModal.staff;
       let targetId = id;
       if (id) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${id}`, { ...data, updatedAt: new Date().toISOString() });
+        await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${id}`, {
+          ...data,
+          updatedAt: new Date().toISOString(),
+        });
       } else {
-        const existing = staff.find(s => s.email.toLowerCase() === data.email?.toLowerCase());
+        const existing = staff.find(
+          (s) => s.email.toLowerCase() === data.email?.toLowerCase(),
+        );
         if (existing) {
-          toast.error('A staff member with this email already exists!');
+          toast.error("A staff member with this email already exists!");
           setIsProcessingCrud(false);
           return;
         }
-        const created = await apiPost(`/api/mariadb/tenants/${tenantId}/staff`, { ...data, status: 'active', createdAt: new Date().toISOString() });
+        const created = await apiPost(
+          `/api/mariadb/tenants/${tenantId}/staff`,
+          { ...data, status: "active", createdAt: new Date().toISOString() },
+        );
         targetId = (created as any).id;
       }
 
       if (newPassword && newPassword.length >= 6) {
         try {
-          await apiPost('/api/auth/setup-password', { staffId: targetId, password: newPassword });
+          await apiPost("/api/auth/setup-password", {
+            staffId: targetId,
+            password: newPassword,
+          });
         } catch (err: any) {
-          console.error('Failed to set password:', err);
-          toast.error('Staff saved, but failed to set password: ' + (err.message || 'Unknown error'));
+          console.error("Failed to set password:", err);
+          toast.error(
+            "Staff saved, but failed to set password: " +
+              (err.message || "Unknown error"),
+          );
         }
       }
 
       setStaffModal({ isOpen: false, staff: null });
     } catch (err) {
-      console.error('Failed to save staff:', err);
+      console.error("Failed to save staff:", err);
     }
     setIsProcessingCrud(false);
   };
@@ -978,13 +1342,16 @@ export default function App() {
       await apiDelete(`/api/mariadb/tenants/${tenantId}/staff/${id}`);
       setStaffToDelete(null);
     } catch (err) {
-      console.error('Failed to delete staff:', err);
+      console.error("Failed to delete staff:", err);
     }
     setIsProcessingCrud(false);
   };
 
   // Loading state — only block on tenantLoading if we actually have a user
-  if (authLoading || (user && (tenantLoading || configLoading || isStaffLoading))) {
+  if (
+    authLoading ||
+    (user && (tenantLoading || configLoading || isStaffLoading))
+  ) {
     return (
       <div className="h-screen w-full bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
         <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -993,7 +1360,7 @@ export default function App() {
   }
 
   if (!user) {
-    if (view === 'packages') {
+    if (view === "packages") {
       return (
         <>
           <PublicPackagesPage
@@ -1006,14 +1373,20 @@ export default function App() {
           />
           <LoginModal
             isOpen={loginModalOpen}
-            onClose={() => { setLoginModalOpen(false); clearError(); }}
+            onClose={() => {
+              setLoginModalOpen(false);
+              clearError();
+            }}
             onSubmit={handleLoginSubmit}
             error={authError}
             isLoading={loginLoading}
           />
           <EnrollmentModal
             isOpen={enrollmentModalOpen}
-            onClose={() => { setEnrollmentModalOpen(false); clearError(); }}
+            onClose={() => {
+              setEnrollmentModalOpen(false);
+              clearError();
+            }}
             onSubmit={handleEnrollmentSubmit}
             error={authError}
             isLoading={enrollmentLoading}
@@ -1034,14 +1407,20 @@ export default function App() {
         />
         <LoginModal
           isOpen={loginModalOpen}
-          onClose={() => { setLoginModalOpen(false); clearError(); }}
+          onClose={() => {
+            setLoginModalOpen(false);
+            clearError();
+          }}
           onSubmit={handleLoginSubmit}
           error={authError}
           isLoading={loginLoading}
         />
         <EnrollmentModal
           isOpen={enrollmentModalOpen}
-          onClose={() => { setEnrollmentModalOpen(false); clearError(); }}
+          onClose={() => {
+            setEnrollmentModalOpen(false);
+            clearError();
+          }}
           onSubmit={handleEnrollmentSubmit}
           error={authError}
           isLoading={enrollmentLoading}
@@ -1051,7 +1430,7 @@ export default function App() {
   }
 
   // If user logged in via client portal and we found their customer record, show portal
-  if (user && loginMode === 'client' && !clientPortal.loading) {
+  if (user && loginMode === "client" && !clientPortal.loading) {
     if (clientPortal.customer && clientPortal.tenantId) {
       return (
         <ClientPortalView
@@ -1074,11 +1453,17 @@ export default function App() {
           <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-6">
             <AlertCircle className="w-8 h-8 text-amber-500" />
           </div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white mb-2">No Account Found</h1>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white mb-2">
+            No Account Found
+          </h1>
           <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-8 max-w-sm">
-            No customer account was found for <strong>{user.email}</strong>. Please ask the business to add you as a customer first.
+            No customer account was found for <strong>{user.email}</strong>.
+            Please ask the business to add you as a customer first.
           </p>
-          <button onClick={handleLogout} className="px-8 py-3 bg-primary text-white font-bold rounded-xl transition-all hover:bg-primary/90">
+          <button
+            onClick={handleLogout}
+            className="px-8 py-3 bg-primary text-white font-bold rounded-xl transition-all hover:bg-primary/90"
+          >
             Sign Out
           </button>
         </div>
@@ -1093,7 +1478,7 @@ export default function App() {
   }
 
   if (!config?.setupCompleted) {
-    if (roleForPermissions === 'admin' || roleForPermissions === 'dev') {
+    if (roleForPermissions === "admin" || roleForPermissions === "dev") {
       return <SetupWizard user={user} config={config} />;
     } else {
       return (
@@ -1101,11 +1486,17 @@ export default function App() {
           <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-6">
             <Building2 className="w-8 h-8 text-amber-500" />
           </div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white mb-2">Setup Required</h1>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white mb-2">
+            Setup Required
+          </h1>
           <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-8 max-w-sm">
-            The business setup has not been completed yet. Please ask an administrator to complete the setup.
+            The business setup has not been completed yet. Please ask an
+            administrator to complete the setup.
           </p>
-          <button onClick={handleLogout} className="px-8 py-3 bg-primary text-white font-bold rounded-xl transition-all hover:bg-primary/90">
+          <button
+            onClick={handleLogout}
+            className="px-8 py-3 bg-primary text-white font-bold rounded-xl transition-all hover:bg-primary/90"
+          >
             Sign Out
           </button>
         </div>
@@ -1119,12 +1510,17 @@ export default function App() {
         <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-6">
           <AlertCircle className="w-8 h-8 text-red-500" />
         </div>
-        <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white mb-2">Access Denied</h1>
+        <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white mb-2">
+          Access Denied
+        </h1>
         <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-8 max-w-sm">
-          You are not registered as staff for this business. Please contact your administrator.
+          You are not registered as staff for this business. Please contact your
+          administrator.
         </p>
         <button
-          onClick={() => { handleLogout(); }}
+          onClick={() => {
+            handleLogout();
+          }}
           className="px-8 py-3 bg-slate-100 dark:bg-[#0B1120] text-slate-600 dark:text-slate-300 font-bold rounded-xl transition-all hover:bg-slate-200 dark:hover:bg-slate-900"
         >
           Sign out
@@ -1138,7 +1534,9 @@ export default function App() {
       {/* Header */}
       <header className="h-14 lg:h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700/60 px-4 lg:px-6 flex items-center justify-between flex-shrink-0 z-40 sticky top-0">
         <div className="flex items-center gap-4 lg:gap-8">
-          <div className="font-extrabold text-lg lg:text-xl tracking-tighter text-primary shrink-0">MasePOS</div>
+          <div className="font-extrabold text-lg lg:text-xl tracking-tighter text-primary shrink-0">
+            MasePOS
+          </div>
           <DesktopNav
             primaryNav={primaryNav}
             secondaryNav={secondaryNav}
@@ -1173,9 +1571,13 @@ export default function App() {
             showCompanionTools={showCompanionTools}
           />
 
-          {view === 'pos' && (
+          {view === "pos" && (
             <button
-              onClick={() => usePosStore.getState().setIsCartOpen(!usePosStore.getState().isCartOpen)}
+              onClick={() =>
+                usePosStore
+                  .getState()
+                  .setIsCartOpen(!usePosStore.getState().isCartOpen)
+              }
               className="lg:hidden relative p-2 bg-primary text-white rounded-xl shadow-lg shadow-primary/20"
               aria-label="Open cart"
             >
@@ -1192,23 +1594,26 @@ export default function App() {
 
       {/* Mobile Nav */}
       <nav className="lg:hidden flex overflow-x-auto bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800/60 px-4 py-2 gap-2 no-scrollbar shrink-0 sticky top-14 z-30 shadow-sm">
-        {navItems.map(item => {
+        {navItems.map((item) => {
           const badge =
-            item.id === 'messages' && messaging.unreadCount > 0 ? messaging.unreadCount :
-            item.id === 'workstation' && pendingWorkstationCount > 0 ? pendingWorkstationCount :
-            item.id === 'tabs' && openTabsCount > 0 ? openTabsCount :
-            0;
+            item.id === "messages" && messaging.unreadCount > 0
+              ? messaging.unreadCount
+              : item.id === "workstation" && pendingWorkstationCount > 0
+                ? pendingWorkstationCount
+                : item.id === "tabs" && openTabsCount > 0
+                  ? openTabsCount
+                  : 0;
           return (
             <button
               key={item.id}
               onClick={() => navigate(`/${item.id}`)}
-              className={`relative px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap border ${view === item.id ? 'bg-primary/5 text-primary border-primary/20' : 'text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-[#0B1120] border-transparent'}`}
+              className={`relative px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap border ${view === item.id ? "bg-primary/5 text-primary border-primary/20" : "text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-[#0B1120] border-transparent"}`}
             >
               <item.icon className="w-3.5 h-3.5" />
               {item.label}
               {badge > 0 && (
                 <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
-                  {badge > 99 ? '99+' : badge}
+                  {badge > 99 ? "99+" : badge}
                 </span>
               )}
             </button>
@@ -1216,7 +1621,17 @@ export default function App() {
         })}
       </nav>
 
-      {!['pos', 'handheld', 'workstation', 'tables', 'tabs', 'history', 'messages', 'delivery'].includes(view) && (
+      {![
+        "pos",
+        "handheld",
+        "workstation",
+        "tables",
+        "tabs",
+        "history",
+        "messages",
+        "delivery",
+        "dev",
+      ].includes(view) && (
         <RoleOnboardingChecklist
           role={roleForPermissions}
           isDev={isDev}
@@ -1237,7 +1652,7 @@ export default function App() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
-        {view === 'pos' && (
+        {view === "pos" && (
           <PointOfSaleView
             products={products}
             user={user}
@@ -1246,7 +1661,9 @@ export default function App() {
             workstations={workstations}
             isProcessing={checkout.isProcessing}
             setIsProcessing={checkout.setIsProcessing}
-            handleSaveOrder={(sendToKitchen) => checkout.handleSaveOrder(sendToKitchen, navigate)}
+            handleSaveOrder={(sendToKitchen) =>
+              checkout.handleSaveOrder(sendToKitchen, navigate)
+            }
             handleParkSale={checkout.handleParkSale}
             handleCheckout={checkout.handleCheckout}
             handleWalletCheckout={checkout.handleWalletCheckout}
@@ -1260,7 +1677,7 @@ export default function App() {
             CATEGORIES={CATEGORIES}
             getCategoryIcon={getCategoryIcon}
             getProductImage={getProductImage}
-            openCashDrawer={() => navigate('/cash')}
+            openCashDrawer={() => navigate("/cash")}
             pointsDiscount={checkout.pointsDiscount}
             pricingDiscount={checkout.pricingDiscount}
             totalDiscount={checkout.totalDiscount}
@@ -1286,10 +1703,14 @@ export default function App() {
             offlineStatus={checkout.offlineStatus}
           />
         )}
-        {view === 'history' && (
+        {view === "history" && (
           <HistoryView
-            sales={sales.filter(s => {
-              if (currentUserRole === 'cashier' && (s as any).staffId !== currentUserStaff?.id) return false;
+            sales={sales.filter((s) => {
+              if (
+                currentUserRole === "cashier" &&
+                (s as any).staffId !== currentUserStaff?.id
+              )
+                return false;
               return true;
             })}
             customers={posCustomerProfiles}
@@ -1302,65 +1723,115 @@ export default function App() {
             onCustomersUpdated={refreshCustomers}
           />
         )}
-        {view === 'cash' && <CashManagementView currentUserStaff={currentUserStaff} sales={sales} />}
-        {view === 'inventory' && (
+        {view === "cash" && (
+          <CashManagementView
+            currentUserStaff={currentUserStaff}
+            sales={sales}
+          />
+        )}
+        {view === "inventory" && (
           <InventoryView
             products={products}
             config={config}
             onEditProduct={(p) => setProductModal({ isOpen: true, product: p })}
-            onAddProduct={() => setProductModal({ isOpen: true, product: { stock: 0, price: 0, costPrice: 0 } })}
+            onAddProduct={() =>
+              setProductModal({
+                isOpen: true,
+                product: { stock: 0, price: 0, costPrice: 0 },
+              })
+            }
             onProductsUpdated={refreshProducts}
           />
         )}
-        {view === 'stocktake' && <StockTakeView products={products} onProductsUpdated={refreshProducts} />}
-        {view === 'customers' && (
+        {view === "stocktake" && (
+          <StockTakeView
+            products={products}
+            onProductsUpdated={refreshProducts}
+          />
+        )}
+        {view === "customers" && (
           <CustomersView
             tenantId={tenantId}
             customers={customers}
             sales={sales}
             onEdit={(c) => setCustomerModal({ isOpen: true, customer: c })}
             onAdd={() => setCustomerModal({ isOpen: true, customer: {} })}
-            onViewOrders={(id) => { setFilterCustomerId(id); navigate('/history'); }}
+            onViewOrders={(id) => {
+              setFilterCustomerId(id);
+              navigate("/history");
+            }}
             onResumeTab={(sale) => {
               setCart(sale.items);
-              usePosStore.getState().setSelectedCustomerId(sale.customerId || null);
+              usePosStore
+                .getState()
+                .setSelectedCustomerId(sale.customerId || null);
               usePosStore.getState().setActiveOrderId(sale.id);
-              navigate('/pos');
+              navigate("/pos");
             }}
             onCustomersUpdated={refreshCustomers}
           />
         )}
-        {view === 'accounts' && (
+        {view === "accounts" && (
           <AccountsView
             customers={customers}
             sales={sales}
-            onEditCustomer={(customer) => setCustomerModal({ isOpen: true, customer })}
-            onViewOrders={(id) => { setFilterCustomerId(id); navigate('/history'); }}
+            onEditCustomer={(customer) =>
+              setCustomerModal({ isOpen: true, customer })
+            }
+            onViewOrders={(id) => {
+              setFilterCustomerId(id);
+              navigate("/history");
+            }}
           />
         )}
-        {view === 'bookings' && tenantId && <EventBookingsView tenantId={tenantId} customers={customers} restaurantTables={restaurantTables} />}
-        {view === 'delivery' && <DeliveryOrdersView tenantId={tenantId} />}
-        {view === 'actions' && <ManagerActionCenterView tenantId={tenantId} />}
-        {view === 'live' && <LiveView tenantId={tenantId} />}
-        {view === 'reports' && <ReportsView sales={sales} customers={customers} tenantId={tenantId} />}
-        {view === 'ai' && <AiCopilotView tenantId={tenantId} />}
-        {view === 'staff' && (
+        {view === "bookings" && tenantId && (
+          <EventBookingsView
+            tenantId={tenantId}
+            customers={customers}
+            restaurantTables={restaurantTables}
+          />
+        )}
+        {view === "delivery" && <DeliveryOrdersView tenantId={tenantId} />}
+        {view === "actions" && <ManagerActionCenterView tenantId={tenantId} />}
+        {view === "live" && <LiveView tenantId={tenantId} />}
+        {view === "reports" && (
+          <ReportsView
+            sales={sales}
+            customers={customers}
+            tenantId={tenantId}
+          />
+        )}
+        {view === "ai" && <AiCopilotView tenantId={tenantId} />}
+        {view === "staff" && (
           <StaffView
             staff={staff}
             tenantId={tenantId}
             currentUserStaff={currentUserStaff}
             onEdit={(s) => setStaffModal({ isOpen: true, staff: s })}
-            onAdd={() => setStaffModal({ isOpen: true, staff: { role: 'cashier' } })}
+            onAdd={() =>
+              setStaffModal({ isOpen: true, staff: { role: "cashier" } })
+            }
             onDelete={(id) => setStaffToDelete(id)}
           />
         )}
-        {view === 'wallets' && (
-          <WalletAdminView staff={staff} customers={customers} currentUserStaff={currentUserStaff} />
+        {view === "wallets" && (
+          <WalletAdminView
+            staff={staff}
+            customers={customers}
+            currentUserStaff={currentUserStaff}
+          />
         )}
-        {view === 'profile' && <StaffProfileView currentUserStaff={currentUserStaff} onStaffUpdated={refreshStaff} />}
-        {view === 'settings' && <SettingsView config={config} setConfig={setConfig} />}
-        {view === 'packages' && <PackagesView />}
-        {view === 'tables' && (
+        {view === "profile" && (
+          <StaffProfileView
+            currentUserStaff={currentUserStaff}
+            onStaffUpdated={refreshStaff}
+          />
+        )}
+        {view === "settings" && (
+          <SettingsView config={config} setConfig={setConfig} />
+        )}
+        {view === "packages" && <PackagesView />}
+        {view === "tables" && (
           <TablesView
             sales={sales}
             tableSections={tableSections}
@@ -1375,11 +1846,11 @@ export default function App() {
                 setActiveOrderId(null);
                 setCart([]);
               }
-              navigate('/');
+              navigate("/");
             }}
           />
         )}
-        {view === 'handheld' && (
+        {view === "handheld" && (
           <HandheldView
             sales={sales}
             customers={posCustomerProfiles}
@@ -1396,33 +1867,35 @@ export default function App() {
                 setSelectedCustomerId(null);
                 setCart([]);
               }
-              setIsCartOpen(intent === 'checkout');
-              navigate('/pos');
+              setIsCartOpen(intent === "checkout");
+              navigate("/pos");
             }}
             onResumeTab={(sale, intent) => {
               setActiveTableNumber(null);
               setActiveOrderId(sale.id);
               setSelectedCustomerId(sale.customerId || null);
               setCart(sale.items);
-              setIsCartOpen(intent === 'checkout');
-              navigate('/pos');
+              setIsCartOpen(intent === "checkout");
+              navigate("/pos");
             }}
           />
         )}
-        {view === 'leaderboard' && <LeaderboardView staff={staff} />}
-        {view === 'tabs' && (
+        {view === "leaderboard" && <LeaderboardView staff={staff} />}
+        {view === "tabs" && (
           <TabsView
             sales={sales}
             customers={posCustomerProfiles}
             onResumeTab={(sale) => {
               setCart(sale.items);
-              usePosStore.getState().setSelectedCustomerId(sale.customerId || null);
+              usePosStore
+                .getState()
+                .setSelectedCustomerId(sale.customerId || null);
               usePosStore.getState().setActiveOrderId(sale.id);
-              navigate('/pos');
+              navigate("/pos");
             }}
           />
         )}
-        {view === 'messages' && (
+        {view === "messages" && (
           <MessagingView
             currentUserStaff={currentUserStaff}
             staff={staff}
@@ -1438,7 +1911,7 @@ export default function App() {
             myId={messaging.myId}
           />
         )}
-        {view === 'workstation' && (
+        {view === "workstation" && (
           <WorkstationView
             sales={sales}
             workstations={workstations}
@@ -1447,7 +1920,7 @@ export default function App() {
             onSalesUpdated={refreshSales}
           />
         )}
-        {view === 'dev' && isDev && user && (
+        {view === "dev" && isDev && user && (
           <DevDashboard
             user={user}
             tenantId={tenantId}
@@ -1491,11 +1964,15 @@ export default function App() {
         {/* Install guide modal — for browsers without beforeinstallprompt (Safari, Firefox) */}
         {showInstallGuide && (
           <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
           >
             <motion.div
-              initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
               className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl"
             >
               <div className="flex items-center gap-3 mb-6">
@@ -1503,23 +1980,40 @@ export default function App() {
                   <Download className="w-6 h-6 text-primary" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Install App</h3>
-                  <p className="text-xs text-slate-400">Add to your home screen</p>
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                    Install App
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Add to your home screen
+                  </p>
                 </div>
               </div>
 
               <div className="space-y-4 mb-6">
                 <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800">
-                  <p className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-1">Chrome / Edge (Desktop)</p>
-                  <p className="text-xs text-blue-600 dark:text-blue-400">Click the install icon (⊕) in the address bar, or go to Menu → Install MasePOS</p>
+                  <p className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-1">
+                    Chrome / Edge (Desktop)
+                  </p>
+                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                    Click the install icon (⊕) in the address bar, or go to Menu
+                    → Install MasePOS
+                  </p>
                 </div>
                 <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700">
-                  <p className="text-sm font-bold text-slate-800 dark:text-white mb-1">Safari (iPhone / iPad)</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Tap the Share button (□↑) → "Add to Home Screen"</p>
+                  <p className="text-sm font-bold text-slate-800 dark:text-white mb-1">
+                    Safari (iPhone / iPad)
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Tap the Share button (□↑) → "Add to Home Screen"
+                  </p>
                 </div>
                 <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700">
-                  <p className="text-sm font-bold text-slate-800 dark:text-white mb-1">Chrome (Android)</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Tap Menu (⋮) → "Add to Home Screen" or "Install App"</p>
+                  <p className="text-sm font-bold text-slate-800 dark:text-white mb-1">
+                    Chrome (Android)
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Tap Menu (⋮) → "Add to Home Screen" or "Install App"
+                  </p>
                 </div>
               </div>
 
@@ -1541,8 +2035,16 @@ export default function App() {
             isProcessing={checkout.isProcessing}
             onTenderedChange={checkout.setTenderedAmount}
             onCardOverageChange={checkout.setCardOverageAction}
-            onConfirm={(details) => checkout.handleCheckout(checkout.tenderModal.method!, undefined, details)}
-            onClose={() => checkout.setTenderModal({ isOpen: false, method: null })}
+            onConfirm={(details) =>
+              checkout.handleCheckout(
+                checkout.tenderModal.method!,
+                undefined,
+                details,
+              )
+            }
+            onClose={() =>
+              checkout.setTenderModal({ isOpen: false, method: null })
+            }
           />
         )}
 
@@ -1551,15 +2053,33 @@ export default function App() {
             isOpen={checkout.splitPaymentModal}
             cartTotal={checkout.cartTotal}
             isProcessing={checkout.isProcessing}
-            customerWalletBalance={customers.find(c => c.id === selectedCustomerId)?.walletBalance || 0}
-            customerAccountEnabled={Boolean(customers.find(c => c.id === selectedCustomerId)?.accountEnabled)}
-            customerAccountRemaining={Math.max(0, Number(customers.find(c => c.id === selectedCustomerId)?.accountLimit || 0) - Number(customers.find(c => c.id === selectedCustomerId)?.accountBalance || 0))}
+            customerWalletBalance={
+              customers.find((c) => c.id === selectedCustomerId)
+                ?.walletBalance || 0
+            }
+            customerAccountEnabled={Boolean(
+              customers.find((c) => c.id === selectedCustomerId)
+                ?.accountEnabled,
+            )}
+            customerAccountRemaining={Math.max(
+              0,
+              Number(
+                customers.find((c) => c.id === selectedCustomerId)
+                  ?.accountLimit || 0,
+              ) -
+                Number(
+                  customers.find((c) => c.id === selectedCustomerId)
+                    ?.accountBalance || 0,
+                ),
+            )}
             offlineMode={checkout.offlineStatus.isOffline}
             billSplitEnabled={Boolean(config?.business?.isRestaurantMode)}
             billSplitItems={cart}
             billSplitTableLabel={activeTableNumber}
-            billSplitTableOptions={restaurantTables.map(table => table.label || table.id)}
-            onConfirm={(payments) => checkout.handleCheckout('split', payments)}
+            billSplitTableOptions={restaurantTables.map(
+              (table) => table.label || table.id,
+            )}
+            onConfirm={(payments) => checkout.handleCheckout("split", payments)}
             onClose={() => checkout.setSplitPaymentModal(false)}
           />
         )}
@@ -1576,19 +2096,21 @@ export default function App() {
           <CheckoutSuccessModal
             sale={checkout.checkoutModal.saleData}
             config={config}
-            onNewSale={() => checkout.setCheckoutModal({ isOpen: false, paymentMethod: null })}
+            onNewSale={() =>
+              checkout.setCheckoutModal({ isOpen: false, paymentMethod: null })
+            }
           />
         )}
 
         {isScanning && (
           <BarcodeScanner
             onScan={(barcode) => {
-              const product = products.find(p => p.barcode === barcode);
+              const product = products.find((p) => p.barcode === barcode);
               if (product) {
                 addToCart(product);
                 setIsScanning(false);
               } else {
-                console.warn('Product not found for barcode:', barcode);
+                console.warn("Product not found for barcode:", barcode);
               }
             }}
             onClose={() => setIsScanning(false)}
