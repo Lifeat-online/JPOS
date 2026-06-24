@@ -942,10 +942,12 @@ function safeParse(value: unknown, fallback: any) {
   }
 }
 function legacyWhereClause() {
-  return LEGACY_SAMPLE_PRODUCTS.map(
-    () =>
-      "(barcode = $1 AND name = $2 AND category = $3 AND COALESCE(section, '') = COALESCE($4, ''))",
-  ).join(" OR ");
+  let idx = 2; // $1 is tenant_id; legacy values start at $2
+  return LEGACY_SAMPLE_PRODUCTS.map(() => {
+    const clause = `(barcode = $${idx} AND name = $${idx + 1} AND category = $${idx + 2} AND COALESCE(section, '') = COALESCE($${idx + 3}, ''))`;
+    idx += 4;
+    return clause;
+  }).join(" OR ");
 }
 function legacyWhereValues() {
   return LEGACY_SAMPLE_PRODUCTS.flatMap(
