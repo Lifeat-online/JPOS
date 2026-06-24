@@ -3,25 +3,29 @@ import '@testing-library/jest-dom';
 // jsdom doesn't implement these APIs by default; tests that touch them
 // stub them locally. The defaults below are explicit so failures are loud.
 if (typeof window !== 'undefined') {
-  if (!window.matchMedia) {
-    Object.defineProperty(window, 'matchMedia', {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: () => {},
-        removeListener: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => false,
-      }),
-    });
-  }
-  if (!('ResizeObserver' in window)) {
-    // @ts-expect-error - minimal stub for recharts ResponsiveContainer
-    window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
-  }
+    if (!window.matchMedia) {
+        Object.defineProperty(window, 'matchMedia', {
+            writable: true,
+            value: (query: string) => ({
+                matches: false,
+                media: query,
+                onchange: null,
+                addListener: () => {},
+                removeListener: () => {},
+                addEventListener: () => {},
+                removeEventListener: () => {},
+                dispatchEvent: () => false,
+            }),
+        });
+    }
+    if (!('ResizeObserver' in window)) {
+        // @ts-expect-error - minimal stub for recharts ResponsiveContainer
+        window.ResizeObserver = class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        };
+    }
 }
 
 // Provide a stable, deterministic JWT secret for tests that touch the
@@ -33,7 +37,7 @@ process.env.REFRESH_TOKEN_EXPIRES_IN ||= '7d';
 process.env.NODE_ENV ||= 'test';
 process.env.PAYFAST_SANDBOX ||= 'true';
 process.env.DB_HOST ||= 'localhost';
-process.env.DB_PORT ||= '3306';
+process.env.DB_PORT ||= '5432';
 process.env.DB_USER ||= 'test';
 process.env.DB_PASSWORD ||= 'test';
 process.env.DB_DATABASE ||= 'jimmy_pos';
