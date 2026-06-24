@@ -1930,6 +1930,9 @@ export default function App() {
             sales={sales}
             config={config}
             workstations={workstations}
+            restaurantTables={restaurantTables}
+            pendingWorkstationCount={pendingWorkstationCount}
+            openTabsCount={openTabsCount}
             onSeedDemo={async (mode) => {
               if (!tenantId) return;
               await seedDemoData(tenantId, mode);

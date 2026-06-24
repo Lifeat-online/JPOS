@@ -9,6 +9,7 @@ import {
   Workstation,
   CashSession,
 } from "../types";
+import type { StaffRole } from "../permissions";
 import {
   createDevDatabaseBackup,
   generateLicence,
@@ -53,6 +54,7 @@ import {
   Bell,
   Send,
   Smartphone,
+  ClipboardCheck,
 } from "lucide-react";
 import { getDate } from "../utils/date";
 import {
@@ -60,6 +62,11 @@ import {
   subscribeBrowserToPush,
   unsubscribeBrowserFromPush,
 } from "../utils/pushNotifications";
+import {
+  buildRoleChecklistItems,
+  type RoleChecklistItem,
+} from "../components/RoleOnboardingChecklist";
+import type { RestaurantTable } from "../types";
 
 // ─── App constants ────────────────────────────────────────────────────
 const APP_VERSION = String("0.0.1");
@@ -81,6 +88,9 @@ interface DevDashboardProps {
   sales: Sale[];
   config: AppConfig;
   workstations: Workstation[];
+  restaurantTables?: RestaurantTable[];
+  pendingWorkstationCount?: number;
+  openTabsCount?: number;
   onSeedDemo?: (mode: "retail" | "restaurant") => void;
   onClearSeeded?: () => void;
   onClearSales?: () => void;
@@ -168,6 +178,123 @@ interface TestDef {
   }) => { status: "pass" | "fail" | "warn"; detail?: string };
 }
 
+// ─── Dev Checklist Tab ──────────────────────────────────────────────────
+function ChecklistTab({
+  isDev,
+  isRestaurant,
+  hasOpenRegister,
+  products,
+  customers,
+  staff,
+  sales,
+  workstations,
+  restaurantTables,
+  pendingWorkstationCount,
+  openTabsCount,
+}: {
+  isDev: boolean;
+  isRestaurant: boolean;
+  hasOpenRegister: boolean;
+  products: Product[];
+  customers: Customer[];
+  staff: Staff[];
+  sales: Sale[];
+  workstations: Workstation[];
+  restaurantTables: RestaurantTable[];
+  pendingWorkstationCount: number;
+  openTabsCount: number;
+}) {
+  const context = {
+    role: null as StaffRole | null,
+    isDev,
+    isRestaurant,
+    hasOpenRegister,
+    products,
+    customers,
+    staff,
+    sales,
+    workstations,
+    restaurantTables,
+    pendingWorkstationCount,
+    openTabsCount,
+  };
+  const items = useMemo(
+    () => buildRoleChecklistItems(context),
+    [
+      isDev,
+      isRestaurant,
+      hasOpenRegister,
+      products.length,
+      customers.length,
+      staff.length,
+      sales.length,
+      workstations.length,
+      restaurantTables.length,
+      pendingWorkstationCount,
+      openTabsCount,
+    ],
+  );
+
+  const statusClasses: Record<string, string> = {
+    attention:
+      "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200",
+    ready:
+      "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-200",
+    done: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-200",
+  };
+
+  return (
+    <div className="space-y-4 max-w-3xl mx-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <ClipboardCheck className="w-4 h-4 text-violet-500" />
+          <h3 className="font-black text-slate-800 dark:text-white">
+            Dev Checklist
+          </h3>
+        </div>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">
+          Daily checks and missing setup items for development workflows.
+        </p>
+        <div className="grid gap-3">
+          {items.map((check) => {
+            const Icon = check.icon;
+            const StatusIcon =
+              check.status === "done"
+                ? CheckCircle2
+                : check.status === "attention"
+                  ? AlertTriangle
+                  : check.icon;
+            return (
+              <a
+                key={check.id}
+                href={check.path}
+                className={`flex items-start gap-3 rounded-xl border p-4 transition-all hover:shadow-md ${statusClasses[check.status] || statusClasses.ready}`}
+              >
+                <div className="mt-0.5 shrink-0">
+                  {check.status === "done" ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                  ) : check.status === "attention" ? (
+                    <AlertTriangle className="w-5 h-5 text-amber-500" />
+                  ) : (
+                    <Icon className="w-5 h-5 text-blue-500" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold">{check.label}</p>
+                  <p className="text-xs mt-0.5 opacity-80">{check.detail}</p>
+                </div>
+                <div className="shrink-0 self-center">
+                  <StatusIcon className="w-4 h-4 opacity-60" />
+                </div>
+              </a>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ────────────────────────────────────────────────────
 export function DevDashboard({
   user,
@@ -178,6 +305,9 @@ export function DevDashboard({
   sales,
   config,
   workstations,
+  restaurantTables = [],
+  pendingWorkstationCount = 0,
+  openTabsCount = 0,
   onSeedDemo,
   onClearSeeded,
   onClearSales,
@@ -186,6 +316,7 @@ export function DevDashboard({
     | "overview"
     | "data"
     | "health"
+    | "checklist"
     | "licences"
     | "notifications"
     | "maintenance"
@@ -1200,6 +1331,7 @@ export function DevDashboard({
     { id: "overview", label: "Overview", icon: Server },
     { id: "data", label: "Data Explorer", icon: Database },
     { id: "health", label: "App Health", icon: Activity },
+    { id: "checklist", label: "Dev Checklist", icon: ClipboardCheck },
     { id: "licences", label: "Licences", icon: KeyRound },
     { id: "notifications", label: "Notifications", icon: Bell },
     { id: "maintenance", label: "Maintenance", icon: Shield },
@@ -1909,6 +2041,25 @@ export function DevDashboard({
               </div>
             </div>
           </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════
+            TAB — DEV CHECKLIST
+        ═══════════════════════════════════════════════════════════════ */}
+        {activeTab === "checklist" && (
+          <ChecklistTab
+            isDev={true}
+            isRestaurant={Boolean(config.business?.isRestaurantMode)}
+            hasOpenRegister={true}
+            products={products}
+            customers={customers}
+            staff={staff}
+            sales={sales}
+            workstations={workstations}
+            restaurantTables={restaurantTables}
+            pendingWorkstationCount={pendingWorkstationCount}
+            openTabsCount={openTabsCount}
+          />
         )}
 
         {/* ═══════════════════════════════════════════════════════════════
