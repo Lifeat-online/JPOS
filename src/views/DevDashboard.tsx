@@ -1213,40 +1213,42 @@ export function DevDashboard({
   ] as const;
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 dark:bg-[#0B1120] overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 bg-slate-50 dark:bg-[#0B1120]">
       {/* ── Header ── */}
-      <div className="bg-slate-900 dark:bg-slate-950 border-b border-slate-700 px-4 py-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <Code2 className="w-5 h-5 text-violet-400" />
-          <span className="text-white font-black tracking-tight text-lg">
+      <div className="bg-slate-900 dark:bg-slate-950 border-b border-slate-700 px-3 py-2.5 sm:px-4 sm:py-3 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <Code2 className="w-4 h-4 sm:w-5 sm:h-5 text-violet-400 shrink-0" />
+          <span className="text-white font-black tracking-tight text-sm sm:text-lg truncate">
             🛠 DEV DASHBOARD
           </span>
-          <span className="px-2 py-0.5 rounded text-xs font-black bg-red-600 text-white tracking-widest uppercase">
+          <span className="hidden sm:inline px-2 py-0.5 rounded text-xs font-black bg-red-600 text-white tracking-widest uppercase shrink-0">
             RESTRICTED
           </span>
         </div>
-        <div className="flex items-center gap-2 text-slate-400 text-sm">
-          <span className="hidden sm:inline">{user.email}</span>
-          <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-violet-900/60 text-violet-300 border border-violet-700">
-            DEV MODE
+        <div className="flex items-center gap-2 text-slate-400 text-xs sm:text-sm shrink-0 ml-2">
+          <span className="hidden sm:inline truncate max-w-[120px]">
+            {user.email}
+          </span>
+          <span className="px-1.5 py-0.5 sm:px-2 sm:py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-violet-900/60 text-violet-300 border border-violet-700 shrink-0">
+            DEV
           </span>
         </div>
       </div>
 
       {/* ── Tabs ── */}
-      <div className="flex gap-1 px-4 pt-3 pb-0 border-b border-slate-200 dark:border-slate-800 overflow-x-auto shrink-0 bg-white dark:bg-slate-900">
+      <div className="flex gap-1 px-2 sm:px-4 pt-2 sm:pt-3 pb-0 border-b border-slate-200 dark:border-slate-800 overflow-x-auto shrink-0 bg-white dark:bg-slate-900 scrollbar-thin">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id as typeof activeTab)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-t-lg whitespace-nowrap transition-all active:scale-95 border-b-2 -mb-px ${
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold rounded-t-lg whitespace-nowrap transition-all active:scale-95 border-b-2 -mb-px ${
               activeTab === id
                 ? "border-violet-500 text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20"
                 : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
             }`}
           >
-            <Icon className="w-4 h-4" />
-            {label}
+            <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="hidden xs:inline">{label}</span>
           </button>
         ))}
       </div>
