@@ -34,8 +34,8 @@ describe('hybrid API fetch behavior', () => {
 
     expect(products).toEqual([{ id: 'prod_1', name: 'Coffee' }]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0][0]).toBe('http://pos-box.local:8080/api/mariadb/tenants/tenant_1/products');
-    expect(fetchMock.mock.calls[1][0]).toBe('https://cloud.masepos.test/api/mariadb/tenants/tenant_1/products');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://pos-box.local:8080/api/data/tenants/tenant_1/products');
+    expect(fetchMock.mock.calls[1][0]).toBe('https://cloud.masepos.test/api/data/tenants/tenant_1/products');
   });
 
   it('fails safe GET requests over after a transient gateway response', async () => {
@@ -48,7 +48,7 @@ describe('hybrid API fetch behavior', () => {
 
     expect(products).toEqual([{ id: 'prod_2', name: 'Tea' }]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1][0]).toBe('https://cloud.masepos.test/api/mariadb/tenants/tenant_1/products');
+    expect(fetchMock.mock.calls[1][0]).toBe('https://cloud.masepos.test/api/data/tenants/tenant_1/products');
   });
 
   it('does not fail mutating requests over to another target', async () => {
@@ -58,6 +58,6 @@ describe('hybrid API fetch behavior', () => {
     await expect(batchCreateProducts('tenant_1', { rows: [], dryRun: true })).rejects.toThrow('Failed to fetch');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe('http://pos-box.local:8080/api/mariadb/tenants/tenant_1/batch/products/create');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://pos-box.local:8080/api/data/tenants/tenant_1/batch/products/create');
   });
 });

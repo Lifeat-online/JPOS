@@ -106,7 +106,7 @@ describe('api routes', () => {
   });
 
   it('returns unauthorized for protected endpoint without token', async () => {
-    const response = await request(app).get('/api/mariadb/tenants/tenant_1/products');
+    const response = await request(app).get('/api/data/tenants/tenant_1/products');
     expect(response.status).toBe(401);
     expect(response.body).toHaveProperty('error');
   });
@@ -122,11 +122,49 @@ describe('api routes', () => {
     });
 
     const response = await request(app)
-      .get('/api/mariadb/tenants/tenant_b/products')
+      .get('/api/data/tenants/tenant_b/products')
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(403);
     expect(response.body.error).toMatch(/cannot access the requested tenant/i);
+  });
+
+  it('blocks a cashier from creating staff (privilege escalation guard)', async () => {
+    const token = generateAccessToken({
+      uid: 'staff_a', staffId: 'staff_a', email: 'cashier@tenant-a.test',
+      name: 'Tenant A Cashier', role: 'cashier', tenantId: 'tenant_a',
+    });
+    const response = await request(app)
+      .post('/api/data/tenants/tenant_a/staff')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Sneaky Admin', role: 'admin', email: 'x@y.z', pin: '1234' });
+    expect(response.status).toBe(403);
+    expect(response.body.error).toMatch(/manager or admin/i);
+  });
+
+  it('blocks a cashier from seeding/wiping tenant data', async () => {
+    const token = generateAccessToken({
+      uid: 'staff_a', staffId: 'staff_a', email: 'cashier@tenant-a.test',
+      name: 'Tenant A Cashier', role: 'cashier', tenantId: 'tenant_a',
+    });
+    const response = await request(app)
+      .delete('/api/data/tenants/tenant_a/demo-seed')
+      .set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(403);
+  });
+
+  it('rejects customers/by-email lookups that are not for the caller\'s own email', async () => {
+    // Unauthenticated: no caller email -> denied (was an unauthenticated PII leak).
+    const anon = await request(app).get('/api/data/customers/by-email?email=victim@example.com');
+    expect(anon.status).toBe(403);
+    // Authenticated but querying a different email -> denied.
+    const token = generateAccessToken({
+      uid: 'u1', staffId: 's1', email: 'me@example.com', name: 'Me', role: 'cashier', tenantId: 'tenant_a',
+    });
+    const mismatch = await request(app)
+      .get('/api/data/customers/by-email?email=victim@example.com')
+      .set('Authorization', `Bearer ${token}`);
+    expect(mismatch.status).toBe(403);
   });
 
   it('exposes PayFast form generation as an authenticated API route', async () => {

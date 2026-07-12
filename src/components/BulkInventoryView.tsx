@@ -37,7 +37,7 @@ export const BulkInventoryView: React.FC = () => {
     if (!tenantId) return;
     setLoading(true);
     try {
-      const data = await apiGet(`/api/mariadb/tenants/${tenantId}/bulk-items`);
+      const data = await apiGet(`/api/data/tenants/${tenantId}/bulk-items`);
       setItems(data as BulkItem[]);
     } catch (err) {
       console.error('Failed to fetch bulk items:', err);
@@ -102,9 +102,9 @@ export const BulkInventoryView: React.FC = () => {
 
     try {
       if (editingId) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/bulk-items/${editingId}`, payload);
+        await apiPut(`/api/data/tenants/${tenantId}/bulk-items/${editingId}`, payload);
       } else {
-        await apiPost(`/api/mariadb/tenants/${tenantId}/bulk-items`, payload);
+        await apiPost(`/api/data/tenants/${tenantId}/bulk-items`, payload);
       }
       setIsAdding(false);
       setEditingId(null);
@@ -118,7 +118,7 @@ export const BulkInventoryView: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!tenantId || !window.confirm('Are you sure? This cannot be undone.')) return;
     try {
-      await apiDelete(`/api/mariadb/tenants/${tenantId}/bulk-items/${id}`);
+      await apiDelete(`/api/data/tenants/${tenantId}/bulk-items/${id}`);
       fetchItems();
     } catch (err) {
       console.error('Failed to delete item:', err);

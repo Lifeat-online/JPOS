@@ -1,6 +1,81 @@
 import { db, query } from "./db.js";
 import { cashierCanAccessLocation, DEFAULT_INVENTORY_LOCATION_ID, getStaffInventoryLocationAccess, listProductLocationStocks, } from "./inventoryLocations.js";
 import { defaultCustomerConsentMap, listTenantCustomerConsents } from "./customerConsents.js";
+import { embedForTenant } from "./ai.js";
+
+/** Format a JS number[] as a pgvector literal, e.g. [0.1,0.2,0.3]. */
+function toVectorLiteral(embedding: number[]): string {
+    return `[${embedding.join(",")}]`;
+}
+
+export interface ProductSimilarityHit {
+    id: string;
+    name: string;
+    price: number;
+    costPrice: number | null;
+    section: string | null;
+    category: string | null;
+    subCategory: string | null;
+    stock: number;
+    imageUrl: string | null;
+    barcode: string | null;
+    /** Cosine distance in [0,2]; smaller = more similar. */
+    distance: number;
+}
+
+/**
+ * Rank a tenant's products by cosine similarity to a precomputed query vector.
+ * Tenant-scoped and skips rows without an embedding. Requires pgvector.
+ */
+export async function searchProductsBySimilarity(
+    tenantId: string,
+    embedding: number[],
+    limit = 10,
+): Promise<ProductSimilarityHit[]> {
+    if (!embedding?.length) return [];
+    const vec = toVectorLiteral(embedding);
+    const rows = await query<any>(
+        `SELECT
+           id,
+           name,
+           price,
+           cost_price AS "costPrice",
+           section,
+           category,
+           sub_category AS "subCategory",
+           stock,
+           image_url AS "imageUrl",
+           barcode,
+           (embedding <=> $2::vector) AS distance
+         FROM products
+         WHERE tenant_id = $1 AND embedding IS NOT NULL
+         ORDER BY embedding <=> $2::vector
+         LIMIT $3`,
+        [tenantId, vec, limit],
+    );
+    // pg returns NUMERIC columns as strings; coerce to numbers to match the type.
+    return rows.map((r) => ({
+        ...r,
+        price: Number(r.price),
+        costPrice: r.costPrice == null ? null : Number(r.costPrice),
+        distance: Number(r.distance),
+    })) as ProductSimilarityHit[];
+}
+
+/**
+ * Semantic product search from free text: embeds the query, then ranks by
+ * similarity. Returns null when embeddings are not configured for the tenant
+ * (so callers can fall back to keyword search).
+ */
+export async function semanticProductSearch(
+    tenantId: string,
+    queryText: string,
+    limit = 10,
+): Promise<ProductSimilarityHit[] | null> {
+    const embedding = await embedForTenant(tenantId, queryText);
+    if (!embedding) return null;
+    return searchProductsBySimilarity(tenantId, embedding, limit);
+}
 // ─────────────────────────────────────────────────────────────────────────
 // Helper Functions
 // ─────────────────────────────────────────────────────────────────────────
@@ -110,7 +185,8 @@ function isMissingColumnError(error: unknown, column: string) {
         code?: string;
         message?: string;
     };
-    return anyError?.code === 'ER_BAD_FIELD_ERROR' &&
+    // Postgres raises 42703 (undefined_column) for a missing column.
+    return anyError?.code === '42703' &&
         String(anyError.message || '').includes(column);
 }
 async function getAppConfigRows(tenantId: string) {

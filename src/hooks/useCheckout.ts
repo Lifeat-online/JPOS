@@ -1,5 +1,5 @@
 /**
- * useCheckout — MariaDB REST edition.
+ * useCheckout — REST edition.
  * Replaces all Firestore addDoc/updateDoc calls with REST API calls.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -485,7 +485,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
       let saleId = activeOrderId;
       if (activeOrderId) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
+        await apiPut(`/api/data/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
       } else {
         const created = await createSale(tenantId, saleData);
         saleId = created.id;
@@ -541,7 +541,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
       let saleId = activeOrderId;
       if (activeOrderId) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
+        await apiPut(`/api/data/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
       } else {
         const created = await createSale(tenantId, saleData);
         saleId = created.id;
@@ -583,7 +583,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
       let saleId = activeOrderId;
       if (activeOrderId) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
+        await apiPut(`/api/data/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
       } else {
         const created = await createSale(tenantId, saleData);
         saleId = created.id;
@@ -637,7 +637,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
 
       let saleId = activeOrderId;
       if (activeOrderId) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
+        await apiPut(`/api/data/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
       } else {
         const created = await createSale(tenantId, saleData);
         saleId = created.id;
@@ -818,7 +818,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       let saleId = '';
       try {
         if (activeOrderId) {
-          await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
+          await apiPut(`/api/data/tenants/${tenantId}/sales/${activeOrderId}`, saleData);
           saleId = activeOrderId;
         } else {
           const created = await createSale(tenantId, saleData);

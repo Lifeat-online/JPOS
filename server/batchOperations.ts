@@ -211,7 +211,8 @@ export async function batchCreateProducts(tenantId: string, input: BatchInput, a
     if (dryRun) {
       result.rows.push({ row: rowNumber, action: "create", name: product.name, price: product.price, stock: product.stock });
     } else {
-      const created = await createProduct(tenantId, product as Omit<Product, "id">);
+      // Skip per-row embedding on bulk import; run scripts/backfill-embeddings.ts after.
+      const created = await createProduct(tenantId, product as Omit<Product, "id">, { embed: false });
       existing.byId.set(created.id, created);
       existing.byName.set(created.name.toLowerCase(), created);
       if (created.barcode) existing.byBarcode.set(created.barcode.toLowerCase(), created);

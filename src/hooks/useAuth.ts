@@ -1,5 +1,5 @@
 /**
- * useAuth — JWT-based authentication hook (MariaDB backend).
+ * useAuth — JWT-based authentication hook (Postgres backend).
  * Replaces the previous Firebase Google auth.
  *
  * Stored in localStorage:

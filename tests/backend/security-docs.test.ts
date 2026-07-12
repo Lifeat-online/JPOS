@@ -41,7 +41,7 @@ describe('security and PCI documentation', () => {
     expect(authSource).toMatch(/authRouter\.post\("\/setup-password"[^,]*,\s*[^\n]*sensitiveRouteRateLimit/);
     expect(salesSource).toMatch(/salesRouter\.post\("\/"\s*,\s*[^\n]*sensitiveRouteRateLimit/);
     expect(salesSource).toMatch(/salesRouter\.post\("\/:saleId\/refund"[^,]*,\s*[^\n]*sensitiveRouteRateLimit/);
-    expect(appSource).toContain('app.post("/api/mariadb/tenants/:tenantId/products/:id/stock-adjustments", sensitiveRouteRateLimit');
+    expect(appSource).toContain('app.post("/api/data/tenants/:tenantId/products/:id/stock-adjustments", sensitiveRouteRateLimit');
     expect(settingsSource).toMatch(/"\/ai\/test",\s*requireAuth,\s*sensitiveRouteRateLimit/);
     expect(payfastSource).toMatch(/payfastRouter\.post\("\/notify"[^,]*,\s*[^\n]*sensitiveRouteRateLimit/);
   });

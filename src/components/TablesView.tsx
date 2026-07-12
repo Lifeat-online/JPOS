@@ -48,12 +48,12 @@ export function TablesView({ sales, tableSections, restaurantTables, onSalesUpda
     if (!tenantId) return;
     const readyItems = sale.items.filter(item => (item as OrderItem).status === 'ready');
     
-    // In MariaDB REST, we update items individually or via a bulk endpoint if we had one.
+    // In the REST API, we update items individually or via a bulk endpoint if we had one.
     // For now, we'll use the individual item update endpoint in a loop or implement a bulk one.
     // Let's use the individual one since we added it to server.ts.
     for (const item of readyItems) {
       const o = item as OrderItem;
-      await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${sale.id}/items/${o.id}`, {
+      await apiPut(`/api/data/tenants/${tenantId}/sales/${sale.id}/items/${o.id}`, {
         status: 'delivered',
       });
     }

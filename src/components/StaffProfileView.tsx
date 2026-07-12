@@ -70,7 +70,7 @@ export function StaffProfileView({ currentUserStaff, onStaffUpdated }: StaffProf
     setIsProcessing(true);
     setErrorMsg('');
     try {
-      await apiPost(`/api/mariadb/tenants/${tenantId}/payout-requests`, {
+      await apiPost(`/api/data/tenants/${tenantId}/payout-requests`, {
         staffId: currentUserStaff.id,
         staffName: currentUserStaff.name,
         amount,

@@ -46,3 +46,7 @@ codex-*.log
 artifacts/
 artifacts-*/
 release/
+
+# Playwright artifacts
+playwright-report/
+test-results/

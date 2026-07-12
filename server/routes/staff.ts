@@ -3,7 +3,7 @@ import { requireAuth } from "../auth-middleware.js";
 import { getStaffByTenant } from "../db-adapter.js";
 import { createStaff, updateStaff, deleteStaff } from "../db-crud.js";
 import { validateSchema, StaffSchema, StaffUpdateSchema } from "../validation.js";
-import { denyWithAudit, auditRouteEvent, auditActorFromRequest, canUseActionCenter } from "./_helpers.js";
+import { denyWithAudit, auditRouteEvent, auditActorFromRequest, canUseActionCenter, requireManagerRole } from "./_helpers.js";
 import {
   cancelStaffShift, clockIn, clockOut, createStaffShift, endBreak, getMyAttendanceStatus,
   getTimesheetPayrollReport, listStaffShifts, publishRoster, startBreak, updateStaffShift
@@ -29,7 +29,7 @@ staffRouter.get("/", requireAuth, async (req: any, res) => {
   }
 });
 
-staffRouter.post("/", requireAuth, validateSchema(StaffSchema), async (req: any, res) => {
+staffRouter.post("/", requireAuth, requireManagerRole, validateSchema(StaffSchema), async (req: any, res) => {
   try {
     const created = await createStaff(req.params.tenantId, req.body);
     res.status(201).json(created);
@@ -38,7 +38,7 @@ staffRouter.post("/", requireAuth, validateSchema(StaffSchema), async (req: any,
   }
 });
 
-staffRouter.put("/:staffId", requireAuth, validateSchema(StaffUpdateSchema), async (req: any, res) => {
+staffRouter.put("/:staffId", requireAuth, requireManagerRole, validateSchema(StaffUpdateSchema), async (req: any, res) => {
   try {
     const updated = await updateStaff(req.params.tenantId, req.params.staffId, req.body);
     res.json(updated);
@@ -47,7 +47,7 @@ staffRouter.put("/:staffId", requireAuth, validateSchema(StaffUpdateSchema), asy
   }
 });
 
-staffRouter.delete("/:staffId", requireAuth, async (req: any, res) => {
+staffRouter.delete("/:staffId", requireAuth, requireManagerRole, async (req: any, res) => {
   try {
     await deleteStaff(req.params.tenantId, req.params.staffId);
     res.status(204).end();

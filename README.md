@@ -1,6 +1,6 @@
 # MasePOS
 
-**MasePOS** is a cloud-native, multi-tenant Point of Sale for restaurants, cafés, and retail counters. It runs on Node.js 22, MariaDB or Postgres, and ships as a PWA that installs on Android, iOS, and desktop.
+**MasePOS** is a cloud-native, multi-tenant Point of Sale for restaurants, cafés, and retail counters. It runs on Node.js 22 and PostgreSQL (with pgvector for AI semantic search), and ships as a PWA that installs on Android, iOS, and desktop.
 
 > Live deployment: **https://masepos.co.za**
 
@@ -21,7 +21,7 @@ See **[DOCKER.md](DOCKER.md)** for the full guide, troubleshooting, backups, and
 npm install
 cp .env.example .env
 # set DB_HOST/DB_USER/DB_PASSWORD/DB_DATABASE and JWT_SECRET
-npm run db:init   # creates schema and seed (no real PII — see db/schema.sql)
+npm run db:init   # creates schema and seed (no real PII — see db/schema.postgres.sql)
 npm run dev       # http://localhost:3000
 ```
 
@@ -43,11 +43,11 @@ npm run dev       # http://localhost:3000
 
 ## Architecture
 
-- **Frontend:** React 19, Vite 6, Tailwind 4, zustand, recharts, html5-qrcode, vite-plugin-pwa
-- **Backend:** Express 4 (ESM), mysql2 / pg, JWT (jsonwebtoken), bcryptjs, zod, web-push
+- **Frontend:** React 19, Vite 8, Tailwind 4, zustand, recharts, html5-qrcode, vite-plugin-pwa
+- **Backend:** Express 5 (ESM), pg + Kysely, Vercel AI SDK, JWT (jsonwebtoken), bcryptjs, zod, web-push
 - **Realtime:** socket.io (deps installed, used by pole-display / multi-terminal presence; falls back to polling if disabled)
 - **Payments:** PayFast (webhook at `POST /api/payfast/notify`), plus card terminal, BNPL, and QR providers via the `paymentProviderBoundary` shim
-- **Storage:** MariaDB 11 or Postgres 14+; schema in `db/schema.sql` and `db/schema.postgres.sql`
+- **Storage:** PostgreSQL 14+ (pgvector extension for embeddings); schema in `db/schema.postgres.sql`
 
 ## Mobile/API clients
 

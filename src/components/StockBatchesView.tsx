@@ -62,7 +62,7 @@ export function StockBatchesView() {
       setLoading(true);
       try {
         const [batchResult, reportResult] = await Promise.allSettled([
-          apiGet<StockBatch[]>(`/api/mariadb/tenants/${tenantId}/stock-batches`),
+          apiGet<StockBatch[]>(`/api/data/tenants/${tenantId}/stock-batches`),
           getStockValuationReport(tenantId),
         ]);
         if (!mounted) return;

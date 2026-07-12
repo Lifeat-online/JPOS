@@ -90,7 +90,7 @@ export function ReorderRecommendationsView() {
     try {
       const [rows, vendorRows, locationRows, ruleRows] = await Promise.all([
         getReorderRecommendations(tenantId),
-        apiGet<Vendor[]>(`/api/mariadb/tenants/${tenantId}/vendors`),
+        apiGet<Vendor[]>(`/api/data/tenants/${tenantId}/vendors`),
         getInventoryLocations(tenantId),
         getReorderNotificationRules(tenantId),
       ]);

@@ -111,7 +111,7 @@ export function stripSensitiveVerification<T extends Record<string, any> | null 
 export async function verifySensitiveActionForRequest(req: Request, requestedActionType: SensitiveActionType | string, details: Record<string, unknown> = {}): Promise<SensitiveActionResult> {
     const actionType = normalizeActionType(requestedActionType);
     const actionLabel = actionLabels[actionType];
-    const tenantId = req.params?.tenantId || req.user?.tenantId || null;
+    const tenantId = (req.params?.tenantId as string) || req.user?.tenantId || null;
     const actorId = req.user?.staffId || req.user?.uid || null;
     const actorName = req.user?.name || null;
     const verification = extractVerification(req);

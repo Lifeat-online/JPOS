@@ -37,9 +37,10 @@ describe('db-adapter', () => {
 
 
   it('reads app config when older databases do not have retention_policy yet', async () => {
+    // Postgres missing-column error shape (SQLSTATE 42703 / undefined_column).
     const missingColumn = Object.assign(
-      new Error("Unknown column 'retention_policy' in 'SELECT'"),
-      { code: 'ER_BAD_FIELD_ERROR' },
+      new Error('column "retention_policy" does not exist'),
+      { code: '42703' },
     );
     (dbModule.query as any)
       .mockRejectedValueOnce(missingColumn)

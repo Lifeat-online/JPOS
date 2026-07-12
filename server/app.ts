@@ -53,7 +53,7 @@ import { stripSensitiveVerification, verifySensitiveActionForRequest, type Sensi
 import { listManagerOverrides } from "./managerOverrides.js";
 import { calculateLoyaltyAward, createLoyaltyRewardRule, createLoyaltyTier, listLoyaltyRewardRules, listLoyaltyTiers, updateLoyaltyRewardRule, updateLoyaltyTier, } from "./loyalty.js";
 import { batchCreateProducts, batchUpdateProductPrices, exportCustomersCsv, exportInventoryCsv, importCustomers, importInventory, } from "./batchOperations.js";
-import { normalizeRole, canManageCash, canManagePush, canUseActionCenter, canManageInventory, canGenerateVapidKeys, canUseDevMaintenance, requireDevMaintenance, auditActorFromRequest, tenantIdFromRequest, auditChangedFields, integrationSecretFromRequest, auditRouteEvent, denyWithAudit, requireTenantRouteAccess, enforceSensitiveAction, customerSensitiveAction, staffSensitiveAction, createTenantLocalSyncSecret, } from "./routes/_helpers.js";
+import { normalizeRole, canManageCash, canManagePush, canUseActionCenter, canManageInventory, canGenerateVapidKeys, canUseDevMaintenance, requireDevMaintenance, requireManagerRole, auditActorFromRequest, tenantIdFromRequest, auditChangedFields, integrationSecretFromRequest, auditRouteEvent, denyWithAudit, requireTenantRouteAccess, enforceSensitiveAction, customerSensitiveAction, staffSensitiveAction, createTenantLocalSyncSecret, } from "./routes/_helpers.js";
 export { createTenantLocalSyncSecret };
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
@@ -154,8 +154,8 @@ export async function createApp(io: any = null) {
     }
     async function requirePackageCapacity(req: Request, res: Response, next: NextFunction, usageKey: "products" | "staff" | "customers" | "activeRegisters", limitKey: "maxProducts" | "maxStaff" | "maxCustomers" | "maxRegisters", limitName: string) {
         try {
-            const context = await getTenantPackageContext(req.params.tenantId);
-            const usage = await getTenantPackageUsage(req.params.tenantId);
+            const context = await getTenantPackageContext(String(req.params.tenantId));
+            const usage = await getTenantPackageUsage(String(req.params.tenantId));
             const limit = Number((context.package as any)[limitKey]);
             if (limitReached(Number((usage as any)[usageKey]), limit)) {
                 void auditRouteEvent(req, "permission.denied", "security", {
@@ -183,7 +183,7 @@ export async function createApp(io: any = null) {
     function requirePackageFeature(feature: PackageFeature) {
         return async (req: Request, res: Response, next: NextFunction) => {
             try {
-                const context = await getTenantPackageContext(req.params.tenantId);
+                const context = await getTenantPackageContext(String(req.params.tenantId));
                 if (!hasPackageFeature(context.package.features, feature)) {
                     void auditRouteEvent(req, "permission.denied", "security", {
                         attemptedAction: `package.feature.${feature}`,
@@ -289,27 +289,37 @@ export async function createApp(io: any = null) {
     }
     const { authRouter } = await import("./routes/auth.js");
     app.use("/api/auth", authRouter);
-    app.use("/api/mariadb/tenants/:tenantId", requireAuth, requireTenantRouteAccess);
+    app.use("/api/data/tenants/:tenantId", requireAuth, requireTenantRouteAccess);
     // Authenticated lookups: these expose email/name/role for cross-tenant
     // user resolution. Previously they were optionalAuth (i.e. unauthenticated
     // callers could enumerate staff by guessing emails). Now requireAuth +
     // tenant scoping via the licence check above.
-    app.get("/api/mariadb/users/:uid", requireAuth, async (req, res) => {
+    app.get("/api/data/users/:uid", requireAuth, async (req, res) => {
         try {
-            const user = await getUserByUid(req.params.uid);
+            const user = await getUserByUid(String(req.params.uid));
+            // Scope to the caller's tenant so a signed-in user can't resolve
+            // arbitrary users in other tenants.
+            if (user && String((user as any).tenant_id) !== String(req.user?.tenantId)) {
+                return res.json(null);
+            }
             res.json(user || null);
         }
         catch (err) {
             sendSafeError(res, 500, "Failed to load user", err, req);
         }
     });
-    app.get("/api/mariadb/staff", requireAuth, async (req, res) => {
+    app.get("/api/data/staff", requireAuth, async (req, res) => {
         try {
             const { email } = req.query;
             if (typeof email !== "string" || !email.trim()) {
                 return res.status(400).json({ error: "Email query parameter is required" });
             }
             const staff = await getStaffTenantByEmail(email.trim().toLowerCase());
+            // Scope to the caller's tenant so email lookup can't enumerate staff
+            // (tenant/role) across tenants.
+            if (staff && String((staff as any).tenant_id) !== String(req.user?.tenantId)) {
+                return res.json(null);
+            }
             return res.json(staff || null);
         }
         catch (err) {
@@ -317,34 +327,39 @@ export async function createApp(io: any = null) {
         }
     });
     const { productsRouter } = await import("./routes/products.js");
-    app.use("/api/mariadb/tenants/:tenantId/products", productsRouter);
+    app.use("/api/data/tenants/:tenantId/products", productsRouter);
     const { customersRouter } = await import("./routes/customers.js");
-    app.use("/api/mariadb/tenants/:tenantId/customers", customersRouter);
+    app.use("/api/data/tenants/:tenantId/customers", customersRouter);
     // ── Extracted routers (ponytail refactor) ────────────────────────────────
     const { salesRouter } = await import("./routes/sales.js");
-    app.use("/api/mariadb/tenants/:tenantId/sales", salesRouter);
+    app.use("/api/data/tenants/:tenantId/sales", salesRouter);
     const { cashRouter } = await import("./routes/cash.js");
-    app.use("/api/mariadb/tenants/:tenantId", cashRouter);
+    app.use("/api/data/tenants/:tenantId", cashRouter);
     const { inventoryRouter } = await import("./routes/inventory.js");
-    app.use("/api/mariadb/tenants/:tenantId", inventoryRouter);
+    app.use("/api/data/tenants/:tenantId", inventoryRouter);
     const { settingsRouter } = await import("./routes/settings.js");
-    app.use("/api/mariadb/tenants/:tenantId", settingsRouter);
+    app.use("/api/data/tenants/:tenantId", settingsRouter);
     const { reportsRouter } = await import("./routes/reports.js");
-    app.use("/api/mariadb/tenants/:tenantId", reportsRouter);
+    app.use("/api/data/tenants/:tenantId", reportsRouter);
     const { tablesRouter } = await import("./routes/tables.js");
-    app.use("/api/mariadb/tenants/:tenantId", tablesRouter);
+    app.use("/api/data/tenants/:tenantId", tablesRouter);
     const { workstationsRouter } = await import("./routes/workstations.js");
-    app.use("/api/mariadb/tenants/:tenantId", workstationsRouter);
+    app.use("/api/data/tenants/:tenantId", workstationsRouter);
     // ─────────────────────────────────────────────────────────────────────────
-    app.get("/api/mariadb/tenants/:tenantId/package-limits", requireAuth, async (req, res) => {
+    app.get("/api/data/tenants/:tenantId/package-limits", requireAuth, async (req, res) => {
         try {
             const [context, usage] = await Promise.all([
-                getTenantPackageContext(req.params.tenantId),
-                getTenantPackageUsage(req.params.tenantId),
+                getTenantPackageContext(String(req.params.tenantId)),
+                getTenantPackageUsage(String(req.params.tenantId)),
             ]);
             const pkg = context.package;
             const localServerSync = hasPackageFeature(pkg.features, "local_server_sync");
-            const localSyncSharedSecret = createTenantLocalSyncSecret(req.params.tenantId, localServerSync);
+            // The local-sync shared secret is an admin-provisioning credential;
+            // only expose it to admin/dev, not to every authenticated staff user.
+            const canSeeSyncSecret = canUseDevMaintenance(req.user?.role);
+            const localSyncSharedSecret = canSeeSyncSecret
+                ? createTenantLocalSyncSecret(String(req.params.tenantId), localServerSync)
+                : "";
             res.json({
                 source: context.source,
                 package: pkg,
@@ -365,10 +380,10 @@ export async function createApp(io: any = null) {
     });
     app.post("/api/integrations/:tenantId/stock-sync", integrationWebhookRateLimit, async (req, res) => {
         try {
-            const apiKey = await authenticateIntegrationApiKey(req.params.tenantId, integrationSecretFromRequest(req));
+            const apiKey = await authenticateIntegrationApiKey(String(req.params.tenantId), integrationSecretFromRequest(req));
             if (!apiKey)
                 return res.status(401).json({ error: "Invalid integration API key" });
-            const event = await ingestStockWebhook(req.params.tenantId, req.body || {}, apiKey);
+            const event = await ingestStockWebhook(String(req.params.tenantId), req.body || {}, apiKey);
             res.status(event.status === "duplicate" ? 200 : 202).json({
                 status: event.status,
                 eventId: event.id,
@@ -384,11 +399,11 @@ export async function createApp(io: any = null) {
         }
     });
     const { staffRouter } = await import("./routes/staff.js");
-    app.use("/api/mariadb/tenants/:tenantId/staff", staffRouter);
-    app.use("/api/mariadb/tenants/:tenantId/workforce", staffRouter);
-    app.get("/api/mariadb/tenants/:tenantId/live", requireAuth, async (req, res) => {
+    app.use("/api/data/tenants/:tenantId/staff", staffRouter);
+    app.use("/api/data/tenants/:tenantId/workforce", staffRouter);
+    app.get("/api/data/tenants/:tenantId/live", requireAuth, async (req, res) => {
         try {
-            const tenantId = req.params.tenantId;
+            const tenantId = String(req.params.tenantId);
             const toNumber = (value: unknown): number => {
                 if (typeof value === "number")
                     return Number.isFinite(value) ? value : 0;
@@ -562,7 +577,7 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.post("/api/mariadb/setup", requireAuth, async (req, res) => {
+    app.post("/api/data/setup", requireAuth, async (req, res) => {
         try {
             const data = await setupTenant(req.body);
             res.json(data);
@@ -571,39 +586,46 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.post("/api/mariadb/tenants/:tenantId/seed-products", requireAuth, async (req, res) => {
+    app.post("/api/data/tenants/:tenantId/seed-products", requireAuth, requireManagerRole, async (req, res) => {
         try {
-            await seedProducts(req.params.tenantId, req.body.products);
+            await seedProducts(String(req.params.tenantId), req.body.products);
             res.json({ success: true });
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.post("/api/mariadb/tenants/:tenantId/demo-seed/:mode", requireAuth, async (req, res) => {
+    app.post("/api/data/tenants/:tenantId/demo-seed/:mode", requireAuth, requireManagerRole, async (req, res) => {
         try {
             const mode = req.params.mode === "restaurant" ? "restaurant" : "retail";
-            await seedDemoData(req.params.tenantId, mode);
+            await seedDemoData(String(req.params.tenantId), mode);
             res.json({ success: true, mode });
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.delete("/api/mariadb/tenants/:tenantId/demo-seed", requireAuth, async (req, res) => {
+    app.delete("/api/data/tenants/:tenantId/demo-seed", requireAuth, requireManagerRole, async (req, res) => {
         try {
-            await clearSeededDemoData(req.params.tenantId);
+            await clearSeededDemoData(String(req.params.tenantId));
             res.json({ success: true });
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.get("/api/mariadb/customers/by-email", optionalAuth, async (req, res) => {
+    app.get("/api/data/customers/by-email", optionalAuth, async (req, res) => {
         try {
             const email = req.query.email as string;
             if (!email)
                 return res.status(400).json({ error: "Email is required" });
+            // Callers may only look up their OWN record. This is a customer-portal
+            // self-lookup; unauthenticated or mismatched-email requests are denied
+            // so this endpoint can't enumerate customer PII across tenants.
+            const callerEmail = String(req.user?.email || "").trim().toLowerCase();
+            if (!callerEmail || callerEmail !== email.trim().toLowerCase()) {
+                return res.status(403).json({ error: "You can only look up your own customer record." });
+            }
             const rows = await query("SELECT * FROM customers WHERE email = $1", [email]);
             if (rows.length === 0)
                 return res.json(null);
@@ -642,33 +664,33 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.post("/api/mariadb/tenants/:tenantId/products", requireAuth, validateSchema(ProductSchema), (req, res, next) => requirePackageCapacity(req, res, next, "products", "maxProducts", "products"), async (req, res, next) => {
+    app.post("/api/data/tenants/:tenantId/products", requireAuth, validateSchema(ProductSchema), (req, res, next) => requirePackageCapacity(req, res, next, "products", "maxProducts", "products"), async (req, res, next) => {
         if (!req.body.imageUrl)
             return next();
         return requirePackageFeature("images")(req, res, next);
     }, async (req, res) => {
         try {
-            const data = await createProduct(req.params.tenantId, req.body);
+            const data = await createProduct(String(req.params.tenantId), req.body);
             res.json(data);
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.put("/api/mariadb/tenants/:tenantId/products/:id", requireAuth, validateSchema(ProductSchema), async (req, res, next) => {
+    app.put("/api/data/tenants/:tenantId/products/:id", requireAuth, validateSchema(ProductSchema), async (req, res, next) => {
         if (!req.body.imageUrl)
             return next();
         return requirePackageFeature("images")(req, res, next);
     }, async (req, res) => {
         try {
-            const data = await updateProduct(req.params.tenantId, req.params.id, req.body);
+            const data = await updateProduct(String(req.params.tenantId), String(req.params.id), req.body);
             res.json(data);
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.post("/api/mariadb/tenants/:tenantId/products/:id/stock-adjustments", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
+    app.post("/api/data/tenants/:tenantId/products/:id/stock-adjustments", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
         try {
             const stockInput = stripSensitiveVerification(req.body || {});
             const delta = Number((stockInput as any)?.delta);
@@ -686,7 +708,7 @@ export async function createApp(io: any = null) {
                 staffName: req.user?.name || (stockInput as any)?.staffName || null,
             };
             const payload = {
-                productId: req.params.id,
+                productId: String(req.params.id),
                 productName: (stockInput as any)?.productName || null,
                 delta,
                 reason,
@@ -695,7 +717,7 @@ export async function createApp(io: any = null) {
                 requestedByName: actor.staffName,
             };
             if (!canManageInventory(req.user?.role)) {
-                const task = await createManagerStockAdjustmentRequest(req.params.tenantId, payload);
+                const task = await createManagerStockAdjustmentRequest(String(req.params.tenantId), payload);
                 res.status(202).json({
                     approvalRequired: true,
                     message: "Stock adjustment request sent to the manager Action Center.",
@@ -704,13 +726,13 @@ export async function createApp(io: any = null) {
                 return;
             }
             const sensitiveResponse = await enforceSensitiveAction(req, res, "stock_adjustment", {
-                productId: req.params.id,
+                productId: String(req.params.id),
                 delta,
                 reason,
             });
             if (sensitiveResponse)
                 return;
-            const result = await applyStockAdjustment(req.params.tenantId, payload, actor);
+            const result = await applyStockAdjustment(String(req.params.tenantId), payload, actor);
             res.json({
                 approvalRequired: false,
                 message: "Stock adjusted and logged.",
@@ -721,9 +743,9 @@ export async function createApp(io: any = null) {
             res.status(400).json({ error: err.message });
         }
     });
-    app.post("/api/mariadb/tenants/:tenantId/customers", requireAuth, validateSchema(CustomerSchema), (req, res, next) => requirePackageCapacity(req, res, next, "customers", "maxCustomers", "customers"), async (req, res) => {
+    app.post("/api/data/tenants/:tenantId/customers", requireAuth, validateSchema(CustomerSchema), (req, res, next) => requirePackageCapacity(req, res, next, "customers", "maxCustomers", "customers"), async (req, res) => {
         try {
-            const data = await createCustomer(req.params.tenantId, {
+            const data = await createCustomer(String(req.params.tenantId), {
                 ...req.body,
                 consentActor: auditActorFromRequest(req),
             });
@@ -737,48 +759,48 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.put("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, validateSchema(CustomerUpdateSchema), async (req, res) => {
+    app.put("/api/data/tenants/:tenantId/customers/:id", requireAuth, validateSchema(CustomerUpdateSchema), async (req, res) => {
         try {
             const customerUpdates = stripSensitiveVerification(req.body || {});
             const sensitiveAction = customerSensitiveAction(customerUpdates);
             if (sensitiveAction) {
                 const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
-                    customerId: req.params.id,
+                    customerId: String(req.params.id),
                     changedFields: auditChangedFields(customerUpdates),
                 });
                 if (sensitiveResponse)
                     return;
             }
-            const data = await updateCustomer(req.params.tenantId, req.params.id, {
+            const data = await updateCustomer(String(req.params.tenantId), String(req.params.id), {
                 ...customerUpdates,
                 consentActor: auditActorFromRequest(req),
             });
             await auditRouteEvent(req, "customer.updated", "customer", {
                 customerName: data?.name || (customerUpdates as any)?.name || null,
                 changedFields: auditChangedFields(customerUpdates || {}),
-            }, req.params.id, "customer_admin");
+            }, String(req.params.id), "customer_admin");
             res.json(data);
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.delete("/api/mariadb/tenants/:tenantId/customers/:id", requireAuth, async (req, res) => {
+    app.delete("/api/data/tenants/:tenantId/customers/:id", requireAuth, async (req, res) => {
         try {
             if (!canUseActionCenter(req.user?.role)) {
                 return denyWithAudit(req, res, "customers.anonymize", "Manager access is required to anonymize customer profiles.", {
-                    customerId: req.params.id,
+                    customerId: String(req.params.id),
                 });
             }
-            const result = await deleteCustomer(req.params.tenantId, req.params.id, {
+            const result = await deleteCustomer(String(req.params.tenantId), String(req.params.id), {
                 ...auditActorFromRequest(req),
                 reason: req.body?.reason || null,
             });
             await auditRouteEvent(req, "customer.deleted", "customer", {
-                customerId: req.params.id,
+                customerId: String(req.params.id),
                 mode: result.mode || "anonymized",
                 retainedSaleCount: result.retainedSaleCount ?? null,
-            }, req.params.id, "customer_admin");
+            }, String(req.params.id), "customer_admin");
             res.json(result);
         }
         catch (err: any) {
@@ -786,9 +808,9 @@ export async function createApp(io: any = null) {
             res.status(message.includes("not found") ? 404 : message.includes("cannot be anonymized") ? 409 : 500).json({ error: err.message });
         }
     });
-    app.post("/api/mariadb/tenants/:tenantId/staff", requireAuth, validateSchema(StaffSchema), (req, res, next) => requirePackageCapacity(req, res, next, "staff", "maxStaff", "staff members"), async (req, res) => {
+    app.post("/api/data/tenants/:tenantId/staff", requireAuth, requireManagerRole, validateSchema(StaffSchema), (req, res, next) => requirePackageCapacity(req, res, next, "staff", "maxStaff", "staff members"), async (req, res) => {
         try {
-            const data = await createStaff(req.params.tenantId, req.body);
+            const data = await createStaff(String(req.params.tenantId), req.body);
             await auditRouteEvent(req, "staff.created", "staff", {
                 staffName: data?.name || req.body?.name || null,
                 role: data?.role || req.body?.role || null,
@@ -800,36 +822,36 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.put("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, validateSchema(StaffUpdateSchema), async (req, res) => {
+    app.put("/api/data/tenants/:tenantId/staff/:id", requireAuth, requireManagerRole, validateSchema(StaffUpdateSchema), async (req, res) => {
         try {
             const staffUpdates = stripSensitiveVerification(req.body || {});
             const sensitiveAction = staffSensitiveAction(staffUpdates);
             if (sensitiveAction) {
                 const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
-                    targetStaffId: req.params.id,
+                    targetStaffId: String(req.params.id),
                     changedFields: auditChangedFields(staffUpdates),
                 });
                 if (sensitiveResponse)
                     return;
             }
-            const data = await updateStaff(req.params.tenantId, req.params.id, staffUpdates);
+            const data = await updateStaff(String(req.params.tenantId), String(req.params.id), staffUpdates);
             await auditRouteEvent(req, "staff.updated", "staff", {
                 staffName: data?.name || (staffUpdates as any)?.name || null,
                 role: data?.role || (staffUpdates as any)?.role || null,
                 changedFields: auditChangedFields(staffUpdates || {}),
-            }, req.params.id, "staff_admin");
+            }, String(req.params.id), "staff_admin");
             res.json(data);
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.delete("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, async (req, res) => {
+    app.delete("/api/data/tenants/:tenantId/staff/:id", requireAuth, requireManagerRole, async (req, res) => {
         try {
-            await deleteStaff(req.params.tenantId, req.params.id);
+            await deleteStaff(String(req.params.tenantId), String(req.params.id));
             await auditRouteEvent(req, "staff.deleted", "staff", {
-                targetStaffId: req.params.id,
-            }, req.params.id, "staff_admin");
+                targetStaffId: String(req.params.id),
+            }, String(req.params.id), "staff_admin");
             res.json({ success: true });
         }
         catch (err: any) {
@@ -839,54 +861,81 @@ export async function createApp(io: any = null) {
     // ─────────────────────────────────────────────────────────────────────────
     // Bulk Items & Inventory Expansion
     // ─────────────────────────────────────────────────────────────────────────
-    app.get("/api/mariadb/products/:productId/recipe", requireAuth, async (req, res) => {
+    // Recipe/modifier routes are keyed by product/modifier id (no tenant in the
+    // path), so they enforce tenant ownership against the caller's token before
+    // reading/mutating. product_recipes/product_modifiers cascade from products,
+    // so ownership is resolved by joining to products.tenant_id.
+    async function productBelongsToCaller(productId: string, req: Request): Promise<boolean> {
+        const rows = await query("SELECT 1 FROM products WHERE id = $1 AND tenant_id = $2", [productId, String(req.user?.tenantId || "")]);
+        return rows.length > 0;
+    }
+    async function modifierBelongsToCaller(modifierId: string, req: Request): Promise<boolean> {
+        const rows = await query(
+            "SELECT 1 FROM product_modifiers m JOIN products p ON m.product_id = p.id WHERE m.id = $1 AND p.tenant_id = $2",
+            [modifierId, String(req.user?.tenantId || "")],
+        );
+        return rows.length > 0;
+    }
+    app.get("/api/data/products/:productId/recipe", requireAuth, async (req, res) => {
         try {
-            const recipe = await getProductRecipe(req.params.productId);
+            if (!(await productBelongsToCaller(String(req.params.productId), req)))
+                return res.status(404).json({ error: "Product not found" });
+            const recipe = await getProductRecipe(String(req.params.productId));
             res.json(recipe);
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.put("/api/mariadb/products/:productId/recipe", requireAuth, async (req, res) => {
+    app.put("/api/data/products/:productId/recipe", requireAuth, requireManagerRole, async (req, res) => {
         try {
-            await updateProductRecipe(req.params.productId, req.body);
+            if (!(await productBelongsToCaller(String(req.params.productId), req)))
+                return res.status(404).json({ error: "Product not found" });
+            await updateProductRecipe(String(req.params.productId), req.body);
             res.json({ success: true });
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.get("/api/mariadb/products/:productId/modifiers", requireAuth, async (req, res) => {
+    app.get("/api/data/products/:productId/modifiers", requireAuth, async (req, res) => {
         try {
-            const mods = await getProductModifiers(req.params.productId);
+            if (!(await productBelongsToCaller(String(req.params.productId), req)))
+                return res.status(404).json({ error: "Product not found" });
+            const mods = await getProductModifiers(String(req.params.productId));
             res.json(mods);
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.post("/api/mariadb/products/:productId/modifiers", requireAuth, async (req, res) => {
+    app.post("/api/data/products/:productId/modifiers", requireAuth, requireManagerRole, async (req, res) => {
         try {
-            const id = await createModifierGroup(req.params.productId, req.body);
+            if (!(await productBelongsToCaller(String(req.params.productId), req)))
+                return res.status(404).json({ error: "Product not found" });
+            const id = await createModifierGroup(String(req.params.productId), req.body);
             res.json({ id });
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.put("/api/mariadb/modifiers/:modifierId/options", requireAuth, async (req, res) => {
+    app.put("/api/data/modifiers/:modifierId/options", requireAuth, requireManagerRole, async (req, res) => {
         try {
-            await updateModifierOptions(req.params.modifierId, req.body);
+            if (!(await modifierBelongsToCaller(String(req.params.modifierId), req)))
+                return res.status(404).json({ error: "Modifier not found" });
+            await updateModifierOptions(String(req.params.modifierId), req.body);
             res.json({ success: true });
         }
         catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.delete("/api/mariadb/modifiers/:modifierId", requireAuth, async (req, res) => {
+    app.delete("/api/data/modifiers/:modifierId", requireAuth, requireManagerRole, async (req, res) => {
         try {
-            await deleteModifierGroup(req.params.modifierId);
+            if (!(await modifierBelongsToCaller(String(req.params.modifierId), req)))
+                return res.status(404).json({ error: "Modifier not found" });
+            await deleteModifierGroup(String(req.params.modifierId));
             res.json({ success: true });
         }
         catch (err: any) {
@@ -930,7 +979,9 @@ export async function createApp(io: any = null) {
                 res.redirect(302, `${basePath}/`);
             });
         }
-        app.get(staticMountPath === '/' ? '*' : `${staticMountPath}/*`, (req, res) => {
+        // Express 5 / path-to-regexp v8: bare "*" is no longer a valid path;
+        // catch-all must use a named wildcard segment ("/*splat").
+        app.get(staticMountPath === '/' ? '/*splat' : `${staticMountPath}/*splat`, (req, res) => {
             res.setHeader('Cache-Control', 'no-store');
             res.sendFile(path.join(distDir, 'index.html'), (err) => {
                 if (err) {

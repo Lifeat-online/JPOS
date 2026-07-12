@@ -1,7 +1,7 @@
 -- Postgres schema for MasePOS (Supabase)
 -- Notes:
 -- - JSON columns are stored as TEXT containing JSON for maximum compatibility with existing code.
--- - Boolean-like flags use SMALLINT (0/1) to match existing MariaDB behavior.
+-- - Boolean-like flags use SMALLINT (0/1) to match the legacy schema boolean convention.
 -- - Run in Supabase SQL editor (public schema).
 
 CREATE TABLE IF NOT EXISTS tenants (
@@ -1482,7 +1482,7 @@ VALUES (
   'Admin',
   'dev',
   'jameskoen78@gmail.com',
-  '$2b$10$cllz1VjHJl97oeAyzvZWsOpYd66l7kaOXG977GZ6yDT6C58SgMf9S',
+  '$2b$10$GRwOgQlFUCQjHrOD/GEZmOgAwgDJ2C6mFK6SagJTs2zDf66PbzJQu',
   'active'
 )
 ON CONFLICT (id) DO NOTHING;

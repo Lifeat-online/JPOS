@@ -1,5 +1,6 @@
 import { getConnection, query } from "./db.js";
 import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
+import { embedForTenant, productEmbeddingText } from "./ai.js";
 import { assertSafePaymentProviderEvidence } from "./paymentProviderBoundary.js";
 import {
   assertCurrentTaxPeriodOpen,
@@ -359,12 +360,12 @@ async function applyCheckoutSideEffects(
     const sessionFields: string[] = [];
     const sessionValues: (string | number | null)[] = [];
     if (context.expectedCashDelta !== undefined) {
-      sessionFields.push("expected_cash = COALESCE(expected_cash, 0) + $1");
+      sessionFields.push(`expected_cash = COALESCE(expected_cash, 0) + $${sessionValues.length + 1}`);
       sessionValues.push(context.expectedCashDelta);
     }
     if (context.tipsDelta !== undefined) {
       sessionFields.push(
-        "accumulated_tips = COALESCE(accumulated_tips, 0) + $1",
+        `accumulated_tips = COALESCE(accumulated_tips, 0) + $${sessionValues.length + 1}`,
       );
       sessionValues.push(context.tipsDelta);
     }
@@ -372,7 +373,7 @@ async function applyCheckoutSideEffects(
       sessionFields.push("updated_at = NOW()");
       sessionValues.push(context.cashSessionId, tenantId);
       await conn.query(
-        `UPDATE cash_sessions SET ${sessionFields.join(", ")} WHERE id = $1 AND tenant_id = $2`,
+        `UPDATE cash_sessions SET ${sessionFields.join(", ")} WHERE id = $${sessionValues.length - 1} AND tenant_id = $${sessionValues.length}`,
         sessionValues,
       );
     }
@@ -782,11 +783,11 @@ async function collectOfflineSaleSyncConflicts(
     const conditions: string[] = [];
     const values: any[] = [tenantId];
     if (tabName) {
-      conditions.push("LOWER(tab_name) = LOWER($1)");
+      conditions.push(`LOWER(tab_name) = LOWER($${values.length + 1})`);
       values.push(tabName);
     }
     if (customerId) {
-      conditions.push("customer_id = $1");
+      conditions.push(`customer_id = $${values.length + 1}`);
       values.push(customerId);
     }
     const [rows] = await conn.query(
@@ -836,9 +837,32 @@ async function collectOfflineSaleSyncConflicts(
   }
   return conflicts;
 }
+/**
+ * Best-effort pgvector embedding for a product. No-op when embeddings are not
+ * configured (no OpenAI key) or pgvector is unavailable. Never throws — the
+ * product write must not fail because embedding failed.
+ */
+async function storeProductEmbedding(
+  tenantId: string,
+  productId: string,
+  product: { name?: string | null; category?: string | null; subCategory?: string | null; section?: string | null; barcode?: string | null },
+): Promise<void> {
+  try {
+    const embedding = await embedForTenant(tenantId, productEmbeddingText(product));
+    if (!embedding) return;
+    await query(
+      `UPDATE products SET embedding = $3::vector WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, productId, `[${embedding.join(",")}]`],
+    );
+  } catch (err: any) {
+    console.warn("[embeddings] storeProductEmbedding failed:", err?.message || err);
+  }
+}
+
 export async function createProduct(
   tenantId: string,
   product: Omit<Product, "id">,
+  opts: { embed?: boolean } = {},
 ): Promise<Product> {
   const id = `prod_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   await query(
@@ -868,6 +892,11 @@ export async function createProduct(
     product.stock,
     product.minStock || 0,
   );
+  // Fire-and-forget embedding so single-product writes stay fast. Bulk paths
+  // pass { embed: false } and rely on scripts/backfill-embeddings.ts instead.
+  if (opts.embed !== false) {
+    void storeProductEmbedding(tenantId, id, product);
+  }
   return { id, ...product };
 }
 export async function createCustomer(
@@ -1036,51 +1065,52 @@ export async function updateProduct(
   tenantId: string,
   productId: string,
   updates: Partial<Product>,
+  opts: { embed?: boolean } = {},
 ): Promise<Product> {
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.name !== undefined) {
-    fields.push("name = $1");
+    fields.push(`name = $${values.length + 1}`);
     values.push(updates.name);
   }
   if (updates.price !== undefined) {
-    fields.push("price = $1");
+    fields.push(`price = $${values.length + 1}`);
     values.push(updates.price);
   }
   if (updates.costPrice !== undefined) {
-    fields.push("cost_price = $1");
+    fields.push(`cost_price = $${values.length + 1}`);
     values.push(updates.costPrice);
   }
   if (updates.section !== undefined) {
-    fields.push("section = $1");
+    fields.push(`section = $${values.length + 1}`);
     values.push(updates.section);
   }
   if (updates.category !== undefined) {
-    fields.push("category = $1");
+    fields.push(`category = $${values.length + 1}`);
     values.push(updates.category);
   }
   if (updates.subCategory !== undefined) {
-    fields.push("sub_category = $1");
+    fields.push(`sub_category = $${values.length + 1}`);
     values.push(updates.subCategory);
   }
   if (updates.stock !== undefined) {
-    fields.push("stock = $1");
+    fields.push(`stock = $${values.length + 1}`);
     values.push(updates.stock);
   }
   if (updates.minStock !== undefined) {
-    fields.push("min_stock = $1");
+    fields.push(`min_stock = $${values.length + 1}`);
     values.push(updates.minStock);
   }
   if (updates.imageUrl !== undefined) {
-    fields.push("image_url = $1");
+    fields.push(`image_url = $${values.length + 1}`);
     values.push(updates.imageUrl);
   }
   if (updates.barcode !== undefined) {
-    fields.push("barcode = $1");
+    fields.push(`barcode = $${values.length + 1}`);
     values.push(updates.barcode);
   }
   if (updates.workstationId !== undefined) {
-    fields.push("workstation_id = $1");
+    fields.push(`workstation_id = $${values.length + 1}`);
     values.push(updates.workstationId);
   }
   fields.push("updated_at = NOW()");
@@ -1111,7 +1141,7 @@ export async function updateProduct(
     return rows[0] as Product;
   }
   await query(
-    `UPDATE products SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE products SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
   const rows = await query(
@@ -1144,6 +1174,17 @@ export async function updateProduct(
       row?.minStock ?? row?.min_stock,
     );
   }
+  // Re-embed only when an embedded text field changed (skip pure price/stock
+  // updates). Fire-and-forget; bulk paths pass { embed: false }.
+  const textChanged =
+    updates.name !== undefined ||
+    updates.category !== undefined ||
+    updates.subCategory !== undefined ||
+    updates.section !== undefined ||
+    updates.barcode !== undefined;
+  if (opts.embed !== false && textChanged) {
+    void storeProductEmbedding(tenantId, productId, rows[0] as Product);
+  }
   return rows[0] as Product;
 }
 export async function updateCustomer(
@@ -1156,72 +1197,72 @@ export async function updateCustomer(
   const consentInput = (updates as any).consents;
   const consentActor = (updates as any).consentActor || {};
   if (updates.name !== undefined) {
-    fields.push("name = $1");
+    fields.push(`name = $${values.length + 1}`);
     values.push(updates.name);
   }
   if (updates.email !== undefined) {
-    fields.push("email = $1");
+    fields.push(`email = $${values.length + 1}`);
     values.push(updates.email);
   }
   if (updates.phone !== undefined) {
-    fields.push("phone = $1");
+    fields.push(`phone = $${values.length + 1}`);
     values.push(updates.phone);
   }
   if (updates.address !== undefined) {
-    fields.push("address = $1");
+    fields.push(`address = $${values.length + 1}`);
     values.push(updates.address);
   }
   if (updates.notes !== undefined) {
-    fields.push("notes = $1");
+    fields.push(`notes = $${values.length + 1}`);
     values.push(updates.notes);
   }
   if (updates.loyaltyPoints !== undefined) {
-    fields.push("loyalty_points = $1");
+    fields.push(`loyalty_points = $${values.length + 1}`);
     values.push(updates.loyaltyPoints);
   }
   if ((updates as any).loyaltyMemberStatus !== undefined) {
-    fields.push("loyalty_member_status = $1");
+    fields.push(`loyalty_member_status = $${values.length + 1}`);
     values.push((updates as any).loyaltyMemberStatus || "active");
   }
   if ((updates as any).loyaltyTierId !== undefined) {
-    fields.push("loyalty_tier_id = $1");
+    fields.push(`loyalty_tier_id = $${values.length + 1}`);
     values.push((updates as any).loyaltyTierId || null);
   }
   if ((updates as any).membershipCardId !== undefined) {
-    fields.push("membership_card_id = $1");
+    fields.push(`membership_card_id = $${values.length + 1}`);
     values.push((updates as any).membershipCardId || null);
   }
   if ((updates as any).membershipBarcode !== undefined) {
-    fields.push("membership_barcode = $1");
+    fields.push(`membership_barcode = $${values.length + 1}`);
     values.push((updates as any).membershipBarcode || null);
   }
   if ((updates as any).membershipStartedAt !== undefined) {
-    fields.push("membership_started_at = $1");
+    fields.push(`membership_started_at = $${values.length + 1}`);
     values.push((updates as any).membershipStartedAt || null);
   }
   if (updates.walletBalance !== undefined) {
-    fields.push("wallet_balance = $1");
+    fields.push(`wallet_balance = $${values.length + 1}`);
     values.push(updates.walletBalance);
   }
   if (updates.accountEnabled !== undefined) {
-    fields.push("account_enabled = $1");
+    fields.push(`account_enabled = $${values.length + 1}`);
     values.push(updates.accountEnabled ? 1 : 0);
   }
   if (updates.accountLimit !== undefined) {
-    fields.push("account_limit = $1");
+    fields.push(`account_limit = $${values.length + 1}`);
     values.push(updates.accountLimit);
   }
   if (updates.accountBalance !== undefined) {
-    fields.push("account_balance = $1");
+    fields.push(`account_balance = $${values.length + 1}`);
     values.push(updates.accountBalance);
   }
   if (updates.discountPercent !== undefined) {
-    fields.push("discount_percent = $1");
+    fields.push(`discount_percent = $${values.length + 1}`);
     values.push(updates.discountPercent || 0);
   }
   if ((updates as any).accountBalanceDelta !== undefined) {
     fields.push(
-      "account_balance = GREATEST(0, COALESCE(account_balance, 0) + $1)",
+      `account_balance = GREATEST(0, COALESCE(account_balance, 0) + $${values.length + 1})`,
     );
     values.push((updates as any).accountBalanceDelta);
   }
@@ -1274,7 +1315,7 @@ export async function updateCustomer(
     } as Customer;
   }
   await query(
-    `UPDATE customers SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE customers SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
   const rows = await query(
@@ -1329,83 +1370,83 @@ export async function updateStaff(
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.name !== undefined) {
-    fields.push("name = $1");
+    fields.push(`name = $${values.length + 1}`);
     values.push(updates.name);
   }
   if (updates.role !== undefined) {
-    fields.push("role = $1");
+    fields.push(`role = $${values.length + 1}`);
     values.push(updates.role);
   }
   if (updates.email !== undefined) {
-    fields.push("email = $1");
+    fields.push(`email = $${values.length + 1}`);
     values.push(updates.email);
   }
   if (updates.phone !== undefined) {
-    fields.push("phone = $1");
+    fields.push(`phone = $${values.length + 1}`);
     values.push(updates.phone);
   }
   if (updates.status !== undefined) {
-    fields.push("status = $1");
+    fields.push(`status = $${values.length + 1}`);
     values.push(updates.status);
   }
   if (updates.permissions !== undefined) {
-    fields.push("permissions = $1");
+    fields.push(`permissions = $${values.length + 1}`);
     values.push(JSON.stringify(updates.permissions));
   }
   if (updates.assignedSections !== undefined) {
-    fields.push("assigned_sections = $1");
+    fields.push(`assigned_sections = $${values.length + 1}`);
     values.push(JSON.stringify(updates.assignedSections));
   }
   if (updates.assignedCategories !== undefined) {
-    fields.push("assigned_categories = $1");
+    fields.push(`assigned_categories = $${values.length + 1}`);
     values.push(JSON.stringify(updates.assignedCategories));
   }
   if (updates.idNumber !== undefined) {
-    fields.push("id_number = $1");
+    fields.push(`id_number = $${values.length + 1}`);
     values.push(updates.idNumber);
   }
   if (updates.payRate !== undefined) {
-    fields.push("pay_rate = $1");
+    fields.push(`pay_rate = $${values.length + 1}`);
     values.push(updates.payRate);
   }
   if (updates.payType !== undefined) {
-    fields.push("pay_type = $1");
+    fields.push(`pay_type = $${values.length + 1}`);
     values.push(updates.payType);
   }
   if (updates.accumulatedLeave !== undefined) {
-    fields.push("accumulated_leave = $1");
+    fields.push(`accumulated_leave = $${values.length + 1}`);
     values.push(updates.accumulatedLeave);
   }
   if (updates.walletBalance !== undefined) {
-    fields.push("wallet_balance = $1");
+    fields.push(`wallet_balance = $${values.length + 1}`);
     values.push(updates.walletBalance);
   }
   if (updates.walletBalanceDelta !== undefined) {
-    fields.push("wallet_balance = COALESCE(wallet_balance, 0) + $1");
+    fields.push(`wallet_balance = COALESCE(wallet_balance, 0) + $${values.length + 1}`);
     values.push(updates.walletBalanceDelta);
   }
   if (updates.discountPercent !== undefined) {
-    fields.push("discount_percent = $1");
+    fields.push(`discount_percent = $${values.length + 1}`);
     values.push(updates.discountPercent || 0);
   }
   if (updates.defaultLocationId !== undefined) {
-    fields.push("default_location_id = $1");
+    fields.push(`default_location_id = $${values.length + 1}`);
     values.push(updates.defaultLocationId || null);
   }
   if (updates.assignedLocationIds !== undefined) {
-    fields.push("assigned_location_ids = $1");
+    fields.push(`assigned_location_ids = $${values.length + 1}`);
     values.push(JSON.stringify(updates.assignedLocationIds || []));
   }
   if (updates.metrics !== undefined) {
-    fields.push("metrics = $1");
+    fields.push(`metrics = $${values.length + 1}`);
     values.push(JSON.stringify(updates.metrics));
   }
   if (updates.badges !== undefined) {
-    fields.push("badges = $1");
+    fields.push(`badges = $${values.length + 1}`);
     values.push(JSON.stringify(updates.badges));
   }
   if (updates.rank !== undefined) {
-    fields.push("rank = $1");
+    fields.push(`rank = $${values.length + 1}`);
     values.push(updates.rank);
   }
   fields.push("updated_at = NOW()");
@@ -1454,7 +1495,7 @@ export async function updateStaff(
     } as Staff;
   }
   await query(
-    `UPDATE staff SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE staff SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
   const rows = await query(
@@ -1506,23 +1547,23 @@ export async function updateTableSection(
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.name !== undefined) {
-    fields.push("name = $1");
+    fields.push(`name = $${values.length + 1}`);
     values.push(updates.name);
   }
   if (updates.color !== undefined) {
-    fields.push("color = $1");
+    fields.push(`color = $${values.length + 1}`);
     values.push(updates.color);
   }
   if (updates.order !== undefined) {
     const orderCol = '"order"';
-    fields.push(`${orderCol} = $1`);
+    fields.push(`${orderCol} = $${values.length + 1}`);
     values.push(updates.order);
   }
   if (fields.length === 0) return;
   fields.push("updated_at = NOW()");
   values.push(tenantId, sectionId);
   await query(
-    `UPDATE table_sections SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE table_sections SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
   return { id: sectionId, ...updates };
@@ -1535,26 +1576,26 @@ export async function updateRestaurantTable(
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.label !== undefined) {
-    fields.push("label = $1");
+    fields.push(`label = $${values.length + 1}`);
     values.push(updates.label);
   }
   if (updates.sectionId !== undefined) {
-    fields.push("section_id = $1");
+    fields.push(`section_id = $${values.length + 1}`);
     values.push(updates.sectionId);
   }
   if (updates.capacity !== undefined) {
-    fields.push("capacity = $1");
+    fields.push(`capacity = $${values.length + 1}`);
     values.push(updates.capacity);
   }
   if (updates.status !== undefined) {
-    fields.push("status = $1");
+    fields.push(`status = $${values.length + 1}`);
     values.push(updates.status);
   }
   if (fields.length === 0) return;
   fields.push("updated_at = NOW()");
   values.push(tenantId, tableId);
   await query(
-    `UPDATE restaurant_tables SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE restaurant_tables SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
   return { id: tableId, ...updates };
@@ -1611,34 +1652,34 @@ export async function updateVendor(
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.name !== undefined) {
-    fields.push("name = $1");
+    fields.push(`name = $${values.length + 1}`);
     values.push(updates.name);
   }
   if (updates.contactPerson !== undefined) {
-    fields.push("contact_person = $1");
+    fields.push(`contact_person = $${values.length + 1}`);
     values.push(updates.contactPerson || null);
   }
   if (updates.email !== undefined) {
-    fields.push("email = $1");
+    fields.push(`email = $${values.length + 1}`);
     values.push(updates.email || null);
   }
   if (updates.phone !== undefined) {
-    fields.push("phone = $1");
+    fields.push(`phone = $${values.length + 1}`);
     values.push(updates.phone || null);
   }
   if (updates.address !== undefined) {
-    fields.push("address = $1");
+    fields.push(`address = $${values.length + 1}`);
     values.push(updates.address || null);
   }
   if (updates.status !== undefined) {
-    fields.push("status = $1");
+    fields.push(`status = $${values.length + 1}`);
     values.push(updates.status === "inactive" ? "inactive" : "active");
   }
   if (fields.length === 0) return;
   fields.push("updated_at = NOW()");
   values.push(tenantId, id);
   await query(
-    `UPDATE vendors SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE vendors SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
 }
@@ -1729,42 +1770,42 @@ export async function updatePurchaseOrder(
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.vendorId !== undefined) {
-    fields.push("vendor_id = $1");
+    fields.push(`vendor_id = $${values.length + 1}`);
     values.push(updates.vendorId || null);
   }
   if (updates.status !== undefined) {
-    fields.push("status = $1");
+    fields.push(`status = $${values.length + 1}`);
     values.push(updates.status);
   }
   if (updates.type !== undefined) {
-    fields.push("type = $1");
+    fields.push(`type = $${values.length + 1}`);
     values.push(updates.type);
   }
   if (updates.recurringFrequency !== undefined) {
-    fields.push("recurring_frequency = $1");
+    fields.push(`recurring_frequency = $${values.length + 1}`);
     values.push(updates.recurringFrequency || null);
   }
   if (updates.items !== undefined) {
-    fields.push("items = $1");
+    fields.push(`items = $${values.length + 1}`);
     values.push(normalizeJsonField(updates.items, []));
   }
   if (updates.totalAmount !== undefined) {
-    fields.push("total_amount = $1");
+    fields.push(`total_amount = $${values.length + 1}`);
     values.push(updates.totalAmount || 0);
   }
   if (updates.expectedDeliveryDate !== undefined) {
-    fields.push("expected_delivery_date = $1");
+    fields.push(`expected_delivery_date = $${values.length + 1}`);
     values.push(updates.expectedDeliveryDate || null);
   }
   if (updates.invoiceStatus !== undefined) {
-    fields.push("invoice_status = $1");
+    fields.push(`invoice_status = $${values.length + 1}`);
     values.push(updates.invoiceStatus);
   }
   if (fields.length === 0) return;
   fields.push("updated_at = NOW()");
   values.push(tenantId, id);
   await query(
-    `UPDATE purchase_orders SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE purchase_orders SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
 }
@@ -2912,138 +2953,138 @@ export async function updateSale(
     const fields: string[] = [];
     const values: any[] = [];
     if (updates.customerId !== undefined) {
-      fields.push("customer_id = $1");
+      fields.push(`customer_id = $${values.length + 1}`);
       values.push(updates.customerId || null);
     }
     if (updates.userId !== undefined) {
-      fields.push("user_id = $1");
+      fields.push(`user_id = $${values.length + 1}`);
       values.push(updates.userId || null);
     }
     if (updates.staffId !== undefined) {
-      fields.push("staff_id = $1");
+      fields.push(`staff_id = $${values.length + 1}`);
       values.push(updates.staffId || null);
     }
     if (updates.total !== undefined) {
-      fields.push("total = $1");
+      fields.push(`total = $${values.length + 1}`);
       values.push(updates.total || 0);
     }
     if (updates.subtotal !== undefined) {
-      fields.push("subtotal = $1");
+      fields.push(`subtotal = $${values.length + 1}`);
       values.push(updates.subtotal || 0);
     }
     if (updates.taxAmount !== undefined) {
-      fields.push("tax_amount = $1");
+      fields.push(`tax_amount = $${values.length + 1}`);
       values.push(updates.taxAmount || 0);
     }
     if (updates.taxRate !== undefined) {
-      fields.push("tax_rate = $1");
+      fields.push(`tax_rate = $${values.length + 1}`);
       values.push(updates.taxRate || 0);
     }
     if (updates.taxInclusive !== undefined) {
-      fields.push("tax_inclusive = $1");
+      fields.push(`tax_inclusive = $${values.length + 1}`);
       values.push(updates.taxInclusive ? 1 : 0);
     }
     if (updates.paymentMethod !== undefined) {
-      fields.push("payment_method = $1");
+      fields.push(`payment_method = $${values.length + 1}`);
       values.push(updates.paymentMethod);
     }
     if (updates.tenderedAmount !== undefined) {
-      fields.push("tendered_amount = $1");
+      fields.push(`tendered_amount = $${values.length + 1}`);
       values.push(updates.tenderedAmount || 0);
     }
     if (updates.changeAmount !== undefined) {
-      fields.push("change_amount = $1");
+      fields.push(`change_amount = $${values.length + 1}`);
       values.push(updates.changeAmount || 0);
     }
     if (updates.tipAmount !== undefined) {
-      fields.push("tip_amount = $1");
+      fields.push(`tip_amount = $${values.length + 1}`);
       values.push(updates.tipAmount || 0);
     }
     if (updates.cashOutAmount !== undefined) {
-      fields.push("cash_out_amount = $1");
+      fields.push(`cash_out_amount = $${values.length + 1}`);
       values.push(updates.cashOutAmount || 0);
     }
     if (updates.pointsDiscount !== undefined) {
-      fields.push("points_discount = $1");
+      fields.push(`points_discount = $${values.length + 1}`);
       values.push(updates.pointsDiscount || 0);
     }
     if ((updates as any).promotionId !== undefined) {
-      fields.push("promotion_id = $1");
+      fields.push(`promotion_id = $${values.length + 1}`);
       values.push((updates as any).promotionId || null);
     }
     if ((updates as any).promotionCode !== undefined) {
-      fields.push("promotion_code = $1");
+      fields.push(`promotion_code = $${values.length + 1}`);
       values.push((updates as any).promotionCode || null);
     }
     if ((updates as any).promotionDiscount !== undefined) {
-      fields.push("promotion_discount = $1");
+      fields.push(`promotion_discount = $${values.length + 1}`);
       values.push((updates as any).promotionDiscount || 0);
     }
     if (updates.status !== undefined) {
-      fields.push("status = $1");
+      fields.push(`status = $${values.length + 1}`);
       values.push(updates.status);
     }
     if ((updates as any).transactionType !== undefined) {
-      fields.push("transaction_type = $1");
+      fields.push(`transaction_type = $${values.length + 1}`);
       values.push((updates as any).transactionType || "sale");
     }
     if ((updates as any).parentSaleId !== undefined) {
-      fields.push("parent_sale_id = $1");
+      fields.push(`parent_sale_id = $${values.length + 1}`);
       values.push((updates as any).parentSaleId || null);
     }
     if ((updates as any).refundStatus !== undefined) {
-      fields.push("refund_status = $1");
+      fields.push(`refund_status = $${values.length + 1}`);
       values.push((updates as any).refundStatus || "none");
     }
     if ((updates as any).refundedAmount !== undefined) {
-      fields.push("refunded_amount = $1");
+      fields.push(`refunded_amount = $${values.length + 1}`);
       values.push((updates as any).refundedAmount || 0);
     }
     if ((updates as any).refundReason !== undefined) {
-      fields.push("refund_reason = $1");
+      fields.push(`refund_reason = $${values.length + 1}`);
       values.push((updates as any).refundReason || null);
     }
     if ((updates as any).refundedBy !== undefined) {
-      fields.push("refunded_by = $1");
+      fields.push(`refunded_by = $${values.length + 1}`);
       values.push((updates as any).refundedBy || null);
     }
     if ((updates as any).voidReason !== undefined) {
-      fields.push("void_reason = $1");
+      fields.push(`void_reason = $${values.length + 1}`);
       values.push((updates as any).voidReason || null);
     }
     if ((updates as any).voidedBy !== undefined) {
-      fields.push("voided_by = $1");
+      fields.push(`voided_by = $${values.length + 1}`);
       values.push((updates as any).voidedBy || null);
     }
     if (updates.payfast_payment_id !== undefined) {
-      fields.push("payfast_payment_id = $1");
+      fields.push(`payfast_payment_id = $${values.length + 1}`);
       values.push(updates.payfast_payment_id || null);
     }
     if (updates.tableNumber !== undefined) {
-      fields.push("table_number = $1");
+      fields.push(`table_number = $${values.length + 1}`);
       values.push(updates.tableNumber || null);
     }
     if (updates.isTab !== undefined) {
-      fields.push("is_tab = $1");
+      fields.push(`is_tab = $${values.length + 1}`);
       values.push(updates.isTab ? 1 : 0);
     }
     if (updates.tabName !== undefined) {
-      fields.push("tab_name = $1");
+      fields.push(`tab_name = $${values.length + 1}`);
       values.push(updates.tabName || null);
     }
     if ((updates as any).offlineEventId !== undefined) {
-      fields.push("offline_event_id = $1");
+      fields.push(`offline_event_id = $${values.length + 1}`);
       values.push((updates as any).offlineEventId || null);
     }
     if ((updates as any).syncSource !== undefined) {
-      fields.push("sync_source = $1");
+      fields.push(`sync_source = $${values.length + 1}`);
       values.push((updates as any).syncSource || "online");
     }
     if (fields.length > 0) {
       fields.push("updated_at = NOW()");
       values.push(tenantId, saleId);
       await conn.query(
-        `UPDATE sales SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+        `UPDATE sales SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
         values,
       );
     }
@@ -3346,7 +3387,7 @@ export async function updateSaleItem(
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.status !== undefined) {
-    fields.push("status = $1");
+    fields.push(`status = $${values.length + 1}`);
     values.push(updates.status);
     if (updates.status === "accepted") {
       fields.push(
@@ -3361,14 +3402,14 @@ export async function updateSaleItem(
     }
   }
   if (updates.actionStaffId !== undefined) {
-    fields.push("action_staff_id = $1");
+    fields.push(`action_staff_id = $${values.length + 1}`);
     values.push(updates.actionStaffId);
   }
   if (fields.length === 0) return;
   fields.push("updated_at = NOW()");
   values.push(saleId, itemId);
   await query(
-    `UPDATE sale_items SET ${fields.join(", ")} WHERE sale_id = $1 AND id = $2`,
+    `UPDATE sale_items SET ${fields.join(", ")} WHERE sale_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
 }
@@ -4156,25 +4197,25 @@ export async function updatePayoutRequest(
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.status !== undefined) {
-    fields.push("status = $1");
+    fields.push(`status = $${values.length + 1}`);
     values.push(updates.status);
   }
   if (updates.processedAt !== undefined) {
-    fields.push("processed_at = $1");
+    fields.push(`processed_at = $${values.length + 1}`);
     values.push(updates.processedAt);
   }
   if (updates.processedBy !== undefined) {
-    fields.push("processed_by = $1");
+    fields.push(`processed_by = $${values.length + 1}`);
     values.push(updates.processedBy);
   }
   if (updates.note !== undefined) {
-    fields.push("note = $1");
+    fields.push(`note = $${values.length + 1}`);
     values.push(updates.note);
   }
   fields.push("updated_at = NOW()");
   values.push(tenantId, id);
   await query(
-    `UPDATE payout_requests SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE payout_requests SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
   const rows = await query(
@@ -4267,25 +4308,25 @@ export async function updateCustomerPayoutRequest(
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.status !== undefined) {
-    fields.push("status = $1");
+    fields.push(`status = $${values.length + 1}`);
     values.push(updates.status);
   }
   if (updates.processedAt !== undefined) {
-    fields.push("processed_at = $1");
+    fields.push(`processed_at = $${values.length + 1}`);
     values.push(updates.processedAt);
   }
   if (updates.processedBy !== undefined) {
-    fields.push("processed_by = $1");
+    fields.push(`processed_by = $${values.length + 1}`);
     values.push(updates.processedBy);
   }
   if (updates.note !== undefined) {
-    fields.push("note = $1");
+    fields.push(`note = $${values.length + 1}`);
     values.push(updates.note);
   }
   fields.push("updated_at = NOW()");
   values.push(tenantId, id);
   await query(
-    `UPDATE customer_payout_requests SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE customer_payout_requests SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
   const rows = await query(
@@ -4627,50 +4668,50 @@ export async function updateBulkItem(
   const fields: string[] = [];
   const values: any[] = [];
   if (updates.name !== undefined) {
-    fields.push("name = $1");
+    fields.push(`name = $${values.length + 1}`);
     values.push(updates.name);
   }
   if (updates.itemType !== undefined) {
-    fields.push("item_type = $1");
+    fields.push(`item_type = $${values.length + 1}`);
     values.push(updates.itemType === "bulk" ? "bulk" : "single");
   }
   if (updates.unit !== undefined) {
-    fields.push("unit = $1");
+    fields.push(`unit = $${values.length + 1}`);
     values.push(updates.unit);
   }
   if (updates.stock !== undefined) {
-    fields.push("stock = $1");
+    fields.push(`stock = $${values.length + 1}`);
     values.push(updates.stock);
   }
   if (updates.minStock !== undefined) {
-    fields.push("min_stock = $1");
+    fields.push(`min_stock = $${values.length + 1}`);
     values.push(updates.minStock);
   }
   if (updates.costPerUnit !== undefined) {
-    fields.push("cost_per_unit = $1");
+    fields.push(`cost_per_unit = $${values.length + 1}`);
     values.push(updates.costPerUnit);
   }
   if (updates.barcode !== undefined) {
-    fields.push("barcode = $1");
+    fields.push(`barcode = $${values.length + 1}`);
     values.push(updates.barcode);
   }
   if (updates.packName !== undefined) {
-    fields.push("pack_name = $1");
+    fields.push(`pack_name = $${values.length + 1}`);
     values.push(updates.packName || null);
   }
   if (updates.packQuantity !== undefined) {
-    fields.push("pack_quantity = $1");
+    fields.push(`pack_quantity = $${values.length + 1}`);
     values.push(updates.packQuantity || 1);
   }
   if (updates.singleUnitName !== undefined) {
-    fields.push("single_unit_name = $1");
+    fields.push(`single_unit_name = $${values.length + 1}`);
     values.push(updates.singleUnitName || "item");
   }
   if (fields.length === 0) return;
   fields.push("updated_at = NOW()");
   values.push(tenantId, id);
   await query(
-    `UPDATE bulk_items SET ${fields.join(", ")} WHERE tenant_id = $1 AND id = $2`,
+    `UPDATE bulk_items SET ${fields.join(", ")} WHERE tenant_id = $${values.length - 1} AND id = $${values.length}`,
     values,
   );
 }

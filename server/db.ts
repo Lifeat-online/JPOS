@@ -19,11 +19,15 @@ const connectionString = firstNonEmpty(
   process.env.SUPABASE_DATABASE_URL,
 );
 
+// SSL is on by default (managed Postgres). Set DB_SSL=false for a plain local
+// Postgres (dev, CI, self-hosted without TLS).
+const dbSsl = process.env.DB_SSL === "false" ? false : { rejectUnauthorized: false };
+
 export const pgPool = connectionString
   ? new Pool({
       connectionString,
       max: Number(process.env.DB_CONNECTION_LIMIT || 10),
-      ssl: { rejectUnauthorized: false },
+      ssl: dbSsl,
     })
   : new Pool({
       host: process.env.DB_HOST || "localhost",
@@ -32,7 +36,7 @@ export const pgPool = connectionString
       password: process.env.DB_PASSWORD || "",
       database: process.env.DB_DATABASE || "jims_pos",
       max: Number(process.env.DB_CONNECTION_LIMIT || 10),
-      ssl: { rejectUnauthorized: false },
+      ssl: dbSsl,
     });
 
 export const db = new Kysely<DB>({

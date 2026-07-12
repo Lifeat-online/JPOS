@@ -66,7 +66,7 @@ devRouter.post("/backups", requireAuth, requireDevMaintenance, async (req, res) 
 
 devRouter.get("/backups/:backupId", requireAuth, requireDevMaintenance, async (req, res) => {
   try {
-    const backup = await readDatabaseBackup(req.params.backupId);
+    const backup = await readDatabaseBackup(String(req.params.backupId));
     if (req.query.download === "1") {
       res.setHeader("Content-Disposition", `attachment; filename="${backup.id}.json"`);
     }
@@ -81,7 +81,7 @@ devRouter.post("/backups/:backupId/restore", requireAuth, requireDevMaintenance,
     if (req.body?.repairSchemaFirst !== false) {
       await initDb();
     }
-    const result = await restoreDatabaseBackup(req.params.backupId, {
+    const result = await restoreDatabaseBackup(String(req.params.backupId), {
       dryRun: Boolean(req.body?.dryRun),
       overwriteExisting: Boolean(req.body?.overwriteExisting),
     });

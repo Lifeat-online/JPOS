@@ -81,7 +81,7 @@ export async function subscribeBrowserToPush(
     applicationServerKey: urlBase64ToUint8Array(publicKey),
   });
 
-  return apiPost<PushNotificationStatus>(`/api/mariadb/tenants/${tenantId}/push/subscriptions`, {
+  return apiPost<PushNotificationStatus>(`/api/data/tenants/${tenantId}/push/subscriptions`, {
     subscription: subscription.toJSON(),
     deviceLabel,
   });
@@ -95,7 +95,7 @@ export async function unsubscribeBrowserFromPush(tenantId: string): Promise<Push
 
   const endpoint = subscription.endpoint;
   await subscription.unsubscribe().catch(() => false);
-  return apiDelete<PushNotificationStatus>(`/api/mariadb/tenants/${tenantId}/push/subscriptions?endpoint=${encodeURIComponent(endpoint)}`);
+  return apiDelete<PushNotificationStatus>(`/api/data/tenants/${tenantId}/push/subscriptions?endpoint=${encodeURIComponent(endpoint)}`);
 }
 
 export function playRealtimeAttention(pattern: number[] = [120, 60, 120]) {

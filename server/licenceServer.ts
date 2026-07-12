@@ -23,7 +23,7 @@ const ADMIN_API_KEY = process.env.ADMIN_API_KEY || process.env.LICENCE_ADMIN_KEY
 export const licenceRouter = Router();
 const validateLimiter = rateLimit({
     windowMs: 24 * 60 * 60 * 1000,
-    max: Number(process.env.LICENCE_VALIDATE_DAILY_LIMIT || 5),
+    limit: Number(process.env.LICENCE_VALIDATE_DAILY_LIMIT || 5),
     message: JSON.stringify({ valid: false, reason: "Too many licence validation requests" }),
 });
 licenceRouter.post("/admin/licence/generate", requireAdminKey, async (req, res) => {

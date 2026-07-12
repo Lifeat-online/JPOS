@@ -15,7 +15,7 @@
 - **Dependencies:** `socket.io` (4.7.5)
 - **Server Setup:** `server/app.ts` creates an HTTP server and attaches Socket.IO through `server/socket.ts`
 - **Fan-out:** single-process rooms are immediate; multi-instance deployments can set `JPOS_REALTIME_FANOUT=database` to publish room events through `realtime_pubsub_events`
-- **Endpoints:** REST endpoints still own persistence and provide fallback reads, including `/api/mariadb/tenants/:tenantId/messages`
+- **Endpoints:** REST endpoints still own persistence and provide fallback reads, including `/api/data/tenants/:tenantId/messages`
 
 ### Client-Side (React)
 - **Dependencies:** `socket.io-client` (4.7.5)
@@ -29,7 +29,7 @@
 The current implementation uses REST polling for several reasons:
 
 1. **Simplicity:** REST is easier to implement and debug
-2. **Database-driven:** Messages are stored in MariaDB, making polling straightforward
+2. **Database-driven:** Messages are stored in Postgres, making polling straightforward
 3. **Multi-tenant:** REST endpoints naturally support tenant scoping
 4. **Fallback:** Polling works even if WebSocket connections drop
 
@@ -154,8 +154,8 @@ useEffect(() => {
 - `server/socket.ts` - room joins and local broadcast helpers
 - `server/realtimePubsub.ts` - optional database-backed cross-instance fan-out
 - `server/init-db.ts` - creates/heals `realtime_pubsub_events`
-- `server/mariadb-adapter.ts` - REST endpoints for messages
-- `server/mariadb-crud.ts` - Message CRUD operations
+- `server/db-adapter.ts` - REST endpoints for messages
+- `server/db-crud.ts` - Message CRUD operations
 
 ### Client:
 - `src/hooks/useSocket.ts` - Socket.IO connection and room joins

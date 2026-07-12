@@ -79,7 +79,7 @@ export function WorkstationQueuePanel({
     try {
       if (!tenantId) return;
 
-      await apiPut(`/api/mariadb/tenants/${tenantId}/sales/${saleId}/items/${item.id}`, {
+      await apiPut(`/api/data/tenants/${tenantId}/sales/${saleId}/items/${item.id}`, {
         status: newStatus,
         actionStaffId: currentUserStaff?.id || null
       });
@@ -89,7 +89,7 @@ export function WorkstationQueuePanel({
         const wsLabel = activeWorkstation?.name || 'Workstation';
         const text = `${orderLabel} - ${item.quantity}x ${item.name} is READY (${wsLabel})`;
 
-        await apiPost(`/api/mariadb/tenants/${tenantId}/messages`, {
+        await apiPost(`/api/data/tenants/${tenantId}/messages`, {
           channel: 'general',
           senderId: 'system',
           senderName: wsLabel,

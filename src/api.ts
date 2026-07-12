@@ -1,5 +1,5 @@
 /**
- * REST API client — MariaDB backend.
+ * REST API client — Postgres backend.
  * All requests automatically attach the JWT Bearer token.
  * On 401, attempts a token refresh and retries once before throwing.
  */
@@ -290,36 +290,36 @@ export function revokeRefreshTokens(staffId?: string, reason = 'suspected_compro
 
 export function getTenantProducts(tenantId: string, locationId?: string | null) {
   const query = locationId ? `?locationId=${encodeURIComponent(locationId)}` : '';
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/products${query}`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/products${query}`);
 }
 
 export function batchCreateProducts(tenantId: string, data: { csv?: string; rows?: Record<string, unknown>[]; dryRun?: boolean }) {
-  return apiPost<BatchMutationResult>(`/api/mariadb/tenants/${tenantId}/batch/products/create`, data);
+  return apiPost<BatchMutationResult>(`/api/data/tenants/${tenantId}/batch/products/create`, data);
 }
 
 export function batchUpdateProductPrices(tenantId: string, data: { csv?: string; rows?: Record<string, unknown>[]; dryRun?: boolean }) {
-  return apiPost<BatchMutationResult>(`/api/mariadb/tenants/${tenantId}/batch/products/prices`, data);
+  return apiPost<BatchMutationResult>(`/api/data/tenants/${tenantId}/batch/products/prices`, data);
 }
 
 export function exportInventoryBatchCsv(tenantId: string, filters: { locationId?: string | null } = {}) {
   const query = filters.locationId ? `?locationId=${encodeURIComponent(filters.locationId)}` : '';
-  return apiGet<BatchExportResult>(`/api/mariadb/tenants/${tenantId}/batch/inventory/export${query}`);
+  return apiGet<BatchExportResult>(`/api/data/tenants/${tenantId}/batch/inventory/export${query}`);
 }
 
 export function importInventoryBatch(tenantId: string, data: { csv?: string; rows?: Record<string, unknown>[]; dryRun?: boolean; locationId?: string | null }) {
-  return apiPost<BatchMutationResult>(`/api/mariadb/tenants/${tenantId}/batch/inventory/import`, data);
+  return apiPost<BatchMutationResult>(`/api/data/tenants/${tenantId}/batch/inventory/import`, data);
 }
 
 export function getInventoryLocations(tenantId: string) {
-  return apiGet<InventoryLocation[]>(`/api/mariadb/tenants/${tenantId}/inventory-locations`);
+  return apiGet<InventoryLocation[]>(`/api/data/tenants/${tenantId}/inventory-locations`);
 }
 
 export function createInventoryLocation(tenantId: string, data: Partial<InventoryLocation>) {
-  return apiPost<InventoryLocation>(`/api/mariadb/tenants/${tenantId}/inventory-locations`, data);
+  return apiPost<InventoryLocation>(`/api/data/tenants/${tenantId}/inventory-locations`, data);
 }
 
 export function updateInventoryLocation(tenantId: string, locationId: string, data: Partial<InventoryLocation>) {
-  return apiPut<InventoryLocation>(`/api/mariadb/tenants/${tenantId}/inventory-locations/${encodeURIComponent(locationId)}`, data);
+  return apiPut<InventoryLocation>(`/api/data/tenants/${tenantId}/inventory-locations/${encodeURIComponent(locationId)}`, data);
 }
 
 export function getProductLocationStocks(tenantId: string, filters: { productId?: string | null; locationId?: string | null } = {}) {
@@ -327,7 +327,7 @@ export function getProductLocationStocks(tenantId: string, filters: { productId?
   if (filters.productId) query.set('productId', filters.productId);
   if (filters.locationId) query.set('locationId', filters.locationId);
   const suffix = query.toString() ? `?${query.toString()}` : '';
-  return apiGet<ProductLocationStock[]>(`/api/mariadb/tenants/${tenantId}/inventory-location-stock${suffix}`);
+  return apiGet<ProductLocationStock[]>(`/api/data/tenants/${tenantId}/inventory-location-stock${suffix}`);
 }
 
 export function updateProductLocationStock(tenantId: string, data: {
@@ -338,12 +338,12 @@ export function updateProductLocationStock(tenantId: string, data: {
   reorderThreshold?: number;
   note?: string | null;
 }) {
-  return apiPut<ProductLocationStock>(`/api/mariadb/tenants/${tenantId}/inventory-location-stock`, data);
+  return apiPut<ProductLocationStock>(`/api/data/tenants/${tenantId}/inventory-location-stock`, data);
 }
 
 export function getStockTransfers(tenantId: string, status?: string | null) {
   const query = status ? `?status=${encodeURIComponent(status)}` : '';
-  return apiGet<StockTransferOrder[]>(`/api/mariadb/tenants/${tenantId}/stock-transfers${query}`);
+  return apiGet<StockTransferOrder[]>(`/api/data/tenants/${tenantId}/stock-transfers${query}`);
 }
 
 export function createStockTransfer(tenantId: string, data: {
@@ -352,27 +352,27 @@ export function createStockTransfer(tenantId: string, data: {
   notes?: string | null;
   items: Array<{ productId: string; productName?: string; quantity: number }>;
 }) {
-  return apiPost<StockTransferOrder>(`/api/mariadb/tenants/${tenantId}/stock-transfers`, data);
+  return apiPost<StockTransferOrder>(`/api/data/tenants/${tenantId}/stock-transfers`, data);
 }
 
 export function completeStockTransfer(tenantId: string, transferId: string) {
-  return apiPost<StockTransferOrder>(`/api/mariadb/tenants/${tenantId}/stock-transfers/${encodeURIComponent(transferId)}/complete`, {});
+  return apiPost<StockTransferOrder>(`/api/data/tenants/${tenantId}/stock-transfers/${encodeURIComponent(transferId)}/complete`, {});
 }
 
 export function getTenantConfig(tenantId: string) {
-  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/config`);
+  return apiGet<any>(`/api/data/tenants/${tenantId}/config`);
 }
 
 export function getPromotions(tenantId: string) {
-  return apiGet<Promotion[]>(`/api/mariadb/tenants/${tenantId}/promotions`);
+  return apiGet<Promotion[]>(`/api/data/tenants/${tenantId}/promotions`);
 }
 
 export function createPromotion(tenantId: string, data: Partial<Promotion>) {
-  return apiPost<Promotion>(`/api/mariadb/tenants/${tenantId}/promotions`, data);
+  return apiPost<Promotion>(`/api/data/tenants/${tenantId}/promotions`, data);
 }
 
 export function updatePromotion(tenantId: string, promotionId: string, data: Partial<Promotion>) {
-  return apiPut<Promotion>(`/api/mariadb/tenants/${tenantId}/promotions/${encodeURIComponent(promotionId)}`, data);
+  return apiPut<Promotion>(`/api/data/tenants/${tenantId}/promotions/${encodeURIComponent(promotionId)}`, data);
 }
 
 export function validatePromotionCode(tenantId: string, data: {
@@ -393,31 +393,31 @@ export function validatePromotionCode(tenantId: string, data: {
     quantity: number;
   }>;
 }) {
-  return apiPost<PromotionValidationResult>(`/api/mariadb/tenants/${tenantId}/promotions/validate`, data);
+  return apiPost<PromotionValidationResult>(`/api/data/tenants/${tenantId}/promotions/validate`, data);
 }
 
 export function getLoyaltyTiers(tenantId: string) {
-  return apiGet<LoyaltyTier[]>(`/api/mariadb/tenants/${tenantId}/loyalty/tiers`);
+  return apiGet<LoyaltyTier[]>(`/api/data/tenants/${tenantId}/loyalty/tiers`);
 }
 
 export function createLoyaltyTier(tenantId: string, data: Partial<LoyaltyTier>) {
-  return apiPost<LoyaltyTier>(`/api/mariadb/tenants/${tenantId}/loyalty/tiers`, data);
+  return apiPost<LoyaltyTier>(`/api/data/tenants/${tenantId}/loyalty/tiers`, data);
 }
 
 export function updateLoyaltyTier(tenantId: string, tierId: string, data: Partial<LoyaltyTier>) {
-  return apiPut<LoyaltyTier>(`/api/mariadb/tenants/${tenantId}/loyalty/tiers/${encodeURIComponent(tierId)}`, data);
+  return apiPut<LoyaltyTier>(`/api/data/tenants/${tenantId}/loyalty/tiers/${encodeURIComponent(tierId)}`, data);
 }
 
 export function getLoyaltyRewardRules(tenantId: string) {
-  return apiGet<LoyaltyRewardRule[]>(`/api/mariadb/tenants/${tenantId}/loyalty/reward-rules`);
+  return apiGet<LoyaltyRewardRule[]>(`/api/data/tenants/${tenantId}/loyalty/reward-rules`);
 }
 
 export function createLoyaltyRewardRule(tenantId: string, data: Partial<LoyaltyRewardRule>) {
-  return apiPost<LoyaltyRewardRule>(`/api/mariadb/tenants/${tenantId}/loyalty/reward-rules`, data);
+  return apiPost<LoyaltyRewardRule>(`/api/data/tenants/${tenantId}/loyalty/reward-rules`, data);
 }
 
 export function updateLoyaltyRewardRule(tenantId: string, ruleId: string, data: Partial<LoyaltyRewardRule>) {
-  return apiPut<LoyaltyRewardRule>(`/api/mariadb/tenants/${tenantId}/loyalty/reward-rules/${encodeURIComponent(ruleId)}`, data);
+  return apiPut<LoyaltyRewardRule>(`/api/data/tenants/${tenantId}/loyalty/reward-rules/${encodeURIComponent(ruleId)}`, data);
 }
 
 export function previewLoyaltyAward(tenantId: string, data: {
@@ -436,7 +436,7 @@ export function previewLoyaltyAward(tenantId: string, data: {
     quantity: number;
   }>;
 }) {
-  return apiPost<LoyaltyAwardResult>(`/api/mariadb/tenants/${tenantId}/loyalty/preview`, data);
+  return apiPost<LoyaltyAwardResult>(`/api/data/tenants/${tenantId}/loyalty/preview`, data);
 }
 
 export type PushNotificationStatus = {
@@ -456,34 +456,34 @@ export type PushSendResult = {
 };
 
 export function getPushNotificationStatus(tenantId: string) {
-  return apiGet<PushNotificationStatus>(`/api/mariadb/tenants/${tenantId}/push/status`);
+  return apiGet<PushNotificationStatus>(`/api/data/tenants/${tenantId}/push/status`);
 }
 
 export function generatePushVapidKeys(tenantId: string, subject?: string) {
-  return apiPost<PushNotificationStatus>(`/api/mariadb/tenants/${tenantId}/push/vapid/generate`, { subject });
+  return apiPost<PushNotificationStatus>(`/api/data/tenants/${tenantId}/push/vapid/generate`, { subject });
 }
 
 export function sendTestPushNotification(tenantId: string) {
-  return apiPost<PushSendResult>(`/api/mariadb/tenants/${tenantId}/push/test`, {});
+  return apiPost<PushSendResult>(`/api/data/tenants/${tenantId}/push/test`, {});
 }
 
 export function getReorderRecommendations(tenantId: string, status = 'open,in_review,approved') {
-  return apiGet<ReorderRecommendation[]>(`/api/mariadb/tenants/${tenantId}/reorder-recommendations?status=${encodeURIComponent(status)}`);
+  return apiGet<ReorderRecommendation[]>(`/api/data/tenants/${tenantId}/reorder-recommendations?status=${encodeURIComponent(status)}`);
 }
 
 export function refreshReorderRecommendations(tenantId: string, data: { daysOfCover?: number; vendorId?: string | null; locationId?: string | null } = {}) {
   return apiPost<{ created: number; updated: number; skippedApproved: number; recommendations: ReorderRecommendation[] }>(
-    `/api/mariadb/tenants/${tenantId}/reorder-recommendations/refresh`,
+    `/api/data/tenants/${tenantId}/reorder-recommendations/refresh`,
     data
   );
 }
 
 export function getReorderNotificationRules(tenantId: string) {
-  return apiGet<ReorderNotificationRule[]>(`/api/mariadb/tenants/${tenantId}/reorder-notification-rules`);
+  return apiGet<ReorderNotificationRule[]>(`/api/data/tenants/${tenantId}/reorder-notification-rules`);
 }
 
 export function getRecipeCostingReport(tenantId: string) {
-  return apiGet<RecipeCostingReport>(`/api/mariadb/tenants/${tenantId}/recipe-costing-report`);
+  return apiGet<RecipeCostingReport>(`/api/data/tenants/${tenantId}/recipe-costing-report`);
 }
 
 export function getEventBookings(tenantId: string, filters: { from?: string; to?: string; status?: string; eventType?: string; reminderStatus?: string } = {}) {
@@ -494,104 +494,104 @@ export function getEventBookings(tenantId: string, filters: { from?: string; to?
   if (filters.eventType) query.set('eventType', filters.eventType);
   if (filters.reminderStatus) query.set('reminderStatus', filters.reminderStatus);
   const suffix = query.toString() ? `?${query.toString()}` : '';
-  return apiGet<EventBooking[]>(`/api/mariadb/tenants/${tenantId}/event-bookings${suffix}`);
+  return apiGet<EventBooking[]>(`/api/data/tenants/${tenantId}/event-bookings${suffix}`);
 }
 
 export function createEventBooking(tenantId: string, data: Partial<EventBooking>) {
-  return apiPost<EventBooking>(`/api/mariadb/tenants/${tenantId}/event-bookings`, data);
+  return apiPost<EventBooking>(`/api/data/tenants/${tenantId}/event-bookings`, data);
 }
 
 export function updateEventBooking(tenantId: string, id: string, data: Partial<EventBooking>) {
-  return apiPut<EventBooking>(`/api/mariadb/tenants/${tenantId}/event-bookings/${encodeURIComponent(id)}`, data);
+  return apiPut<EventBooking>(`/api/data/tenants/${tenantId}/event-bookings/${encodeURIComponent(id)}`, data);
 }
 
 export function deleteEventBooking(tenantId: string, id: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/event-bookings/${encodeURIComponent(id)}`);
+  return apiDelete<{ success: boolean }>(`/api/data/tenants/${tenantId}/event-bookings/${encodeURIComponent(id)}`);
 }
 
 export function createReorderNotificationRule(tenantId: string, data: Partial<ReorderNotificationRule>) {
-  return apiPost<ReorderNotificationRule>(`/api/mariadb/tenants/${tenantId}/reorder-notification-rules`, data);
+  return apiPost<ReorderNotificationRule>(`/api/data/tenants/${tenantId}/reorder-notification-rules`, data);
 }
 
 export function updateReorderNotificationRule(tenantId: string, id: string, data: Partial<ReorderNotificationRule>) {
-  return apiPut<ReorderNotificationRule>(`/api/mariadb/tenants/${tenantId}/reorder-notification-rules/${encodeURIComponent(id)}`, data);
+  return apiPut<ReorderNotificationRule>(`/api/data/tenants/${tenantId}/reorder-notification-rules/${encodeURIComponent(id)}`, data);
 }
 
 export function runReorderNotificationRule(tenantId: string, id: string) {
   return apiPost<{
     rule: ReorderNotificationRule | null;
     result: { created: number; updated: number; skippedApproved: number; recommendations: ReorderRecommendation[]; ruleRun?: Record<string, any> };
-  }>(`/api/mariadb/tenants/${tenantId}/reorder-notification-rules/${encodeURIComponent(id)}/run`, {});
+  }>(`/api/data/tenants/${tenantId}/reorder-notification-rules/${encodeURIComponent(id)}/run`, {});
 }
 
 export function approveReorderRecommendation(tenantId: string, id: string, data: { note?: string | null; vendorId?: string | null; quantity?: number; expectedPrice?: number; expectedDeliveryDate?: string | null } = {}) {
   return apiPost<{ recommendation: ReorderRecommendation | null; purchaseOrder: any; alreadyOrdered: boolean }>(
-    `/api/mariadb/tenants/${tenantId}/reorder-recommendations/${encodeURIComponent(id)}/approve`,
+    `/api/data/tenants/${tenantId}/reorder-recommendations/${encodeURIComponent(id)}/approve`,
     data
   );
 }
 
 export function dismissReorderRecommendation(tenantId: string, id: string, note?: string | null) {
   return apiPost<ReorderRecommendation>(
-    `/api/mariadb/tenants/${tenantId}/reorder-recommendations/${encodeURIComponent(id)}/dismiss`,
+    `/api/data/tenants/${tenantId}/reorder-recommendations/${encodeURIComponent(id)}/dismiss`,
     { note: note || null }
   );
 }
 
 export function getTenantCustomers(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/customers`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/customers`);
 }
 
 export function exportCustomersBatchCsv(tenantId: string) {
-  return apiGet<BatchExportResult>(`/api/mariadb/tenants/${tenantId}/batch/customers/export`);
+  return apiGet<BatchExportResult>(`/api/data/tenants/${tenantId}/batch/customers/export`);
 }
 
 export function importCustomersBatch(tenantId: string, data: { csv?: string; rows?: Record<string, unknown>[]; dryRun?: boolean }) {
-  return apiPost<BatchMutationResult>(`/api/mariadb/tenants/${tenantId}/batch/customers/import`, data);
+  return apiPost<BatchMutationResult>(`/api/data/tenants/${tenantId}/batch/customers/import`, data);
 }
 
 export function getTenantStaff(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/staff`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/staff`);
 }
 
 export function getTenantWorkstations(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/workstations`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/workstations`);
 }
 
 export function getCompanionDeviceAssignments(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/companion-device-assignments`);
 }
 
 export function getCompanionDeviceAssignment(tenantId: string, deviceId: string) {
-  return apiGet<any | null>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`);
+  return apiGet<any | null>(`/api/data/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`);
 }
 
 export function assignCompanionDevice(tenantId: string, deviceId: string, data: { deviceName: string; workstationId: string; defaultMode: 'wireless_scanner' | 'pole_display' }) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`, data);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`, data);
 }
 
 export function revokeCompanionDeviceAssignment(tenantId: string, deviceId: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`);
+  return apiDelete<{ success: boolean }>(`/api/data/tenants/${tenantId}/companion-device-assignments/${encodeURIComponent(deviceId)}`);
 }
 
 export function getTenantSales(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/sales`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/sales`);
 }
 
 export function getTenantLiveStats(tenantId: string) {
-  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/live`);
+  return apiGet<any>(`/api/data/tenants/${tenantId}/live`);
 }
 
 export function getManagerActionCenter(tenantId: string) {
-  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/action-center`);
+  return apiGet<any>(`/api/data/tenants/${tenantId}/action-center`);
 }
 
 export function getManagerTasks(tenantId: string) {
-  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/action-center/tasks`);
+  return apiGet<any>(`/api/data/tenants/${tenantId}/action-center/tasks`);
 }
 
 export function getManagerOverrides(tenantId: string, limit = 20) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/manager-overrides?limit=${encodeURIComponent(String(limit))}`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/manager-overrides?limit=${encodeURIComponent(String(limit))}`);
 }
 
 export function getManagerActivityHistory(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -601,7 +601,7 @@ export function getManagerActivityHistory(tenantId: string, filters: Record<stri
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/action-center/activity${query ? `?${query}` : ''}`);
+  return apiGet<any>(`/api/data/tenants/${tenantId}/action-center/activity${query ? `?${query}` : ''}`);
 }
 
 export function exportManagerActivityHistoryCsv(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -612,7 +612,7 @@ export function exportManagerActivityHistoryCsv(tenantId: string, filters: Recor
   });
   const query = params.toString();
   return apiGet<{ filename: string; mimeType: string; count: number; csv: string; generatedAt: string }>(
-    `/api/mariadb/tenants/${tenantId}/action-center/activity/export${query ? `?${query}` : ''}`
+    `/api/data/tenants/${tenantId}/action-center/activity/export${query ? `?${query}` : ''}`
   );
 }
 
@@ -635,7 +635,7 @@ export function exportManagerAuditReport(tenantId: string, filters: Record<strin
     pdfBase64: string;
     generatedAt: string;
   }>(
-    `/api/mariadb/tenants/${tenantId}/action-center/activity/report${query ? `?${query}` : ''}`
+    `/api/data/tenants/${tenantId}/action-center/activity/report${query ? `?${query}` : ''}`
   );
 }
 
@@ -666,12 +666,12 @@ export function exportPaymentProviderReconciliationReport(tenantId: string, filt
       note: string;
     };
   }>(
-    `/api/mariadb/tenants/${tenantId}/payment-provider-reconciliation/report${query ? `?${query}` : ''}`
+    `/api/data/tenants/${tenantId}/payment-provider-reconciliation/report${query ? `?${query}` : ''}`
   );
 }
 
 export function getTaxPeriods(tenantId: string, limit = 24) {
-  return apiGet<TaxPeriod[]>(`/api/mariadb/tenants/${tenantId}/tax/periods?limit=${encodeURIComponent(String(limit))}`);
+  return apiGet<TaxPeriod[]>(`/api/data/tenants/${tenantId}/tax/periods?limit=${encodeURIComponent(String(limit))}`);
 }
 
 export function exportVatTaxReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -681,11 +681,11 @@ export function exportVatTaxReport(tenantId: string, filters: Record<string, str
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<VatTaxReport>(`/api/mariadb/tenants/${tenantId}/tax/vat-report${query ? `?${query}` : ''}`);
+  return apiGet<VatTaxReport>(`/api/data/tenants/${tenantId}/tax/vat-report${query ? `?${query}` : ''}`);
 }
 
 export function lockTaxPeriod(tenantId: string, data: { periodStart: string; periodEnd: string; note?: string | null }) {
-  return apiPost<{ period: TaxPeriod; report: VatTaxReport }>(`/api/mariadb/tenants/${tenantId}/tax/periods/lock`, data);
+  return apiPost<{ period: TaxPeriod; report: VatTaxReport }>(`/api/data/tenants/${tenantId}/tax/periods/lock`, data);
 }
 
 export function exportMarginReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -695,7 +695,7 @@ export function exportMarginReport(tenantId: string, filters: Record<string, str
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<MarginReport>(`/api/mariadb/tenants/${tenantId}/reports/margins${query ? `?${query}` : ''}`);
+  return apiGet<MarginReport>(`/api/data/tenants/${tenantId}/reports/margins${query ? `?${query}` : ''}`);
 }
 
 export function exportOperationalReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -705,7 +705,7 @@ export function exportOperationalReport(tenantId: string, filters: Record<string
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<OperationalReport>(`/api/mariadb/tenants/${tenantId}/reports/operational${query ? `?${query}` : ''}`);
+  return apiGet<OperationalReport>(`/api/data/tenants/${tenantId}/reports/operational${query ? `?${query}` : ''}`);
 }
 
 export function exportAccountingJournalReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -715,7 +715,7 @@ export function exportAccountingJournalReport(tenantId: string, filters: Record<
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<AccountingJournalReport>(`/api/mariadb/tenants/${tenantId}/reports/accounting-journal${query ? `?${query}` : ''}`);
+  return apiGet<AccountingJournalReport>(`/api/data/tenants/${tenantId}/reports/accounting-journal${query ? `?${query}` : ''}`);
 }
 
 export function exportEcommerceMarketplacePack(tenantId: string, filters: Record<string, string | number | boolean | null | undefined> = {}) {
@@ -725,19 +725,19 @@ export function exportEcommerceMarketplacePack(tenantId: string, filters: Record
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<EcommerceMarketplaceExport>(`/api/mariadb/tenants/${tenantId}/integrations/ecommerce/products-export${query ? `?${query}` : ''}`);
+  return apiGet<EcommerceMarketplaceExport>(`/api/data/tenants/${tenantId}/integrations/ecommerce/products-export${query ? `?${query}` : ''}`);
 }
 
 export function getIntegrationApiKeys(tenantId: string) {
-  return apiGet<IntegrationApiKey[]>(`/api/mariadb/tenants/${tenantId}/integrations/api-keys`);
+  return apiGet<IntegrationApiKey[]>(`/api/data/tenants/${tenantId}/integrations/api-keys`);
 }
 
 export function createIntegrationApiKey(tenantId: string, data: { name?: string; scopes?: string[] }) {
-  return apiPost<{ key: IntegrationApiKey; secret: string }>(`/api/mariadb/tenants/${tenantId}/integrations/api-keys`, data);
+  return apiPost<{ key: IntegrationApiKey; secret: string }>(`/api/data/tenants/${tenantId}/integrations/api-keys`, data);
 }
 
 export function revokeIntegrationApiKey(tenantId: string, keyId: string) {
-  return apiPost<IntegrationApiKey>(`/api/mariadb/tenants/${tenantId}/integrations/api-keys/${encodeURIComponent(keyId)}/revoke`, {});
+  return apiPost<IntegrationApiKey>(`/api/data/tenants/${tenantId}/integrations/api-keys/${encodeURIComponent(keyId)}/revoke`, {});
 }
 
 export function getIntegrationWebhookEvents(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -747,7 +747,7 @@ export function getIntegrationWebhookEvents(tenantId: string, filters: Record<st
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<IntegrationWebhookEvent[]>(`/api/mariadb/tenants/${tenantId}/integrations/webhook-events${query ? `?${query}` : ''}`);
+  return apiGet<IntegrationWebhookEvent[]>(`/api/data/tenants/${tenantId}/integrations/webhook-events${query ? `?${query}` : ''}`);
 }
 
 export function getDeliveryOrders(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -757,47 +757,47 @@ export function getDeliveryOrders(tenantId: string, filters: Record<string, stri
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<DeliveryOrder[]>(`/api/mariadb/tenants/${tenantId}/integrations/delivery/orders${query ? `?${query}` : ''}`);
+  return apiGet<DeliveryOrder[]>(`/api/data/tenants/${tenantId}/integrations/delivery/orders${query ? `?${query}` : ''}`);
 }
 
 export function ingestDeliveryOrder(tenantId: string, payload: unknown) {
-  return apiPost<DeliveryOrder>(`/api/mariadb/tenants/${tenantId}/integrations/delivery/orders`, payload);
+  return apiPost<DeliveryOrder>(`/api/data/tenants/${tenantId}/integrations/delivery/orders`, payload);
 }
 
 export function updateDeliveryOrderStatus(tenantId: string, orderId: string, status: DeliveryOrderStatus) {
-  return apiPut<DeliveryOrder>(`/api/mariadb/tenants/${tenantId}/integrations/delivery/orders/${encodeURIComponent(orderId)}/status`, { status });
+  return apiPut<DeliveryOrder>(`/api/data/tenants/${tenantId}/integrations/delivery/orders/${encodeURIComponent(orderId)}/status`, { status });
 }
 
 export function decideManagerTask(tenantId: string, taskId: string, data: { action: string; note?: string; assignedTo?: string | null }) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/action-center/tasks/${encodeURIComponent(taskId)}`, data);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/action-center/tasks/${encodeURIComponent(taskId)}`, data);
 }
 
 export function getTenantTableSections(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/table-sections`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/table-sections`);
 }
 
 export function getTenantRestaurantTables(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/restaurant-tables`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/restaurant-tables`);
 }
 
 export function getOpenCashSession(tenantId: string, staffId: string) {
-  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/cash-sessions?staffId=${encodeURIComponent(staffId)}`);
+  return apiGet<any>(`/api/data/tenants/${tenantId}/cash-sessions?staffId=${encodeURIComponent(staffId)}`);
 }
 
 export function getTenantCashSessions(tenantId: string, limit = 100) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/cash-sessions?limit=${encodeURIComponent(String(limit))}`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/cash-sessions?limit=${encodeURIComponent(String(limit))}`);
 }
 
 export function getTenantIdBySlug(slug: string) {
-  return apiGet<{ tenantId: string }>(`/api/mariadb/slugs/${encodeURIComponent(slug)}/tenant`);
+  return apiGet<{ tenantId: string }>(`/api/data/slugs/${encodeURIComponent(slug)}/tenant`);
 }
 
 export function getUserByUid(uid: string) {
-  return apiGet<any>(`/api/mariadb/users/${encodeURIComponent(uid)}`);
+  return apiGet<any>(`/api/data/users/${encodeURIComponent(uid)}`);
 }
 
 export function getStaffTenantByEmail(email: string) {
-  return apiGet<any>(`/api/mariadb/staff?email=${encodeURIComponent(email)}`);
+  return apiGet<any>(`/api/data/staff?email=${encodeURIComponent(email)}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -805,11 +805,11 @@ export function getStaffTenantByEmail(email: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function createProduct(tenantId: string, product: any) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/products`, product);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/products`, product);
 }
 
 export function updateProduct(tenantId: string, productId: string, updates: any) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/products/${productId}`, updates);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/products/${productId}`, updates);
 }
 
 export function requestStockAdjustment(tenantId: string, productId: string, data: {
@@ -820,7 +820,7 @@ export function requestStockAdjustment(tenantId: string, productId: string, data
   staffId?: string | null;
   staffName?: string | null;
 }) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/products/${productId}/stock-adjustments`, data);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/products/${productId}/stock-adjustments`, data);
 }
 
 export function getStockTakeSessions(tenantId: string, filters: Record<string, string | null | undefined> = {}) {
@@ -830,7 +830,7 @@ export function getStockTakeSessions(tenantId: string, filters: Record<string, s
     params.set(key, value);
   });
   const query = params.toString();
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/stocktakes${query ? `?${query}` : ''}`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/stocktakes${query ? `?${query}` : ''}`);
 }
 
 export function createStockTakeSession(tenantId: string, data: {
@@ -842,16 +842,16 @@ export function createStockTakeSession(tenantId: string, data: {
   staffId?: string | null;
   staffName?: string | null;
 }) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/stocktakes`, data);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/stocktakes`, data);
 }
 
 export function getStockTakeRules(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/stocktakes/rules`);
 }
 
 export function getStockTakeSuggestions(tenantId: string, limit = 12) {
   return apiGet<{ suggestions: StockTakeSuggestion[]; generatedAt: string; signalWindowDays: number; expiryWindowDays: number }>(
-    `/api/mariadb/tenants/${tenantId}/stocktakes/suggestions?limit=${encodeURIComponent(String(limit))}`
+    `/api/data/tenants/${tenantId}/stocktakes/suggestions?limit=${encodeURIComponent(String(limit))}`
   );
 }
 
@@ -868,15 +868,15 @@ export function createStockTakeRule(tenantId: string, data: {
   staffId?: string | null;
   staffName?: string | null;
 }) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules`, data);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/stocktakes/rules`, data);
 }
 
 export function updateStockTakeRule(tenantId: string, ruleId: string, data: Record<string, any>) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules/${encodeURIComponent(ruleId)}`, data);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/stocktakes/rules/${encodeURIComponent(ruleId)}`, data);
 }
 
 export function deleteStockTakeRule(tenantId: string, ruleId: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules/${encodeURIComponent(ruleId)}`);
+  return apiDelete<{ success: boolean }>(`/api/data/tenants/${tenantId}/stocktakes/rules/${encodeURIComponent(ruleId)}`);
 }
 
 export function runDueStockTakeRules(tenantId: string, data: {
@@ -885,11 +885,11 @@ export function runDueStockTakeRules(tenantId: string, data: {
   staffId?: string | null;
   staffName?: string | null;
 } = {}) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/rules/run-due`, data);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/stocktakes/rules/run-due`, data);
 }
 
 export function getStockTakeSession(tenantId: string, sessionId: string) {
-  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}`);
+  return apiGet<any>(`/api/data/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}`);
 }
 
 export function getStockTakeExportPack(tenantId: string, sessionId: string) {
@@ -901,7 +901,7 @@ export function getStockTakeExportPack(tenantId: string, sessionId: string) {
     csv: string;
     varianceReasons: Array<{ value: string; label: string; stockReasonCode: string; supervisorSensitive: boolean }>;
     session: any;
-  }>(`/api/mariadb/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}/export-pack`);
+  }>(`/api/data/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}/export-pack`);
 }
 
 export function getStockValuationReport(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -912,13 +912,13 @@ export function getStockValuationReport(tenantId: string, filters: Record<string
   });
   const query = params.toString();
   return apiGet<StockValuationReport>(
-    `/api/mariadb/tenants/${tenantId}/stock-reports/valuation${query ? `?${query}` : ''}`
+    `/api/data/tenants/${tenantId}/stock-reports/valuation${query ? `?${query}` : ''}`
   );
 }
 
 export function getMyStockTakeAssignments(tenantId: string, staffId?: string | null) {
   const query = staffId ? `?staffId=${encodeURIComponent(staffId)}` : '';
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/stocktakes/my-assignments${query}`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/stocktakes/my-assignments${query}`);
 }
 
 export function submitStockTakeCount(tenantId: string, itemId: string, data: {
@@ -928,7 +928,7 @@ export function submitStockTakeCount(tenantId: string, itemId: string, data: {
   staffId?: string | null;
   staffName?: string | null;
 }) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/items/${encodeURIComponent(itemId)}/count`, data);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/stocktakes/items/${encodeURIComponent(itemId)}/count`, data);
 }
 
 export function requestStockTakeRecount(tenantId: string, itemId: string, data: {
@@ -936,18 +936,18 @@ export function requestStockTakeRecount(tenantId: string, itemId: string, data: 
   staffId?: string | null;
   staffName?: string | null;
 }) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/items/${encodeURIComponent(itemId)}/recount`, data);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/stocktakes/items/${encodeURIComponent(itemId)}/recount`, data);
 }
 
 export function approveStockTakeSession(tenantId: string, sessionId: string, data: {
   staffId?: string | null;
   staffName?: string | null;
 } = {}) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}/approve`, data);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/stocktakes/${encodeURIComponent(sessionId)}/approve`, data);
 }
 
 export function deleteProduct(tenantId: string, productId: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/products/${productId}`);
+  return apiDelete<{ success: boolean }>(`/api/data/tenants/${tenantId}/products/${productId}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -955,11 +955,11 @@ export function deleteProduct(tenantId: string, productId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function createCustomer(tenantId: string, customer: any) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/customers`, customer);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/customers`, customer);
 }
 
 export function updateCustomer(tenantId: string, customerId: string, updates: any) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}`, updates);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/customers/${customerId}`, updates);
 }
 
 export function deleteCustomer(tenantId: string, customerId: string, data: { reason?: string | null } = {}) {
@@ -971,7 +971,7 @@ export function deleteCustomer(tenantId: string, customerId: string, data: { rea
     retainedSaleCount?: number;
     revokedConsentTypes?: string[];
     blockers?: any[];
-  }>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}`, data);
+  }>(`/api/data/tenants/${tenantId}/customers/${customerId}`, data);
 }
 
 export function getCustomerCampaignExport(tenantId: string, filters: { segment?: string; limit?: number } = {}) {
@@ -979,19 +979,19 @@ export function getCustomerCampaignExport(tenantId: string, filters: { segment?:
   if (filters.segment) query.set('segment', filters.segment);
   if (filters.limit) query.set('limit', String(filters.limit));
   const suffix = query.toString() ? `?${query.toString()}` : '';
-  return apiGet<CustomerCampaignExport>(`/api/mariadb/tenants/${tenantId}/customers/campaign-export${suffix}`);
+  return apiGet<CustomerCampaignExport>(`/api/data/tenants/${tenantId}/customers/campaign-export${suffix}`);
 }
 
 export function getCustomerConsents(tenantId: string, customerId: string) {
-  return apiGet<CustomerConsentMap>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}/consents`);
+  return apiGet<CustomerConsentMap>(`/api/data/tenants/${tenantId}/customers/${customerId}/consents`);
 }
 
 export function updateCustomerConsents(tenantId: string, customerId: string, consents: Partial<CustomerConsentMap>) {
-  return apiPut<CustomerConsentMap>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}/consents`, { consents });
+  return apiPut<CustomerConsentMap>(`/api/data/tenants/${tenantId}/customers/${customerId}/consents`, { consents });
 }
 
 export function getCustomerDataExport(tenantId: string, customerId: string) {
-  return apiGet<CustomerDataExport>(`/api/mariadb/tenants/${tenantId}/customers/${customerId}/data-export`);
+  return apiGet<CustomerDataExport>(`/api/data/tenants/${tenantId}/customers/${customerId}/data-export`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -999,15 +999,15 @@ export function getCustomerDataExport(tenantId: string, customerId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function createStaff(tenantId: string, staff: any) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/staff`, staff);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/staff`, staff);
 }
 
 export function updateStaff(tenantId: string, staffId: string, updates: any) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/staff/${staffId}`, updates);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/staff/${staffId}`, updates);
 }
 
 export function deleteStaff(tenantId: string, staffId: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/staff/${staffId}`);
+  return apiDelete<{ success: boolean }>(`/api/data/tenants/${tenantId}/staff/${staffId}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1015,11 +1015,11 @@ export function deleteStaff(tenantId: string, staffId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function createWorkstation(tenantId: string, workstation: any) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/workstations`, workstation);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/workstations`, workstation);
 }
 
 export function deleteWorkstation(tenantId: string, workstationId: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/workstations/${workstationId}`);
+  return apiDelete<{ success: boolean }>(`/api/data/tenants/${tenantId}/workstations/${workstationId}`);
 }
 
 export function getHardwareDevices(tenantId: string, filters: Record<string, string | number | null | undefined> = {}) {
@@ -1029,54 +1029,54 @@ export function getHardwareDevices(tenantId: string, filters: Record<string, str
     params.set(key, String(value));
   });
   const query = params.toString();
-  return apiGet<HardwareDevice[]>(`/api/mariadb/tenants/${tenantId}/hardware-devices${query ? `?${query}` : ''}`);
+  return apiGet<HardwareDevice[]>(`/api/data/tenants/${tenantId}/hardware-devices${query ? `?${query}` : ''}`);
 }
 
 export function createHardwareDevice(tenantId: string, device: Partial<HardwareDevice>) {
-  return apiPost<HardwareDevice>(`/api/mariadb/tenants/${tenantId}/hardware-devices`, device);
+  return apiPost<HardwareDevice>(`/api/data/tenants/${tenantId}/hardware-devices`, device);
 }
 
 export function updateHardwareDevice(tenantId: string, deviceId: string, device: Partial<HardwareDevice>) {
-  return apiPut<HardwareDevice>(`/api/mariadb/tenants/${tenantId}/hardware-devices/${encodeURIComponent(deviceId)}`, device);
+  return apiPut<HardwareDevice>(`/api/data/tenants/${tenantId}/hardware-devices/${encodeURIComponent(deviceId)}`, device);
 }
 
 export function deleteHardwareDevice(tenantId: string, deviceId: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/hardware-devices/${encodeURIComponent(deviceId)}`);
+  return apiDelete<{ success: boolean }>(`/api/data/tenants/${tenantId}/hardware-devices/${encodeURIComponent(deviceId)}`);
 }
 
 export function testHardwareDevice(tenantId: string, deviceId: string, context: Record<string, any> = {}) {
   return apiPost<{ eventId: string; ready: boolean; message: string; dispatchMode: string; command: any; device: HardwareDevice }>(
-    `/api/mariadb/tenants/${tenantId}/hardware-devices/${encodeURIComponent(deviceId)}/test`,
+    `/api/data/tenants/${tenantId}/hardware-devices/${encodeURIComponent(deviceId)}/test`,
     context
   );
 }
 
 export function getHardwareEvents(tenantId: string, limit = 25) {
-  return apiGet<HardwareDeviceEvent[]>(`/api/mariadb/tenants/${tenantId}/hardware-events?limit=${encodeURIComponent(String(limit))}`);
+  return apiGet<HardwareDeviceEvent[]>(`/api/data/tenants/${tenantId}/hardware-events?limit=${encodeURIComponent(String(limit))}`);
 }
 
 export function createTableSection(tenantId: string, section: any) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/table-sections`, section);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/table-sections`, section);
 }
 
 export function updateTableSection(tenantId: string, sectionId: string, updates: any) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/table-sections/${sectionId}`, updates);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/table-sections/${sectionId}`, updates);
 }
 
 export function deleteTableSection(tenantId: string, sectionId: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/table-sections/${sectionId}`);
+  return apiDelete<{ success: boolean }>(`/api/data/tenants/${tenantId}/table-sections/${sectionId}`);
 }
 
 export function createRestaurantTable(tenantId: string, table: any) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/restaurant-tables`, table);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/restaurant-tables`, table);
 }
 
 export function updateRestaurantTable(tenantId: string, tableId: string, updates: any) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/restaurant-tables/${tableId}`, updates);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/restaurant-tables/${tableId}`, updates);
 }
 
 export function deleteRestaurantTable(tenantId: string, tableId: string) {
-  return apiDelete<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/restaurant-tables/${tableId}`);
+  return apiDelete<{ success: boolean }>(`/api/data/tenants/${tenantId}/restaurant-tables/${tableId}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1084,7 +1084,7 @@ export function deleteRestaurantTable(tenantId: string, tableId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function createSale(tenantId: string, sale: any) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/sales`, sale);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/sales`, sale);
 }
 
 export function reportOfflineSyncIssue(tenantId: string, data: {
@@ -1106,15 +1106,15 @@ export function reportOfflineSyncIssue(tenantId: string, data: {
   syncBatchId?: string | null;
   syncSequence?: number | null;
 }) {
-  return apiPost<{ eventId: string }>(`/api/mariadb/tenants/${tenantId}/offline-sync/issues`, data);
+  return apiPost<{ eventId: string }>(`/api/data/tenants/${tenantId}/offline-sync/issues`, data);
 }
 
 export function getSaleById(tenantId: string, saleId: string) {
-  return apiGet<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}`);
+  return apiGet<any>(`/api/data/tenants/${tenantId}/sales/${saleId}`);
 }
 
 export function updateSaleStatus(tenantId: string, saleId: string, status: string) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}`, { status });
+  return apiPut<any>(`/api/data/tenants/${tenantId}/sales/${saleId}`, { status });
 }
 
 export function updateSalePaymentProviderStatus(tenantId: string, saleId: string, paymentId: string, data: {
@@ -1125,7 +1125,7 @@ export function updateSalePaymentProviderStatus(tenantId: string, saleId: string
   providerStatus: string;
   providerNote?: string | null;
 }) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}/payments/${paymentId}/provider-status`, data);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/sales/${saleId}/payments/${paymentId}/provider-status`, data);
 }
 
 export function refundSale(tenantId: string, saleId: string, data: {
@@ -1141,7 +1141,7 @@ export function refundSale(tenantId: string, saleId: string, data: {
   providerStatus?: string | null;
   providerNote?: string | null;
 }) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}/refund`, data);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/sales/${saleId}/refund`, data);
 }
 
 export function voidSale(tenantId: string, saleId: string, data: {
@@ -1150,7 +1150,7 @@ export function voidSale(tenantId: string, saleId: string, data: {
   staffId?: string | null;
   staffName?: string | null;
 }) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/sales/${saleId}/void`, data);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/sales/${saleId}/void`, data);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1165,11 +1165,11 @@ export function getLaybyOrders(tenantId: string, filters: { status?: string; sea
     }
   });
   const query = params.toString();
-  return apiGet<LaybyOrder[]>(`/api/mariadb/tenants/${tenantId}/laybys${query ? `?${query}` : ''}`);
+  return apiGet<LaybyOrder[]>(`/api/data/tenants/${tenantId}/laybys${query ? `?${query}` : ''}`);
 }
 
 export function getLaybyOrderById(tenantId: string, laybyId: string) {
-  return apiGet<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}`);
+  return apiGet<LaybyOrder>(`/api/data/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}`);
 }
 
 export function createLaybyOrder(tenantId: string, data: {
@@ -1193,7 +1193,7 @@ export function createLaybyOrder(tenantId: string, data: {
   staffId?: string | null;
   staffName?: string | null;
 }) {
-  return apiPost<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys`, data);
+  return apiPost<LaybyOrder>(`/api/data/tenants/${tenantId}/laybys`, data);
 }
 
 export function addLaybyPayment(tenantId: string, laybyId: string, data: {
@@ -1206,7 +1206,7 @@ export function addLaybyPayment(tenantId: string, laybyId: string, data: {
   staffName?: string | null;
   note?: string | null;
 }) {
-  return apiPost<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}/payments`, data);
+  return apiPost<LaybyOrder>(`/api/data/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}/payments`, data);
 }
 
 export function completeLaybyOrder(tenantId: string, laybyId: string, data: {
@@ -1221,7 +1221,7 @@ export function completeLaybyOrder(tenantId: string, laybyId: string, data: {
   staffId?: string | null;
   staffName?: string | null;
 } = {}) {
-  return apiPost<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}/complete`, data);
+  return apiPost<LaybyOrder>(`/api/data/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}/complete`, data);
 }
 
 export function cancelLaybyOrder(tenantId: string, laybyId: string, data: {
@@ -1232,27 +1232,27 @@ export function cancelLaybyOrder(tenantId: string, laybyId: string, data: {
   staffId?: string | null;
   staffName?: string | null;
 }) {
-  return apiPost<LaybyOrder>(`/api/mariadb/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}/cancel`, data);
+  return apiPost<LaybyOrder>(`/api/data/tenants/${tenantId}/laybys/${encodeURIComponent(laybyId)}/cancel`, data);
 }
 
 export function getPayoutRequests(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/payout-requests`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/payout-requests`);
 }
 
 export function getCustomerPayoutRequests(tenantId: string) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/customer-payout-requests`);
 }
 
 export function updatePayoutRequest(tenantId: string, id: string, updates: any) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/payout-requests/${id}`, updates);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/payout-requests/${id}`, updates);
 }
 
 export function updateCustomerPayoutRequest(tenantId: string, id: string, updates: any) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests/${id}`, updates);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/customer-payout-requests/${id}`, updates);
 }
 
 export function createPayoutRequest(tenantId: string, data: any) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/payout-requests`, data);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/payout-requests`, data);
 }
 
 export function recordCashMovement(tenantId: string, cashSessionId: string, data: {
@@ -1265,11 +1265,11 @@ export function recordCashMovement(tenantId: string, cashSessionId: string, data
   staffName?: string | null;
   note?: string | null;
 }) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/cash-sessions/${cashSessionId}/movements`, data);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/cash-sessions/${cashSessionId}/movements`, data);
 }
 
 export function getManagerCashSummary(tenantId: string) {
-  return apiGet<ManagerCashSummary>(`/api/mariadb/tenants/${tenantId}/manager-cash/summary`);
+  return apiGet<ManagerCashSummary>(`/api/data/tenants/${tenantId}/manager-cash/summary`);
 }
 
 export type ManagerCashMovementFilters = {
@@ -1297,12 +1297,12 @@ function managerCashMovementQuery(filters: ManagerCashMovementFilters = {}) {
 }
 
 export function getManagerCashMovements(tenantId: string, filters: ManagerCashMovementFilters = {}) {
-  return apiGet<ManagerCashMovement[]>(`/api/mariadb/tenants/${tenantId}/manager-cash/movements${managerCashMovementQuery(filters)}`);
+  return apiGet<ManagerCashMovement[]>(`/api/data/tenants/${tenantId}/manager-cash/movements${managerCashMovementQuery(filters)}`);
 }
 
 export function exportManagerCashMovementsCsv(tenantId: string, filters: ManagerCashMovementFilters = {}) {
   return apiGet<{ filename: string; mimeType: string; csv: string; generatedAt: string; count: number }>(
-    `/api/mariadb/tenants/${tenantId}/manager-cash/movements/export${managerCashMovementQuery(filters)}`
+    `/api/data/tenants/${tenantId}/manager-cash/movements/export${managerCashMovementQuery(filters)}`
   );
 }
 
@@ -1326,7 +1326,7 @@ export function recordManagerCashMovement(tenantId: string, data: {
   approvedBy?: string | null;
   approvedByName?: string | null;
 }) {
-  return apiPost<ManagerCashMovement>(`/api/mariadb/tenants/${tenantId}/manager-cash/movements`, data);
+  return apiPost<ManagerCashMovement>(`/api/data/tenants/${tenantId}/manager-cash/movements`, data);
 }
 
 export function getCashCustodyTransfers(tenantId: string, filters: { status?: string; limit?: number } = {}) {
@@ -1334,7 +1334,7 @@ export function getCashCustodyTransfers(tenantId: string, filters: { status?: st
   if (filters.status) params.set('status', filters.status);
   if (filters.limit) params.set('limit', String(filters.limit));
   const query = params.toString();
-  return apiGet<CashCustodyTransfer[]>(`/api/mariadb/tenants/${tenantId}/manager-cash/transfers${query ? `?${query}` : ''}`);
+  return apiGet<CashCustodyTransfer[]>(`/api/data/tenants/${tenantId}/manager-cash/transfers${query ? `?${query}` : ''}`);
 }
 
 export function createCashCustodyTransfer(tenantId: string, data: {
@@ -1350,7 +1350,7 @@ export function createCashCustodyTransfer(tenantId: string, data: {
   countedBreakdown?: Record<string, number>;
   note?: string | null;
 }) {
-  return apiPost<CashCustodyTransfer>(`/api/mariadb/tenants/${tenantId}/manager-cash/transfers`, data);
+  return apiPost<CashCustodyTransfer>(`/api/data/tenants/${tenantId}/manager-cash/transfers`, data);
 }
 
 export function confirmCashCustodyTransfer(tenantId: string, transferId: string, data: {
@@ -1358,20 +1358,20 @@ export function confirmCashCustodyTransfer(tenantId: string, transferId: string,
   countedBreakdown?: Record<string, number>;
   note?: string | null;
 } = {}) {
-  return apiPut<CashCustodyTransfer>(`/api/mariadb/tenants/${tenantId}/manager-cash/transfers/${encodeURIComponent(transferId)}/confirm`, data);
+  return apiPut<CashCustodyTransfer>(`/api/data/tenants/${tenantId}/manager-cash/transfers/${encodeURIComponent(transferId)}/confirm`, data);
 }
 
 export function cancelCashCustodyTransfer(tenantId: string, transferId: string, data: { note?: string | null } = {}) {
-  return apiPut<{ success: boolean }>(`/api/mariadb/tenants/${tenantId}/manager-cash/transfers/${encodeURIComponent(transferId)}/cancel`, data);
+  return apiPut<{ success: boolean }>(`/api/data/tenants/${tenantId}/manager-cash/transfers/${encodeURIComponent(transferId)}/cancel`, data);
 }
 
 export function getCashClosePreview(tenantId: string, businessDate?: string | null) {
   const query = businessDate ? `?businessDate=${encodeURIComponent(businessDate)}` : '';
-  return apiGet<CashClosePreview>(`/api/mariadb/tenants/${tenantId}/manager-cash/close/preview${query}`);
+  return apiGet<CashClosePreview>(`/api/data/tenants/${tenantId}/manager-cash/close/preview${query}`);
 }
 
 export function getCashCloseCheckpoints(tenantId: string, limit = 20) {
-  return apiGet<CashCloseCheckpoint[]>(`/api/mariadb/tenants/${tenantId}/manager-cash/close?limit=${encodeURIComponent(String(limit))}`);
+  return apiGet<CashCloseCheckpoint[]>(`/api/data/tenants/${tenantId}/manager-cash/close?limit=${encodeURIComponent(String(limit))}`);
 }
 
 export function createCashCloseCheckpoint(tenantId: string, data: {
@@ -1380,12 +1380,12 @@ export function createCashCloseCheckpoint(tenantId: string, data: {
   countedBreakdown?: Record<string, number>;
   note?: string | null;
 }) {
-  return apiPost<CashCloseCheckpoint>(`/api/mariadb/tenants/${tenantId}/manager-cash/close`, data);
+  return apiPost<CashCloseCheckpoint>(`/api/data/tenants/${tenantId}/manager-cash/close`, data);
 }
 
 export function exportCashCloseCheckpointCsv(tenantId: string, checkpointId: string) {
   return apiGet<{ filename: string; mimeType: string; csv: string; generatedAt: string }>(
-    `/api/mariadb/tenants/${tenantId}/manager-cash/close/${encodeURIComponent(checkpointId)}/export`
+    `/api/data/tenants/${tenantId}/manager-cash/close/${encodeURIComponent(checkpointId)}/export`
   );
 }
 
@@ -1410,7 +1410,7 @@ export function recordWalletCashMovement(tenantId: string, data: {
     previousBalance: number;
     nextBalance: number;
     appliedWalletDelta: boolean;
-  }>(`/api/mariadb/tenants/${tenantId}/manager-cash/wallet-cash`, data);
+  }>(`/api/data/tenants/${tenantId}/manager-cash/wallet-cash`, data);
 }
 
 export function recordRegisterWalletCashMovement(tenantId: string, cashSessionId: string, data: {
@@ -1428,15 +1428,15 @@ export function recordRegisterWalletCashMovement(tenantId: string, cashSessionId
     nextBalance: number;
     cashSessionId: string;
     cashSessionDelta: number;
-  }>(`/api/mariadb/tenants/${tenantId}/cash-sessions/${encodeURIComponent(cashSessionId)}/wallet-cash`, data);
+  }>(`/api/data/tenants/${tenantId}/cash-sessions/${encodeURIComponent(cashSessionId)}/wallet-cash`, data);
 }
 
 export function setupTenant(data: any) {
-  return apiPost<{ tenantId: string }>(`/api/mariadb/setup`, data);
+  return apiPost<{ tenantId: string }>(`/api/data/setup`, data);
 }
 
 export function updateTenantConfig(tenantId: string, config: any) {
-  return apiPut<any>(`/api/mariadb/tenants/${tenantId}/settings/app`, config);
+  return apiPut<any>(`/api/data/tenants/${tenantId}/settings/app`, config);
 }
 
 function queryString(params: Record<string, string | number | undefined | null>) {
@@ -1449,31 +1449,31 @@ function queryString(params: Record<string, string | number | undefined | null>)
 }
 
 export function getStaffShifts(tenantId: string, params: { startDate?: string; endDate?: string; staffId?: string } = {}) {
-  return apiGet<StaffShift[]>(`/api/mariadb/tenants/${tenantId}/workforce/shifts${queryString(params)}`);
+  return apiGet<StaffShift[]>(`/api/data/tenants/${tenantId}/workforce/shifts${queryString(params)}`);
 }
 
 export function createStaffShift(tenantId: string, data: Partial<StaffShift>) {
-  return apiPost<StaffShift>(`/api/mariadb/tenants/${tenantId}/workforce/shifts`, data);
+  return apiPost<StaffShift>(`/api/data/tenants/${tenantId}/workforce/shifts`, data);
 }
 
 export function updateStaffShift(tenantId: string, shiftId: string, data: Partial<StaffShift>) {
-  return apiPut<StaffShift>(`/api/mariadb/tenants/${tenantId}/workforce/shifts/${encodeURIComponent(shiftId)}`, data);
+  return apiPut<StaffShift>(`/api/data/tenants/${tenantId}/workforce/shifts/${encodeURIComponent(shiftId)}`, data);
 }
 
 export function cancelStaffShift(tenantId: string, shiftId: string) {
-  return apiDelete<StaffShift>(`/api/mariadb/tenants/${tenantId}/workforce/shifts/${encodeURIComponent(shiftId)}`);
+  return apiDelete<StaffShift>(`/api/data/tenants/${tenantId}/workforce/shifts/${encodeURIComponent(shiftId)}`);
 }
 
 export function publishStaffRoster(tenantId: string, data: { startDate: string; endDate: string }) {
-  return apiPost<{ startDate: string; endDate: string; shifts: StaffShift[] }>(`/api/mariadb/tenants/${tenantId}/workforce/roster/publish`, data);
+  return apiPost<{ startDate: string; endDate: string; shifts: StaffShift[] }>(`/api/data/tenants/${tenantId}/workforce/roster/publish`, data);
 }
 
 export function getTimesheetPayrollReport(tenantId: string, params: { startDate?: string; endDate?: string; staffId?: string } = {}) {
-  return apiGet<StaffTimesheetReport>(`/api/mariadb/tenants/${tenantId}/workforce/timesheet-payroll${queryString(params)}`);
+  return apiGet<StaffTimesheetReport>(`/api/data/tenants/${tenantId}/workforce/timesheet-payroll${queryString(params)}`);
 }
 
 export function getStaffPerformanceReport(tenantId: string, params: { startDate?: string; endDate?: string; staffId?: string } = {}) {
-  return apiGet<StaffPerformanceReport>(`/api/mariadb/tenants/${tenantId}/workforce/staff-performance${queryString(params)}`);
+  return apiGet<StaffPerformanceReport>(`/api/data/tenants/${tenantId}/workforce/staff-performance${queryString(params)}`);
 }
 
 export function addStaffCoachingNote(tenantId: string, data: {
@@ -1483,87 +1483,87 @@ export function addStaffCoachingNote(tenantId: string, data: {
   noteType?: StaffCoachingNote['noteType'];
   source?: StaffCoachingNote['source'];
 }) {
-  return apiPost<StaffCoachingNote>(`/api/mariadb/tenants/${tenantId}/workforce/staff-performance/coaching-notes`, data);
+  return apiPost<StaffCoachingNote>(`/api/data/tenants/${tenantId}/workforce/staff-performance/coaching-notes`, data);
 }
 
 export function getTipPoolRules(tenantId: string) {
-  return apiGet<TipPoolRule[]>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pool-rules`);
+  return apiGet<TipPoolRule[]>(`/api/data/tenants/${tenantId}/workforce/tip-pool-rules`);
 }
 
 export function createTipPoolRule(tenantId: string, data: Partial<TipPoolRule>) {
-  return apiPost<TipPoolRule>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pool-rules`, data);
+  return apiPost<TipPoolRule>(`/api/data/tenants/${tenantId}/workforce/tip-pool-rules`, data);
 }
 
 export function updateTipPoolRule(tenantId: string, ruleId: string, data: Partial<TipPoolRule>) {
-  return apiPut<TipPoolRule>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pool-rules/${encodeURIComponent(ruleId)}`, data);
+  return apiPut<TipPoolRule>(`/api/data/tenants/${tenantId}/workforce/tip-pool-rules/${encodeURIComponent(ruleId)}`, data);
 }
 
 export function previewTipPoolPayouts(tenantId: string, data: { ruleId?: string; startDate?: string; endDate?: string }) {
-  return apiPost<TipPoolReport>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pools/preview`, data);
+  return apiPost<TipPoolReport>(`/api/data/tenants/${tenantId}/workforce/tip-pools/preview`, data);
 }
 
 export function generateTipPoolPayouts(tenantId: string, data: { ruleId?: string; startDate?: string; endDate?: string }) {
-  return apiPost<TipPoolReport>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pools/generate`, data);
+  return apiPost<TipPoolReport>(`/api/data/tenants/${tenantId}/workforce/tip-pools/generate`, data);
 }
 
 export function getTipPoolPayouts(tenantId: string, params: { ruleId?: string; startDate?: string; endDate?: string; staffId?: string } = {}) {
-  return apiGet<any[]>(`/api/mariadb/tenants/${tenantId}/workforce/tip-pool-payouts${queryString(params)}`);
+  return apiGet<any[]>(`/api/data/tenants/${tenantId}/workforce/tip-pool-payouts${queryString(params)}`);
 }
 
 export function getMyAttendanceStatus(tenantId: string, staffId?: string) {
-  return apiGet<StaffAttendanceStatus>(`/api/mariadb/tenants/${tenantId}/workforce/attendance/me${queryString({ staffId })}`);
+  return apiGet<StaffAttendanceStatus>(`/api/data/tenants/${tenantId}/workforce/attendance/me${queryString({ staffId })}`);
 }
 
 export function clockInStaff(tenantId: string, data: { staffId?: string; shiftId?: string | null; at?: string; note?: string }) {
-  return apiPost<StaffAttendance>(`/api/mariadb/tenants/${tenantId}/workforce/clock-in`, data);
+  return apiPost<StaffAttendance>(`/api/data/tenants/${tenantId}/workforce/clock-in`, data);
 }
 
 export function startStaffBreak(tenantId: string, data: { staffId?: string; at?: string } = {}) {
-  return apiPost<StaffAttendance>(`/api/mariadb/tenants/${tenantId}/workforce/break/start`, data);
+  return apiPost<StaffAttendance>(`/api/data/tenants/${tenantId}/workforce/break/start`, data);
 }
 
 export function endStaffBreak(tenantId: string, data: { staffId?: string; at?: string } = {}) {
-  return apiPost<StaffAttendance>(`/api/mariadb/tenants/${tenantId}/workforce/break/end`, data);
+  return apiPost<StaffAttendance>(`/api/data/tenants/${tenantId}/workforce/break/end`, data);
 }
 
 export function clockOutStaff(tenantId: string, data: { staffId?: string; at?: string; note?: string } = {}) {
-  return apiPost<StaffAttendance>(`/api/mariadb/tenants/${tenantId}/workforce/clock-out`, data);
+  return apiPost<StaffAttendance>(`/api/data/tenants/${tenantId}/workforce/clock-out`, data);
 }
 
 export function getRetentionPolicy(tenantId: string) {
-  return apiGet<RetentionPolicy>(`/api/mariadb/tenants/${tenantId}/settings/retention-policy`);
+  return apiGet<RetentionPolicy>(`/api/data/tenants/${tenantId}/settings/retention-policy`);
 }
 
 export function updateRetentionPolicy(tenantId: string, policy: Partial<RetentionPolicy>) {
-  return apiPut<RetentionPolicy>(`/api/mariadb/tenants/${tenantId}/settings/retention-policy`, policy);
+  return apiPut<RetentionPolicy>(`/api/data/tenants/${tenantId}/settings/retention-policy`, policy);
 }
 
 export function previewRetentionPolicy(tenantId: string, policy?: Partial<RetentionPolicy>) {
-  return apiPost<RetentionPreview>(`/api/mariadb/tenants/${tenantId}/settings/retention-policy/preview`, policy || {});
+  return apiPost<RetentionPreview>(`/api/data/tenants/${tenantId}/settings/retention-policy/preview`, policy || {});
 }
 
 export function applyRetentionPolicy(tenantId: string, policy?: Partial<RetentionPolicy>) {
-  return apiPost<RetentionApplyResult>(`/api/mariadb/tenants/${tenantId}/settings/retention-policy/apply`, policy || {});
+  return apiPost<RetentionApplyResult>(`/api/data/tenants/${tenantId}/settings/retention-policy/apply`, policy || {});
 }
 
 export function uploadTenantLogo(tenantId: string, data: { dataUrl: string; filename: string; mimeType: string }) {
-  return apiPost<{ logoUrl: string; config?: any }>(`/api/mariadb/tenants/${tenantId}/settings/logo`, data);
+  return apiPost<{ logoUrl: string; config?: any }>(`/api/data/tenants/${tenantId}/settings/logo`, data);
 }
 
 export function seedProducts(tenantId: string, products: any[]) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/seed-products`, { products });
+  return apiPost<any>(`/api/data/tenants/${tenantId}/seed-products`, { products });
 }
 
 export function seedDemoData(tenantId: string, mode: 'retail' | 'restaurant') {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/demo-seed/${mode}`, {});
+  return apiPost<any>(`/api/data/tenants/${tenantId}/demo-seed/${mode}`, {});
 }
 
 export function clearSeededDemoData(tenantId: string) {
-  return apiDelete<any>(`/api/mariadb/tenants/${tenantId}/demo-seed`);
+  return apiDelete<any>(`/api/data/tenants/${tenantId}/demo-seed`);
 }
 
 export function clearAllSales(tenantId: string) {
-  return apiDelete<any>(`/api/mariadb/tenants/${tenantId}/sales`);
+  return apiDelete<any>(`/api/data/tenants/${tenantId}/sales`);
 }
 
 export interface DatabaseBackupSummary {
@@ -1573,7 +1573,7 @@ export interface DatabaseBackupSummary {
   createdBy: string | null;
   note: string | null;
   scope: 'full-database';
-  dialect: 'postgres' | 'mariadb';
+  dialect: 'postgres';
   databaseName: string | null;
   schemaName: string | null;
   tableCount: number;
@@ -1589,7 +1589,7 @@ export interface DatabaseBackupFile {
   note: string | null;
   scope: 'full-database';
   source: {
-    dialect: 'postgres' | 'mariadb';
+    dialect: 'postgres';
     databaseName: string | null;
     schemaName: string | null;
   };
@@ -1655,7 +1655,7 @@ export function restoreDevDatabaseBackup(
 }
 
 export function createCustomerPayoutRequest(tenantId: string, data: any) {
-  return apiPost<any>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests`, data);
+  return apiPost<any>(`/api/data/tenants/${tenantId}/customer-payout-requests`, data);
 }
 
 export type LicenceFeature = 'jpos_branding' | 'own_logo' | 'images' | 'ai' | 'analytics' | 'local_server_sync' | 'api_access' | 'multi_location' | 'full_branding' | 'priority_support' | 'updates' | 'offline_sales_basic' | 'offline_sales_full';
@@ -1736,55 +1736,55 @@ export function getLicenceInfo() {
 }
 
 export function getTenantPackageLimits(tenantId: string) {
-  return apiGet<TenantPackageLimitsResponse>(`/api/mariadb/tenants/${tenantId}/package-limits`);
+  return apiGet<TenantPackageLimitsResponse>(`/api/data/tenants/${tenantId}/package-limits`);
 }
 
 export function getAiSettings(tenantId: string) {
-  return apiGet<AiSettings>(`/api/mariadb/tenants/${tenantId}/ai/settings`);
+  return apiGet<AiSettings>(`/api/data/tenants/${tenantId}/ai/settings`);
 }
 
 export function updateAiSettings(tenantId: string, settings: Partial<AiSettings>) {
-  return apiPut<AiSettings>(`/api/mariadb/tenants/${tenantId}/ai/settings`, settings);
+  return apiPut<AiSettings>(`/api/data/tenants/${tenantId}/ai/settings`, settings);
 }
 
 export function listAiModels(tenantId: string, settings: Partial<AiSettings>) {
-  return apiPost<{ models: AiModelOption[] }>(`/api/mariadb/tenants/${tenantId}/ai/models`, settings);
+  return apiPost<{ models: AiModelOption[] }>(`/api/data/tenants/${tenantId}/ai/models`, settings);
 }
 
 export function testAiProvider(tenantId: string, settings: Partial<AiSettings> & { message?: string; images?: string[]; documents?: Array<{ name?: string; type?: string; dataUrl: string }> }) {
-  return apiPost<{ provider: string; model: string; reply: string; latencyMs: number }>(`/api/mariadb/tenants/${tenantId}/ai/test`, settings);
+  return apiPost<{ provider: string; model: string; reply: string; latencyMs: number }>(`/api/data/tenants/${tenantId}/ai/test`, settings);
 }
 
 export function getAiInsights(tenantId: string) {
-  return apiGet<AiInsight[]>(`/api/mariadb/tenants/${tenantId}/ai/insights`);
+  return apiGet<AiInsight[]>(`/api/data/tenants/${tenantId}/ai/insights`);
 }
 
 export function generateAiInsights(tenantId: string) {
-  return apiPost<AiInsight[]>(`/api/mariadb/tenants/${tenantId}/ai/insights/generate`, {});
+  return apiPost<AiInsight[]>(`/api/data/tenants/${tenantId}/ai/insights/generate`, {});
 }
 
 export function deleteAiInsight(tenantId: string, insightId: string) {
-  return apiDelete<{ deleted: number }>(`/api/mariadb/tenants/${tenantId}/ai/insights/${insightId}`);
+  return apiDelete<{ deleted: number }>(`/api/data/tenants/${tenantId}/ai/insights/${insightId}`);
 }
 
 export function syncAiInsightTasks(tenantId: string) {
-  return apiPost<{ synced: number }>(`/api/mariadb/tenants/${tenantId}/ai/insights/sync-tasks`, {});
+  return apiPost<{ synced: number }>(`/api/data/tenants/${tenantId}/ai/insights/sync-tasks`, {});
 }
 
 export function getAiStaffScores(tenantId: string) {
-  return apiGet<AiStaffScore[]>(`/api/mariadb/tenants/${tenantId}/ai/staff-scores`);
+  return apiGet<AiStaffScore[]>(`/api/data/tenants/${tenantId}/ai/staff-scores`);
 }
 
 export function generateAiStaffScores(tenantId: string) {
-  return apiPost<AiStaffScore[]>(`/api/mariadb/tenants/${tenantId}/ai/staff-scores/generate`, {});
+  return apiPost<AiStaffScore[]>(`/api/data/tenants/${tenantId}/ai/staff-scores/generate`, {});
 }
 
 export function generateInventoryAgentProposal(tenantId: string, data: unknown) {
-  return apiPost<InventoryAgentProposal>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/proposal`, data);
+  return apiPost<InventoryAgentProposal>(`/api/data/tenants/${tenantId}/ai/agent/inventory/proposal`, data);
 }
 
 export function applyInventoryAgentSteps(tenantId: string, steps: InventoryAgentStep[], fullAutopilot = false, runId?: string) {
-  return apiPost<InventoryAgentApplyResult>(`/api/mariadb/tenants/${tenantId}/ai/agent/inventory/apply`, { steps, fullAutopilot, runId });
+  return apiPost<InventoryAgentApplyResult>(`/api/data/tenants/${tenantId}/ai/agent/inventory/apply`, { steps, fullAutopilot, runId });
 }
 
 export async function generateLicence(adminKey: string, data: GenerateLicenceRequest) {

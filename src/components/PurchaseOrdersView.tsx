@@ -36,9 +36,9 @@ export function PurchaseOrdersView() {
     if (!tenantId) return;
     try {
       const [pos, vends, prods] = await Promise.all([
-        apiGet<PurchaseOrder[]>(`/api/mariadb/tenants/${tenantId}/purchase-orders`),
-        apiGet<Vendor[]>(`/api/mariadb/tenants/${tenantId}/vendors`),
-        apiGet<Product[]>(`/api/mariadb/tenants/${tenantId}/products`),
+        apiGet<PurchaseOrder[]>(`/api/data/tenants/${tenantId}/purchase-orders`),
+        apiGet<Vendor[]>(`/api/data/tenants/${tenantId}/vendors`),
+        apiGet<Product[]>(`/api/data/tenants/${tenantId}/products`),
       ]);
       setOrders(pos || []);
       setVendors(vends || []);
@@ -76,9 +76,9 @@ export function PurchaseOrdersView() {
         expectedDeliveryDate: currentOrder.expectedDeliveryDate || null,
       };
       if (currentOrder.id) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/purchase-orders/${currentOrder.id}`, data);
+        await apiPut(`/api/data/tenants/${tenantId}/purchase-orders/${currentOrder.id}`, data);
       } else {
-        await apiPost(`/api/mariadb/tenants/${tenantId}/purchase-orders`, data);
+        await apiPost(`/api/data/tenants/${tenantId}/purchase-orders`, data);
       }
       await fetchData();
       setModalOpen(false);
@@ -116,7 +116,7 @@ export function PurchaseOrdersView() {
     setIsProcessing(true);
     setReceivingError('');
     try {
-      await apiPost(`/api/mariadb/tenants/${tenantId}/purchase-orders/${receivingOrder.id}/receive`, {
+      await apiPost(`/api/data/tenants/${tenantId}/purchase-orders/${receivingOrder.id}/receive`, {
         invoiceNumber: receivingInvoiceNumber || null,
         invoiceDate: receivingInvoiceDate || null,
         note: receivingNote || null,

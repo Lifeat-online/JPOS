@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import { recordAuditEventSafe } from "./audit.js";
 import { summarizeWorkstationTiming } from "../shared/workstationTiming.js";
+import { providerUsesSdk, generateTextViaSdk, embedText, embedTexts, type SdkProviderName, type GenerateTextInput } from "./aiProvider.js";
 export type AiRole = "admin" | "manager" | "dev" | "cashier" | "chef";
 export type AiProviderName = "openai" | "ollama" | "anythingllm" | "google" | "vertex" | "openrouter";
 export type AiInsightCategory = "sales" | "stock" | "cash" | "staff" | "restaurant" | "customer" | "package" | "integration";
@@ -264,7 +265,7 @@ function hasRoleAccess(role: unknown, roles: string[]) {
     return roles.includes(r) || r === "dev";
 }
 function auditAiPermissionDenied(req: Request, attemptedAction: string, reason: string) {
-    const tenantId = req.params?.tenantId || req.user?.tenantId || null;
+    const tenantId = (req.params?.tenantId as string) || req.user?.tenantId || null;
     if (!tenantId)
         return;
     void recordAuditEventSafe({
@@ -287,7 +288,7 @@ function auditAiPermissionDenied(req: Request, attemptedAction: string, reason: 
     });
 }
 export async function requireAiRoleAccess(req: Request, res: Response, next: NextFunction) {
-    const settings = await getAiSettings(req.params.tenantId);
+    const settings = await getAiSettings(String(req.params.tenantId));
     if (!settings.enabled) {
         auditAiPermissionDenied(req, "ai.access", "ai_disabled");
         return res.status(403).json({ error: "AI is disabled for this tenant" });
@@ -299,7 +300,7 @@ export async function requireAiRoleAccess(req: Request, res: Response, next: Nex
     next();
 }
 export async function requireAiStaffScoreAccess(req: Request, res: Response, next: NextFunction) {
-    const settings = await getAiSettings(req.params.tenantId);
+    const settings = await getAiSettings(String(req.params.tenantId));
     if (!settings.enabled || !settings.staffScoringEnabled) {
         auditAiPermissionDenied(req, "ai.staff_scores", !settings.enabled ? "ai_disabled" : "staff_scoring_disabled");
         return res.status(403).json({ error: "AI staff scoring is disabled for this tenant" });
@@ -1394,34 +1395,62 @@ async function callProviderForStaffScores(settings: AiSettings, scores: StaffSco
         };
     });
 }
+const COPILOT_JSON_SYSTEM = "You are MasePOS Manager Copilot. You return compact valid JSON only. Never recommend punitive action. Never invent business metrics.";
+const CONNECTIVITY_SYSTEM = "You are a provider connectivity tester for MasePOS. Reply briefly in plain text.";
+// System prompt kept in sync with the legacy invoice extraction path.
+const INVOICE_SYSTEM = "You are an invoice extraction engine for MasePOS. Return strict JSON only.";
+// Providers routed through the Vercel AI SDK (server/aiProvider.ts). Vertex and
+// AnythingLLM keep their bespoke hand-rolled paths below.
+function buildSdkModelInput(settings: AiSettings): Pick<GenerateTextInput, "provider" | "model" | "apiKey" | "baseUrl" | "headers"> {
+    const provider = settings.provider as SdkProviderName;
+    const apiKey = getProviderApiKey(settings);
+    if (provider === "openrouter") {
+        return {
+            provider,
+            apiKey,
+            model: normalizeOpenRouterModel(settings.model),
+            headers: {
+                "HTTP-Referer": process.env.APP_URL || "http://localhost",
+                "X-Title": "MasePOS AI Manager Copilot",
+            },
+        };
+    }
+    if (provider === "google")
+        return { provider, apiKey, model: settings.model || process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash" };
+    if (provider === "ollama")
+        return { provider, apiKey, model: settings.model || process.env.OLLAMA_MODEL || "llama3.1", baseUrl: settings.baseUrl || process.env.OLLAMA_BASE_URL || null };
+    return { provider, apiKey, model: settings.model };
+}
+async function generateViaSdk(settings: AiSettings, opts: { system: string; message: string; images?: string[]; documents?: AiFileInput[] }): Promise<string> {
+    const input = buildSdkModelInput(settings);
+    if (!input.apiKey && input.provider !== "ollama")
+        throw new Error(`${input.provider} API key is not configured`);
+    try {
+        return await generateTextViaSdk({ ...input, system: opts.system, message: opts.message, images: opts.images, documents: opts.documents });
+    }
+    catch (err: any) {
+        const message = err?.message || String(err);
+        if (settings.provider === "openrouter" && /missing authentication header|auth/i.test(message))
+            throw new Error(openRouterAuthGuidance(message, Boolean(input.apiKey)));
+        throw err;
+    }
+}
 async function callConfiguredProvider(settings: AiSettings, payload: any): Promise<string> {
-    if (settings.provider === "openai")
-        return callOpenAi(settings, payload);
-    if (settings.provider === "ollama")
-        return callOllama(settings, payload);
+    if (providerUsesSdk(settings.provider))
+        return generateViaSdk(settings, { system: COPILOT_JSON_SYSTEM, message: providerPrompt(payload) });
     if (settings.provider === "anythingllm")
         return callAnythingLlm(settings, payload);
-    if (settings.provider === "google")
-        return callGoogle(settings, payload);
     if (settings.provider === "vertex")
         return callVertex(settings, payload);
-    if (settings.provider === "openrouter")
-        return callOpenRouter(settings, payload);
     throw new Error(`Unsupported AI provider: ${settings.provider}`);
 }
 async function callConfiguredProviderText(settings: AiSettings, message: string, images: string[] = [], documents: AiFileInput[] = []): Promise<string> {
-    if (settings.provider === "openai")
-        return callOpenAiText(settings, message, images, documents);
-    if (settings.provider === "ollama")
-        return callOllamaText(settings, message, images);
+    if (providerUsesSdk(settings.provider))
+        return generateViaSdk(settings, { system: CONNECTIVITY_SYSTEM, message, images, documents });
     if (settings.provider === "anythingllm")
         return callAnythingLlmText(settings, message, images, documents);
-    if (settings.provider === "google")
-        return callGoogleText(settings, message, images, documents);
     if (settings.provider === "vertex")
         return callVertexText(settings, message, images, documents);
-    if (settings.provider === "openrouter")
-        return callOpenRouterText(settings, message, images);
     throw new Error(`Unsupported AI provider: ${settings.provider}`);
 }
 function dataUrlPayload(dataUrl: string) {
@@ -1523,20 +1552,16 @@ export async function extractInvoiceWithAi(tenantId: string, input: AiInvoiceExt
     const documents = input.documents || [];
     const images = input.images || [];
     let text = "";
-    if (settings.provider === "openai") {
-        text = await callOpenAiWithFiles(settings, promptPayload, images, documents);
-    }
-    else if (settings.provider === "google") {
-        text = await callGoogleWithFiles(settings, promptPayload, images, documents);
+    if (providerUsesSdk(settings.provider)) {
+        text = await generateViaSdk(settings, {
+            system: INVOICE_SYSTEM,
+            message: `Return compact valid JSON only.\n${providerPrompt(promptPayload)}`,
+            images,
+            documents,
+        });
     }
     else if (settings.provider === "vertex") {
         text = await callVertexWithFiles(settings, promptPayload, images, documents);
-    }
-    else if (settings.provider === "openrouter") {
-        text = await callOpenRouterWithImages(settings, promptPayload, images);
-    }
-    else if (settings.provider === "ollama") {
-        text = await callOllamaWithImages(settings, promptPayload, images);
     }
     else {
         text = await callConfiguredProvider(settings, {
@@ -1548,50 +1573,6 @@ export async function extractInvoiceWithAi(tenantId: string, input: AiInvoiceExt
     if (!parsed || typeof parsed !== "object")
         return null;
     return parsed;
-}
-async function callOpenAiWithFiles(settings: AiSettings, payload: any, images: string[], documents: AiFileInput[]): Promise<string> {
-    const key = getProviderApiKey(settings);
-    if (!key)
-        throw new Error("OPENAI_API_KEY is not configured");
-    const content: any[] = [{ type: "input_text", text: providerPrompt(payload) }];
-    for (const image of images) {
-        content.push({ type: "input_image", image_url: image });
-    }
-    for (const document of documents) {
-        if (!document.dataUrl)
-            continue;
-        content.push({
-            type: "input_file",
-            filename: document.name || "invoice.pdf",
-            file_data: document.dataUrl,
-        });
-    }
-    const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-            model: settings.model,
-            input: [
-                { role: "system", content: "You are an invoice extraction engine for MasePOS. Return strict JSON only." },
-                { role: "user", content },
-            ],
-            text: { format: { type: "json_object" } },
-        }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok)
-        throw new Error(body?.error?.message || `OpenAI invoice extraction failed [${response.status}]`);
-    return body.output_text || body.output?.flatMap((item: any) => item.content || []).map((part: any) => part.text || "").join("") || "";
-}
-async function callGoogleWithFiles(settings: AiSettings, payload: any, images: string[], documents: AiFileInput[]): Promise<string> {
-    const key = getProviderApiKey(settings);
-    if (!key)
-        throw new Error("GOOGLE_AI_API_KEY or GEMINI_API_KEY is not configured");
-    const model = settings.model || process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash";
-    return callGeminiApiKeyWithFiles(key, model, payload, images, documents, "Google invoice extraction");
 }
 async function callGeminiApiKeyWithFiles(key: string, model: string, payload: any, images: string[], documents: AiFileInput[], label: string): Promise<string> {
     const parts: any[] = [{ text: `Return compact valid JSON only.\n${providerPrompt(payload)}` }];
@@ -1651,62 +1632,57 @@ async function callVertexWithFiles(settings: AiSettings, payload: any, images: s
     }
     return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
 }
-async function callOpenRouterWithImages(settings: AiSettings, payload: any, images: string[]): Promise<string> {
-    const key = getProviderApiKey(settings);
-    if (!key)
-        throw new Error("OPENROUTER_API_KEY is not configured");
-    const content: any[] = [{ type: "text", text: providerPrompt(payload) }];
-    for (const image of images)
-        content.push({ type: "image_url", image_url: { url: image } });
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-            "HTTP-Referer": process.env.APP_URL || "http://localhost",
-            "X-Title": "MasePOS AI Manager Copilot",
-        },
-        body: JSON.stringify({
-            model: normalizeOpenRouterModel(settings.model),
-            messages: [
-                { role: "system", content: "You are an invoice extraction engine for MasePOS. Return strict JSON only." },
-                { role: "user", content },
-            ],
-            response_format: { type: "json_object" },
-        }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        const message = body?.error?.message || `OpenRouter invoice extraction failed [${response.status}]`;
-        throw new Error(/missing authentication header|auth/i.test(message) ? openRouterAuthGuidance(message, Boolean(key)) : message);
-    }
-    return body.choices?.[0]?.message?.content || "";
-}
-async function callOllamaWithImages(settings: AiSettings, payload: any, images: string[]): Promise<string> {
-    const baseUrl = (settings.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
-    const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model: settings.model || process.env.OLLAMA_MODEL || "llama3.1",
-            stream: false,
-            format: "json",
-            messages: [
-                {
-                    role: "user",
-                    content: providerPrompt(payload),
-                    images: images.map((image) => dataUrlPayload(image).base64).filter(Boolean),
-                },
-            ],
-        }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok)
-        throw new Error(body?.error || `Ollama invoice extraction failed [${response.status}]`);
-    return body.message?.content || body.response || "";
-}
 function providerPrompt(payload: any) {
     return JSON.stringify(payload);
+}
+/**
+ * Build the text a product is embedded from. Combines the human-meaningful
+ * fields so similarity search matches on name, category and section.
+ */
+export function productEmbeddingText(p: { name?: string | null; category?: string | null; subCategory?: string | null; section?: string | null; barcode?: string | null }): string {
+    return [p.name, p.category, p.subCategory, p.section, p.barcode]
+        .map((v) => (v == null ? "" : String(v).trim()))
+        .filter(Boolean)
+        .join(" · ");
+}
+/**
+ * Resolve the OpenAI key used for embeddings for a tenant. Embeddings always
+ * use OpenAI (text-embedding-3-small) regardless of the tenant's chat provider,
+ * so this looks up the OpenAI-scoped key / OPENAI_API_KEY. Returns "" when none.
+ */
+async function getEmbeddingApiKey(tenantId: string): Promise<string> {
+    const settings = await getAiSettings(tenantId);
+    return getProviderApiKey({ ...settings, provider: "openai" });
+}
+/** Embed a single string for a tenant. Returns null when embeddings are not configured. */
+export async function embedForTenant(tenantId: string, text: string): Promise<number[] | null> {
+    if (!text || !text.trim())
+        return null;
+    const apiKey = await getEmbeddingApiKey(tenantId);
+    if (!apiKey)
+        return null;
+    try {
+        return await embedText({ apiKey }, text);
+    }
+    catch (err: any) {
+        console.warn("[embeddings] embedForTenant failed:", err?.message || err);
+        return null;
+    }
+}
+/** Batch-embed many strings for a tenant. Returns null when embeddings are not configured. */
+export async function embedManyForTenant(tenantId: string, texts: string[]): Promise<number[][] | null> {
+    if (!texts.length)
+        return [];
+    const apiKey = await getEmbeddingApiKey(tenantId);
+    if (!apiKey)
+        return null;
+    try {
+        return await embedTexts({ apiKey }, texts);
+    }
+    catch (err: any) {
+        console.warn("[embeddings] embedManyForTenant failed:", err?.message || err);
+        return null;
+    }
 }
 async function listOpenAiModels(settings: Partial<AiSettings>) {
     const key = getProviderApiKey({ ...settings, provider: "openai" });
@@ -1834,102 +1810,6 @@ async function listOpenRouterModels(settings: Partial<AiSettings>) {
         provider: "openrouter" as const,
         ownedBy: model.architecture?.modality,
     })));
-}
-async function callOpenAiText(settings: AiSettings, message: string, images: string[] = [], documents: AiFileInput[] = []): Promise<string> {
-    const key = getProviderApiKey(settings);
-    if (!key)
-        throw new Error("OPENAI_API_KEY is not configured");
-    const content: any[] = [{ type: "input_text", text: message }];
-    for (const image of images)
-        content.push({ type: "input_image", image_url: image });
-    for (const document of documents) {
-        if (document.dataUrl)
-            content.push({ type: "input_file", filename: document.name || "test-document", file_data: document.dataUrl });
-    }
-    const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({
-            model: settings.model,
-            input: [
-                { role: "system", content: "You are a provider connectivity tester for MasePOS. Reply briefly in plain text." },
-                { role: "user", content },
-            ],
-        }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok)
-        throw new Error(providerErrorMessage(body, `OpenAI test failed [${response.status}]`, response.status));
-    return body.output_text || body.output?.flatMap((item: any) => item.content || []).map((part: any) => part.text || "").join("") || "";
-}
-async function callOpenAi(settings: AiSettings, payload: any): Promise<string> {
-    const key = getProviderApiKey(settings);
-    if (!key)
-        throw new Error("OPENAI_API_KEY is not configured");
-    const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-            model: settings.model,
-            input: [
-                {
-                    role: "system",
-                    content: "You are MasePOS Manager Copilot. You return compact valid JSON only. Never recommend punitive action. Never invent business metrics.",
-                },
-                {
-                    role: "user",
-                    content: JSON.stringify(payload),
-                },
-            ],
-            text: { format: { type: "json_object" } },
-        }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok)
-        throw new Error(body?.error?.message || `OpenAI request failed [${response.status}]`);
-    return body.output_text || body.output?.flatMap((item: any) => item.content || []).map((part: any) => part.text || "").join("") || "";
-}
-async function callOllamaText(settings: AiSettings, message: string, images: string[] = []): Promise<string> {
-    const baseUrl = (settings.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
-    const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model: settings.model || process.env.OLLAMA_MODEL || "llama3.1",
-            stream: false,
-            messages: [
-                { role: "system", content: "You are a provider connectivity tester for MasePOS. Reply briefly in plain text." },
-                { role: "user", content: message, ...(images.length ? { images: images.map((image) => dataUrlPayload(image).base64).filter(Boolean) } : {}) },
-            ],
-        }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok)
-        throw new Error(providerErrorMessage(body, `Ollama test failed [${response.status}]`, response.status));
-    return body.message?.content || body.response || "";
-}
-async function callOllama(settings: AiSettings, payload: any): Promise<string> {
-    const baseUrl = (settings.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
-    const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model: settings.model || process.env.OLLAMA_MODEL || "llama3.1",
-            stream: false,
-            format: "json",
-            messages: [
-                { role: "system", content: "You are MasePOS Manager Copilot. Return compact valid JSON only. Never invent business metrics." },
-                { role: "user", content: providerPrompt(payload) },
-            ],
-        }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok)
-        throw new Error(body?.error || `Ollama request failed [${response.status}]`);
-    return body.message?.content || body.response || "";
 }
 async function callAnythingLlmText(settings: AiSettings, message: string, images: string[] = [], documents: AiFileInput[] = []): Promise<string> {
     const baseUrl = (settings.baseUrl || process.env.ANYTHINGLLM_BASE_URL || "http://localhost:3001").replace(/\/$/, "");
@@ -2086,62 +1966,4 @@ async function callVertex(settings: AiSettings, payload: any): Promise<string> {
         throw new Error(isVertexBlockedError(message) ? vertexBlockedGuidance(message) : message);
     }
     return body.candidates?.[0]?.content?.parts?.map((part: any) => part.text || "").join("") || "";
-}
-async function callOpenRouterText(settings: AiSettings, message: string, images: string[] = []): Promise<string> {
-    const key = getProviderApiKey(settings);
-    if (!key)
-        throw new Error("OPENROUTER_API_KEY is not configured");
-    const content: any[] = [{ type: "text", text: message }];
-    for (const image of images)
-        content.push({ type: "image_url", image_url: { url: image } });
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-            "HTTP-Referer": process.env.APP_URL || "http://localhost",
-            "X-Title": "MasePOS AI Manager Copilot",
-        },
-        body: JSON.stringify({
-            model: normalizeOpenRouterModel(settings.model),
-            messages: [
-                { role: "system", content: "You are a provider connectivity tester for MasePOS. Reply briefly in plain text." },
-                { role: "user", content },
-            ],
-        }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        const message = providerErrorMessage(body, `OpenRouter test failed [${response.status}]`, response.status);
-        throw new Error(/missing authentication header|auth/i.test(message) ? openRouterAuthGuidance(message, Boolean(key)) : message);
-    }
-    return body.choices?.[0]?.message?.content || "";
-}
-async function callOpenRouter(settings: AiSettings, payload: any): Promise<string> {
-    const key = getProviderApiKey(settings);
-    if (!key)
-        throw new Error("OPENROUTER_API_KEY is not configured");
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-            "HTTP-Referer": process.env.APP_URL || "http://localhost",
-            "X-Title": "MasePOS AI Manager Copilot",
-        },
-        body: JSON.stringify({
-            model: normalizeOpenRouterModel(settings.model),
-            messages: [
-                { role: "system", content: "You are MasePOS Manager Copilot. Return compact valid JSON only. Never invent business metrics." },
-                { role: "user", content: providerPrompt(payload) },
-            ],
-            response_format: { type: "json_object" },
-        }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        const message = body?.error?.message || `OpenRouter request failed [${response.status}]`;
-        throw new Error(/missing authentication header|auth/i.test(message) ? openRouterAuthGuidance(message, Boolean(key)) : message);
-    }
-    return body.choices?.[0]?.message?.content || "";
 }

@@ -2953,7 +2953,7 @@ function buildYearData(
           attemptedAction: "manager_cash.summary_view",
           actorRole: "cashier",
           reason: "manager_required",
-          route: `/api/mariadb/tenants/${tenantId}/manager-cash/summary`,
+          route: `/api/data/tenants/${tenantId}/manager-cash/summary`,
           method: "GET",
         },
       );
