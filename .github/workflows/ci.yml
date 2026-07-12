@@ -74,7 +74,8 @@ jobs:
     env:
       # Run the production server (static dist, no Vite dev middleware) against
       # the Postgres service; initDb() + the dev bootstrap seed the login.
-      NODE_ENV: production
+      # NOTE: NODE_ENV is set only on the server command below — setting it here
+      # would make `npm ci` skip devDependencies (vite/tsx/playwright).
       DB_HOST: localhost
       DB_PORT: '5432'
       DB_USER: postgres
@@ -97,7 +98,7 @@ jobs:
       - run: npm run build
       - name: Run e2e against production server
         run: |
-          npx tsx server.ts > /tmp/server.log 2>&1 &
+          NODE_ENV=production npx tsx server.ts > /tmp/server.log 2>&1 &
           SERVER_PID=$!
           echo "waiting for server..."
           for i in $(seq 1 90); do curl -sf http://127.0.0.1:3000/api/health >/dev/null 2>&1 && break; sleep 2; done
