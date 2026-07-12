@@ -28,6 +28,10 @@
     "security:scan": "npm audit --omit=dev"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.12",
+    "@ai-sdk/openai": "^4.0.11",
+    "@ai-sdk/openai-compatible": "^3.0.7",
+    "ai": "^7.0.22",
     "bcryptjs": "^3.0.3",
     "date-fns": "3.6.0",
     "dotenv": "^17.2.3",

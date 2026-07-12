@@ -83,6 +83,16 @@ per provider via existing `testAiProviderContact`.
 **Exit:** every provider path works through the SDK; `server/ai.ts` shrinks
 substantially; no route/frontend changes required.
 
+**Implemented (hybrid):** OpenAI, Google, OpenRouter, and Ollama now route
+through `server/aiProvider.ts` (`resolveTextModel` + `generateText`). Vertex
+(bespoke OAuth + Gemini fallback) and AnythingLLM (workspace chat API) keep
+their existing hand-rolled paths — their auth/endpoints are non-standard and
+their fallback logic is not safely reproducible without live keys. Dead
+per-provider `fetch` functions for the four migrated providers were removed
+(~10KB). Verified by tsc, module-load boot test, `tests/backend/ai-provider.test.ts`,
+and the full unit suite. Live provider network calls were NOT exercised (no
+API keys in CI); those paths are covered by types + logic review only.
+
 ---
 
 ## Workstream C — pgvector + embeddings
