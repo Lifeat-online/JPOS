@@ -130,8 +130,11 @@ query returns sensible results, inventory agent uses retrieved context.
 
 Each PR keeps `build` + `lint` + `test:unit` + `test:api` green before merge.
 
-## Open questions
-- Which embedding model/provider is the default (drives vector dimension)?
-- Self-hosted Postgres image — confirm we can add the `pgvector` extension, or
-  is prod on Supabase/managed PG that already has it?
-- Appetite for the Express 5 upgrade now, or defer indefinitely?
+## Decisions (2026-07-12)
+- **Default embedding model:** OpenAI `text-embedding-3-small` → vector dim **1536**.
+- **Prod Postgres:** self-hosted on a **Hetzner VPS** → add the `pgvector`
+  extension to the Postgres Docker image (`docker-compose.yml` / image build).
+- **Express 5:** do it **now** (folded into Workstream A, not deferred).
+- **No production users yet** → breaking changes are safe; no data migration,
+  backfill-downtime, or backward-compat constraints. We can drop/recreate DB
+  and reseed freely.

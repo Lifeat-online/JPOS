@@ -35,12 +35,9 @@
     "express-rate-limit": "^5.5.1",
     "html5-qrcode": "^2.3.8",
     "jsonwebtoken": "^9.0.3",
-    "kysely": "^0.27.6",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pg": "^8.16.3",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
     "react-router-dom": "^7.14.2",
     "recharts": "^3.8.1",
     "socket.io": "^4.7.5",
@@ -52,7 +49,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.41.0",
-    "@tailwindcss/vite": "^4.1.14",
+    "@tailwindcss/vite": "^4.3.2",
     "@testing-library/jest-dom": "^6.0.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",
@@ -68,15 +65,18 @@
     "@types/supertest": "^2.0.14",
     "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^5.0.4",
-    "@vitest/ui": "^4.1.5",
+    "@vitest/ui": "^4.1.10",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
     "jsdom": "^22.1.0",
+    "kysely": "^0.29.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "supertest": "^6.3.3",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0",
+    "vite": "^8.1.4",
     "vite-plugin-pwa": "^1.3.0",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.10"
   }
 }
