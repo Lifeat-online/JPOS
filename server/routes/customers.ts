@@ -7,12 +7,10 @@ import { exportCustomersCsv, importCustomers } from "../batchOperations.js";
 import { getCustomerCampaignExport } from "../customerSegments.js";
 import { listCustomerConsents, upsertCustomerConsents } from "../customerConsents.js";
 import { getCustomerDataExport } from "../customerDataExport.js";
-import { denyWithAudit, auditRouteEvent, auditActorFromRequest } from "./_helpers.js";
-
-function canUseActionCenter(role: string | undefined | null) {
-  const r = String(role || "").toLowerCase();
-  return r === "admin" || r === "manager" || r === "dev";
-}
+import {
+  denyWithAudit, auditRouteEvent, auditActorFromRequest, auditChangedFields,
+  canUseActionCenter, customerSensitiveAction, enforceSensitiveAction, stripSensitiveVerification,
+} from "./_helpers.js";
 
 export const customersRouter = Router({ mergeParams: true });
 
@@ -27,7 +25,14 @@ customersRouter.get("/", requireAuth, async (req: any, res) => {
 
 customersRouter.post("/", requireAuth, validateSchema(CustomerSchema), async (req: any, res) => {
   try {
-    const created = await createCustomer(req.params.tenantId, req.body);
+    const created = await createCustomer(req.params.tenantId, {
+      ...req.body,
+      consentActor: auditActorFromRequest(req),
+    });
+    await auditRouteEvent(req, "customer.created", "customer", {
+      customerName: created?.name || req.body?.name || null,
+      changedFields: auditChangedFields(req.body || {}),
+    }, created?.id || null, "customer_admin");
     res.status(201).json(created);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -36,7 +41,26 @@ customersRouter.post("/", requireAuth, validateSchema(CustomerSchema), async (re
 
 customersRouter.put("/:customerId", requireAuth, validateSchema(CustomerUpdateSchema), async (req: any, res) => {
   try {
-    const updated = await updateCustomer(req.params.tenantId, req.params.customerId, req.body);
+    // Step-up verification for money/discount changes (wallet, account balance,
+    // account limit, manual discount) — mirrors the manager controls the sale
+    // flow enforces so a cashier cannot silently credit balances.
+    const customerUpdates = stripSensitiveVerification(req.body || {});
+    const sensitiveAction = customerSensitiveAction(customerUpdates as any);
+    if (sensitiveAction) {
+      const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
+        customerId: String(req.params.customerId),
+        changedFields: auditChangedFields(customerUpdates),
+      });
+      if (sensitiveResponse) return;
+    }
+    const updated = await updateCustomer(req.params.tenantId, req.params.customerId, {
+      ...customerUpdates,
+      consentActor: auditActorFromRequest(req),
+    } as any);
+    await auditRouteEvent(req, "customer.updated", "customer", {
+      customerName: updated?.name || (customerUpdates as any)?.name || null,
+      changedFields: auditChangedFields(customerUpdates || {}),
+    }, String(req.params.customerId), "customer_admin");
     res.json(updated);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -45,10 +69,24 @@ customersRouter.put("/:customerId", requireAuth, validateSchema(CustomerUpdateSc
 
 customersRouter.delete("/:customerId", requireAuth, async (req: any, res) => {
   try {
-    await deleteCustomer(req.params.tenantId, req.params.customerId);
-    res.status(204).end();
+    if (!canUseActionCenter(req.user?.role)) {
+      return denyWithAudit(req, res, "customers.anonymize", "Manager access is required to anonymize customer profiles.", {
+        customerId: String(req.params.customerId),
+      });
+    }
+    const result = await deleteCustomer(req.params.tenantId, req.params.customerId, {
+      ...auditActorFromRequest(req),
+      reason: req.body?.reason || null,
+    });
+    await auditRouteEvent(req, "customer.deleted", "customer", {
+      customerId: String(req.params.customerId),
+      mode: (result as any)?.mode || "anonymized",
+      retainedSaleCount: (result as any)?.retainedSaleCount ?? null,
+    }, String(req.params.customerId), "customer_admin");
+    res.json(result);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    const message = String(err?.message || "");
+    res.status(message.includes("not found") ? 404 : message.includes("cannot be anonymized") ? 409 : 500).json({ error: err.message });
   }
 });
 

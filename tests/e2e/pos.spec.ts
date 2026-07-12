@@ -1,13 +1,19 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // ── Shared dev credentials ──────────────────────────────────────────────
-// Prefer CI/local env overrides; fall back to the seed-dev-staff defaults so
-// a locally-bootstrapped dev tenant still works out of the box.
-const DEV_EMAIL = process.env.E2E_EMAIL || "jameskoen78@gmail.com";
-const DEV_PASSWORD = process.env.E2E_PASSWORD || "James4James@1978";
+// Credentials come from the environment only. Never commit real credentials
+// here — they end up in git history. Set E2E_EMAIL / E2E_PASSWORD in CI or a
+// local .env before running the authenticated suites.
+const DEV_EMAIL = process.env.E2E_EMAIL || "";
+const DEV_PASSWORD = process.env.E2E_PASSWORD || "";
 
 // ── Helper: log in via the Staff Login modal ────────────────────────────
 async function login(page: Page) {
+  if (!DEV_EMAIL || !DEV_PASSWORD) {
+    throw new Error(
+      "E2E_EMAIL and E2E_PASSWORD must be set to run the authenticated suites.",
+    );
+  }
   await page.goto("/");
   await page.locator("text=Staff Login").click();
   await page.locator("#login-email").fill(DEV_EMAIL);

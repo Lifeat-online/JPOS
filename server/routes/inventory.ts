@@ -256,22 +256,31 @@ inventoryRouter.get("/vendors", requireAuth, async (req: any, res) => {
   try { res.json(await getVendors(req.params.tenantId)); } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 inventoryRouter.post("/vendors", requireAuth, async (req: any, res) => {
-  try { res.json(await createVendor(req.params.tenantId, req.body || {})); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try {
+    if (!canManageInventory(req.user?.role)) return denyWithAudit(req, res, "vendor.create", "Manager access is required to manage vendors.");
+    res.json(await createVendor(req.params.tenantId, req.body || {}));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 inventoryRouter.put("/vendors/:id", requireAuth, async (req: any, res) => {
-  try { await updateVendor(req.params.tenantId, req.params.id, req.body || {}); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try {
+    if (!canManageInventory(req.user?.role)) return denyWithAudit(req, res, "vendor.update", "Manager access is required to manage vendors.", { vendorId: req.params.id });
+    await updateVendor(req.params.tenantId, req.params.id, req.body || {}); res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 inventoryRouter.get("/purchase-orders", requireAuth, async (req: any, res) => {
   try { res.json(await getPurchaseOrders(req.params.tenantId)); } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 inventoryRouter.post("/purchase-orders", requireAuth, async (req: any, res) => {
-  try { res.json(await createPurchaseOrder(req.params.tenantId, req.body || {})); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try {
+    if (!canManageInventory(req.user?.role)) return denyWithAudit(req, res, "purchase_order.create", "Manager access is required to raise purchase orders.");
+    res.json(await createPurchaseOrder(req.params.tenantId, req.body || {}));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 inventoryRouter.put("/purchase-orders/:id", requireAuth, async (req: any, res) => {
   try {
+    if (!canManageInventory(req.user?.role)) return denyWithAudit(req, res, req.body?.status === "received" ? "purchase_order.receive" : "purchase_order.update", "Manager access is required to manage purchase orders.", { purchaseOrderId: req.params.id });
     if (req.body?.status === "received") {
-      if (!canManageInventory(req.user?.role)) return denyWithAudit(req, res, "purchase_order.receive", "Only managers can receive purchase orders.", { purchaseOrderId: req.params.id });
       return res.json(await receivePurchaseOrder(req.params.tenantId, req.params.id, req.body || {}, auditActorFromRequest(req)));
     }
     await updatePurchaseOrder(req.params.tenantId, req.params.id, req.body || {});
@@ -304,13 +313,22 @@ inventoryRouter.get("/bulk-items", requireAuth, async (req: any, res) => {
   try { res.json(await getBulkItems(req.params.tenantId)); } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 inventoryRouter.post("/bulk-items", requireAuth, async (req: any, res) => {
-  try { res.json(await createBulkItem(req.params.tenantId, req.body)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try {
+    if (!canManageInventory(req.user?.role)) return denyWithAudit(req, res, "bulk_item.create", "Manager access is required to manage recipe items.");
+    res.json(await createBulkItem(req.params.tenantId, req.body));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 inventoryRouter.put("/bulk-items/:id", requireAuth, async (req: any, res) => {
-  try { await updateBulkItem(req.params.tenantId, req.params.id, req.body); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try {
+    if (!canManageInventory(req.user?.role)) return denyWithAudit(req, res, "bulk_item.update", "Manager access is required to manage recipe items.", { bulkItemId: req.params.id });
+    await updateBulkItem(req.params.tenantId, req.params.id, req.body); res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 inventoryRouter.delete("/bulk-items/:id", requireAuth, async (req: any, res) => {
-  try { await deleteBulkItem(req.params.tenantId, req.params.id); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try {
+    if (!canManageInventory(req.user?.role)) return denyWithAudit(req, res, "bulk_item.delete", "Manager access is required to manage recipe items.", { bulkItemId: req.params.id });
+    await deleteBulkItem(req.params.tenantId, req.params.id); res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 inventoryRouter.get("/recipe-costing-report", requireAuth, async (req: any, res) => {

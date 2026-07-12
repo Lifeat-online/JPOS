@@ -35,12 +35,28 @@ export const settingsRouter = Router({ mergeParams: true });
 // ── App config ─────────────────────────────────────────────────────────────
 
 settingsRouter.get("/config", requireAuth, async (req: any, res) => {
-  try { res.json(await getAppConfigByTenant(req.params.tenantId)); }
+  try {
+    const config = await getAppConfigByTenant(req.params.tenantId);
+    // PayFast signing secrets (merchant key + passphrase) must never reach a
+    // non-privileged device — a cashier token could otherwise read them and
+    // forge payment signatures. Only admins/managers (who configure payments)
+    // receive them; the server signs payments internally regardless.
+    if (config && !canUseActionCenter(req.user?.role)) {
+      (config as any).payfastMerchantKey = undefined;
+      (config as any).payfastPassphrase = undefined;
+    }
+    res.json(config);
+  }
   catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 settingsRouter.put("/settings/app", requireAuth, async (req: any, res) => {
   try {
+    // Tenant business config, tax rate, package tier, and PayFast credentials
+    // are manager/admin-only — step-up alone is not sufficient authorization.
+    if (!canUseActionCenter(req.user?.role)) {
+      return denyWithAudit(req, res, "settings.app_update", "Manager access is required to change business settings.");
+    }
     const settingsUpdate = stripSensitiveVerification(req.body || {});
     const r = await enforceSensitiveAction(req, res, "settings_change", { changedFields: auditChangedFields(settingsUpdate || {}), businessFields: auditChangedFields((settingsUpdate as any)?.business || {}) });
     if (r) return;

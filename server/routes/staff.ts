@@ -3,7 +3,23 @@ import { requireAuth } from "../auth-middleware.js";
 import { getStaffByTenant } from "../db-adapter.js";
 import { createStaff, updateStaff, deleteStaff } from "../db-crud.js";
 import { validateSchema, StaffSchema, StaffUpdateSchema } from "../validation.js";
-import { denyWithAudit, auditRouteEvent, auditActorFromRequest, canUseActionCenter, requireManagerRole } from "./_helpers.js";
+import {
+  denyWithAudit, auditRouteEvent, auditActorFromRequest, auditChangedFields, canUseActionCenter,
+  requireManagerRole, normalizeRole, staffSensitiveAction, enforceSensitiveAction, stripSensitiveVerification,
+} from "./_helpers.js";
+
+// Only an admin/dev may assign the admin or dev role. Blocks a manager from
+// promoting themselves or anyone else to full tenant control.
+function blockRoleEscalation(req: any, res: any, requestedRole: unknown): boolean {
+  const target = normalizeRole(requestedRole);
+  if (target !== "admin" && target !== "dev") return false;
+  const actor = normalizeRole(req.user?.role);
+  if (actor === "admin" || actor === "dev") return false;
+  denyWithAudit(req, res, "staff.role_escalation", "Only an admin can assign the admin or dev role.", {
+    requestedRole: target,
+  });
+  return true;
+}
 import {
   cancelStaffShift, clockIn, clockOut, createStaffShift, endBreak, getMyAttendanceStatus,
   getTimesheetPayrollReport, listStaffShifts, publishRoster, startBreak, updateStaffShift
@@ -31,7 +47,13 @@ staffRouter.get("/", requireAuth, async (req: any, res) => {
 
 staffRouter.post("/", requireAuth, requireManagerRole, validateSchema(StaffSchema), async (req: any, res) => {
   try {
+    if (blockRoleEscalation(req, res, req.body?.role)) return;
     const created = await createStaff(req.params.tenantId, req.body);
+    await auditRouteEvent(req, "staff.created", "staff", {
+      staffName: created?.name || req.body?.name || null,
+      role: created?.role || req.body?.role || null,
+      changedFields: auditChangedFields(req.body || {}),
+    }, created?.id || null, "staff_admin");
     res.status(201).json(created);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -40,7 +62,23 @@ staffRouter.post("/", requireAuth, requireManagerRole, validateSchema(StaffSchem
 
 staffRouter.put("/:staffId", requireAuth, requireManagerRole, validateSchema(StaffUpdateSchema), async (req: any, res) => {
   try {
-    const updated = await updateStaff(req.params.tenantId, req.params.staffId, req.body);
+    const staffUpdates = stripSensitiveVerification(req.body || {});
+    if (blockRoleEscalation(req, res, (staffUpdates as any)?.role)) return;
+    // Step-up verification for wallet/discount changes to staff records.
+    const sensitiveAction = staffSensitiveAction(staffUpdates as any);
+    if (sensitiveAction) {
+      const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
+        targetStaffId: String(req.params.staffId),
+        changedFields: auditChangedFields(staffUpdates),
+      });
+      if (sensitiveResponse) return;
+    }
+    const updated = await updateStaff(req.params.tenantId, req.params.staffId, staffUpdates as any);
+    await auditRouteEvent(req, "staff.updated", "staff", {
+      staffName: updated?.name || (staffUpdates as any)?.name || null,
+      role: updated?.role || (staffUpdates as any)?.role || null,
+      changedFields: auditChangedFields(staffUpdates || {}),
+    }, String(req.params.staffId), "staff_admin");
     res.json(updated);
   } catch (err: any) {
     res.status(400).json({ error: err.message });

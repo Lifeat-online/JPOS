@@ -89,26 +89,16 @@ export default defineConfig(({mode}) => {
       importScripts: ['push-sw-addon.js'],
       globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
       navigateFallback: `${base}index.html`,
-      runtimeCaching: [
-        {
-          urlPattern: /^https:\/\/firestore\.googleapis\.com\/.*/i,
-          handler: 'NetworkFirst',
-          options: { cacheName: 'firestore-cache' },
-        },
-      ],
     },
   };
 
   return {
     base,
     plugins: [
-      react(), 
+      react(),
       tailwindcss(),
       VitePWA(pwaOptions)
     ],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -133,11 +123,14 @@ export default defineConfig(({mode}) => {
           manualChunks(id) {
             if (!id.includes('node_modules')) return;
 
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
-              return 'vendor-react';
-            }
+            // Most-specific matches first: lucide-react and @tailwindcss/*react*
+            // paths also contain "react", so they must be claimed before the
+            // generic react bucket or they leak into vendor-react.
             if (id.includes('lucide-react')) {
               return 'vendor-icons';
+            }
+            if (/node_modules\/(react|react-dom|react-router-dom|scheduler)\//.test(id)) {
+              return 'vendor-react';
             }
             if (id.includes('recharts') || id.includes('d3-')) {
               return 'vendor-charts';

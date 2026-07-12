@@ -3277,11 +3277,20 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Colour</label>
                 <div className="flex gap-2 mt-1 flex-wrap">
-                  {['blue', 'emerald', 'orange', 'violet', 'red', 'amber'].map(c => (
+                  {([
+                    ['blue', 'bg-blue-400'],
+                    ['emerald', 'bg-emerald-400'],
+                    ['orange', 'bg-orange-400'],
+                    ['violet', 'bg-violet-400'],
+                    ['red', 'bg-red-400'],
+                    ['amber', 'bg-amber-400'],
+                  ] as const).map(([c, swatch]) => (
                     <button
                       key={c} type="button"
+                      aria-label={`Section colour ${c}`}
+                      title={c}
                       onClick={() => setSectionModal({ ...sectionModal, section: { ...sectionModal.section, color: c } })}
-                      className={`w-8 h-8 rounded-lg border-2 transition-all ${sectionModal.section?.color === c ? 'border-slate-900 dark:border-white scale-110' : 'border-transparent'} bg-${c}-400`}
+                      className={`w-8 h-8 rounded-lg border-2 transition-all ${sectionModal.section?.color === c ? 'border-slate-900 dark:border-white scale-110' : 'border-transparent'} ${swatch}`}
                     />
                   ))}
                 </div>

@@ -184,7 +184,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [showQuickActions, setShowQuickActions] = useState(() => {
     try {
       const saved = window.localStorage.getItem('masepos-show-quick-actions');
-      return saved !== 'false';
+      if (saved === 'true') return true;
+      if (saved === 'false') return false;
+      // No stored preference yet: default collapsed on phones/tablets so the
+      // product grid isn't buried under a wall of tool cards; expanded on
+      // desktop where there's room. The user's choice is then remembered.
+      return typeof window !== 'undefined' ? window.innerWidth >= 1024 : true;
     } catch {
       return true;
     }
@@ -195,6 +200,21 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       window.localStorage.setItem('masepos-show-quick-actions', String(showQuickActions));
     } catch {}
   }, [showQuickActions]);
+
+  // Reactive desktop breakpoint (lg / 1024px). Drives the cart-panel layout so
+  // rotating or resizing a tablet re-evaluates docked vs. bottom-sheet mode,
+  // instead of reading window.innerWidth during render (which never updates).
+  const [isLargeScreen, setIsLargeScreen] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : true,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => setIsLargeScreen(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   const drawerReasons = [
     'Make change',
@@ -1673,17 +1693,17 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       )}
 
       <AnimatePresence>
-        {(isCartOpen || window.innerWidth >= 1024) && (
+        {(isCartOpen || isLargeScreen) && (
           <>
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsCartOpen(false)}
               className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[45]"
             />
-            <motion.aside 
-              initial={window.innerWidth < 1024 ? { y: '100%' } : { x: '100%' }}
-              animate={window.innerWidth < 1024 ? { y: 0 } : { x: 0 }}
-              exit={window.innerWidth < 1024 ? { y: '100%' } : { x: '100%' }}
+            <motion.aside
+              initial={isLargeScreen ? { x: '100%' } : { y: '100%' }}
+              animate={isLargeScreen ? { x: 0 } : { y: 0 }}
+              exit={isLargeScreen ? { x: '100%' } : { y: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className={`fixed bottom-0 left-0 right-0 lg:relative lg:inset-auto z-50 lg:z-10 w-full lg:w-[360px] max-h-[90vh] lg:max-h-none bg-white dark:bg-slate-900 lg:border-l border-slate-200 dark:border-slate-700/60 flex flex-col flex-shrink-0 shadow-2xl rounded-t-3xl lg:rounded-none overflow-hidden`}
             >
