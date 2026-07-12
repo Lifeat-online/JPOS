@@ -154,8 +154,8 @@ export async function createApp(io: any = null) {
     }
     async function requirePackageCapacity(req: Request, res: Response, next: NextFunction, usageKey: "products" | "staff" | "customers" | "activeRegisters", limitKey: "maxProducts" | "maxStaff" | "maxCustomers" | "maxRegisters", limitName: string) {
         try {
-            const context = await getTenantPackageContext(req.params.tenantId);
-            const usage = await getTenantPackageUsage(req.params.tenantId);
+            const context = await getTenantPackageContext(String(req.params.tenantId));
+            const usage = await getTenantPackageUsage(String(req.params.tenantId));
             const limit = Number((context.package as any)[limitKey]);
             if (limitReached(Number((usage as any)[usageKey]), limit)) {
                 void auditRouteEvent(req, "permission.denied", "security", {
@@ -183,7 +183,7 @@ export async function createApp(io: any = null) {
     function requirePackageFeature(feature: PackageFeature) {
         return async (req: Request, res: Response, next: NextFunction) => {
             try {
-                const context = await getTenantPackageContext(req.params.tenantId);
+                const context = await getTenantPackageContext(String(req.params.tenantId));
                 if (!hasPackageFeature(context.package.features, feature)) {
                     void auditRouteEvent(req, "permission.denied", "security", {
                         attemptedAction: `package.feature.${feature}`,
@@ -296,7 +296,7 @@ export async function createApp(io: any = null) {
     // tenant scoping via the licence check above.
     app.get("/api/mariadb/users/:uid", requireAuth, async (req, res) => {
         try {
-            const user = await getUserByUid(req.params.uid);
+            const user = await getUserByUid(String(req.params.uid));
             res.json(user || null);
         }
         catch (err) {
@@ -339,12 +339,12 @@ export async function createApp(io: any = null) {
     app.get("/api/mariadb/tenants/:tenantId/package-limits", requireAuth, async (req, res) => {
         try {
             const [context, usage] = await Promise.all([
-                getTenantPackageContext(req.params.tenantId),
-                getTenantPackageUsage(req.params.tenantId),
+                getTenantPackageContext(String(req.params.tenantId)),
+                getTenantPackageUsage(String(req.params.tenantId)),
             ]);
             const pkg = context.package;
             const localServerSync = hasPackageFeature(pkg.features, "local_server_sync");
-            const localSyncSharedSecret = createTenantLocalSyncSecret(req.params.tenantId, localServerSync);
+            const localSyncSharedSecret = createTenantLocalSyncSecret(String(req.params.tenantId), localServerSync);
             res.json({
                 source: context.source,
                 package: pkg,
@@ -365,10 +365,10 @@ export async function createApp(io: any = null) {
     });
     app.post("/api/integrations/:tenantId/stock-sync", integrationWebhookRateLimit, async (req, res) => {
         try {
-            const apiKey = await authenticateIntegrationApiKey(req.params.tenantId, integrationSecretFromRequest(req));
+            const apiKey = await authenticateIntegrationApiKey(String(req.params.tenantId), integrationSecretFromRequest(req));
             if (!apiKey)
                 return res.status(401).json({ error: "Invalid integration API key" });
-            const event = await ingestStockWebhook(req.params.tenantId, req.body || {}, apiKey);
+            const event = await ingestStockWebhook(String(req.params.tenantId), req.body || {}, apiKey);
             res.status(event.status === "duplicate" ? 200 : 202).json({
                 status: event.status,
                 eventId: event.id,
@@ -388,7 +388,7 @@ export async function createApp(io: any = null) {
     app.use("/api/mariadb/tenants/:tenantId/workforce", staffRouter);
     app.get("/api/mariadb/tenants/:tenantId/live", requireAuth, async (req, res) => {
         try {
-            const tenantId = req.params.tenantId;
+            const tenantId = String(req.params.tenantId);
             const toNumber = (value: unknown): number => {
                 if (typeof value === "number")
                     return Number.isFinite(value) ? value : 0;
@@ -573,7 +573,7 @@ export async function createApp(io: any = null) {
     });
     app.post("/api/mariadb/tenants/:tenantId/seed-products", requireAuth, async (req, res) => {
         try {
-            await seedProducts(req.params.tenantId, req.body.products);
+            await seedProducts(String(req.params.tenantId), req.body.products);
             res.json({ success: true });
         }
         catch (err: any) {
@@ -583,7 +583,7 @@ export async function createApp(io: any = null) {
     app.post("/api/mariadb/tenants/:tenantId/demo-seed/:mode", requireAuth, async (req, res) => {
         try {
             const mode = req.params.mode === "restaurant" ? "restaurant" : "retail";
-            await seedDemoData(req.params.tenantId, mode);
+            await seedDemoData(String(req.params.tenantId), mode);
             res.json({ success: true, mode });
         }
         catch (err: any) {
@@ -592,7 +592,7 @@ export async function createApp(io: any = null) {
     });
     app.delete("/api/mariadb/tenants/:tenantId/demo-seed", requireAuth, async (req, res) => {
         try {
-            await clearSeededDemoData(req.params.tenantId);
+            await clearSeededDemoData(String(req.params.tenantId));
             res.json({ success: true });
         }
         catch (err: any) {
@@ -648,7 +648,7 @@ export async function createApp(io: any = null) {
         return requirePackageFeature("images")(req, res, next);
     }, async (req, res) => {
         try {
-            const data = await createProduct(req.params.tenantId, req.body);
+            const data = await createProduct(String(req.params.tenantId), req.body);
             res.json(data);
         }
         catch (err: any) {
@@ -661,7 +661,7 @@ export async function createApp(io: any = null) {
         return requirePackageFeature("images")(req, res, next);
     }, async (req, res) => {
         try {
-            const data = await updateProduct(req.params.tenantId, req.params.id, req.body);
+            const data = await updateProduct(String(req.params.tenantId), String(req.params.id), req.body);
             res.json(data);
         }
         catch (err: any) {
@@ -686,7 +686,7 @@ export async function createApp(io: any = null) {
                 staffName: req.user?.name || (stockInput as any)?.staffName || null,
             };
             const payload = {
-                productId: req.params.id,
+                productId: String(req.params.id),
                 productName: (stockInput as any)?.productName || null,
                 delta,
                 reason,
@@ -695,7 +695,7 @@ export async function createApp(io: any = null) {
                 requestedByName: actor.staffName,
             };
             if (!canManageInventory(req.user?.role)) {
-                const task = await createManagerStockAdjustmentRequest(req.params.tenantId, payload);
+                const task = await createManagerStockAdjustmentRequest(String(req.params.tenantId), payload);
                 res.status(202).json({
                     approvalRequired: true,
                     message: "Stock adjustment request sent to the manager Action Center.",
@@ -704,13 +704,13 @@ export async function createApp(io: any = null) {
                 return;
             }
             const sensitiveResponse = await enforceSensitiveAction(req, res, "stock_adjustment", {
-                productId: req.params.id,
+                productId: String(req.params.id),
                 delta,
                 reason,
             });
             if (sensitiveResponse)
                 return;
-            const result = await applyStockAdjustment(req.params.tenantId, payload, actor);
+            const result = await applyStockAdjustment(String(req.params.tenantId), payload, actor);
             res.json({
                 approvalRequired: false,
                 message: "Stock adjusted and logged.",
@@ -723,7 +723,7 @@ export async function createApp(io: any = null) {
     });
     app.post("/api/mariadb/tenants/:tenantId/customers", requireAuth, validateSchema(CustomerSchema), (req, res, next) => requirePackageCapacity(req, res, next, "customers", "maxCustomers", "customers"), async (req, res) => {
         try {
-            const data = await createCustomer(req.params.tenantId, {
+            const data = await createCustomer(String(req.params.tenantId), {
                 ...req.body,
                 consentActor: auditActorFromRequest(req),
             });
@@ -743,20 +743,20 @@ export async function createApp(io: any = null) {
             const sensitiveAction = customerSensitiveAction(customerUpdates);
             if (sensitiveAction) {
                 const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
-                    customerId: req.params.id,
+                    customerId: String(req.params.id),
                     changedFields: auditChangedFields(customerUpdates),
                 });
                 if (sensitiveResponse)
                     return;
             }
-            const data = await updateCustomer(req.params.tenantId, req.params.id, {
+            const data = await updateCustomer(String(req.params.tenantId), String(req.params.id), {
                 ...customerUpdates,
                 consentActor: auditActorFromRequest(req),
             });
             await auditRouteEvent(req, "customer.updated", "customer", {
                 customerName: data?.name || (customerUpdates as any)?.name || null,
                 changedFields: auditChangedFields(customerUpdates || {}),
-            }, req.params.id, "customer_admin");
+            }, String(req.params.id), "customer_admin");
             res.json(data);
         }
         catch (err: any) {
@@ -767,18 +767,18 @@ export async function createApp(io: any = null) {
         try {
             if (!canUseActionCenter(req.user?.role)) {
                 return denyWithAudit(req, res, "customers.anonymize", "Manager access is required to anonymize customer profiles.", {
-                    customerId: req.params.id,
+                    customerId: String(req.params.id),
                 });
             }
-            const result = await deleteCustomer(req.params.tenantId, req.params.id, {
+            const result = await deleteCustomer(String(req.params.tenantId), String(req.params.id), {
                 ...auditActorFromRequest(req),
                 reason: req.body?.reason || null,
             });
             await auditRouteEvent(req, "customer.deleted", "customer", {
-                customerId: req.params.id,
+                customerId: String(req.params.id),
                 mode: result.mode || "anonymized",
                 retainedSaleCount: result.retainedSaleCount ?? null,
-            }, req.params.id, "customer_admin");
+            }, String(req.params.id), "customer_admin");
             res.json(result);
         }
         catch (err: any) {
@@ -788,7 +788,7 @@ export async function createApp(io: any = null) {
     });
     app.post("/api/mariadb/tenants/:tenantId/staff", requireAuth, validateSchema(StaffSchema), (req, res, next) => requirePackageCapacity(req, res, next, "staff", "maxStaff", "staff members"), async (req, res) => {
         try {
-            const data = await createStaff(req.params.tenantId, req.body);
+            const data = await createStaff(String(req.params.tenantId), req.body);
             await auditRouteEvent(req, "staff.created", "staff", {
                 staffName: data?.name || req.body?.name || null,
                 role: data?.role || req.body?.role || null,
@@ -806,18 +806,18 @@ export async function createApp(io: any = null) {
             const sensitiveAction = staffSensitiveAction(staffUpdates);
             if (sensitiveAction) {
                 const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
-                    targetStaffId: req.params.id,
+                    targetStaffId: String(req.params.id),
                     changedFields: auditChangedFields(staffUpdates),
                 });
                 if (sensitiveResponse)
                     return;
             }
-            const data = await updateStaff(req.params.tenantId, req.params.id, staffUpdates);
+            const data = await updateStaff(String(req.params.tenantId), String(req.params.id), staffUpdates);
             await auditRouteEvent(req, "staff.updated", "staff", {
                 staffName: data?.name || (staffUpdates as any)?.name || null,
                 role: data?.role || (staffUpdates as any)?.role || null,
                 changedFields: auditChangedFields(staffUpdates || {}),
-            }, req.params.id, "staff_admin");
+            }, String(req.params.id), "staff_admin");
             res.json(data);
         }
         catch (err: any) {
@@ -826,10 +826,10 @@ export async function createApp(io: any = null) {
     });
     app.delete("/api/mariadb/tenants/:tenantId/staff/:id", requireAuth, async (req, res) => {
         try {
-            await deleteStaff(req.params.tenantId, req.params.id);
+            await deleteStaff(String(req.params.tenantId), String(req.params.id));
             await auditRouteEvent(req, "staff.deleted", "staff", {
-                targetStaffId: req.params.id,
-            }, req.params.id, "staff_admin");
+                targetStaffId: String(req.params.id),
+            }, String(req.params.id), "staff_admin");
             res.json({ success: true });
         }
         catch (err: any) {
@@ -841,7 +841,7 @@ export async function createApp(io: any = null) {
     // ─────────────────────────────────────────────────────────────────────────
     app.get("/api/mariadb/products/:productId/recipe", requireAuth, async (req, res) => {
         try {
-            const recipe = await getProductRecipe(req.params.productId);
+            const recipe = await getProductRecipe(String(req.params.productId));
             res.json(recipe);
         }
         catch (err: any) {
@@ -850,7 +850,7 @@ export async function createApp(io: any = null) {
     });
     app.put("/api/mariadb/products/:productId/recipe", requireAuth, async (req, res) => {
         try {
-            await updateProductRecipe(req.params.productId, req.body);
+            await updateProductRecipe(String(req.params.productId), req.body);
             res.json({ success: true });
         }
         catch (err: any) {
@@ -859,7 +859,7 @@ export async function createApp(io: any = null) {
     });
     app.get("/api/mariadb/products/:productId/modifiers", requireAuth, async (req, res) => {
         try {
-            const mods = await getProductModifiers(req.params.productId);
+            const mods = await getProductModifiers(String(req.params.productId));
             res.json(mods);
         }
         catch (err: any) {
@@ -868,7 +868,7 @@ export async function createApp(io: any = null) {
     });
     app.post("/api/mariadb/products/:productId/modifiers", requireAuth, async (req, res) => {
         try {
-            const id = await createModifierGroup(req.params.productId, req.body);
+            const id = await createModifierGroup(String(req.params.productId), req.body);
             res.json({ id });
         }
         catch (err: any) {
@@ -877,7 +877,7 @@ export async function createApp(io: any = null) {
     });
     app.put("/api/mariadb/modifiers/:modifierId/options", requireAuth, async (req, res) => {
         try {
-            await updateModifierOptions(req.params.modifierId, req.body);
+            await updateModifierOptions(String(req.params.modifierId), req.body);
             res.json({ success: true });
         }
         catch (err: any) {
@@ -886,7 +886,7 @@ export async function createApp(io: any = null) {
     });
     app.delete("/api/mariadb/modifiers/:modifierId", requireAuth, async (req, res) => {
         try {
-            await deleteModifierGroup(req.params.modifierId);
+            await deleteModifierGroup(String(req.params.modifierId));
             res.json({ success: true });
         }
         catch (err: any) {
@@ -930,7 +930,9 @@ export async function createApp(io: any = null) {
                 res.redirect(302, `${basePath}/`);
             });
         }
-        app.get(staticMountPath === '/' ? '*' : `${staticMountPath}/*`, (req, res) => {
+        // Express 5 / path-to-regexp v8: bare "*" is no longer a valid path;
+        // catch-all must use a named wildcard segment ("/*splat").
+        app.get(staticMountPath === '/' ? '/*splat' : `${staticMountPath}/*splat`, (req, res) => {
             res.setHeader('Cache-Control', 'no-store');
             res.sendFile(path.join(distDir, 'index.html'), (err) => {
                 if (err) {

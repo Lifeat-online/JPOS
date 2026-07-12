@@ -264,7 +264,7 @@ function hasRoleAccess(role: unknown, roles: string[]) {
     return roles.includes(r) || r === "dev";
 }
 function auditAiPermissionDenied(req: Request, attemptedAction: string, reason: string) {
-    const tenantId = req.params?.tenantId || req.user?.tenantId || null;
+    const tenantId = (req.params?.tenantId as string) || req.user?.tenantId || null;
     if (!tenantId)
         return;
     void recordAuditEventSafe({
@@ -287,7 +287,7 @@ function auditAiPermissionDenied(req: Request, attemptedAction: string, reason: 
     });
 }
 export async function requireAiRoleAccess(req: Request, res: Response, next: NextFunction) {
-    const settings = await getAiSettings(req.params.tenantId);
+    const settings = await getAiSettings(String(req.params.tenantId));
     if (!settings.enabled) {
         auditAiPermissionDenied(req, "ai.access", "ai_disabled");
         return res.status(403).json({ error: "AI is disabled for this tenant" });
@@ -299,7 +299,7 @@ export async function requireAiRoleAccess(req: Request, res: Response, next: Nex
     next();
 }
 export async function requireAiStaffScoreAccess(req: Request, res: Response, next: NextFunction) {
-    const settings = await getAiSettings(req.params.tenantId);
+    const settings = await getAiSettings(String(req.params.tenantId));
     if (!settings.enabled || !settings.staffScoringEnabled) {
         auditAiPermissionDenied(req, "ai.staff_scores", !settings.enabled ? "ai_disabled" : "staff_scoring_disabled");
         return res.status(403).json({ error: "AI staff scoring is disabled for this tenant" });

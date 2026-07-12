@@ -81,7 +81,7 @@ export function auditActorFromRequest(req: Request) {
 }
 
 export function tenantIdFromRequest(req: Request) {
-  return req.params?.tenantId || req.user?.tenantId || null;
+  return (req.params?.tenantId as string) || req.user?.tenantId || null;
 }
 
 export function auditChangedFields(value: unknown) {
