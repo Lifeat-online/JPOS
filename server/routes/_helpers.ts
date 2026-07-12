@@ -60,6 +60,16 @@ export function requireDevMaintenance(req: Request, res: Response, next: NextFun
   return res.status(403).json({ error: "Dev or admin access is required for database maintenance." });
 }
 
+// Manager/admin/dev gate for privileged mutations (staff management, seeding,
+// demo-data). Blocks cashier/chef tokens from privileged operations.
+export function requireManagerRole(req: Request, res: Response, next: NextFunction) {
+  const r = normalizeRole(req.user?.role);
+  if (r === "admin" || r === "manager" || r === "dev") return next();
+  return denyWithAudit(req, res, "authz.insufficient_role", "Manager or admin access is required.", {
+    requiredRole: "manager|admin|dev",
+  });
+}
+
 export function requireTenantRouteAccess(req: Request, res: Response, next: NextFunction) {
   const routeTenantId = String(req.params.tenantId || "").trim();
   const tokenTenantId = String(req.user?.tenantId || "").trim();

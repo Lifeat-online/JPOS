@@ -53,7 +53,7 @@ import { stripSensitiveVerification, verifySensitiveActionForRequest, type Sensi
 import { listManagerOverrides } from "./managerOverrides.js";
 import { calculateLoyaltyAward, createLoyaltyRewardRule, createLoyaltyTier, listLoyaltyRewardRules, listLoyaltyTiers, updateLoyaltyRewardRule, updateLoyaltyTier, } from "./loyalty.js";
 import { batchCreateProducts, batchUpdateProductPrices, exportCustomersCsv, exportInventoryCsv, importCustomers, importInventory, } from "./batchOperations.js";
-import { normalizeRole, canManageCash, canManagePush, canUseActionCenter, canManageInventory, canGenerateVapidKeys, canUseDevMaintenance, requireDevMaintenance, auditActorFromRequest, tenantIdFromRequest, auditChangedFields, integrationSecretFromRequest, auditRouteEvent, denyWithAudit, requireTenantRouteAccess, enforceSensitiveAction, customerSensitiveAction, staffSensitiveAction, createTenantLocalSyncSecret, } from "./routes/_helpers.js";
+import { normalizeRole, canManageCash, canManagePush, canUseActionCenter, canManageInventory, canGenerateVapidKeys, canUseDevMaintenance, requireDevMaintenance, requireManagerRole, auditActorFromRequest, tenantIdFromRequest, auditChangedFields, integrationSecretFromRequest, auditRouteEvent, denyWithAudit, requireTenantRouteAccess, enforceSensitiveAction, customerSensitiveAction, staffSensitiveAction, createTenantLocalSyncSecret, } from "./routes/_helpers.js";
 export { createTenantLocalSyncSecret };
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
@@ -297,6 +297,11 @@ export async function createApp(io: any = null) {
     app.get("/api/data/users/:uid", requireAuth, async (req, res) => {
         try {
             const user = await getUserByUid(String(req.params.uid));
+            // Scope to the caller's tenant so a signed-in user can't resolve
+            // arbitrary users in other tenants.
+            if (user && String((user as any).tenant_id) !== String(req.user?.tenantId)) {
+                return res.json(null);
+            }
             res.json(user || null);
         }
         catch (err) {
@@ -310,6 +315,11 @@ export async function createApp(io: any = null) {
                 return res.status(400).json({ error: "Email query parameter is required" });
             }
             const staff = await getStaffTenantByEmail(email.trim().toLowerCase());
+            // Scope to the caller's tenant so email lookup can't enumerate staff
+            // (tenant/role) across tenants.
+            if (staff && String((staff as any).tenant_id) !== String(req.user?.tenantId)) {
+                return res.json(null);
+            }
             return res.json(staff || null);
         }
         catch (err) {
@@ -344,7 +354,12 @@ export async function createApp(io: any = null) {
             ]);
             const pkg = context.package;
             const localServerSync = hasPackageFeature(pkg.features, "local_server_sync");
-            const localSyncSharedSecret = createTenantLocalSyncSecret(String(req.params.tenantId), localServerSync);
+            // The local-sync shared secret is an admin-provisioning credential;
+            // only expose it to admin/dev, not to every authenticated staff user.
+            const canSeeSyncSecret = canUseDevMaintenance(req.user?.role);
+            const localSyncSharedSecret = canSeeSyncSecret
+                ? createTenantLocalSyncSecret(String(req.params.tenantId), localServerSync)
+                : "";
             res.json({
                 source: context.source,
                 package: pkg,
@@ -571,7 +586,7 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.post("/api/data/tenants/:tenantId/seed-products", requireAuth, async (req, res) => {
+    app.post("/api/data/tenants/:tenantId/seed-products", requireAuth, requireManagerRole, async (req, res) => {
         try {
             await seedProducts(String(req.params.tenantId), req.body.products);
             res.json({ success: true });
@@ -580,7 +595,7 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.post("/api/data/tenants/:tenantId/demo-seed/:mode", requireAuth, async (req, res) => {
+    app.post("/api/data/tenants/:tenantId/demo-seed/:mode", requireAuth, requireManagerRole, async (req, res) => {
         try {
             const mode = req.params.mode === "restaurant" ? "restaurant" : "retail";
             await seedDemoData(String(req.params.tenantId), mode);
@@ -590,7 +605,7 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.delete("/api/data/tenants/:tenantId/demo-seed", requireAuth, async (req, res) => {
+    app.delete("/api/data/tenants/:tenantId/demo-seed", requireAuth, requireManagerRole, async (req, res) => {
         try {
             await clearSeededDemoData(String(req.params.tenantId));
             res.json({ success: true });
@@ -604,6 +619,13 @@ export async function createApp(io: any = null) {
             const email = req.query.email as string;
             if (!email)
                 return res.status(400).json({ error: "Email is required" });
+            // Callers may only look up their OWN record. This is a customer-portal
+            // self-lookup; unauthenticated or mismatched-email requests are denied
+            // so this endpoint can't enumerate customer PII across tenants.
+            const callerEmail = String(req.user?.email || "").trim().toLowerCase();
+            if (!callerEmail || callerEmail !== email.trim().toLowerCase()) {
+                return res.status(403).json({ error: "You can only look up your own customer record." });
+            }
             const rows = await query("SELECT * FROM customers WHERE email = $1", [email]);
             if (rows.length === 0)
                 return res.json(null);
@@ -786,7 +808,7 @@ export async function createApp(io: any = null) {
             res.status(message.includes("not found") ? 404 : message.includes("cannot be anonymized") ? 409 : 500).json({ error: err.message });
         }
     });
-    app.post("/api/data/tenants/:tenantId/staff", requireAuth, validateSchema(StaffSchema), (req, res, next) => requirePackageCapacity(req, res, next, "staff", "maxStaff", "staff members"), async (req, res) => {
+    app.post("/api/data/tenants/:tenantId/staff", requireAuth, requireManagerRole, validateSchema(StaffSchema), (req, res, next) => requirePackageCapacity(req, res, next, "staff", "maxStaff", "staff members"), async (req, res) => {
         try {
             const data = await createStaff(String(req.params.tenantId), req.body);
             await auditRouteEvent(req, "staff.created", "staff", {
@@ -800,7 +822,7 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.put("/api/data/tenants/:tenantId/staff/:id", requireAuth, validateSchema(StaffUpdateSchema), async (req, res) => {
+    app.put("/api/data/tenants/:tenantId/staff/:id", requireAuth, requireManagerRole, validateSchema(StaffUpdateSchema), async (req, res) => {
         try {
             const staffUpdates = stripSensitiveVerification(req.body || {});
             const sensitiveAction = staffSensitiveAction(staffUpdates);
@@ -824,7 +846,7 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.delete("/api/data/tenants/:tenantId/staff/:id", requireAuth, async (req, res) => {
+    app.delete("/api/data/tenants/:tenantId/staff/:id", requireAuth, requireManagerRole, async (req, res) => {
         try {
             await deleteStaff(String(req.params.tenantId), String(req.params.id));
             await auditRouteEvent(req, "staff.deleted", "staff", {
@@ -839,8 +861,25 @@ export async function createApp(io: any = null) {
     // ─────────────────────────────────────────────────────────────────────────
     // Bulk Items & Inventory Expansion
     // ─────────────────────────────────────────────────────────────────────────
+    // Recipe/modifier routes are keyed by product/modifier id (no tenant in the
+    // path), so they enforce tenant ownership against the caller's token before
+    // reading/mutating. product_recipes/product_modifiers cascade from products,
+    // so ownership is resolved by joining to products.tenant_id.
+    async function productBelongsToCaller(productId: string, req: Request): Promise<boolean> {
+        const rows = await query("SELECT 1 FROM products WHERE id = $1 AND tenant_id = $2", [productId, String(req.user?.tenantId || "")]);
+        return rows.length > 0;
+    }
+    async function modifierBelongsToCaller(modifierId: string, req: Request): Promise<boolean> {
+        const rows = await query(
+            "SELECT 1 FROM product_modifiers m JOIN products p ON m.product_id = p.id WHERE m.id = $1 AND p.tenant_id = $2",
+            [modifierId, String(req.user?.tenantId || "")],
+        );
+        return rows.length > 0;
+    }
     app.get("/api/data/products/:productId/recipe", requireAuth, async (req, res) => {
         try {
+            if (!(await productBelongsToCaller(String(req.params.productId), req)))
+                return res.status(404).json({ error: "Product not found" });
             const recipe = await getProductRecipe(String(req.params.productId));
             res.json(recipe);
         }
@@ -848,8 +887,10 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.put("/api/data/products/:productId/recipe", requireAuth, async (req, res) => {
+    app.put("/api/data/products/:productId/recipe", requireAuth, requireManagerRole, async (req, res) => {
         try {
+            if (!(await productBelongsToCaller(String(req.params.productId), req)))
+                return res.status(404).json({ error: "Product not found" });
             await updateProductRecipe(String(req.params.productId), req.body);
             res.json({ success: true });
         }
@@ -859,6 +900,8 @@ export async function createApp(io: any = null) {
     });
     app.get("/api/data/products/:productId/modifiers", requireAuth, async (req, res) => {
         try {
+            if (!(await productBelongsToCaller(String(req.params.productId), req)))
+                return res.status(404).json({ error: "Product not found" });
             const mods = await getProductModifiers(String(req.params.productId));
             res.json(mods);
         }
@@ -866,8 +909,10 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.post("/api/data/products/:productId/modifiers", requireAuth, async (req, res) => {
+    app.post("/api/data/products/:productId/modifiers", requireAuth, requireManagerRole, async (req, res) => {
         try {
+            if (!(await productBelongsToCaller(String(req.params.productId), req)))
+                return res.status(404).json({ error: "Product not found" });
             const id = await createModifierGroup(String(req.params.productId), req.body);
             res.json({ id });
         }
@@ -875,8 +920,10 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.put("/api/data/modifiers/:modifierId/options", requireAuth, async (req, res) => {
+    app.put("/api/data/modifiers/:modifierId/options", requireAuth, requireManagerRole, async (req, res) => {
         try {
+            if (!(await modifierBelongsToCaller(String(req.params.modifierId), req)))
+                return res.status(404).json({ error: "Modifier not found" });
             await updateModifierOptions(String(req.params.modifierId), req.body);
             res.json({ success: true });
         }
@@ -884,8 +931,10 @@ export async function createApp(io: any = null) {
             res.status(500).json({ error: err.message });
         }
     });
-    app.delete("/api/data/modifiers/:modifierId", requireAuth, async (req, res) => {
+    app.delete("/api/data/modifiers/:modifierId", requireAuth, requireManagerRole, async (req, res) => {
         try {
+            if (!(await modifierBelongsToCaller(String(req.params.modifierId), req)))
+                return res.status(404).json({ error: "Modifier not found" });
             await deleteModifierGroup(String(req.params.modifierId));
             res.json({ success: true });
         }

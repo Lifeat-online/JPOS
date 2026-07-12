@@ -72,8 +72,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      # The Playwright webServer boots `npm run dev`, which runs initDb() and
-      # seeds the dev login against this Postgres service.
+      # Run the production server (static dist, no Vite dev middleware) against
+      # the Postgres service; initDb() + the dev bootstrap seed the login.
+      NODE_ENV: production
       DB_HOST: localhost
       DB_PORT: '5432'
       DB_USER: postgres
@@ -81,9 +82,10 @@ jobs:
       DB_DATABASE: jpos_ci
       DB_SSL: 'false'
       PORT: '3000'
-      DISABLE_HMR: 'true'
       JWT_SECRET: ci-e2e-jwt-secret-0000000000000000000000
       ENABLE_DEV_BOOTSTRAP: 'true'
+      # Skip Playwright's own webServer; we start and health-check the server here.
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -91,8 +93,22 @@ jobs:
           node-version: '22.12.0'
           cache: 'npm'
       - run: npm ci
-      - run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:e2e
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Run e2e against production server
+        run: |
+          npx tsx server.ts > /tmp/server.log 2>&1 &
+          SERVER_PID=$!
+          echo "waiting for server..."
+          for i in $(seq 1 90); do curl -sf http://127.0.0.1:3000/api/health >/dev/null 2>&1 && break; sleep 2; done
+          if ! curl -sf http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+            echo "::error::server did not become healthy"; echo "---- server.log ----"; cat /tmp/server.log; kill "$SERVER_PID" 2>/dev/null || true; exit 1
+          fi
+          echo "server healthy"
+          npx playwright test --project=chromium; TEST_EXIT=$?
+          echo "---- server.log (tail) ----"; tail -50 /tmp/server.log
+          kill "$SERVER_PID" 2>/dev/null || true
+          exit $TEST_EXIT
       - uses: actions/upload-artifact@v4
         if: always()
         with:
