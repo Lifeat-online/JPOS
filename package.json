@@ -25,6 +25,7 @@
     "ops:verify-endpoint": "tsx scripts/verify-production-endpoint.ts",
     "ops:verify-schema": "tsx scripts/verify-production-schema.ts",
     "seed:test-tenant": "tsx scripts/seed-test-tenant.ts",
+    "embed:backfill": "tsx scripts/backfill-embeddings.ts",
     "security:scan": "npm audit --omit=dev"
   },
   "dependencies": {

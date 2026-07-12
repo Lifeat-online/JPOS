@@ -1,10 +1,26 @@
 import { Router } from "express";
 import { requireAuth } from "../auth-middleware.js";
-import { getProductsByTenant } from "../db-adapter.js";
+import { getProductsByTenant, semanticProductSearch } from "../db-adapter.js";
 import { createProduct, updateProduct, deleteProduct } from "../db-crud.js";
 import { validateSchema, ProductSchema } from "../validation.js";
 
 export const productsRouter = Router({ mergeParams: true });
+
+// Semantic (vector) product search. Returns { mode: "semantic", results } when
+// pgvector embeddings are configured, or { mode: "unavailable" } so the client
+// can fall back to keyword search.
+productsRouter.get("/search", requireAuth, async (req: any, res) => {
+  try {
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (!q) return res.status(400).json({ error: "Query parameter 'q' is required" });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+    const results = await semanticProductSearch(req.params.tenantId, q, limit);
+    if (results === null) return res.json({ mode: "unavailable", results: [] });
+    res.json({ mode: "semantic", results });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 productsRouter.get("/", requireAuth, async (req: any, res) => {
   try {

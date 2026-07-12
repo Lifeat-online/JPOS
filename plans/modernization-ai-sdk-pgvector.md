@@ -128,6 +128,21 @@ on text change. HNSW index keeps similarity queries sub-ms at this scale.
 **Exit:** `vector` extension live, products embedded, tenant-scoped similarity
 query returns sensible results, inventory agent uses retrieved context.
 
+**Implemented:** `ensureProductEmbeddingSchema()` in init-db (idempotent,
+resilient if pgvector missing) adds `products.embedding vector(1536)` + an HNSW
+cosine index. `embedForTenant`/`embedManyForTenant` + `productEmbeddingText` in
+ai.ts (OpenAI text-embedding-3-small, gated on OPENAI_API_KEY). Embed-on-write
+in createProduct/updateProduct (fire-and-forget, `{embed:false}` for bulk).
+`searchProductsBySimilarity` + `semanticProductSearch` in db-adapter; semantic
+search endpoint `GET /api/mariadb/tenants/:tenantId/products/search?q=`.
+Backfill via `npm run embed:backfill`. docker-compose now provisions
+`pgvector/pgvector:pg17` (was mariadb, which the pg-only app couldn't use);
+`DB_SSL=false` added for local/CI Postgres. **Verified end-to-end against a
+real pgvector Postgres**: migration DDL, idempotency, and tenant-scoped cosine
+ranking at 1536 dims (`tests/backend/product-embeddings.integration.test.ts`,
+guarded by `PGVECTOR_TEST_URL`). Embedding network calls need an OpenAI key,
+not exercised in CI.
+
 ---
 
 ## Sequencing & PRs

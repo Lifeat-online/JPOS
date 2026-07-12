@@ -593,6 +593,7 @@ export async function initDb() {
   await ensurePurchaseOrderReceivingSchema();
   await ensureEventBookingSchema();
   await ensureStockBatchSchema();
+  await ensureProductEmbeddingSchema();
   await ensureReorderRecommendationSchema();
   await ensureMultiLocationInventorySchema();
   await ensureReorderNotificationRuleSchema();
@@ -844,6 +845,27 @@ export async function ensureEventBookingSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_event_bookings_reminders ON event_bookings (tenant_id, reminder_status, reminder_at)`);
 }
 
+/**
+ * pgvector: enable semantic product search. Idempotent and resilient — if the
+ * `vector` extension is not installed on this Postgres, embeddings are simply
+ * disabled (no column/index) and the rest of init continues. Dimension 1536
+ * matches OpenAI text-embedding-3-small (see aiProvider.DEFAULT_EMBEDDING_DIMENSIONS).
+ */
+export async function ensureProductEmbeddingSchema() {
+  try {
+    await query("CREATE EXTENSION IF NOT EXISTS vector");
+  } catch (err) {
+    console.warn(
+      "[embeddings] pgvector extension unavailable; product embeddings disabled:",
+      (err as Error)?.message,
+    );
+    return;
+  }
+  await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS embedding vector(1536)");
+  await query(
+    "CREATE INDEX IF NOT EXISTS idx_products_embedding ON products USING hnsw (embedding vector_cosine_ops)",
+  );
+}
 export async function ensureStockBatchSchema() {
   await query(`
     CREATE TABLE IF NOT EXISTS stock_batches (

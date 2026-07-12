@@ -83,7 +83,7 @@ describe('batch operations', () => {
       costPrice: 11,
       stock: 8,
       barcode: 'BRN-1',
-    }));
+    }), { embed: false }); // bulk import skips inline embedding (backfill covers it)
   });
 
   it('batch updates product prices by barcode', async () => {

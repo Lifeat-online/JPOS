@@ -1,5 +1,6 @@
 import { getConnection, query } from "./db.js";
 import { applyProductStockDelta, recordAuditEvent } from "./audit.js";
+import { embedForTenant, productEmbeddingText } from "./ai.js";
 import { assertSafePaymentProviderEvidence } from "./paymentProviderBoundary.js";
 import {
   assertCurrentTaxPeriodOpen,
@@ -836,9 +837,32 @@ async function collectOfflineSaleSyncConflicts(
   }
   return conflicts;
 }
+/**
+ * Best-effort pgvector embedding for a product. No-op when embeddings are not
+ * configured (no OpenAI key) or pgvector is unavailable. Never throws — the
+ * product write must not fail because embedding failed.
+ */
+async function storeProductEmbedding(
+  tenantId: string,
+  productId: string,
+  product: { name?: string | null; category?: string | null; subCategory?: string | null; section?: string | null; barcode?: string | null },
+): Promise<void> {
+  try {
+    const embedding = await embedForTenant(tenantId, productEmbeddingText(product));
+    if (!embedding) return;
+    await query(
+      `UPDATE products SET embedding = $3::vector WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, productId, `[${embedding.join(",")}]`],
+    );
+  } catch (err: any) {
+    console.warn("[embeddings] storeProductEmbedding failed:", err?.message || err);
+  }
+}
+
 export async function createProduct(
   tenantId: string,
   product: Omit<Product, "id">,
+  opts: { embed?: boolean } = {},
 ): Promise<Product> {
   const id = `prod_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   await query(
@@ -868,6 +892,11 @@ export async function createProduct(
     product.stock,
     product.minStock || 0,
   );
+  // Fire-and-forget embedding so single-product writes stay fast. Bulk paths
+  // pass { embed: false } and rely on scripts/backfill-embeddings.ts instead.
+  if (opts.embed !== false) {
+    void storeProductEmbedding(tenantId, id, product);
+  }
   return { id, ...product };
 }
 export async function createCustomer(
@@ -1036,6 +1065,7 @@ export async function updateProduct(
   tenantId: string,
   productId: string,
   updates: Partial<Product>,
+  opts: { embed?: boolean } = {},
 ): Promise<Product> {
   const fields: string[] = [];
   const values: any[] = [];
@@ -1143,6 +1173,17 @@ export async function updateProduct(
       row?.stock,
       row?.minStock ?? row?.min_stock,
     );
+  }
+  // Re-embed only when an embedded text field changed (skip pure price/stock
+  // updates). Fire-and-forget; bulk paths pass { embed: false }.
+  const textChanged =
+    updates.name !== undefined ||
+    updates.category !== undefined ||
+    updates.subCategory !== undefined ||
+    updates.section !== undefined ||
+    updates.barcode !== undefined;
+  if (opts.embed !== false && textChanged) {
+    void storeProductEmbedding(tenantId, productId, rows[0] as Product);
   }
   return rows[0] as Product;
 }

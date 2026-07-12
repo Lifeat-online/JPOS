@@ -3,7 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import { recordAuditEventSafe } from "./audit.js";
 import { summarizeWorkstationTiming } from "../shared/workstationTiming.js";
-import { providerUsesSdk, generateTextViaSdk, type SdkProviderName, type GenerateTextInput } from "./aiProvider.js";
+import { providerUsesSdk, generateTextViaSdk, embedText, embedTexts, type SdkProviderName, type GenerateTextInput } from "./aiProvider.js";
 export type AiRole = "admin" | "manager" | "dev" | "cashier" | "chef";
 export type AiProviderName = "openai" | "ollama" | "anythingllm" | "google" | "vertex" | "openrouter";
 export type AiInsightCategory = "sales" | "stock" | "cash" | "staff" | "restaurant" | "customer" | "package" | "integration";
@@ -1634,6 +1634,55 @@ async function callVertexWithFiles(settings: AiSettings, payload: any, images: s
 }
 function providerPrompt(payload: any) {
     return JSON.stringify(payload);
+}
+/**
+ * Build the text a product is embedded from. Combines the human-meaningful
+ * fields so similarity search matches on name, category and section.
+ */
+export function productEmbeddingText(p: { name?: string | null; category?: string | null; subCategory?: string | null; section?: string | null; barcode?: string | null }): string {
+    return [p.name, p.category, p.subCategory, p.section, p.barcode]
+        .map((v) => (v == null ? "" : String(v).trim()))
+        .filter(Boolean)
+        .join(" · ");
+}
+/**
+ * Resolve the OpenAI key used for embeddings for a tenant. Embeddings always
+ * use OpenAI (text-embedding-3-small) regardless of the tenant's chat provider,
+ * so this looks up the OpenAI-scoped key / OPENAI_API_KEY. Returns "" when none.
+ */
+async function getEmbeddingApiKey(tenantId: string): Promise<string> {
+    const settings = await getAiSettings(tenantId);
+    return getProviderApiKey({ ...settings, provider: "openai" });
+}
+/** Embed a single string for a tenant. Returns null when embeddings are not configured. */
+export async function embedForTenant(tenantId: string, text: string): Promise<number[] | null> {
+    if (!text || !text.trim())
+        return null;
+    const apiKey = await getEmbeddingApiKey(tenantId);
+    if (!apiKey)
+        return null;
+    try {
+        return await embedText({ apiKey }, text);
+    }
+    catch (err: any) {
+        console.warn("[embeddings] embedForTenant failed:", err?.message || err);
+        return null;
+    }
+}
+/** Batch-embed many strings for a tenant. Returns null when embeddings are not configured. */
+export async function embedManyForTenant(tenantId: string, texts: string[]): Promise<number[][] | null> {
+    if (!texts.length)
+        return [];
+    const apiKey = await getEmbeddingApiKey(tenantId);
+    if (!apiKey)
+        return null;
+    try {
+        return await embedTexts({ apiKey }, texts);
+    }
+    catch (err: any) {
+        console.warn("[embeddings] embedManyForTenant failed:", err?.message || err);
+        return null;
+    }
 }
 async function listOpenAiModels(settings: Partial<AiSettings>) {
     const key = getProviderApiKey({ ...settings, provider: "openai" });

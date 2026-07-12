@@ -1,25 +1,25 @@
 name: mase-pos
 
 services:
-  # MariaDB Database
-  mariadb:
-    image: mariadb:11
+  # PostgreSQL + pgvector. The app is Postgres-only (pg + Kysely) and applies
+  # its schema on boot (init-db), so the DB just needs an empty database plus
+  # the vector extension, which the pgvector image ships.
+  postgres:
+    image: pgvector/pgvector:pg17
     container_name: masepos-db
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD must be set}
-      MYSQL_DATABASE: ${DB_DATABASE:-jimmy_pos}
-      MYSQL_USER: ${MARIADB_USER:-pos_user}
-      MYSQL_PASSWORD: ${MARIADB_PASSWORD:?MARIADB_PASSWORD must be set}
+      POSTGRES_DB: ${DB_DATABASE:-jimmy_pos}
+      POSTGRES_USER: ${DB_USER:-pos_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - mariadb_data:/var/lib/mysql
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - postgres_data:/var/lib/postgresql/data
     networks:
       - pos-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pos_user} -d ${DB_DATABASE:-jimmy_pos}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -36,14 +36,14 @@ services:
         VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     container_name: masepos-app
     depends_on:
-      mariadb:
+      postgres:
         condition: service_healthy
     environment:
       # Database
-      DB_HOST: mariadb
-      DB_PORT: 3306
-      DB_USER: ${MARIADB_USER:-pos_user}
-      DB_PASSWORD: ${MARIADB_PASSWORD:?MARIADB_PASSWORD must be set}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-pos_user}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       DB_DATABASE: ${DB_DATABASE:-jimmy_pos}
       DB_CONNECTION_LIMIT: 10
 
@@ -121,7 +121,7 @@ services:
       - NET_BIND_SERVICE
 
 volumes:
-  mariadb_data:
+  postgres_data:
     driver: local
   nginx_cache:
     driver: local
