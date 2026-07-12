@@ -667,6 +667,7 @@ Unless noted, routes are JSON and protected by Bearer JWT.
 
 - `GET /api/data/tenants/:tenantId/workstations`
 - `POST /api/data/tenants/:tenantId/workstations`
+- `PUT /api/data/tenants/:tenantId/workstations/:id`
 - `DELETE /api/data/tenants/:tenantId/workstations/:id`
 - `GET /api/data/tenants/:tenantId/hardware-devices`
 - `POST /api/data/tenants/:tenantId/hardware-devices`

@@ -1482,7 +1482,7 @@ VALUES (
   'Admin',
   'dev',
   'jameskoen78@gmail.com',
-  '$2b$10$cllz1VjHJl97oeAyzvZWsOpYd66l7kaOXG977GZ6yDT6C58SgMf9S',
+  '$2b$10$GRwOgQlFUCQjHrOD/GEZmOgAwgDJ2C6mFK6SagJTs2zDf66PbzJQu',
   'active'
 )
 ON CONFLICT (id) DO NOTHING;

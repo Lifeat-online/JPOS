@@ -185,7 +185,8 @@ function isMissingColumnError(error: unknown, column: string) {
         code?: string;
         message?: string;
     };
-    return anyError?.code === 'ER_BAD_FIELD_ERROR' &&
+    // Postgres raises 42703 (undefined_column) for a missing column.
+    return anyError?.code === '42703' &&
         String(anyError.message || '').includes(column);
 }
 async function getAppConfigRows(tenantId: string) {

@@ -145,7 +145,7 @@ docker-compose ps
 docker-compose logs postgres
 
 # Verify connectivity from app container
-docker exec masepos-app psql -h postgres -U pos_user -d jimmy_pos -c "SELECT 1"
+docker exec masepos-db psql -U pos_user -d jimmy_pos -c "SELECT 1"
 ```
 
 ### Port 3000 or 80 already in use
@@ -161,9 +161,9 @@ services:
 ```
 
 ### Database initialization failed
-Check the schema file exists at `./db/schema.sql`:
+Check the schema file exists at `./db/schema.postgres.sql`:
 ```bash
-ls -la db/schema.sql
+ls -la db/schema.postgres.sql
 ```
 
 ### Container keeps restarting
@@ -226,7 +226,7 @@ docker exec masepos-db pg_dump -U pos_user jimmy_pos > backup_$(date +%Y%m%d_%H%
 
 ### Restore from backup
 ```bash
-docker exec -i masepos-db psql -U pos_user jimmy_pos < backup_20260506_142000.sql
+docker exec -i masepos-db psql -v ON_ERROR_STOP=1 -U pos_user jimmy_pos < backup_20260506_142000.sql
 ```
 
 ## Network

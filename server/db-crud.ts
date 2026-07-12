@@ -360,12 +360,12 @@ async function applyCheckoutSideEffects(
     const sessionFields: string[] = [];
     const sessionValues: (string | number | null)[] = [];
     if (context.expectedCashDelta !== undefined) {
-      sessionFields.push("expected_cash = COALESCE(expected_cash, 0) + $1");
+      sessionFields.push(`expected_cash = COALESCE(expected_cash, 0) + $${sessionValues.length + 1}`);
       sessionValues.push(context.expectedCashDelta);
     }
     if (context.tipsDelta !== undefined) {
       sessionFields.push(
-        "accumulated_tips = COALESCE(accumulated_tips, 0) + $1",
+        `accumulated_tips = COALESCE(accumulated_tips, 0) + $${sessionValues.length + 1}`,
       );
       sessionValues.push(context.tipsDelta);
     }
@@ -373,7 +373,7 @@ async function applyCheckoutSideEffects(
       sessionFields.push("updated_at = NOW()");
       sessionValues.push(context.cashSessionId, tenantId);
       await conn.query(
-        `UPDATE cash_sessions SET ${sessionFields.join(", ")} WHERE id = $1 AND tenant_id = $2`,
+        `UPDATE cash_sessions SET ${sessionFields.join(", ")} WHERE id = $${sessionValues.length - 1} AND tenant_id = $${sessionValues.length}`,
         sessionValues,
       );
     }
@@ -783,11 +783,11 @@ async function collectOfflineSaleSyncConflicts(
     const conditions: string[] = [];
     const values: any[] = [tenantId];
     if (tabName) {
-      conditions.push("LOWER(tab_name) = LOWER($1)");
+      conditions.push(`LOWER(tab_name) = LOWER($${values.length + 1})`);
       values.push(tabName);
     }
     if (customerId) {
-      conditions.push("customer_id = $1");
+      conditions.push(`customer_id = $${values.length + 1}`);
       values.push(customerId);
     }
     const [rows] = await conn.query(
@@ -1262,7 +1262,7 @@ export async function updateCustomer(
   }
   if ((updates as any).accountBalanceDelta !== undefined) {
     fields.push(
-      "account_balance = GREATEST(0, COALESCE(account_balance, 0) + $1)",
+      `account_balance = GREATEST(0, COALESCE(account_balance, 0) + $${values.length + 1})`,
     );
     values.push((updates as any).accountBalanceDelta);
   }
@@ -1422,7 +1422,7 @@ export async function updateStaff(
     values.push(updates.walletBalance);
   }
   if (updates.walletBalanceDelta !== undefined) {
-    fields.push("wallet_balance = COALESCE(wallet_balance, 0) + $1");
+    fields.push(`wallet_balance = COALESCE(wallet_balance, 0) + $${values.length + 1}`);
     values.push(updates.walletBalanceDelta);
   }
   if (updates.discountPercent !== undefined) {
@@ -1556,7 +1556,7 @@ export async function updateTableSection(
   }
   if (updates.order !== undefined) {
     const orderCol = '"order"';
-    fields.push(`${orderCol} = $1`);
+    fields.push(`${orderCol} = $${values.length + 1}`);
     values.push(updates.order);
   }
   if (fields.length === 0) return;

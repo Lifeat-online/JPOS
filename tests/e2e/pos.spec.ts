@@ -1,8 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // ── Shared dev credentials ──────────────────────────────────────────────
-const DEV_EMAIL = "jameskoen78@gmail.com";
-const DEV_PASSWORD = "James4James@1978";
+// Prefer CI/local env overrides; fall back to the seed-dev-staff defaults so
+// a locally-bootstrapped dev tenant still works out of the box.
+const DEV_EMAIL = process.env.E2E_EMAIL || "jameskoen78@gmail.com";
+const DEV_PASSWORD = process.env.E2E_PASSWORD || "James4James@1978";
 
 // ── Helper: log in via the Staff Login modal ────────────────────────────
 async function login(page: Page) {
