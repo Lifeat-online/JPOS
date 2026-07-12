@@ -53,7 +53,13 @@ export async function searchProductsBySimilarity(
          LIMIT $3`,
         [tenantId, vec, limit],
     );
-    return rows as ProductSimilarityHit[];
+    // pg returns NUMERIC columns as strings; coerce to numbers to match the type.
+    return rows.map((r) => ({
+        ...r,
+        price: Number(r.price),
+        costPrice: r.costPrice == null ? null : Number(r.costPrice),
+        distance: Number(r.distance),
+    })) as ProductSimilarityHit[];
 }
 
 /**

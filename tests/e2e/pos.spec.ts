@@ -1,11 +1,11 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 // ── Shared dev credentials ──────────────────────────────────────────────
 const DEV_EMAIL = "jameskoen78@gmail.com";
 const DEV_PASSWORD = "James4James@1978";
 
 // ── Helper: log in via the Staff Login modal ────────────────────────────
-async function login(page: ReturnType<(typeof test)["info"]>["page"]) {
+async function login(page: Page) {
   await page.goto("/");
   await page.locator("text=Staff Login").click();
   await page.locator("#login-email").fill(DEV_EMAIL);
@@ -17,7 +17,7 @@ async function login(page: ReturnType<(typeof test)["info"]>["page"]) {
 
 // ── Helper: pick a section from the sidebar by its label (case-insensitive) ─
 async function navigateTo(
-  page: ReturnType<(typeof test)["info"]>["page"],
+  page: Page,
   label: string,
 ) {
   await page.locator(`button:has-text("${label}")`).first().click();

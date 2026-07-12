@@ -106,7 +106,7 @@ describe('api routes', () => {
   });
 
   it('returns unauthorized for protected endpoint without token', async () => {
-    const response = await request(app).get('/api/mariadb/tenants/tenant_1/products');
+    const response = await request(app).get('/api/data/tenants/tenant_1/products');
     expect(response.status).toBe(401);
     expect(response.body).toHaveProperty('error');
   });
@@ -122,7 +122,7 @@ describe('api routes', () => {
     });
 
     const response = await request(app)
-      .get('/api/mariadb/tenants/tenant_b/products')
+      .get('/api/data/tenants/tenant_b/products')
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(403);

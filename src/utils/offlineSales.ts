@@ -591,7 +591,7 @@ export async function syncQueuedOfflineSales(tenantId: string, options: { batchS
       if (!item.saleSyncedAt || !cloudSaleId) {
         const salePayload = getSalePayload(item, batchId || `offline_batch_${randomToken()}`, sequence);
         if (item.operation === 'update_sale' && item.targetSaleId) {
-          const sale = await apiPut<any>(`/api/mariadb/tenants/${tenantId}/sales/${item.targetSaleId}`, salePayload);
+          const sale = await apiPut<any>(`/api/data/tenants/${tenantId}/sales/${item.targetSaleId}`, salePayload);
           cloudSaleId = sale?.id || item.targetSaleId;
         } else {
           const sale = await createSale(tenantId, salePayload);

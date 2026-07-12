@@ -1,5 +1,5 @@
 /**
- * useMessaging - MariaDB REST edition.
+ * useMessaging - REST edition.
  * Replaced Firestore onSnapshot real-time listeners with REST polling.
  * Polls the messages endpoint every 10 seconds while the hook is mounted.
  */
@@ -34,7 +34,7 @@ export function useMessaging({ user, tenantId, currentUserStaff, staff }: UseMes
   const fetchMessages = useCallback(async () => {
     if (!user || !tenantId) { setMessages([]); return; }
     try {
-      const data = await apiGet<Message[]>(`/api/mariadb/tenants/${tenantId}/messages?limit=200`);
+      const data = await apiGet<Message[]>(`/api/data/tenants/${tenantId}/messages?limit=200`);
       setMessages(data || []);
     } catch (err) {
       if ((err as { isRateLimit?: boolean } | null)?.isRateLimit) return;
@@ -110,7 +110,7 @@ export function useMessaging({ user, tenantId, currentUserStaff, staff }: UseMes
     setMessages(prev => [...prev, optimisticMessage]);
 
     try {
-      await apiPost(`/api/mariadb/tenants/${tenantId}/messages`, payload);
+      await apiPost(`/api/data/tenants/${tenantId}/messages`, payload);
       await fetchMessages();
     } catch (err) {
       console.error('Failed to send message:', err);
@@ -129,7 +129,7 @@ export function useMessaging({ user, tenantId, currentUserStaff, staff }: UseMes
     if (unread.length === 0) return;
 
     unread.forEach(m => {
-      apiPut(`/api/mariadb/tenants/${tenantId}/messages/${m.id}/read`, { userId: myId })
+      apiPut(`/api/data/tenants/${tenantId}/messages/${m.id}/read`, { userId: myId })
         .catch(e => console.warn(`markRead failed for message ${m.id}:`, e));
     });
 

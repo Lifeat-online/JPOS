@@ -10,7 +10,7 @@ vi.mock('../../server/db.js', () => ({
 function request(body: any = {}) {
   return {
     method: 'POST',
-    originalUrl: '/api/mariadb/tenants/tenant_1/sales/sale_1/refund',
+    originalUrl: '/api/data/tenants/tenant_1/sales/sale_1/refund',
     params: { tenantId: 'tenant_1' },
     body,
     user: {

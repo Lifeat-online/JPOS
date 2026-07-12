@@ -1078,9 +1078,9 @@ export default function App() {
                 updatedAt: new Date().toISOString(),
             };
             if (id) {
-                await apiPut(`/api/mariadb/tenants/${tenantId}/products/${id}`, cleanData);
+                await apiPut(`/api/data/tenants/${tenantId}/products/${id}`, cleanData);
             } else {
-                await apiPost(`/api/mariadb/tenants/${tenantId}/products`, {
+                await apiPost(`/api/data/tenants/${tenantId}/products`, {
                     ...cleanData,
                     createdAt: new Date().toISOString(),
                 });
@@ -1099,9 +1099,9 @@ export default function App() {
         try {
             const { id, ...data } = customerModal.customer;
             if (id) {
-                await apiPut(`/api/mariadb/tenants/${tenantId}/customers/${id}`, data);
+                await apiPut(`/api/data/tenants/${tenantId}/customers/${id}`, data);
             } else {
-                await apiPost(`/api/mariadb/tenants/${tenantId}/customers`, {
+                await apiPost(`/api/data/tenants/${tenantId}/customers`, {
                     ...data,
                     createdAt: new Date().toISOString(),
                 });
@@ -1121,7 +1121,7 @@ export default function App() {
             const { id, newPassword, ...data } = staffModal.staff;
             let targetId = id;
             if (id) {
-                await apiPut(`/api/mariadb/tenants/${tenantId}/staff/${id}`, {
+                await apiPut(`/api/data/tenants/${tenantId}/staff/${id}`, {
                     ...data,
                     updatedAt: new Date().toISOString(),
                 });
@@ -1132,7 +1132,7 @@ export default function App() {
                     setIsProcessingCrud(false);
                     return;
                 }
-                const created = await apiPost(`/api/mariadb/tenants/${tenantId}/staff`, { ...data, status: 'active', createdAt: new Date().toISOString() });
+                const created = await apiPost(`/api/data/tenants/${tenantId}/staff`, { ...data, status: 'active', createdAt: new Date().toISOString() });
                 targetId = (created as any).id;
             }
 
@@ -1159,7 +1159,7 @@ export default function App() {
         if (!tenantId) return;
         setIsProcessingCrud(true);
         try {
-            await apiDelete(`/api/mariadb/tenants/${tenantId}/staff/${id}`);
+            await apiDelete(`/api/data/tenants/${tenantId}/staff/${id}`);
             setStaffToDelete(null);
         } catch (err) {
             console.error('Failed to delete staff:', err);

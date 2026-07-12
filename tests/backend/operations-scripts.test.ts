@@ -195,7 +195,7 @@ describe("operations scripts and runbooks", () => {
     expect(rollbackDoc).toContain("npm run ops:verify-schema");
     expect(rollbackDoc).toContain("database backup");
     expect(rollbackDoc).toContain("npm run seed:test-tenant -- --tenant test_tenant --mode restaurant --clear-first");
-    expect(archiveDoc).toContain("Older MariaDB/Nginx migration notes");
+    expect(archiveDoc).toContain("Older historical migration notes");
     expect(archiveDoc).toContain("archival unless they are re-verified against the current codebase");
     expect(seedScript).toContain("seedDemoData");
     expect(seedScript).toContain("clearSeededDemoData");

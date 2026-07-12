@@ -1,5 +1,5 @@
 /**
- * useClientPortal — MariaDB REST edition.
+ * useClientPortal — REST edition.
  * Replaced all Firestore subscriptions with REST polling.
  * Polls every 30 seconds to stay reasonably fresh without real-time overhead.
  */
@@ -35,7 +35,7 @@ export function useClientPortal(user: JwtUser | null): ClientPortalData {
     const findCustomer = async () => {
       try {
         const result = await apiGet<{ customer: Customer; tenantId: string } | null>(
-          `/api/mariadb/customers/by-email?email=${encodeURIComponent(user.email)}`
+          `/api/data/customers/by-email?email=${encodeURIComponent(user.email)}`
         );
         if (!result?.customer) {
           setNotFound(true);
@@ -47,7 +47,7 @@ export function useClientPortal(user: JwtUser | null): ClientPortalData {
 
         // Link customer UID if not already set
         if (!result.customer.uid && result.tenantId) {
-          await apiPut(`/api/mariadb/tenants/${result.tenantId}/customers/${result.customer.id}`, {
+          await apiPut(`/api/data/tenants/${result.tenantId}/customers/${result.customer.id}`, {
             uid: user.uid,
           }).catch(() => {});
         }
@@ -66,9 +66,9 @@ export function useClientPortal(user: JwtUser | null): ClientPortalData {
     if (!customer?.id || !tenantId) return;
     try {
       const [customerRes, salesRes, payoutsRes] = await Promise.all([
-        apiGet<Customer>(`/api/mariadb/tenants/${tenantId}/customers/${customer.id}`),
-        apiGet<Sale[]>(`/api/mariadb/tenants/${tenantId}/sales?customerId=${customer.id}&limit=50`),
-        apiGet<PayoutRequest[]>(`/api/mariadb/tenants/${tenantId}/customer-payout-requests?customerId=${customer.id}`),
+        apiGet<Customer>(`/api/data/tenants/${tenantId}/customers/${customer.id}`),
+        apiGet<Sale[]>(`/api/data/tenants/${tenantId}/sales?customerId=${customer.id}&limit=50`),
+        apiGet<PayoutRequest[]>(`/api/data/tenants/${tenantId}/customer-payout-requests?customerId=${customer.id}`),
       ]);
       if (customerRes) {
         setCustomer({

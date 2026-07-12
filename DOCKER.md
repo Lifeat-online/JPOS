@@ -25,7 +25,7 @@ Edit `.env.docker.local` to configure:
 
 ### 2. Build and Start Services
 
-Start all services (MariaDB, App, Nginx):
+Start all services (PostgreSQL, App, Nginx):
 
 ```bash
 docker-compose up -d
@@ -33,7 +33,7 @@ docker-compose up -d
 
 This will:
 - Build the POS application image
-- Start MariaDB database
+- Start PostgreSQL database
 - Start the Node.js/React application
 - Start Nginx reverse proxy
 - Initialize the database schema
@@ -48,10 +48,10 @@ The application will be available at port 80 (HTTP).
 
 ## Services
 
-### MariaDB Database
+### PostgreSQL Database
 - **Container**: masepos-db
-- **Port**: 3306 (exposed for local development)
-- **Volume**: `mariadb_data` (persistent database storage)
+- **Port**: 5432 (exposed for local development)
+- **Volume**: `postgres_data` (persistent database storage)
 - **Health Check**: Automatic
 
 ### POS Application
@@ -80,7 +80,7 @@ docker-compose logs -f
 
 # Specific service
 docker-compose logs -f app
-docker-compose logs -f mariadb
+docker-compose logs -f postgres
 docker-compose logs -f nginx
 ```
 
@@ -107,7 +107,7 @@ docker-compose up -d
 
 ### Access database directly
 ```bash
-docker exec -it masepos-db mysql -u pos_user -p jimmy_pos
+docker exec -it masepos-db psql -U pos_user jimmy_pos
 ```
 
 ### Execute commands in app container
@@ -126,8 +126,7 @@ Create a `.env.docker.local` file (git-ignored) with your configuration:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_ROOT_PASSWORD` | rootpassword | MariaDB root password |
-| `DB_USER` | pos_user | Database user |
+| `DB_USER` | pos_user | Database user (Postgres superuser) |
 | `DB_PASSWORD` | pospassword | Database password |
 | `DB_DATABASE` | jimmy_pos | Database name |
 | `JWT_SECRET` | - | **CHANGE THIS!** JWT signing key |
@@ -139,14 +138,14 @@ Create a `.env.docker.local` file (git-ignored) with your configuration:
 
 ### App won't connect to database
 ```bash
-# Check if MariaDB is healthy
+# Check if PostgreSQL is healthy
 docker-compose ps
 
-# View MariaDB logs
-docker-compose logs mariadb
+# View PostgreSQL logs
+docker-compose logs postgres
 
 # Verify connectivity from app container
-docker exec masepos-app mysql -h mariadb -u pos_user -p jimmy_pos -e "SELECT 1"
+docker exec masepos-app psql -h postgres -U pos_user -d jimmy_pos -c "SELECT 1"
 ```
 
 ### Port 3000 or 80 already in use
@@ -222,25 +221,25 @@ For production use:
 
 ### Backup the database
 ```bash
-docker exec masepos-db mysqldump -u root -p jimmy_pos > backup_$(date +%Y%m%d_%H%M%S).sql
+docker exec masepos-db pg_dump -U pos_user jimmy_pos > backup_$(date +%Y%m%d_%H%M%S).sql
 ```
 
 ### Restore from backup
 ```bash
-docker exec -i masepos-db mysql -u root -p jimmy_pos < backup_20260506_142000.sql
+docker exec -i masepos-db psql -U pos_user jimmy_pos < backup_20260506_142000.sql
 ```
 
 ## Network
 
 The services communicate via the `pos-network` Docker bridge network:
-- App connects to `mariadb:3306`
+- App connects to `postgres:5432`
 - Nginx connects to `app:3000`
 - All containers can be accessed internally by service name
 
 ## Volumes
 
 Persistent data is stored in named Docker volumes:
-- `mariadb_data` - Database files
+- `postgres_data` - Database files
 - `nginx_cache` - Nginx cache
 - `nginx_logs` - Nginx logs
 

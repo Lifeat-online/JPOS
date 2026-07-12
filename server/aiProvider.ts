@@ -105,7 +105,11 @@ function buildUserMessage(
       const { mediaType, base64 } = parseDataUrl(image);
       if (base64) content.push({ type: "file", data: base64, mediaType });
     } else {
-      content.push({ type: "image", image: new URL(image) });
+      try {
+        content.push({ type: "image", image: new URL(image) });
+      } catch {
+        // Skip a malformed image URL rather than aborting the whole request.
+      }
     }
   }
 

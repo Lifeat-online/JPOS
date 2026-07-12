@@ -244,10 +244,10 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     if (!tenantId) return;
     try {
       const [ws, assignments, sects, tabs, limits, promoRows, tierRows, ruleRows, retentionConfig] = await Promise.all([
-        apiGet<Workstation[]>(`/api/mariadb/tenants/${tenantId}/workstations`),
+        apiGet<Workstation[]>(`/api/data/tenants/${tenantId}/workstations`),
         getCompanionDeviceAssignments(tenantId).catch(() => []),
-        apiGet<TableSection[]>(`/api/mariadb/tenants/${tenantId}/table-sections`),
-        apiGet<RestaurantTable[]>(`/api/mariadb/tenants/${tenantId}/restaurant-tables`),
+        apiGet<TableSection[]>(`/api/data/tenants/${tenantId}/table-sections`),
+        apiGet<RestaurantTable[]>(`/api/data/tenants/${tenantId}/restaurant-tables`),
         getTenantPackageLimits(tenantId),
         getPromotions(tenantId).catch(() => []),
         getLoyaltyTiers(tenantId).catch(() => []),
@@ -347,9 +347,9 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     try {
       const data = { name: wsModal.ws.name, type: wsModal.ws.type || 'kitchen', status: wsModal.ws.status || 'active' };
       if (wsModal.ws.id) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/workstations/${wsModal.ws.id}`, data);
+        await apiPut(`/api/data/tenants/${tenantId}/workstations/${wsModal.ws.id}`, data);
       } else {
-        await apiPost(`/api/mariadb/tenants/${tenantId}/workstations`, data);
+        await apiPost(`/api/data/tenants/${tenantId}/workstations`, data);
       }
       await fetchData();
       setWsModal({ isOpen: false, ws: null });
@@ -360,7 +360,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const deleteWorkstation = async (id: string) => {
     if (!tenantId || !confirm('Delete this workstation?')) return;
     try {
-      await apiDelete(`/api/mariadb/tenants/${tenantId}/workstations/${id}`);
+      await apiDelete(`/api/data/tenants/${tenantId}/workstations/${id}`);
       await fetchData();
     } catch (err) { console.error(err); }
   };
@@ -372,9 +372,9 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     try {
       const data = { name: sectionModal.section.name, color: sectionModal.section.color || 'blue', order: sectionModal.section.order ?? sections.length };
       if (sectionModal.section.id) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/table-sections/${sectionModal.section.id}`, data);
+        await apiPut(`/api/data/tenants/${tenantId}/table-sections/${sectionModal.section.id}`, data);
       } else {
-        await apiPost(`/api/mariadb/tenants/${tenantId}/table-sections`, data);
+        await apiPost(`/api/data/tenants/${tenantId}/table-sections`, data);
       }
       await fetchData();
       setSectionModal({ isOpen: false, section: null });
@@ -394,9 +394,9 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
         status: tableModal.table.status || 'active',
       };
       if (tableModal.table.id) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/restaurant-tables/${tableModal.table.id}`, data);
+        await apiPut(`/api/data/tenants/${tenantId}/restaurant-tables/${tableModal.table.id}`, data);
       } else {
-        await apiPost(`/api/mariadb/tenants/${tenantId}/restaurant-tables`, data);
+        await apiPost(`/api/data/tenants/${tenantId}/restaurant-tables`, data);
       }
       await fetchData();
       setTableModal({ isOpen: false, table: null });
@@ -407,7 +407,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const deleteSection = async (id: string) => {
     if (!tenantId || !confirm('Delete this section? Tables in it will also be removed.')) return;
     try {
-      await apiDelete(`/api/mariadb/tenants/${tenantId}/table-sections/${id}`);
+      await apiDelete(`/api/data/tenants/${tenantId}/table-sections/${id}`);
       await fetchData();
     } catch (err) { console.error(err); }
   };
@@ -415,7 +415,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
   const deleteTable = async (id: string) => {
     if (!tenantId || !confirm('Delete this table?')) return;
     try {
-      await apiDelete(`/api/mariadb/tenants/${tenantId}/restaurant-tables/${id}`);
+      await apiDelete(`/api/data/tenants/${tenantId}/restaurant-tables/${id}`);
       await fetchData();
     } catch (err) { console.error(err); }
   };
@@ -424,7 +424,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     if (!tenantId) return;
     setIsSaving(true);
     try {
-      await apiPut(`/api/mariadb/tenants/${tenantId}/settings/app`, formData);
+      await apiPut(`/api/data/tenants/${tenantId}/settings/app`, formData);
       setConfig(formData);
       setPackageLimits(await getTenantPackageLimits(tenantId));
       toast.success("Settings saved successfully!");

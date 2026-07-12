@@ -24,8 +24,8 @@ export const ModifierModal: React.FC<ModifierModalProps> = ({ product, onClose, 
     setLoading(true);
     try {
       const [modsData, bulkData] = await Promise.all([
-        apiGet(`/api/mariadb/products/${product.id}/modifiers`),
-        apiGet(`/api/mariadb/tenants/${(product as any).tenantId}/bulk-items`)
+        apiGet(`/api/data/products/${product.id}/modifiers`),
+        apiGet(`/api/data/tenants/${(product as any).tenantId}/bulk-items`)
       ]);
       setGroups((modsData as ModifierGroup[]) || []);
       setBulkItems((bulkData as BulkItem[]) || []);
@@ -39,7 +39,7 @@ export const ModifierModal: React.FC<ModifierModalProps> = ({ product, onClose, 
 
   const handleAddGroup = async () => {
     try {
-      const result = await apiPost(`/api/mariadb/products/${product.id}/modifiers`, {
+      const result = await apiPost(`/api/data/products/${product.id}/modifiers`, {
         name: 'New Modifier Group',
         type: 'single',
         required: false,
@@ -101,7 +101,7 @@ export const ModifierModal: React.FC<ModifierModalProps> = ({ product, onClose, 
     e.stopPropagation();
     if (!confirm('Are you sure you want to delete this modifier group?')) return;
     try {
-      await apiDelete(`/api/mariadb/modifiers/${groupId}`);
+      await apiDelete(`/api/data/modifiers/${groupId}`);
       setGroups(groups.filter(g => g.id !== groupId));
       if (activeGroupId === groupId) setActiveGroupId(groups.length > 1 ? groups[0].id : null);
     } catch (err) {
@@ -114,7 +114,7 @@ export const ModifierModal: React.FC<ModifierModalProps> = ({ product, onClose, 
     try {
       // For each group, update options
       for (const g of groups) {
-        await apiPut(`/api/mariadb/modifiers/${g.id}/options`, g.options);
+        await apiPut(`/api/data/modifiers/${g.id}/options`, g.options);
       }
       onSave();
       onClose();

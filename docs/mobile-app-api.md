@@ -9,7 +9,7 @@ backend unless the product explicitly moves to a new API version.
 ## Current Architecture
 
 - Backend: Express, JSON REST routes in `server/app.ts`.
-- Database: MariaDB or Postgres, tenant-scoped.
+- Database: PostgreSQL, tenant-scoped.
 - Auth: JWT access token plus rotating refresh token.
 - Realtime: Socket.IO for live workstations, tables, tabs, messaging, device presence, and companion-device state.
 - Existing web client: React PWA. It defaults to same-origin `/api` but now supports `VITE_API_BASE_URL` and `VITE_SOCKET_URL`.
@@ -266,19 +266,19 @@ type Sale = {
 Recommended parallel calls:
 
 - `GET /api/auth/me`
-- `GET /api/mariadb/tenants/:tenantId/config`
-- `GET /api/mariadb/tenants/:tenantId/products`
-- `GET /api/mariadb/tenants/:tenantId/customers`
-- `GET /api/mariadb/tenants/:tenantId/staff`
-- `GET /api/mariadb/tenants/:tenantId/workstations`
-- `GET /api/mariadb/tenants/:tenantId/table-sections`
-- `GET /api/mariadb/tenants/:tenantId/restaurant-tables`
-- `GET /api/mariadb/tenants/:tenantId/sales?status=open,kitchen`
-- `GET /api/mariadb/tenants/:tenantId/cash-sessions?staffId=<staffId>`
+- `GET /api/data/tenants/:tenantId/config`
+- `GET /api/data/tenants/:tenantId/products`
+- `GET /api/data/tenants/:tenantId/customers`
+- `GET /api/data/tenants/:tenantId/staff`
+- `GET /api/data/tenants/:tenantId/workstations`
+- `GET /api/data/tenants/:tenantId/table-sections`
+- `GET /api/data/tenants/:tenantId/restaurant-tables`
+- `GET /api/data/tenants/:tenantId/sales?status=open,kitchen`
+- `GET /api/data/tenants/:tenantId/cash-sessions?staffId=<staffId>`
 
 ### Create Online Sale
 
-`POST /api/mariadb/tenants/:tenantId/sales`
+`POST /api/data/tenants/:tenantId/sales`
 
 Minimal request:
 
@@ -326,7 +326,7 @@ Send to kitchen:
 
 Update:
 
-`PUT /api/mariadb/tenants/:tenantId/sales/:saleId`
+`PUT /api/data/tenants/:tenantId/sales/:saleId`
 
 ### Offline Sale Queue
 
@@ -368,12 +368,12 @@ Queued sale payload must include:
 
 Replay with:
 
-- `POST /api/mariadb/tenants/:tenantId/sales` for new sales.
-- `PUT /api/mariadb/tenants/:tenantId/sales/:saleId` for updates.
+- `POST /api/data/tenants/:tenantId/sales` for new sales.
+- `PUT /api/data/tenants/:tenantId/sales/:saleId` for updates.
 
 If replay fails, report:
 
-`POST /api/mariadb/tenants/:tenantId/offline-sync/issues`
+`POST /api/data/tenants/:tenantId/offline-sync/issues`
 
 ```json
 {
@@ -395,11 +395,11 @@ The backend records audit events and Action Center manager tasks for conflicts.
 
 Refund:
 
-`POST /api/mariadb/tenants/:tenantId/sales/:saleId/refund`
+`POST /api/data/tenants/:tenantId/sales/:saleId/refund`
 
 Void:
 
-`POST /api/mariadb/tenants/:tenantId/sales/:saleId/void`
+`POST /api/data/tenants/:tenantId/sales/:saleId/void`
 
 Cashiers may receive `202` with `approvalRequired: true`; managers/admin/dev may need `428` sensitive verification.
 
@@ -525,258 +525,258 @@ Unless noted, routes are JSON and protected by Bearer JWT.
 
 ### Tenant Bootstrap
 
-- `GET /api/mariadb/users/:uid`
-- `GET /api/mariadb/staff`
-- `GET /api/mariadb/tenants/:tenantId/config`
-- `PUT /api/mariadb/tenants/:tenantId/settings/app`
-- `GET /api/mariadb/tenants/:tenantId/package-limits`
-- `POST /api/mariadb/setup`
-- `POST /api/mariadb/tenants/:tenantId/seed-products`
-- `POST /api/mariadb/tenants/:tenantId/demo-seed/:mode`
-- `DELETE /api/mariadb/tenants/:tenantId/demo-seed`
+- `GET /api/data/users/:uid`
+- `GET /api/data/staff`
+- `GET /api/data/tenants/:tenantId/config`
+- `PUT /api/data/tenants/:tenantId/settings/app`
+- `GET /api/data/tenants/:tenantId/package-limits`
+- `POST /api/data/setup`
+- `POST /api/data/tenants/:tenantId/seed-products`
+- `POST /api/data/tenants/:tenantId/demo-seed/:mode`
+- `DELETE /api/data/tenants/:tenantId/demo-seed`
 
 ### Products And Inventory
 
-- `GET /api/mariadb/tenants/:tenantId/products`
-- `POST /api/mariadb/tenants/:tenantId/products`
-- `PUT /api/mariadb/tenants/:tenantId/products/:id`
-- `DELETE /api/mariadb/tenants/:tenantId/products/:id`
-- `POST /api/mariadb/tenants/:tenantId/products/:id/stock-adjustments`
-- `GET /api/mariadb/tenants/:tenantId/inventory-locations`
-- `POST /api/mariadb/tenants/:tenantId/inventory-locations`
-- `PUT /api/mariadb/tenants/:tenantId/inventory-locations/:locationId`
-- `GET /api/mariadb/tenants/:tenantId/inventory-location-stock`
-- `PUT /api/mariadb/tenants/:tenantId/inventory-location-stock`
-- `GET /api/mariadb/tenants/:tenantId/stock-transfers`
-- `POST /api/mariadb/tenants/:tenantId/stock-transfers`
-- `POST /api/mariadb/tenants/:tenantId/stock-transfers/:transferId/complete`
-- `GET /api/mariadb/tenants/:tenantId/stock-batches`
-- `GET /api/mariadb/tenants/:tenantId/stock-reports/valuation`
+- `GET /api/data/tenants/:tenantId/products`
+- `POST /api/data/tenants/:tenantId/products`
+- `PUT /api/data/tenants/:tenantId/products/:id`
+- `DELETE /api/data/tenants/:tenantId/products/:id`
+- `POST /api/data/tenants/:tenantId/products/:id/stock-adjustments`
+- `GET /api/data/tenants/:tenantId/inventory-locations`
+- `POST /api/data/tenants/:tenantId/inventory-locations`
+- `PUT /api/data/tenants/:tenantId/inventory-locations/:locationId`
+- `GET /api/data/tenants/:tenantId/inventory-location-stock`
+- `PUT /api/data/tenants/:tenantId/inventory-location-stock`
+- `GET /api/data/tenants/:tenantId/stock-transfers`
+- `POST /api/data/tenants/:tenantId/stock-transfers`
+- `POST /api/data/tenants/:tenantId/stock-transfers/:transferId/complete`
+- `GET /api/data/tenants/:tenantId/stock-batches`
+- `GET /api/data/tenants/:tenantId/stock-reports/valuation`
 
 ### Recipe, Modifiers, Bulk Items, Vendors, Purchase Orders
 
-- `GET /api/mariadb/tenants/:tenantId/vendors`
-- `POST /api/mariadb/tenants/:tenantId/vendors`
-- `PUT /api/mariadb/tenants/:tenantId/vendors/:id`
-- `GET /api/mariadb/tenants/:tenantId/purchase-orders`
-- `POST /api/mariadb/tenants/:tenantId/purchase-orders`
-- `PUT /api/mariadb/tenants/:tenantId/purchase-orders/:id`
-- `POST /api/mariadb/tenants/:tenantId/purchase-orders/:id/receive`
-- `GET /api/mariadb/tenants/:tenantId/bulk-items`
-- `POST /api/mariadb/tenants/:tenantId/bulk-items`
-- `PUT /api/mariadb/tenants/:tenantId/bulk-items/:id`
-- `DELETE /api/mariadb/tenants/:tenantId/bulk-items/:id`
-- `GET /api/mariadb/tenants/:tenantId/recipe-costing-report`
-- `GET /api/mariadb/products/:productId/recipe`
-- `PUT /api/mariadb/products/:productId/recipe`
-- `GET /api/mariadb/products/:productId/modifiers`
-- `POST /api/mariadb/products/:productId/modifiers`
-- `PUT /api/mariadb/modifiers/:modifierId/options`
-- `DELETE /api/mariadb/modifiers/:modifierId`
+- `GET /api/data/tenants/:tenantId/vendors`
+- `POST /api/data/tenants/:tenantId/vendors`
+- `PUT /api/data/tenants/:tenantId/vendors/:id`
+- `GET /api/data/tenants/:tenantId/purchase-orders`
+- `POST /api/data/tenants/:tenantId/purchase-orders`
+- `PUT /api/data/tenants/:tenantId/purchase-orders/:id`
+- `POST /api/data/tenants/:tenantId/purchase-orders/:id/receive`
+- `GET /api/data/tenants/:tenantId/bulk-items`
+- `POST /api/data/tenants/:tenantId/bulk-items`
+- `PUT /api/data/tenants/:tenantId/bulk-items/:id`
+- `DELETE /api/data/tenants/:tenantId/bulk-items/:id`
+- `GET /api/data/tenants/:tenantId/recipe-costing-report`
+- `GET /api/data/products/:productId/recipe`
+- `PUT /api/data/products/:productId/recipe`
+- `GET /api/data/products/:productId/modifiers`
+- `POST /api/data/products/:productId/modifiers`
+- `PUT /api/data/modifiers/:modifierId/options`
+- `DELETE /api/data/modifiers/:modifierId`
 
 ### Sales, Tables, Tabs, Live POS
 
-- `GET /api/mariadb/tenants/:tenantId/sales`
-- `POST /api/mariadb/tenants/:tenantId/sales`
-- `GET /api/mariadb/tenants/:tenantId/sales/:saleId`
-- `PUT /api/mariadb/tenants/:tenantId/sales/:saleId`
-- `DELETE /api/mariadb/tenants/:tenantId/sales`
-- `PUT /api/mariadb/tenants/:tenantId/sales/:saleId/items/:itemId`
-- `PUT /api/mariadb/tenants/:tenantId/sales/:saleId/payments/:paymentId/provider-status`
-- `POST /api/mariadb/tenants/:tenantId/sales/:saleId/refund`
-- `POST /api/mariadb/tenants/:tenantId/sales/:saleId/void`
-- `POST /api/mariadb/tenants/:tenantId/offline-sync/issues`
-- `GET /api/mariadb/tenants/:tenantId/live`
-- `GET /api/mariadb/tenants/:tenantId/table-sections`
-- `POST /api/mariadb/tenants/:tenantId/table-sections`
-- `PUT /api/mariadb/tenants/:tenantId/table-sections/:id`
-- `DELETE /api/mariadb/tenants/:tenantId/table-sections/:id`
-- `GET /api/mariadb/tenants/:tenantId/restaurant-tables`
-- `POST /api/mariadb/tenants/:tenantId/restaurant-tables`
-- `PUT /api/mariadb/tenants/:tenantId/restaurant-tables/:id`
-- `DELETE /api/mariadb/tenants/:tenantId/restaurant-tables/:id`
+- `GET /api/data/tenants/:tenantId/sales`
+- `POST /api/data/tenants/:tenantId/sales`
+- `GET /api/data/tenants/:tenantId/sales/:saleId`
+- `PUT /api/data/tenants/:tenantId/sales/:saleId`
+- `DELETE /api/data/tenants/:tenantId/sales`
+- `PUT /api/data/tenants/:tenantId/sales/:saleId/items/:itemId`
+- `PUT /api/data/tenants/:tenantId/sales/:saleId/payments/:paymentId/provider-status`
+- `POST /api/data/tenants/:tenantId/sales/:saleId/refund`
+- `POST /api/data/tenants/:tenantId/sales/:saleId/void`
+- `POST /api/data/tenants/:tenantId/offline-sync/issues`
+- `GET /api/data/tenants/:tenantId/live`
+- `GET /api/data/tenants/:tenantId/table-sections`
+- `POST /api/data/tenants/:tenantId/table-sections`
+- `PUT /api/data/tenants/:tenantId/table-sections/:id`
+- `DELETE /api/data/tenants/:tenantId/table-sections/:id`
+- `GET /api/data/tenants/:tenantId/restaurant-tables`
+- `POST /api/data/tenants/:tenantId/restaurant-tables`
+- `PUT /api/data/tenants/:tenantId/restaurant-tables/:id`
+- `DELETE /api/data/tenants/:tenantId/restaurant-tables/:id`
 
 ### Cash, Wallet, Payouts
 
-- `GET /api/mariadb/tenants/:tenantId/cash-sessions`
-- `POST /api/mariadb/tenants/:tenantId/cash-sessions`
-- `PUT /api/mariadb/tenants/:tenantId/cash-sessions/:id`
-- `PUT /api/mariadb/tenants/:tenantId/cash-sessions/:id/review`
-- `GET /api/mariadb/tenants/:tenantId/cash-sessions/:id/movements`
-- `POST /api/mariadb/tenants/:tenantId/cash-sessions/:id/movements`
-- `POST /api/mariadb/tenants/:tenantId/cash-sessions/:id/wallet-cash`
-- `GET /api/mariadb/tenants/:tenantId/manager-cash/summary`
-- `GET /api/mariadb/tenants/:tenantId/manager-cash/movements`
-- `GET /api/mariadb/tenants/:tenantId/manager-cash/movements/export`
-- `POST /api/mariadb/tenants/:tenantId/manager-cash/movements`
-- `GET /api/mariadb/tenants/:tenantId/manager-cash/transfers`
-- `POST /api/mariadb/tenants/:tenantId/manager-cash/transfers`
-- `PUT /api/mariadb/tenants/:tenantId/manager-cash/transfers/:transferId/confirm`
-- `PUT /api/mariadb/tenants/:tenantId/manager-cash/transfers/:transferId/cancel`
-- `GET /api/mariadb/tenants/:tenantId/manager-cash/close/preview`
-- `GET /api/mariadb/tenants/:tenantId/manager-cash/close`
-- `POST /api/mariadb/tenants/:tenantId/manager-cash/close`
-- `GET /api/mariadb/tenants/:tenantId/manager-cash/close/:checkpointId/export`
-- `POST /api/mariadb/tenants/:tenantId/manager-cash/wallet-cash`
-- `GET /api/mariadb/tenants/:tenantId/payout-requests`
-- `POST /api/mariadb/tenants/:tenantId/payout-requests`
-- `PUT /api/mariadb/tenants/:tenantId/payout-requests/:id`
-- `GET /api/mariadb/tenants/:tenantId/customer-payout-requests`
-- `POST /api/mariadb/tenants/:tenantId/customer-payout-requests`
-- `PUT /api/mariadb/tenants/:tenantId/customer-payout-requests/:id`
+- `GET /api/data/tenants/:tenantId/cash-sessions`
+- `POST /api/data/tenants/:tenantId/cash-sessions`
+- `PUT /api/data/tenants/:tenantId/cash-sessions/:id`
+- `PUT /api/data/tenants/:tenantId/cash-sessions/:id/review`
+- `GET /api/data/tenants/:tenantId/cash-sessions/:id/movements`
+- `POST /api/data/tenants/:tenantId/cash-sessions/:id/movements`
+- `POST /api/data/tenants/:tenantId/cash-sessions/:id/wallet-cash`
+- `GET /api/data/tenants/:tenantId/manager-cash/summary`
+- `GET /api/data/tenants/:tenantId/manager-cash/movements`
+- `GET /api/data/tenants/:tenantId/manager-cash/movements/export`
+- `POST /api/data/tenants/:tenantId/manager-cash/movements`
+- `GET /api/data/tenants/:tenantId/manager-cash/transfers`
+- `POST /api/data/tenants/:tenantId/manager-cash/transfers`
+- `PUT /api/data/tenants/:tenantId/manager-cash/transfers/:transferId/confirm`
+- `PUT /api/data/tenants/:tenantId/manager-cash/transfers/:transferId/cancel`
+- `GET /api/data/tenants/:tenantId/manager-cash/close/preview`
+- `GET /api/data/tenants/:tenantId/manager-cash/close`
+- `POST /api/data/tenants/:tenantId/manager-cash/close`
+- `GET /api/data/tenants/:tenantId/manager-cash/close/:checkpointId/export`
+- `POST /api/data/tenants/:tenantId/manager-cash/wallet-cash`
+- `GET /api/data/tenants/:tenantId/payout-requests`
+- `POST /api/data/tenants/:tenantId/payout-requests`
+- `PUT /api/data/tenants/:tenantId/payout-requests/:id`
+- `GET /api/data/tenants/:tenantId/customer-payout-requests`
+- `POST /api/data/tenants/:tenantId/customer-payout-requests`
+- `PUT /api/data/tenants/:tenantId/customer-payout-requests/:id`
 
 ### Customers
 
-- `GET /api/mariadb/tenants/:tenantId/customers`
-- `POST /api/mariadb/tenants/:tenantId/customers`
-- `PUT /api/mariadb/tenants/:tenantId/customers/:id`
-- `DELETE /api/mariadb/tenants/:tenantId/customers/:id`
-- `GET /api/mariadb/tenants/:tenantId/customers/campaign-export`
-- `GET /api/mariadb/tenants/:tenantId/customers/:id/consents`
-- `PUT /api/mariadb/tenants/:tenantId/customers/:id/consents`
-- `GET /api/mariadb/tenants/:tenantId/customers/:id/data-export`
-- `GET /api/mariadb/customers/by-email` optional auth
+- `GET /api/data/tenants/:tenantId/customers`
+- `POST /api/data/tenants/:tenantId/customers`
+- `PUT /api/data/tenants/:tenantId/customers/:id`
+- `DELETE /api/data/tenants/:tenantId/customers/:id`
+- `GET /api/data/tenants/:tenantId/customers/campaign-export`
+- `GET /api/data/tenants/:tenantId/customers/:id/consents`
+- `PUT /api/data/tenants/:tenantId/customers/:id/consents`
+- `GET /api/data/tenants/:tenantId/customers/:id/data-export`
+- `GET /api/data/customers/by-email` optional auth
 
 ### Staff And Workforce
 
-- `GET /api/mariadb/tenants/:tenantId/staff`
-- `POST /api/mariadb/tenants/:tenantId/staff`
-- `PUT /api/mariadb/tenants/:tenantId/staff/:id`
-- `DELETE /api/mariadb/tenants/:tenantId/staff/:id`
-- `GET /api/mariadb/tenants/:tenantId/workforce/shifts`
-- `POST /api/mariadb/tenants/:tenantId/workforce/shifts`
-- `PUT /api/mariadb/tenants/:tenantId/workforce/shifts/:shiftId`
-- `DELETE /api/mariadb/tenants/:tenantId/workforce/shifts/:shiftId`
-- `POST /api/mariadb/tenants/:tenantId/workforce/roster/publish`
-- `GET /api/mariadb/tenants/:tenantId/workforce/attendance/me`
-- `POST /api/mariadb/tenants/:tenantId/workforce/clock-in`
-- `POST /api/mariadb/tenants/:tenantId/workforce/break/start`
-- `POST /api/mariadb/tenants/:tenantId/workforce/break/end`
-- `POST /api/mariadb/tenants/:tenantId/workforce/clock-out`
-- `GET /api/mariadb/tenants/:tenantId/workforce/timesheet-payroll`
-- `GET /api/mariadb/tenants/:tenantId/workforce/staff-performance`
-- `POST /api/mariadb/tenants/:tenantId/workforce/staff-performance/coaching-notes`
-- `GET /api/mariadb/tenants/:tenantId/workforce/tip-pool-rules`
-- `POST /api/mariadb/tenants/:tenantId/workforce/tip-pool-rules`
-- `PUT /api/mariadb/tenants/:tenantId/workforce/tip-pool-rules/:ruleId`
-- `POST /api/mariadb/tenants/:tenantId/workforce/tip-pools/preview`
-- `POST /api/mariadb/tenants/:tenantId/workforce/tip-pools/generate`
-- `GET /api/mariadb/tenants/:tenantId/workforce/tip-pool-payouts`
+- `GET /api/data/tenants/:tenantId/staff`
+- `POST /api/data/tenants/:tenantId/staff`
+- `PUT /api/data/tenants/:tenantId/staff/:id`
+- `DELETE /api/data/tenants/:tenantId/staff/:id`
+- `GET /api/data/tenants/:tenantId/workforce/shifts`
+- `POST /api/data/tenants/:tenantId/workforce/shifts`
+- `PUT /api/data/tenants/:tenantId/workforce/shifts/:shiftId`
+- `DELETE /api/data/tenants/:tenantId/workforce/shifts/:shiftId`
+- `POST /api/data/tenants/:tenantId/workforce/roster/publish`
+- `GET /api/data/tenants/:tenantId/workforce/attendance/me`
+- `POST /api/data/tenants/:tenantId/workforce/clock-in`
+- `POST /api/data/tenants/:tenantId/workforce/break/start`
+- `POST /api/data/tenants/:tenantId/workforce/break/end`
+- `POST /api/data/tenants/:tenantId/workforce/clock-out`
+- `GET /api/data/tenants/:tenantId/workforce/timesheet-payroll`
+- `GET /api/data/tenants/:tenantId/workforce/staff-performance`
+- `POST /api/data/tenants/:tenantId/workforce/staff-performance/coaching-notes`
+- `GET /api/data/tenants/:tenantId/workforce/tip-pool-rules`
+- `POST /api/data/tenants/:tenantId/workforce/tip-pool-rules`
+- `PUT /api/data/tenants/:tenantId/workforce/tip-pool-rules/:ruleId`
+- `POST /api/data/tenants/:tenantId/workforce/tip-pools/preview`
+- `POST /api/data/tenants/:tenantId/workforce/tip-pools/generate`
+- `GET /api/data/tenants/:tenantId/workforce/tip-pool-payouts`
 
 ### Workstations, Hardware, Companion Devices
 
-- `GET /api/mariadb/tenants/:tenantId/workstations`
-- `POST /api/mariadb/tenants/:tenantId/workstations`
-- `DELETE /api/mariadb/tenants/:tenantId/workstations/:id`
-- `GET /api/mariadb/tenants/:tenantId/hardware-devices`
-- `POST /api/mariadb/tenants/:tenantId/hardware-devices`
-- `PUT /api/mariadb/tenants/:tenantId/hardware-devices/:deviceId`
-- `DELETE /api/mariadb/tenants/:tenantId/hardware-devices/:deviceId`
-- `POST /api/mariadb/tenants/:tenantId/hardware-devices/:deviceId/test`
-- `GET /api/mariadb/tenants/:tenantId/hardware-events`
-- `GET /api/mariadb/tenants/:tenantId/companion-device-assignments`
-- `GET /api/mariadb/tenants/:tenantId/companion-device-assignments/:deviceId`
-- `PUT /api/mariadb/tenants/:tenantId/companion-device-assignments/:deviceId`
-- `DELETE /api/mariadb/tenants/:tenantId/companion-device-assignments/:deviceId`
+- `GET /api/data/tenants/:tenantId/workstations`
+- `POST /api/data/tenants/:tenantId/workstations`
+- `DELETE /api/data/tenants/:tenantId/workstations/:id`
+- `GET /api/data/tenants/:tenantId/hardware-devices`
+- `POST /api/data/tenants/:tenantId/hardware-devices`
+- `PUT /api/data/tenants/:tenantId/hardware-devices/:deviceId`
+- `DELETE /api/data/tenants/:tenantId/hardware-devices/:deviceId`
+- `POST /api/data/tenants/:tenantId/hardware-devices/:deviceId/test`
+- `GET /api/data/tenants/:tenantId/hardware-events`
+- `GET /api/data/tenants/:tenantId/companion-device-assignments`
+- `GET /api/data/tenants/:tenantId/companion-device-assignments/:deviceId`
+- `PUT /api/data/tenants/:tenantId/companion-device-assignments/:deviceId`
+- `DELETE /api/data/tenants/:tenantId/companion-device-assignments/:deviceId`
 
 ### Stocktake
 
-- `GET /api/mariadb/tenants/:tenantId/stocktakes`
-- `POST /api/mariadb/tenants/:tenantId/stocktakes`
-- `GET /api/mariadb/tenants/:tenantId/stocktakes/suggestions`
-- `GET /api/mariadb/tenants/:tenantId/stocktakes/rules`
-- `POST /api/mariadb/tenants/:tenantId/stocktakes/rules`
-- `POST /api/mariadb/tenants/:tenantId/stocktakes/rules/run-due`
-- `PUT /api/mariadb/tenants/:tenantId/stocktakes/rules/:ruleId`
-- `DELETE /api/mariadb/tenants/:tenantId/stocktakes/rules/:ruleId`
-- `GET /api/mariadb/tenants/:tenantId/stocktakes/my-assignments`
-- `GET /api/mariadb/tenants/:tenantId/stocktakes/:sessionId/export-pack`
-- `GET /api/mariadb/tenants/:tenantId/stocktakes/:sessionId`
-- `PUT /api/mariadb/tenants/:tenantId/stocktakes/items/:itemId/count`
-- `PUT /api/mariadb/tenants/:tenantId/stocktakes/items/:itemId/recount`
-- `PUT /api/mariadb/tenants/:tenantId/stocktakes/:sessionId/approve`
+- `GET /api/data/tenants/:tenantId/stocktakes`
+- `POST /api/data/tenants/:tenantId/stocktakes`
+- `GET /api/data/tenants/:tenantId/stocktakes/suggestions`
+- `GET /api/data/tenants/:tenantId/stocktakes/rules`
+- `POST /api/data/tenants/:tenantId/stocktakes/rules`
+- `POST /api/data/tenants/:tenantId/stocktakes/rules/run-due`
+- `PUT /api/data/tenants/:tenantId/stocktakes/rules/:ruleId`
+- `DELETE /api/data/tenants/:tenantId/stocktakes/rules/:ruleId`
+- `GET /api/data/tenants/:tenantId/stocktakes/my-assignments`
+- `GET /api/data/tenants/:tenantId/stocktakes/:sessionId/export-pack`
+- `GET /api/data/tenants/:tenantId/stocktakes/:sessionId`
+- `PUT /api/data/tenants/:tenantId/stocktakes/items/:itemId/count`
+- `PUT /api/data/tenants/:tenantId/stocktakes/items/:itemId/recount`
+- `PUT /api/data/tenants/:tenantId/stocktakes/:sessionId/approve`
 
 ### Promotions And Loyalty
 
-- `GET /api/mariadb/tenants/:tenantId/promotions`
-- `POST /api/mariadb/tenants/:tenantId/promotions`
-- `PUT /api/mariadb/tenants/:tenantId/promotions/:promotionId`
-- `POST /api/mariadb/tenants/:tenantId/promotions/validate`
-- `GET /api/mariadb/tenants/:tenantId/loyalty/tiers`
-- `POST /api/mariadb/tenants/:tenantId/loyalty/tiers`
-- `PUT /api/mariadb/tenants/:tenantId/loyalty/tiers/:tierId`
-- `GET /api/mariadb/tenants/:tenantId/loyalty/reward-rules`
-- `POST /api/mariadb/tenants/:tenantId/loyalty/reward-rules`
-- `PUT /api/mariadb/tenants/:tenantId/loyalty/reward-rules/:ruleId`
-- `POST /api/mariadb/tenants/:tenantId/loyalty/preview`
+- `GET /api/data/tenants/:tenantId/promotions`
+- `POST /api/data/tenants/:tenantId/promotions`
+- `PUT /api/data/tenants/:tenantId/promotions/:promotionId`
+- `POST /api/data/tenants/:tenantId/promotions/validate`
+- `GET /api/data/tenants/:tenantId/loyalty/tiers`
+- `POST /api/data/tenants/:tenantId/loyalty/tiers`
+- `PUT /api/data/tenants/:tenantId/loyalty/tiers/:tierId`
+- `GET /api/data/tenants/:tenantId/loyalty/reward-rules`
+- `POST /api/data/tenants/:tenantId/loyalty/reward-rules`
+- `PUT /api/data/tenants/:tenantId/loyalty/reward-rules/:ruleId`
+- `POST /api/data/tenants/:tenantId/loyalty/preview`
 
 ### Lay-bys And Events
 
-- `GET /api/mariadb/tenants/:tenantId/laybys`
-- `POST /api/mariadb/tenants/:tenantId/laybys`
-- `GET /api/mariadb/tenants/:tenantId/laybys/:laybyId`
-- `POST /api/mariadb/tenants/:tenantId/laybys/:laybyId/payments`
-- `POST /api/mariadb/tenants/:tenantId/laybys/:laybyId/complete`
-- `POST /api/mariadb/tenants/:tenantId/laybys/:laybyId/cancel`
-- `GET /api/mariadb/tenants/:tenantId/event-bookings`
-- `POST /api/mariadb/tenants/:tenantId/event-bookings`
-- `PUT /api/mariadb/tenants/:tenantId/event-bookings/:id`
-- `DELETE /api/mariadb/tenants/:tenantId/event-bookings/:id`
+- `GET /api/data/tenants/:tenantId/laybys`
+- `POST /api/data/tenants/:tenantId/laybys`
+- `GET /api/data/tenants/:tenantId/laybys/:laybyId`
+- `POST /api/data/tenants/:tenantId/laybys/:laybyId/payments`
+- `POST /api/data/tenants/:tenantId/laybys/:laybyId/complete`
+- `POST /api/data/tenants/:tenantId/laybys/:laybyId/cancel`
+- `GET /api/data/tenants/:tenantId/event-bookings`
+- `POST /api/data/tenants/:tenantId/event-bookings`
+- `PUT /api/data/tenants/:tenantId/event-bookings/:id`
+- `DELETE /api/data/tenants/:tenantId/event-bookings/:id`
 
 ### Messaging And Push
 
-- `GET /api/mariadb/tenants/:tenantId/messages`
-- `POST /api/mariadb/tenants/:tenantId/messages`
-- `PUT /api/mariadb/tenants/:tenantId/messages/:id/read`
-- `GET /api/mariadb/tenants/:tenantId/push/status`
-- `POST /api/mariadb/tenants/:tenantId/push/vapid/generate` dev role
-- `POST /api/mariadb/tenants/:tenantId/push/subscriptions`
-- `DELETE /api/mariadb/tenants/:tenantId/push/subscriptions`
-- `POST /api/mariadb/tenants/:tenantId/push/test`
+- `GET /api/data/tenants/:tenantId/messages`
+- `POST /api/data/tenants/:tenantId/messages`
+- `PUT /api/data/tenants/:tenantId/messages/:id/read`
+- `GET /api/data/tenants/:tenantId/push/status`
+- `POST /api/data/tenants/:tenantId/push/vapid/generate` dev role
+- `POST /api/data/tenants/:tenantId/push/subscriptions`
+- `DELETE /api/data/tenants/:tenantId/push/subscriptions`
+- `POST /api/data/tenants/:tenantId/push/test`
 
 ### Action Center And Manager Reviews
 
-- `GET /api/mariadb/tenants/:tenantId/action-center`
-- `GET /api/mariadb/tenants/:tenantId/action-center/tasks`
-- `PUT /api/mariadb/tenants/:tenantId/action-center/tasks/:taskId`
-- `GET /api/mariadb/tenants/:tenantId/action-center/activity`
-- `GET /api/mariadb/tenants/:tenantId/action-center/activity/export`
-- `GET /api/mariadb/tenants/:tenantId/action-center/activity/report`
-- `GET /api/mariadb/tenants/:tenantId/manager-overrides`
+- `GET /api/data/tenants/:tenantId/action-center`
+- `GET /api/data/tenants/:tenantId/action-center/tasks`
+- `PUT /api/data/tenants/:tenantId/action-center/tasks/:taskId`
+- `GET /api/data/tenants/:tenantId/action-center/activity`
+- `GET /api/data/tenants/:tenantId/action-center/activity/export`
+- `GET /api/data/tenants/:tenantId/action-center/activity/report`
+- `GET /api/data/tenants/:tenantId/manager-overrides`
 
 ### Reporting And Tax
 
-- `GET /api/mariadb/tenants/:tenantId/payment-provider-reconciliation/report`
-- `GET /api/mariadb/tenants/:tenantId/tax/periods`
-- `GET /api/mariadb/tenants/:tenantId/tax/vat-report`
-- `POST /api/mariadb/tenants/:tenantId/tax/periods/lock`
-- `GET /api/mariadb/tenants/:tenantId/reports/margins`
-- `GET /api/mariadb/tenants/:tenantId/reports/operational`
-- `GET /api/mariadb/tenants/:tenantId/reports/accounting-journal`
+- `GET /api/data/tenants/:tenantId/payment-provider-reconciliation/report`
+- `GET /api/data/tenants/:tenantId/tax/periods`
+- `GET /api/data/tenants/:tenantId/tax/vat-report`
+- `POST /api/data/tenants/:tenantId/tax/periods/lock`
+- `GET /api/data/tenants/:tenantId/reports/margins`
+- `GET /api/data/tenants/:tenantId/reports/operational`
+- `GET /api/data/tenants/:tenantId/reports/accounting-journal`
 
 ### Reorder Recommendations
 
-- `GET /api/mariadb/tenants/:tenantId/reorder-recommendations`
-- `POST /api/mariadb/tenants/:tenantId/reorder-recommendations/refresh`
-- `POST /api/mariadb/tenants/:tenantId/reorder-recommendations/:id/approve`
-- `POST /api/mariadb/tenants/:tenantId/reorder-recommendations/:id/dismiss`
-- `GET /api/mariadb/tenants/:tenantId/reorder-notification-rules`
-- `POST /api/mariadb/tenants/:tenantId/reorder-notification-rules`
-- `PUT /api/mariadb/tenants/:tenantId/reorder-notification-rules/:id`
-- `POST /api/mariadb/tenants/:tenantId/reorder-notification-rules/:id/run`
+- `GET /api/data/tenants/:tenantId/reorder-recommendations`
+- `POST /api/data/tenants/:tenantId/reorder-recommendations/refresh`
+- `POST /api/data/tenants/:tenantId/reorder-recommendations/:id/approve`
+- `POST /api/data/tenants/:tenantId/reorder-recommendations/:id/dismiss`
+- `GET /api/data/tenants/:tenantId/reorder-notification-rules`
+- `POST /api/data/tenants/:tenantId/reorder-notification-rules`
+- `PUT /api/data/tenants/:tenantId/reorder-notification-rules/:id`
+- `POST /api/data/tenants/:tenantId/reorder-notification-rules/:id/run`
 
 ### Integrations
 
 Staff/admin UI routes:
 
-- `GET /api/mariadb/tenants/:tenantId/integrations/ecommerce/products-export`
-- `GET /api/mariadb/tenants/:tenantId/integrations/api-keys`
-- `POST /api/mariadb/tenants/:tenantId/integrations/api-keys`
-- `POST /api/mariadb/tenants/:tenantId/integrations/api-keys/:keyId/revoke`
-- `GET /api/mariadb/tenants/:tenantId/integrations/webhook-events`
-- `GET /api/mariadb/tenants/:tenantId/integrations/delivery/orders`
-- `POST /api/mariadb/tenants/:tenantId/integrations/delivery/orders`
-- `PUT /api/mariadb/tenants/:tenantId/integrations/delivery/orders/:orderId/status`
+- `GET /api/data/tenants/:tenantId/integrations/ecommerce/products-export`
+- `GET /api/data/tenants/:tenantId/integrations/api-keys`
+- `POST /api/data/tenants/:tenantId/integrations/api-keys`
+- `POST /api/data/tenants/:tenantId/integrations/api-keys/:keyId/revoke`
+- `GET /api/data/tenants/:tenantId/integrations/webhook-events`
+- `GET /api/data/tenants/:tenantId/integrations/delivery/orders`
+- `POST /api/data/tenants/:tenantId/integrations/delivery/orders`
+- `PUT /api/data/tenants/:tenantId/integrations/delivery/orders/:orderId/status`
 
 Server-to-server route:
 
@@ -786,17 +786,17 @@ Use `x-jpos-integration-key`, `x-jimmy-integration-key`, or `Authorization: Bear
 
 ### AI
 
-- `GET /api/mariadb/tenants/:tenantId/ai/settings`
-- `PUT /api/mariadb/tenants/:tenantId/ai/settings`
-- `POST /api/mariadb/tenants/:tenantId/ai/models`
-- `POST /api/mariadb/tenants/:tenantId/ai/test`
-- `GET /api/mariadb/tenants/:tenantId/ai/insights`
-- `DELETE /api/mariadb/tenants/:tenantId/ai/insights/:insightId`
-- `POST /api/mariadb/tenants/:tenantId/ai/insights/generate`
-- `GET /api/mariadb/tenants/:tenantId/ai/staff-scores`
-- `POST /api/mariadb/tenants/:tenantId/ai/staff-scores/generate`
-- `POST /api/mariadb/tenants/:tenantId/ai/agent/inventory/proposal`
-- `POST /api/mariadb/tenants/:tenantId/ai/agent/inventory/apply`
+- `GET /api/data/tenants/:tenantId/ai/settings`
+- `PUT /api/data/tenants/:tenantId/ai/settings`
+- `POST /api/data/tenants/:tenantId/ai/models`
+- `POST /api/data/tenants/:tenantId/ai/test`
+- `GET /api/data/tenants/:tenantId/ai/insights`
+- `DELETE /api/data/tenants/:tenantId/ai/insights/:insightId`
+- `POST /api/data/tenants/:tenantId/ai/insights/generate`
+- `GET /api/data/tenants/:tenantId/ai/staff-scores`
+- `POST /api/data/tenants/:tenantId/ai/staff-scores/generate`
+- `POST /api/data/tenants/:tenantId/ai/agent/inventory/proposal`
+- `POST /api/data/tenants/:tenantId/ai/agent/inventory/apply`
 
 ## Mobile Build Notes
 

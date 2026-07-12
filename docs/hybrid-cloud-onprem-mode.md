@@ -68,13 +68,13 @@ Queued sales include a local receipt number, device ID, offline event ID,
 sync event metadata, batch ID, and sequence number. Replay uses the normal sale
 routes with idempotency fields:
 
-- `POST /api/mariadb/tenants/:tenantId/sales`
-- `PUT /api/mariadb/tenants/:tenantId/sales/:saleId`
+- `POST /api/data/tenants/:tenantId/sales`
+- `PUT /api/data/tenants/:tenantId/sales/:saleId`
 
 Sync conflicts are reported to:
 
 ```http
-POST /api/mariadb/tenants/:tenantId/offline-sync/issues
+POST /api/data/tenants/:tenantId/offline-sync/issues
 ```
 
 The backend records audit events and Action Center tasks for manager review.

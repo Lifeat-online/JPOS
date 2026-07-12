@@ -16,7 +16,7 @@ export function VendorManagementView() {
   const fetchVendors = async () => {
     if (!tenantId) return;
     try {
-      const data = await apiGet<Vendor[]>(`/api/mariadb/tenants/${tenantId}/vendors`);
+      const data = await apiGet<Vendor[]>(`/api/data/tenants/${tenantId}/vendors`);
       setVendors(data || []);
     } catch (err) {
       console.error('Vendors fetch error:', err);
@@ -46,9 +46,9 @@ export function VendorManagementView() {
         status: currentVendor.status || 'active',
       };
       if (currentVendor.id) {
-        await apiPut(`/api/mariadb/tenants/${tenantId}/vendors/${currentVendor.id}`, data);
+        await apiPut(`/api/data/tenants/${tenantId}/vendors/${currentVendor.id}`, data);
       } else {
-        await apiPost(`/api/mariadb/tenants/${tenantId}/vendors`, data);
+        await apiPost(`/api/data/tenants/${tenantId}/vendors`, data);
       }
       await fetchVendors();
       setModalOpen(false);
@@ -61,7 +61,7 @@ export function VendorManagementView() {
   const toggleStatus = async (vendor: Vendor) => {
     if (!tenantId) return;
     try {
-      await apiPut(`/api/mariadb/tenants/${tenantId}/vendors/${vendor.id}`, {
+      await apiPut(`/api/data/tenants/${tenantId}/vendors/${vendor.id}`, {
         status: vendor.status === 'active' ? 'inactive' : 'active',
       });
       await fetchVendors();

@@ -59,7 +59,8 @@ describe('db-crud', () => {
         await seedProducts('tenant_1', [
             { name: 'Bread', price: 16, category: 'Groceries', section: 'Retail', stock: 35, barcode: '778899' },
         ]);
-        expect(conn.query).toHaveBeenNthCalledWith(2, expect.stringContaining('DELETE FROM products'), ['tenant_1', 'prod_duplicate_1', 'prod_duplicate_2']);
+        // The dup ids are passed as a single array param for ANY($2::text[]).
+        expect(conn.query).toHaveBeenNthCalledWith(2, expect.stringContaining('DELETE FROM products'), ['tenant_1', ['prod_duplicate_1', 'prod_duplicate_2']]);
         expect(conn.commit).toHaveBeenCalled();
     });
     it('creates a sale without treating transaction row tuples as recipe rows', async () => {

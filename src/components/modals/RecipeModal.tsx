@@ -58,8 +58,8 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
     setLoading(true);
     try {
       const [recipeData, bulkData] = await Promise.all([
-        apiGet(`/api/mariadb/products/${product.id}/recipe`),
-        apiGet(`/api/mariadb/tenants/${(product as any).tenantId}/bulk-items`)
+        apiGet(`/api/data/products/${product.id}/recipe`),
+        apiGet(`/api/data/tenants/${(product as any).tenantId}/bulk-items`)
       ]);
       setRecipe((recipeData as RecipeItem[]) || []);
       setBulkItems((bulkData as BulkItem[]) || []);
@@ -102,7 +102,7 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
   const handleSave = async () => {
     setSaving(true);
     try {
-      await apiPut(`/api/mariadb/products/${product.id}/recipe`, recipe);
+      await apiPut(`/api/data/products/${product.id}/recipe`, recipe);
       onSave();
       onClose();
     } catch (err) {

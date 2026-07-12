@@ -7,7 +7,15 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
  *     npx vitest run tests/backend/product-embeddings.integration.test.ts
  */
 const TEST_URL = process.env.PGVECTOR_TEST_URL;
-const suite = TEST_URL ? describe : describe.skip;
+// Safety: this suite DROPs/CREATEs the products table, so only run it against a
+// database whose name is explicitly test-only. Refuse anything else.
+const TARGETS_TEST_DB = !!TEST_URL && /test/i.test(new URL(TEST_URL).pathname);
+if (TEST_URL && !TARGETS_TEST_DB) {
+  throw new Error(
+    "PGVECTOR_TEST_URL must point at a test-only database (name must contain 'test'); refusing to run destructive migration test.",
+  );
+}
+const suite = TARGETS_TEST_DB ? describe : describe.skip;
 
 function unitVector(axis: number): number[] {
   const a = new Array(1536).fill(0);

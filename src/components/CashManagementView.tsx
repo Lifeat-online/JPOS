@@ -294,7 +294,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
   const fetchSessions = async () => {
     if (!tenantId) return;
     try {
-      let data = await apiGet<CashSession[]>(`/api/mariadb/tenants/${tenantId}/cash-sessions?limit=50`);
+      let data = await apiGet<CashSession[]>(`/api/data/tenants/${tenantId}/cash-sessions?limit=50`);
       if (currentUserStaff?.role === 'cashier') {
         data = data.filter(s => s.staffId === currentUserStaff.id);
       }
@@ -311,7 +311,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
       setSessions(normalized);
       const visibleTodaySessions = normalized.filter(s => isToday(s.openedAt) || isToday(s.closedAt));
       const movementPairs = await Promise.all(visibleTodaySessions.map(async session => {
-        const movements = await apiGet<CashTransaction[]>(`/api/mariadb/tenants/${tenantId}/cash-sessions/${session.id}/movements`).catch(() => []);
+        const movements = await apiGet<CashTransaction[]>(`/api/data/tenants/${tenantId}/cash-sessions/${session.id}/movements`).catch(() => []);
         return [session.id, movements] as const;
       }));
       setCashMovements(Object.fromEntries(movementPairs));
@@ -368,7 +368,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
     if (!currentUserStaff || !tenantId) return;
     setIsProcessing(true);
     try {
-      await apiPost(`/api/mariadb/tenants/${tenantId}/cash-sessions`, {
+      await apiPost(`/api/data/tenants/${tenantId}/cash-sessions`, {
         staffId: currentUserStaff.id,
         staffName: currentUserStaff.name,
         openedAt: new Date().toISOString(),
@@ -395,7 +395,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
       if (difference < 0) {
         netTips = Math.max(0, netTips + difference);
       }
-      await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${activeSession.id}`, {
+      await apiPut(`/api/data/tenants/${tenantId}/cash-sessions/${activeSession.id}`, {
         status: 'closed',
         reviewStatus: 'submitted',
         closedAt: new Date().toISOString(),
@@ -419,7 +419,7 @@ export function CashManagementView({ currentUserStaff, sales }: CashManagementVi
     if (!tenantId) return;
     setIsProcessing(true);
     try {
-      await apiPut(`/api/mariadb/tenants/${tenantId}/cash-sessions/${session.id}/review`, {
+      await apiPut(`/api/data/tenants/${tenantId}/cash-sessions/${session.id}/review`, {
         reviewStatus,
         managerNotes: managerNotes[session.id] || '',
         varianceReason: varianceReasons[session.id] || '',
