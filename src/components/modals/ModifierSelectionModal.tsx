@@ -50,7 +50,7 @@ export const ModifierSelectionModal: React.FC<ModifierSelectionModalProps> = ({ 
   };
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-modal-stack flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[40px] shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[85vh]">
         <div className="p-8 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-white/5">
           <div>
@@ -67,7 +67,7 @@ export const ModifierSelectionModal: React.FC<ModifierSelectionModalProps> = ({ 
             <div key={g.id} className="space-y-4">
               <div className="flex justify-between items-baseline">
                 <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-[0.2em]">{g.name}</h3>
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                   {g.type === 'single' ? 'Select One' : 'Select Multiple'}
                 </p>
               </div>

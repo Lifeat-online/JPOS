@@ -160,7 +160,7 @@ export const BulkInventoryView: React.FC = () => {
               >
                 {area === 'single' ? <FlaskConical className="w-4 h-4" /> : <Package className="w-4 h-4" />}
                 {area === 'single' ? 'Single' : 'Bulk'}
-                <span className="text-[9px] opacity-70">{counts[area]}</span>
+                <span className="text-[10px] opacity-70">{counts[area]}</span>
               </button>
             ))}
           </div>
@@ -361,7 +361,7 @@ export const BulkInventoryView: React.FC = () => {
               <div className="space-y-1">
                 <div className="flex items-center gap-2 min-w-0">
                   <h4 className="font-black text-slate-900 dark:text-white truncate">{item.name}</h4>
-                  <span className="shrink-0 px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-[9px] font-black uppercase tracking-widest text-slate-500">
+                  <span className="shrink-0 px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase tracking-widest text-slate-500">
                     {itemType === 'bulk' ? 'Bulk' : 'Single'}
                   </span>
                 </div>
@@ -370,7 +370,7 @@ export const BulkInventoryView: React.FC = () => {
 
               {itemType === 'bulk' && (
                 <div className="mt-5 p-3 rounded-lg bg-primary/5 border border-primary/10">
-                  <p className="text-[9px] font-black text-primary uppercase tracking-widest mb-1">{item.packName || 'Pack'} Size</p>
+                  <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">{item.packName || 'Pack'} Size</p>
                   <p className="text-sm font-black text-slate-900 dark:text-white">
                     {packQuantity} {singleUnitName}{packQuantity === 1 ? '' : 's'} per {(item.packName || 'pack').toLowerCase()}
                   </p>
@@ -379,14 +379,14 @@ export const BulkInventoryView: React.FC = () => {
 
               <div className="mt-6 pt-6 border-t border-slate-50 dark:border-slate-800 flex justify-between items-end">
                 <div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Available Stock</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Available Stock</p>
                   <div className="flex items-center gap-2">
                     <span className={`text-2xl font-black ${isLow ? 'text-orange-600' : 'text-slate-900 dark:text-white'}`}>{item.stock}</span>
                     <span className="text-[10px] font-bold text-slate-300 uppercase">{item.unit}</span>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Cost / {item.unit || 'unit'}</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Cost / {item.unit || 'unit'}</p>
                   <p className="text-sm font-black text-emerald-600">R{Number(item.costPerUnit || 0).toFixed(2)}</p>
                 </div>
               </div>

@@ -64,7 +64,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       initial={{ opacity: 0 }} 
       animate={{ opacity: 1 }} 
       exit={{ opacity: 0 }} 
-      className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+      className="fixed inset-0 z-scanner bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
     >
       <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl relative">
         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">

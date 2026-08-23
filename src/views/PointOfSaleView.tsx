@@ -1448,7 +1448,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
         )}
 
         {assignedCompanionMode === 'pole_display' && (
-          <div className="fixed inset-0 z-[120] bg-slate-950 text-white flex flex-col">
+          <div className="fixed inset-0 z-fullscreen bg-slate-950 text-white flex flex-col">
             <div className="p-5 border-b border-white/10 flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Pole display</p>
@@ -1663,12 +1663,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                   {product.modifiers && product.modifiers.length > 0 && (
                     <div className="flex items-center gap-1 mt-1">
                       <div className="w-1.5 h-1.5 rounded-full bg-primary" />
-                      <span className="text-[8px] font-black text-primary uppercase">Customizable</span>
+                      <span className="text-[9px] font-black text-primary uppercase">Customizable</span>
                     </div>
                   )}
                   <div className="lg:hidden flex items-baseline gap-2 mt-1">
                      <span className="font-extrabold text-primary">R{Number(product.price).toFixed(2)}</span>
-                     <span className={`text-[8px] font-black ${isOutOfStock ? 'text-rose-500' : isLowStock ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`}>
+                     <span className={`text-[9px] font-black ${isOutOfStock ? 'text-rose-500' : isLowStock ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`}>
                       {isOutOfStock ? 'Out' : `${remainingAfterCart} left`}
                      </span>
                   </div>
@@ -1712,7 +1712,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsCartOpen(false)}
-              className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[45]"
+              className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-scrim"
             />
             <motion.aside
               initial={!isDesktopLayout ? { y: '100%' } : { x: '100%' }}
@@ -1780,7 +1780,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                           onClick={() => openWalletCashModal('in')}
                           disabled={!activeSession?.id || walletOnlineRequired}
                           title={walletOnlineRequired ? WALLET_ONLINE_REQUIRED_MESSAGE : 'Record customer wallet cash'}
-                          className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[8px] uppercase tracking-widest text-violet-700 disabled:opacity-50 dark:border-violet-900/50 dark:bg-violet-900/20 dark:text-violet-300"
+                          className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[9px] uppercase tracking-widest text-violet-700 disabled:opacity-50 dark:border-violet-900/50 dark:bg-violet-900/20 dark:text-violet-300"
                         >
                           Cash wallet
                         </button>
@@ -1956,7 +1956,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                           {modifiers.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-1">
                               {modifiers.map((m: any) => (
-                                <span key={m.optionId} className="text-[8px] font-bold bg-slate-50 dark:bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded-md">
+                                <span key={m.optionId} className="text-[9px] font-bold bg-slate-50 dark:bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded-md">
                                   + {m.name}
                                 </span>
                               ))}
@@ -2391,7 +2391,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            className="fixed inset-0 z-modal bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
             onClick={() => {
               setPriceCheckProduct(null);
               setPriceCheckError('');
@@ -2527,7 +2527,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            className="fixed inset-0 z-modal bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
             onClick={() => setParkModalOpen(false)}
           >
             <motion.div
@@ -2608,7 +2608,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            className="fixed inset-0 z-modal bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
             onClick={() => setWalletCashModalOpen(false)}
           >
             <motion.div
@@ -2746,7 +2746,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            className="fixed inset-0 z-modal bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
             onClick={() => setDrawerModalOpen(false)}
           >
             <motion.div
@@ -2838,7 +2838,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            className="fixed inset-0 z-modal bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
             onClick={() => setTablePickerOpen(false)}
           >
             <motion.div

@@ -433,7 +433,7 @@ export const StaffView: React.FC<StaffViewProps> = ({ staff, onEdit, onAdd, onDe
                   <div className="w-16 h-16 bg-slate-900 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-white text-2xl font-black shadow-lg">
                     {s.name.charAt(0)}
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
                     s.role === 'admin'
                       ? 'bg-purple-100 dark:bg-purple-500/10 text-purple-700 dark:text-purple-400'
                       : s.role === 'manager'
@@ -592,7 +592,7 @@ export const StaffView: React.FC<StaffViewProps> = ({ staff, onEdit, onAdd, onDe
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
                                 <p className="font-black text-slate-900 dark:text-white">{shift.staffName}</p>
-                                <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${
+                                <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-widest ${
                                   shift.status === 'published' ? 'bg-emerald-100 text-emerald-700' :
                                   shift.status === 'cancelled' ? 'bg-rose-100 text-rose-700' :
                                   shift.status === 'completed' ? 'bg-blue-100 text-blue-700' :

@@ -343,7 +343,7 @@ function UserMenu({
                                         disabled={Boolean(option.disabled)}
                                         onClick={() => changeCompanionMode(option.id)}
                                         title={option.disabled ? 'A display is already paired to this terminal' : option.label}
-                                        className={`h-10 rounded-xl text-[9px] font-black uppercase tracking-widest flex flex-col items-center justify-center gap-0.5 border transition-all disabled:opacity-40 ${
+                                        className={`h-10 rounded-xl text-[10px] font-black uppercase tracking-widest flex flex-col items-center justify-center gap-0.5 border transition-all disabled:opacity-40 ${
                                             companionState.companionMode === option.id
                                                 ? 'bg-primary text-white border-primary shadow-sm'
                                                 : 'bg-slate-50 dark:bg-slate-950/50 text-slate-500 dark:text-slate-300 border-slate-100 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -422,7 +422,7 @@ function UserMenu({
                             <Monitor className={`w-4 h-4 ${isKioskMode ? 'text-amber-500' : 'text-slate-500'}`} />
                             {isKioskMode ? 'Exit Kiosk Mode' : 'Kiosk Mode'}
                             {isKioskMode && (
-                                <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 uppercase tracking-widest">
+                                <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 uppercase tracking-widest">
                                     Active
                                 </span>
                             )}
@@ -462,7 +462,7 @@ function UserMenu({
                             >
                                 <Download className="w-4 h-4" />
                                 Install App
-                                <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-black bg-primary/10 text-primary uppercase tracking-widest">
+                                <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-black bg-primary/10 text-primary uppercase tracking-widest">
                                     PWA
                                 </span>
                             </button>
@@ -570,7 +570,7 @@ function DesktopNav({
                         <item.icon className="w-3.5 h-3.5 shrink-0" />
                         {item.label}
                         {badge > 0 && (
-                            <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
+                            <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center">
                                 {badge > 99 ? '99+' : badge}
                             </span>
                         )}
@@ -614,7 +614,7 @@ function DesktopNav({
                                 <div key={groupName}>
                                     {gIdx > 0 && <div className="h-px bg-slate-100 dark:bg-slate-800 mx-3 my-1" />}
                                     <div className="px-3 py-1.5">
-                                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">{groupName}</span>
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">{groupName}</span>
                                     </div>
                                     {items.map((item) => (
                                         <button
@@ -1422,7 +1422,7 @@ export default function App() {
                             <item.icon className="w-3.5 h-3.5" />
                             {item.label}
                             {badge > 0 && (
-                                <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
+                                <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center">
                                     {badge > 99 ? '99+' : badge}
                                 </span>
                             )}
@@ -1721,7 +1721,7 @@ export default function App() {
             <AnimatePresence>
                 {/* Kiosk mode exit button — always visible when kiosk is active */}
                 {isKioskMode && (
-                    <div className="fixed bottom-6 right-6 z-[200]">
+                    <div className="fixed bottom-6 right-6 z-top">
                         <button
                             onClick={exitKioskMode}
                             className="flex items-center gap-2 px-4 py-3 bg-amber-500 text-white rounded-2xl font-black text-sm shadow-2xl shadow-amber-500/40 hover:bg-amber-600 active:scale-95 transition-all border-2 border-amber-400"

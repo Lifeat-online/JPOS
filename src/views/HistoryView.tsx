@@ -383,7 +383,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       <div className="flex flex-col gap-1">
                         <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">{sale.paymentMethod}</span>
                         {sale.payments && sale.payments.length > 1 && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[8px] font-black uppercase tracking-tighter w-fit">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[9px] font-black uppercase tracking-tighter w-fit">
                             Split ({sale.payments.length})
                           </span>
                         )}
@@ -391,7 +391,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     </td>
                     <td className="px-6 py-4 font-extrabold text-slate-900 dark:text-white">R{Number(sale.total || 0).toFixed(2)}</td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
                         sale.transactionType === 'refund'
                           ? 'bg-rose-100 text-rose-700'
                           : sale.transactionType === 'void'
@@ -512,7 +512,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                             </div>
                           )}
                           {'status' in item && item.status && (
-                            <span className="mt-2 inline-flex rounded bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-500">
+                            <span className="mt-2 inline-flex rounded bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-500">
                               {item.status}
                             </span>
                           )}
@@ -652,7 +652,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </div>
           {refundOpen && (
             <div
-              className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/65 p-0 sm:p-4"
+              className="fixed inset-0 z-popover flex items-end sm:items-center justify-center bg-slate-950/65 p-0 sm:p-4"
               role="dialog"
               aria-modal="true"
               aria-labelledby="refund-dialog-title"
@@ -860,7 +860,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           )}
           {voidOpen && (
             <div
-              className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/65 p-0 sm:p-4"
+              className="fixed inset-0 z-popover flex items-end sm:items-center justify-center bg-slate-950/65 p-0 sm:p-4"
               role="dialog"
               aria-modal="true"
               aria-labelledby="void-dialog-title"

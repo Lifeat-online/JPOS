@@ -64,7 +64,7 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4">
+    <div className="fixed inset-0 z-scanner bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

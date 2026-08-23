@@ -26,7 +26,7 @@ export const LaybyReceipt: React.FC<LaybyReceiptProps> = ({ order, config }) => 
 
   return (
     <div
-      className="layby-receipt-print-only fixed inset-0 bg-white text-black z-[9999] hidden flex-col font-mono leading-tight mx-auto"
+      className="layby-receipt-print-only fixed inset-0 bg-white text-black z-print hidden flex-col font-mono leading-tight mx-auto"
       style={{ width: printProfile.contentWidth, maxWidth: printProfile.maxWidth, fontSize: printProfile.fontSizePx }}
     >
       <div className="text-center mb-4">

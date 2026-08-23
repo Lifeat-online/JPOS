@@ -18,16 +18,22 @@
 }
 
 /*
- * Z-index scale (keep new overlays within it; avoid one-off values):
- *   base content      0-10
- *   sticky header     40
- *   mobile nav/bars   30
- *   cart peek bar     35
- *   dropdowns/popovers 45
- *   modal overlay     60
- *   scanner           100
- *   fullscreen modes  120
- *   print-only        9999
+ * Z-index scale — single source of truth. Use the named utilities
+ * (z-scrim, z-modal, …) instead of arbitrary z-[N] values so stacking
+ * order stays auditable. Numeric z-0…z-50 from Tailwind's default scale
+ * remain valid for local stacking contexts.
+ *   z-nav        30   mobile bottom tab bar
+ *   z-header     40   sticky app header / cart peek affordances
+ *   z-scrim      45   cart sheet backdrop
+ *   (z-50)            cart sheet / dropdown shells
+ *   z-modal      60   modal overlays + toasts
+ *   z-popover    70   popovers layered inside a modal
+ *   z-scanner   100   barcode camera overlay
+ *   z-modal-stack 110 modal rendered above another overlay
+ *   z-fullscreen 120  kiosk / pole-display takeover
+ *   z-high      150   settings sub-overlays
+ *   z-top       200   highest interactive layer (install prompts)
+ *   z-print    9999   print-only receipts
  */
 
 @layer base {
@@ -65,4 +71,17 @@
   .pt-safe {
     padding-top: env(safe-area-inset-top);
   }
+
+  /* Named z-index scale — see the map above the utilities layer. */
+  .z-nav { z-index: 30; }
+  .z-header { z-index: 40; }
+  .z-scrim { z-index: 45; }
+  .z-modal { z-index: 60; }
+  .z-popover { z-index: 70; }
+  .z-scanner { z-index: 100; }
+  .z-modal-stack { z-index: 110; }
+  .z-fullscreen { z-index: 120; }
+  .z-high { z-index: 150; }
+  .z-top { z-index: 200; }
+  .z-print { z-index: 9999; }
 }

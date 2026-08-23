@@ -211,7 +211,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                       </div>
                       <span className="text-xs font-black text-primary">R{Number(row.totalSpend || 0).toFixed(2)}</span>
                     </div>
-                    <div className={`mt-2 inline-flex items-center rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${row.campaignEligible ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>
+                    <div className={`mt-2 inline-flex items-center rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-widest ${row.campaignEligible ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>
                       {row.campaignEligible ? 'Campaign ready' : 'Consent needed'}
                     </div>
                     <p className="mt-2 line-clamp-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{row.campaignHint}</p>
@@ -269,7 +269,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                       <h3 className="font-bold text-slate-900 dark:text-white truncate">{c.name}</h3>
                       <p className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-widest truncate">{c.email}</p>
                       {c.isAnonymized && (
-                        <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-rose-500">Anonymized</p>
+                        <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-rose-500">Anonymized</p>
                       )}
                     </div>
                   </div>
@@ -300,18 +300,18 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 {(c.accountEnabled || Number(c.accountBalance || 0) > 0) && (
                   <div className="grid grid-cols-3 gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-200">
                     <div>
-                      <p className="text-[8px] font-black uppercase tracking-widest opacity-70">Limit</p>
+                      <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Limit</p>
                       <p className="text-xs font-black">R{Number(c.accountLimit || 0).toFixed(2)}</p>
                     </div>
                     <div>
-                      <p className="text-[8px] font-black uppercase tracking-widest opacity-70">Owing</p>
+                      <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Owing</p>
                       <p className="text-xs font-black">R{Number(c.accountBalance || 0).toFixed(2)}</p>
                     </div>
                     <div>
-                      <p className="text-[8px] font-black uppercase tracking-widest opacity-70">Left</p>
+                      <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Left</p>
                       <p className="text-xs font-black">R{Math.max(0, Number(c.accountLimit || 0) - Number(c.accountBalance || 0)).toFixed(2)}</p>
                     </div>
-                    <div className="col-span-3 flex items-center gap-2 text-[9px] font-black uppercase tracking-widest">
+                    <div className="col-span-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
                       <ReceiptText className="w-3 h-3" />
                       {c.accountEnabled ? 'Account active' : 'Account disabled'}
                     </div>
@@ -325,7 +325,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                       <div key={type} className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${consentPillClass(status)}`}>
                         <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
                         <div className="min-w-0">
-                          <p className="truncate text-[8px] font-black uppercase tracking-widest">{type === 'marketing' ? 'Marketing' : 'Contact data'}</p>
+                          <p className="truncate text-[9px] font-black uppercase tracking-widest">{type === 'marketing' ? 'Marketing' : 'Contact data'}</p>
                           <p className="truncate text-[10px] font-black uppercase">{consentLabel(status)}</p>
                         </div>
                       </div>

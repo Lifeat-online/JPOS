@@ -211,19 +211,19 @@ export function StockBatchesView() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-right">
               <div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Units</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Units</p>
                 <p className="text-sm font-black text-slate-900 dark:text-white">{location.currentStockQuantity.toFixed(3)}</p>
               </div>
               <div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Received</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Received</p>
                 <p className="text-sm font-black text-slate-900 dark:text-white">{formatMoney(location.receivedValue)}</p>
               </div>
               <div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Movement In/Out</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Movement In/Out</p>
                 <p className="text-sm font-black text-slate-900 dark:text-white">{location.movementQuantityIn.toFixed(3)} / {location.movementQuantityOut.toFixed(3)}</p>
               </div>
               <div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Value Impact</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Value Impact</p>
                 <p className="text-sm font-black text-slate-900 dark:text-white">{formatMoney(location.movementValueDelta)}</p>
               </div>
             </div>
@@ -254,15 +254,15 @@ export function StockBatchesView() {
 
               <div className="grid grid-cols-3 gap-3 mt-5">
                 <div>
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Remaining</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Remaining</p>
                   <p className="text-xl font-black text-slate-900 dark:text-white">{Number(batch.remainingQuantity || 0).toFixed(3)}</p>
                 </div>
                 <div>
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Received</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Received</p>
                   <p className="text-xl font-black text-slate-900 dark:text-white">{Number(batch.receivedQuantity || 0).toFixed(3)}</p>
                 </div>
                 <div>
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Unit Cost</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Unit Cost</p>
                   <p className="text-xl font-black text-slate-900 dark:text-white">R{Number(batch.unitCost || 0).toFixed(2)}</p>
                 </div>
               </div>

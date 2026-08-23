@@ -131,7 +131,7 @@ export const LaybyCreateModal: React.FC<LaybyCreateModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+    <div className="fixed inset-0 z-popover bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
       <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden">
         <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-4">
           <div>
@@ -232,15 +232,15 @@ export const LaybyCreateModal: React.FC<LaybyCreateModalProps> = ({
 
           <div className="grid grid-cols-3 gap-2 rounded-2xl bg-slate-50 dark:bg-slate-950/60 p-3">
             <div>
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Deposit</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Deposit</p>
               <p className="text-sm font-black text-slate-900 dark:text-white">{currency}{depositValue.toFixed(2)}</p>
             </div>
             <div>
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Balance</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Balance</p>
               <p className="text-sm font-black text-slate-900 dark:text-white">{currency}{balanceAfterDeposit.toFixed(2)}</p>
             </div>
             <div>
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Change</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Change</p>
               <p className="text-sm font-black text-slate-900 dark:text-white">{currency}{changeValue.toFixed(2)}</p>
             </div>
           </div>

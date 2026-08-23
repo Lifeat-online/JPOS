@@ -1921,15 +1921,15 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                   </div>
                   <div className="mb-4 grid grid-cols-3 gap-2">
                     <div className="rounded-xl bg-slate-50 p-2 text-center dark:bg-slate-800">
-                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Paper</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Paper</p>
                       <p className="mt-1 text-xs font-black text-slate-800 dark:text-white">{receiptProfile.label}</p>
                     </div>
                     <div className="rounded-xl bg-slate-50 p-2 text-center dark:bg-slate-800">
-                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Text</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Text</p>
                       <p className="mt-1 text-xs font-black text-slate-800 dark:text-white">{receiptPrint.fontSizePx}px</p>
                     </div>
                     <div className="rounded-xl bg-slate-50 p-2 text-center dark:bg-slate-800">
-                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Logo</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Logo</p>
                       <p className="mt-1 text-xs font-black text-slate-800 dark:text-white">{receiptPrint.showLogo ? `${receiptPrint.logoMode} ${receiptPreviewLogoPx}px` : 'off'}</p>
                     </div>
                   </div>
@@ -2155,7 +2155,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                               <p className="text-sm font-black text-slate-900 dark:text-white">{tier.name}</p>
                               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{tier.minPoints} pts / {tier.earnMultiplier}x earn</p>
                             </div>
-                            <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${tier.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{tier.status}</span>
+                            <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-widest ${tier.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{tier.status}</span>
                           </div>
                           <div className="mt-3 flex gap-2">
                             <button type="button" onClick={() => setLoyaltyTierDraft(tier)} className="flex-1 rounded-lg bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-slate-900 dark:text-slate-300">Edit</button>
@@ -2283,7 +2283,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
                               <p className="text-sm font-black text-slate-900 dark:text-white">{rule.name}</p>
                               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{rule.ruleType} / {rule.pointsPerCurrency || 'base'} currency/pt / {rule.multiplier}x / +{rule.bonusPoints} pts</p>
                             </div>
-                            <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${rule.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{rule.status}</span>
+                            <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-widest ${rule.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{rule.status}</span>
                           </div>
                           <div className="mt-3 flex gap-2">
                             <button type="button" onClick={() => setLoyaltyRuleDraft(loyaltyRuleToDraft(rule))} className="flex-1 rounded-lg bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-slate-900 dark:text-slate-300">Edit</button>
@@ -3170,7 +3170,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
       </div>
 
       {categoryInput.isOpen && (
-        <div className="fixed inset-0 z-[150] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-high bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl w-full max-w-sm">
             <h3 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">
               Add {categoryInput.type.charAt(0).toUpperCase() + categoryInput.type.slice(1)}
@@ -3206,7 +3206,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
 
       {/* Workstation modal */}
       {wsModal.isOpen && (
-        <div className="fixed inset-0 z-[150] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-high bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl w-full max-w-sm">
             <h3 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">
               {wsModal.ws?.id ? 'Edit Workstation' : 'New Workstation'}
@@ -3258,7 +3258,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
 
       {/* Section modal */}
       {sectionModal.isOpen && (
-        <div className="fixed inset-0 z-[150] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-high bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl w-full max-w-sm">
             <h3 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">
               {sectionModal.section?.id ? 'Edit Section' : 'New Section'}
@@ -3299,7 +3299,7 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
 
       {/* Table modal */}
       {tableModal.isOpen && (
-        <div className="fixed inset-0 z-[150] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-high bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl w-full max-w-sm">
             <h3 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">
               {tableModal.table?.id ? 'Edit Table' : 'New Table'}

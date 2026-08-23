@@ -178,7 +178,7 @@ export const LaybyManagerModal: React.FC<LaybyManagerModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-[70] bg-slate-950/60 backdrop-blur-sm flex items-end lg:items-center justify-center p-4">
+      <div className="fixed inset-0 z-popover bg-slate-950/60 backdrop-blur-sm flex items-end lg:items-center justify-center p-4">
         <div className="w-full max-w-6xl max-h-[92vh] rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col">
           <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-4">
             <div>
@@ -242,7 +242,7 @@ export const LaybyManagerModal: React.FC<LaybyManagerModalProps> = ({
                       <p className="font-black text-sm text-slate-900 dark:text-white truncate">{order.customerName}</p>
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{order.id.slice(-8).toUpperCase()}</p>
                     </div>
-                    <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${isOverdue(order) ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-widest ${isOverdue(order) ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
                       {isOverdue(order) ? 'overdue' : order.status}
                     </span>
                   </div>
@@ -266,15 +266,15 @@ export const LaybyManagerModal: React.FC<LaybyManagerModalProps> = ({
                     </div>
                     <div className="grid grid-cols-3 gap-2 min-w-[280px]">
                       <div className="rounded-2xl bg-slate-50 dark:bg-slate-950 p-3">
-                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Total</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total</p>
                         <p className="text-sm font-black text-slate-900 dark:text-white">{currency}{selectedOrder.totalAmount.toFixed(2)}</p>
                       </div>
                       <div className="rounded-2xl bg-slate-50 dark:bg-slate-950 p-3">
-                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Paid</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Paid</p>
                         <p className="text-sm font-black text-slate-900 dark:text-white">{currency}{selectedOrder.amountPaid.toFixed(2)}</p>
                       </div>
                       <div className="rounded-2xl bg-slate-50 dark:bg-slate-950 p-3">
-                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Balance</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Balance</p>
                         <p className="text-sm font-black text-slate-900 dark:text-white">{currency}{selectedOrder.balanceDue.toFixed(2)}</p>
                       </div>
                     </div>

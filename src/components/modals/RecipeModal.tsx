@@ -118,7 +118,7 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
   );
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-scanner flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-[40px] shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
         <div className="p-8 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-white/5">
           <div className="flex items-center gap-4">
@@ -140,19 +140,19 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
           <div className="flex-1 p-8 overflow-y-auto space-y-6">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Recipe cost</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Recipe cost</p>
                 <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">R{recipeCost.toFixed(2)}</p>
               </div>
               <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Gross margin</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gross margin</p>
                 <p className={`mt-1 text-lg font-black ${grossMargin < 30 ? 'text-amber-600' : 'text-emerald-600'}`}>{grossMargin.toFixed(1)}%</p>
               </div>
               <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Sub groups</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sub groups</p>
                 <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">{Object.keys(grouped).length}</p>
               </div>
               <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Waste avg</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Waste avg</p>
                 <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">
                   {recipe.length ? (recipe.reduce((sum, item) => sum + number(item.wastePercent), 0) / recipe.length).toFixed(1) : '0.0'}%
                 </p>
@@ -173,7 +173,7 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
                     <div className="flex items-start gap-4">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-black text-slate-900 dark:text-white">{item.bulkItemName}</p>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                         {item.unit} - {effectiveQuantity(item).toFixed(3)} effective - R{lineCost(item).toFixed(2)}
                       </p>
                     </div>
@@ -266,7 +266,7 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({ product, onClose, onSa
                 >
                   <div>
                     <p className="text-[11px] font-black text-slate-900 dark:text-white truncate max-w-[140px]">{item.name}</p>
-                    <p className="text-[9px] font-bold text-slate-400">{item.unit}</p>
+                    <p className="text-[10px] font-bold text-slate-400">{item.unit}</p>
                   </div>
                   <Plus className="w-4 h-4 text-slate-300 group-hover:text-primary transition-colors" />
                 </button>

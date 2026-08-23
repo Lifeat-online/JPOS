@@ -82,7 +82,7 @@ function MessageBubble({ msg, isOwn, showSender }: { msg: Message; isOwn: boolea
               {msg.senderName}
             </span>
             {msg.isDevBroadcast && (
-              <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 uppercase tracking-widest">
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 uppercase tracking-widest">
                 DEV
               </span>
             )}
@@ -299,7 +299,7 @@ export function MessagingView({
             <ChannelIcon className="w-4 h-4 text-slate-500" />
             <span className="font-black text-slate-900 dark:text-white">{getChannelLabel(activeChannel)}</span>
             {activeChannel === 'dev-broadcast' && (
-              <span className="px-2 py-0.5 rounded text-[9px] font-black bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 uppercase tracking-widest">
+              <span className="px-2 py-0.5 rounded text-[10px] font-black bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 uppercase tracking-widest">
                 Platform-wide
               </span>
             )}
@@ -397,7 +397,7 @@ export function MessagingView({
             </button>
           </div>
           <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 px-1">
-            Press <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[9px]">Enter</kbd> to send · <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[9px]">Shift+Enter</kbd> for new line
+            Press <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px]">Enter</kbd> to send · <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px]">Shift+Enter</kbd> for new line
           </p>
         </div>
       </div>

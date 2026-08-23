@@ -292,8 +292,8 @@ export function InventoryAgentView() {
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2 mb-2">
                           <h4 className="text-base font-black text-slate-900 dark:text-white">{item.label}</h4>
-                          <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${item.risk === 'high' ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-300' : item.risk === 'medium' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-300' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-300'}`}>{item.risk} risk</span>
-                          <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-500">{Math.round(item.confidence * 100)}% confidence</span>
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${item.risk === 'high' ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-300' : item.risk === 'medium' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-300' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-300'}`}>{item.risk} risk</span>
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-500">{Math.round(item.confidence * 100)}% confidence</span>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {item.evidence.map(evidence => (

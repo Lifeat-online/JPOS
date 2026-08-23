@@ -592,7 +592,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <div className="flex justify-between items-center px-1">
                       <label className="text-[10px] font-black text-slate-900 dark:text-white uppercase tracking-widest">Section</label>
                       {section !== 'All' && (
-                        <button onClick={() => { setSection('All'); setCategory('All'); setSubCategory('All'); }} className="text-[9px] font-black text-primary uppercase tracking-widest hover:underline">Clear</button>
+                        <button onClick={() => { setSection('All'); setCategory('All'); setSubCategory('All'); }} className="text-[10px] font-black text-primary uppercase tracking-widest hover:underline">Clear</button>
                       )}
                     </div>
                     <div className="flex flex-col gap-2">
@@ -637,7 +637,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <button
                             key={sub}
                             onClick={() => setSubCategory(sub === subCategory ? 'All' : sub)}
-                            className={`px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${subCategory === sub ? 'bg-slate-800 dark:bg-slate-100 text-white shadow-md' : 'bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/60 text-slate-400 dark:text-slate-500 hover:border-slate-300'}`}
+                            className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${subCategory === sub ? 'bg-slate-800 dark:bg-slate-100 text-white shadow-md' : 'bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/60 text-slate-400 dark:text-slate-500 hover:border-slate-300'}`}
                           >
                             {sub}
                           </button>
@@ -666,7 +666,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <div className="relative z-10">
                     <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">Stock Items</p>
                     <h4 className="text-4xl font-black text-slate-900 dark:text-white">{stats.totalItems}</h4>
-                    <p className="text-[9px] font-bold text-slate-300 dark:text-slate-600 mt-2">Active SKUs</p>
+                    <p className="text-[10px] font-bold text-slate-300 dark:text-slate-600 mt-2">Active SKUs</p>
                   </div>
                   <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:rotate-12 transition-transform duration-500">
                     <Package className="w-32 h-32 text-slate-900 dark:text-white" />
@@ -677,7 +677,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <div className="relative z-10">
                     <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${stats.lowStockItems > 0 ? 'text-orange-600' : 'text-slate-400 dark:text-slate-500'}`}>Low Stock Alerts</p>
                     <h4 className={`text-4xl font-black ${stats.lowStockItems > 0 ? 'text-orange-600' : 'text-slate-900 dark:text-white'}`}>{stats.lowStockItems}</h4>
-                    <p className="text-[9px] font-bold text-orange-400 mt-2 uppercase tracking-widest">Needs Restocking</p>
+                    <p className="text-[10px] font-bold text-orange-400 mt-2 uppercase tracking-widest">Needs Restocking</p>
                   </div>
                   <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:rotate-12 transition-transform duration-500">
                     <ShieldCheck className="w-32 h-32 text-slate-900 dark:text-white" />
@@ -688,7 +688,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <div className="relative z-10">
                     <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Inventory Value</p>
                     <h4 className="text-4xl font-black text-white dark:text-slate-900">R{stats.totalValue.toLocaleString()}</h4>
-                    <p className="text-[9px] font-bold text-slate-500 dark:text-slate-400 mt-2">Current Asset Value</p>
+                    <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mt-2">Current Asset Value</p>
                   </div>
                   <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:-rotate-12 transition-transform duration-500">
                     <Banknote className="w-32 h-32 text-white dark:text-slate-900" />
@@ -713,9 +713,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         />
                         <div className="absolute top-6 left-6 flex flex-col gap-2">
                           {isLowStock && (
-                            <div className="px-3 py-1.5 bg-orange-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full shadow-xl">Low Stock</div>
+                            <div className="px-3 py-1.5 bg-orange-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full shadow-xl">Low Stock</div>
                           )}
-                          <div className="px-3 py-1.5 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm text-slate-900 dark:text-white text-[9px] font-black uppercase tracking-widest rounded-full shadow-sm border border-white/20">
+                          <div className="px-3 py-1.5 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm text-slate-900 dark:text-white text-[10px] font-black uppercase tracking-widest rounded-full shadow-sm border border-white/20">
                             {product.category}
                           </div>
                         </div>
@@ -740,14 +740,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                         <div className="grid grid-cols-2 gap-4 pb-6 border-b border-slate-50 dark:border-slate-800">
                           <div>
-                            <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 opacity-50">Quantity</p>
+                            <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 opacity-50">Quantity</p>
                             <div className="flex items-center gap-3">
                               <span className={`text-2xl font-black ${isLowStock ? 'text-orange-500 animate-pulse' : 'text-slate-900 dark:text-white'}`}>{product.stock}</span>
                               <span className="text-[10px] font-bold text-slate-300 dark:text-slate-600">PCS</span>
                             </div>
                           </div>
                           <div>
-                            <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 opacity-50">Asset Value</p>
+                            <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 opacity-50">Asset Value</p>
                             <p className="text-2xl font-black text-slate-900 dark:text-white">R{(product.stock * (product.costPrice || product.price)).toLocaleString()}</p>
                           </div>
                         </div>
@@ -820,17 +820,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
             <div className="mt-6 grid grid-cols-3 gap-3">
               <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Current</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Current</p>
                 <p className="mt-1 text-2xl font-black text-slate-900 dark:text-white">{adjustmentPreview.current}</p>
               </div>
               <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Change</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Change</p>
                 <p className={`mt-1 text-2xl font-black ${adjustModal.delta > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                   {adjustModal.delta > 0 ? '+' : '-'}{adjustmentPreview.absoluteDelta}
                 </p>
               </div>
               <div className="rounded-2xl bg-slate-900 p-4 dark:bg-white">
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Result</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Result</p>
                 <p className="mt-1 text-2xl font-black text-white dark:text-slate-900">{adjustmentPreview.next}</p>
               </div>
             </div>

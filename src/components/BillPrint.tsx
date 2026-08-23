@@ -26,7 +26,7 @@ export const BillPrint: React.FC<BillPrintProps> = ({ cart, customer, config, su
 
   return (
     <div
-      className="bill-print-only fixed inset-0 bg-white text-black z-[9999] hidden flex-col font-mono leading-tight mx-auto"
+      className="bill-print-only fixed inset-0 bg-white text-black z-print hidden flex-col font-mono leading-tight mx-auto"
       style={{ width: printProfile.contentWidth, maxWidth: printProfile.maxWidth, fontSize: printProfile.fontSizePx }}
     >
       <div className="text-center mb-4">

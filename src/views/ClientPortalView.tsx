@@ -151,7 +151,7 @@ export function ClientPortalView({
             <Icon className="w-4 h-4" />
             {label}
             {id === 'wallet' && pendingPayouts.length > 0 && (
-              <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[9px] font-black flex items-center justify-center">
+              <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-black flex items-center justify-center">
                 {pendingPayouts.length}
               </span>
             )}

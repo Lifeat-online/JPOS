@@ -110,7 +110,7 @@ export function CustomerSelector({ customers, selectedId, onSelect, onAddNew }: 
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 4, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            className="absolute top-full left-0 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl z-[100] overflow-hidden"
+            className="absolute top-full left-0 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl z-scanner overflow-hidden"
           >
             <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50">
               <div className="relative">
@@ -169,12 +169,12 @@ export function CustomerSelector({ customers, selectedId, onSelect, onAddNew }: 
                           {customer.name}
                         </span>
                         {customer.profileType === 'staff' && (
-                          <span className="shrink-0 rounded-full bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                          <span className="shrink-0 rounded-full bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
                             Staff
                           </span>
                         )}
                         {customer.profileType !== 'staff' && customer.loyaltyMemberStatus && customer.loyaltyMemberStatus !== 'active' && (
-                          <span className="shrink-0 rounded-full bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
+                          <span className="shrink-0 rounded-full bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
                             {customer.loyaltyMemberStatus.replace('_', ' ')}
                           </span>
                         )}

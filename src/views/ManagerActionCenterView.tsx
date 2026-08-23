@@ -738,11 +738,11 @@ export function ManagerActionCenterView({ tenantId }: { tenantId: string | null 
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <h4 className="truncate text-sm font-black text-slate-900 dark:text-white">{item.title}</h4>
-                          <span className="rounded-full bg-white px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-400 dark:bg-slate-900">
+                          <span className="rounded-full bg-white px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:bg-slate-900">
                             {item.kind}
                           </span>
                           {isStock && item.reasonCode && (
-                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                               {stockReasonLabel(item.reasonCode)}
                             </span>
                           )}
