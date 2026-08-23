@@ -1,7 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { randomUUID } from 'crypto';
 declare global {
-    // eslint-disable-next-line @typescript-eslint/no-namespace
     namespace Express {
         interface Request {
             requestId?: string;
@@ -137,6 +136,19 @@ interface RateState {
     resetAt: number;
 }
 const rateState = new Map<string, RateState>();
+// Prune expired entries so unique IPs cannot grow the map without bound.
+// Runs at most once per minute; the timer is unref'd so it never keeps
+// the process (or a test run) alive on its own.
+let lastRatePrune = 0;
+function pruneExpiredRateStates(now: number): void {
+    if (now - lastRatePrune < 60000)
+        return;
+    lastRatePrune = now;
+    for (const [key, state] of rateState) {
+        if (state.resetAt <= now)
+            rateState.delete(key);
+    }
+}
 const SECRET_ASSIGNMENT_PATTERN = /(["']?\b(?:password|passwd|pwd|token|refreshToken|accessToken|api[_-]?key|apikey|secret|authorization|cookie|set-cookie|jwt|cvv|cvc|security\s*code|card[_-]?number|pan|merchant[_-]?key|passphrase)\b["']?\s*[:=]\s*["']?)[^"',}\]]+/gi;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
 const CARD_PAN_PATTERN = /\b(?:\d[ -]*?){13,19}\b/g;
@@ -183,6 +195,7 @@ export function writeSecurityLog(level: 'warn' | 'error', event: string, req: Re
  */
 export function _resetRateLimitForTests(): void {
     rateState.clear();
+    lastRatePrune = 0;
 }
 /**
  * Process-local API rate limit.
@@ -199,6 +212,7 @@ export const apiRateLimit: RequestHandler = (req, res, next) => {
         return next();
     const key = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
+    pruneExpiredRateStates(now);
     const window = 60000;
     const state = rateState.get(key);
     if (!state || state.resetAt <= now) {

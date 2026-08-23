@@ -406,7 +406,11 @@ function UserMenu({
                         {/* Kiosk mode — fullscreen + Escape blocked */}
                         <button
                             onClick={() => {
-                                isKioskMode ? exitKioskMode() : enterKioskMode();
+                                if (isKioskMode) {
+                                    exitKioskMode();
+                                } else {
+                                    enterKioskMode();
+                                }
                                 setOpen(false);
                             }}
                             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${

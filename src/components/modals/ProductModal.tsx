@@ -21,9 +21,11 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 }) => {
   const [showRecipe, setShowRecipe] = React.useState(false);
   const [showModifiers, setShowModifiers] = React.useState(false);
+  // Hooks must run unconditionally — the early return below would change
+  // the hook order between renders and crash the modal on close.
+  const workstations = usePosStore(s => s.workstations);
   if (!product) return null;
 
-  const workstations = usePosStore(s => s.workstations);
   const isRestaurantMode = config?.business?.isRestaurantMode;
 
   const categoryTree = config?.categories || DEFAULT_CATEGORY_TREE;

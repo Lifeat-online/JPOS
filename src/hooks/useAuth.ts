@@ -332,7 +332,7 @@ export function useAuth() {
         clearTimeout(timer);
         if (!res.ok) {
           // Non-fatal: log + continue. Local session is cleared below.
-          // eslint-disable-next-line no-console
+           
           console.warn('Server logout returned', res.status, '- clearing local session anyway');
         }
       } catch {

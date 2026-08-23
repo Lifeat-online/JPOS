@@ -7,7 +7,7 @@ import { getHostedPackage } from '../shared/packageCatalog.js';
 import { recordAuditEventSafe } from './audit.js';
 import { buildTotpUri, generateTotpSecret, isPrivilegedTwoFactorRole, verifyTotpCode, } from './twoFactor.js';
 import { expiryFromJwtPayload, revokeRefreshToken, revokeStaffRefreshTokens, storeRefreshTokenSession, verifyStoredRefreshToken, } from './refreshTokenSessions.js';
-import { generateAccessToken, generateRefreshToken, verifyToken, AuthTokenPayload, DEV_EMAIL, DEV_TENANT_ID, devBootstrapEnabled, isDevEmail, normalizeEmail, normalizeAuthTokenPayload, } from './auth-middleware.js';
+import { generateAccessToken, generateRefreshToken, verifyToken, verifyRefreshToken, AuthTokenPayload, DEV_EMAIL, DEV_TENANT_ID, devBootstrapEnabled, isDevEmail, normalizeEmail, normalizeAuthTokenPayload, } from './auth-middleware.js';
 // Hash password for storage.
 // 12 rounds of bcryptjs ≈ 250-400ms on a typical CPU — strong enough
 // for a POS app and stays pure-JS (no native build deps on the
@@ -108,7 +108,7 @@ async function issueAuthResponse(req: Request, staff: {
     two_factor_enabled?: number | boolean | string | null;
 }, replacedToken?: string | null) {
     const response = buildAuthResponse(staff);
-    const refreshPayload = verifyToken(response.refreshToken) as (AuthTokenPayload & {
+    const refreshPayload = verifyRefreshToken(response.refreshToken) as (AuthTokenPayload & {
         exp?: number;
     }) | null;
     await storeRefreshTokenSession(req, {
@@ -470,7 +470,7 @@ export async function handleRefreshToken(req: Request, res: Response) {
         if (!refreshToken) {
             return res.status(400).json({ error: 'Refresh token required' });
         }
-        const payload = verifyToken(refreshToken);
+        const payload = verifyRefreshToken(refreshToken);
         if (!payload) {
             return res.status(401).json({ error: 'Invalid or expired refresh token' });
         }
@@ -511,7 +511,7 @@ export async function handleRefreshToken(req: Request, res: Response) {
         // Generate new access token
         const newAccessToken = generateAccessToken(cleanPayload);
         const newRefreshToken = generateRefreshToken(cleanPayload);
-        const newRefreshPayload = verifyToken(newRefreshToken) as (AuthTokenPayload & {
+        const newRefreshPayload = verifyRefreshToken(newRefreshToken) as (AuthTokenPayload & {
             exp?: number;
         }) | null;
         await storeRefreshTokenSession(req, {

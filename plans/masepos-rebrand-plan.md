@@ -271,7 +271,7 @@ For DOM events, implement **dual-dispatch** during transition:
 - **Line 267**: `docker tag jimmy-pos:v1.0 yourusername/jimmy-pos:v1.0` → `docker tag masepos:v1.0 yourusername/masepos:v1.0`
 - **Line 268**: `docker push yourusername/jimmy-pos:v1.0` → `docker push yourusername/masepos:v1.0`
 
-### 7.3 [`Implementation Plan/implementation_plan.md`](Implementation%20Plan/implementation_plan.md:1)
+### 7.3 [`implementation-plan/implementation_plan.md`](implementation-plan/implementation_plan.md:1)
 - **Line 1**: `# Jimmy POS Master Todo` → `# MasePOS Master Todo`
 - **Line 5**: `Jimmy POS implementation work` → `MasePOS implementation work`
 - **Line 25**: `Jimmy POS` → `MasePOS`

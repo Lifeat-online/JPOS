@@ -28,7 +28,7 @@ function getJwtSecret() {
 const JWT_SECRET = getJwtSecret();
 const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '8h') as SignOptions['expiresIn'];
 const REFRESH_TOKEN_EXPIRES_IN = (process.env.REFRESH_TOKEN_EXPIRES_IN || '7d') as SignOptions['expiresIn'];
-export const DEV_EMAIL = 'jameskoen78@gmail.com';
+export const DEV_EMAIL = 'dev@masepos.local';
 export const DEV_TENANT_ID = 'tenant1';
 
 // Dev-bootstrap backdoor is OFF by default. Set ENABLE_DEV_BOOTSTRAP=true
@@ -63,6 +63,10 @@ export type AuthTokenPayload = {
   tenantId: string;
   role: string;
   staffId: string;
+  // Token-type discriminator: access tokens carry no "type" (or "access");
+  // refresh tokens always carry "refresh". verifyToken() rejects refresh
+  // tokens so a stolen refresh token cannot be replayed as a Bearer token.
+  type?: 'access' | 'refresh';
   jti?: string;
   iat?: number;
   exp?: number;
@@ -96,21 +100,41 @@ export function normalizeAuthTokenPayload(payload: AuthTokenPayload): AuthTokenP
 
 export function generateAccessToken(payload: AuthTokenPayload): string {
   const options: SignOptions = { expiresIn: JWT_EXPIRES_IN };
-  return jwt.sign(payload, JWT_SECRET, options);
+  return jwt.sign({ ...payload, type: 'access' }, JWT_SECRET, options);
 }
 
 export function generateRefreshToken(payload: AuthTokenPayload): string {
   const options: SignOptions = { expiresIn: REFRESH_TOKEN_EXPIRES_IN };
-  return jwt.sign({ ...payload, jti: crypto.randomUUID() }, JWT_SECRET, options);
+  return jwt.sign({ ...payload, type: 'refresh', jti: crypto.randomUUID() }, JWT_SECRET, options);
 }
 
-export function verifyToken(token: string): AuthTokenPayload | null {
+function decodeVerified(token: string): AuthTokenPayload | null {
   try {
     const options: VerifyOptions = { complete: false };
     return normalizeAuthTokenPayload(jwt.verify(token, JWT_SECRET) as AuthTokenPayload);
   } catch (error) {
     return null;
   }
+}
+
+// Verifies access tokens. Explicitly rejects refresh tokens so they can
+// never be used as Bearer credentials against protected routes.
+export function verifyToken(token: string): AuthTokenPayload | null {
+  const payload = decodeVerified(token);
+  if (!payload || payload.type === 'refresh') {
+    return null;
+  }
+  return payload;
+}
+
+// Verifies refresh tokens (must carry type: "refresh"). Used only by the
+// token refresh endpoint.
+export function verifyRefreshToken(token: string): AuthTokenPayload | null {
+  const payload = decodeVerified(token);
+  if (!payload || payload.type !== 'refresh' || !payload.jti) {
+    return null;
+  }
+  return payload;
 }
 
 // Middleware to protect routes

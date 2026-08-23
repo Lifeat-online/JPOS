@@ -29,6 +29,7 @@ metadata.json
 .vscode/
 .idea/
 .kilo/
+.kiro/
 .railway/
 app/
 

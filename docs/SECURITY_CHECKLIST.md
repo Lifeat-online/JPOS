@@ -2,7 +2,7 @@
 
 This document has been superseded by the single source of truth:
 
-- `Implementation Plan/implementation_plan.md`
+- `implementation-plan/implementation_plan.md`
 
 Use the `P6 - Staff, Workforce, and Permissions` and `P9 - Security, PCI Boundary, and Production Hardening` sections there for all active security, POPIA, PCI, audit, authentication, and deployment-hardening todo items.
 

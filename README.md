@@ -7,9 +7,9 @@
 ## Quick start (local Docker stack)
 
 ```bash
-cp .env.docker .env.docker.local
+cp .env.example .env.docker.local
 # edit secrets in .env.docker.local (DB password, JWT_SECRET, PayFast keys, etc.)
-docker compose up -d
+docker compose --env-file .env.docker.local up -d
 # open http://localhost
 ```
 
@@ -32,9 +32,9 @@ npm run dev       # http://localhost:3000
 | `npm run dev` | Start Vite + Express on port 3000 with HMR |
 | `npm run build` | Production build to `dist/` |
 | `npm start` | Run the production server |
-| `npm run lint` | TypeScript typecheck (`tsc --noEmit`) |
-| `npm test` | Run unit + API test suites |
-| `npm run test:unit` | Vitest unit tests only |
+| `npm run lint` | TypeScript typecheck + ESLint |
+| `npm test` | Run all Vitest suites (unit + API) |
+| `npm run test:unit` | All Vitest suites (backend + frontend) |
 | `npm run test:api` | Backend API tests only |
 | `npm run test:e2e` | Playwright e2e |
 | `npm run db:init` | Apply the schema to a fresh database |
@@ -89,7 +89,8 @@ db/              Schema SQL + migrations
 nginx/           nginx configs (Docker, dev, Windows)
 tests/           Vitest + Playwright
 scripts/         Dev/CI helpers (no one-off patches)
-Implementation Plan/   Active roadmap and todo (single source of truth)
+docs/            Architecture notes, security docs, phase summaries
+implementation-plan/   Active roadmap and todo (single source of truth)
 ```
 
 ## Security
@@ -100,7 +101,7 @@ Implementation Plan/   Active roadmap and todo (single source of truth)
 - PayFast signature verification is done over the raw form body in canonical order with `crypto.timingSafeEqual`.
 - bcrypt cost is 12 (`bcryptjs` — see `server/auth-handler.ts`); migrating to native `bcrypt` is on the roadmap.
 
-See **[Implementation Plan/implementation_plan.md](Implementation%20Plan/implementation_plan.md)** for the active security, PCI, and POPIA work, and the audit-driven hardening backlog.
+See **[implementation-plan/implementation_plan.md](implementation-plan/implementation_plan.md)** for the active security, PCI, and POPIA work, and the audit-driven hardening backlog.
 
 ## Licence & hosted mode
 

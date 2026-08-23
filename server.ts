@@ -52,6 +52,10 @@ try {
   await initDb();
   console.log("Base schema initialized (initDb).");
 } catch (err: unknown) {
+  if (process.env.NODE_ENV === "production") {
+    console.error("initDb() failed — refusing to start with an uninitialized schema:", err);
+    process.exit(1);
+  }
   console.warn("initDb() failed, falling back to individual ensure functions:", err);
 }
 

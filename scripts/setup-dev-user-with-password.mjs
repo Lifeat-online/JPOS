@@ -20,9 +20,9 @@ const pool = new pg.Pool({
 });
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const EMAIL = "jameskoen78@gmail.com";
-const NAME = "James Koen";
-const DEV_PASSWORD = "James4James@1978";
+const EMAIL = "dev@masepos.local";
+const NAME = "Dev User";
+const DEV_PASSWORD = process.env.DEV_SEED_PASSWORD || "dev-change-me";
 const TENANT_ID = "tenant1"; // must match DEV_TENANT_ID in auth-middleware.ts
 const TENANT_NAME = "MasePOS Dev";
 const STAFF_ID = "dev-staff-001";

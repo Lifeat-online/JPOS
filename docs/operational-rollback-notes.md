@@ -5,7 +5,7 @@ Use this runbook before production deploys that include database migrations, sta
 ## Pre-Deploy Gate
 
 - Run `npm run ops:verify-schema` against the target production database before opening traffic.
-- Run `npm run lint`, `npm run build`, and the focused tests listed in `Implementation Plan/implementation_plan.md` for the release slice.
+- Run `npm run lint`, `npm run build`, and the focused tests listed in `implementation-plan/implementation_plan.md` for the release slice.
 - Take a database backup before irreversible schema changes or before running a live repair/init endpoint.
 - Record the deploy artifact, Git commit, environment, database host, and operator in the release notes.
 - Confirm `JWT_SECRET`, database credentials, PayFast credentials, provider keys, and licence variables are present in the target environment.

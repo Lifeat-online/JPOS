@@ -137,7 +137,7 @@ describe('auth-handler', () => {
           tenant_id: 'tenant1',
           name: 'Stale Dev',
           role: 'dev',
-          email: 'jameskoen78@gmail.com',
+          email: 'dev@masepos.local',
           password_hash: staleHash,
           status: 'active',
           tenant_name: 'MasePOS',
@@ -145,9 +145,9 @@ describe('auth-handler', () => {
         {
           id: 'dev_legacy',
           tenant_id: 'default',
-          name: 'James Koen',
+          name: 'Dev User',
           role: 'admin',
-          email: 'jameskoen78@gmail.com',
+          email: 'dev@masepos.local',
           password_hash: matchingHash,
           status: 'active',
           tenant_name: 'Default Tenant',
@@ -157,7 +157,7 @@ describe('auth-handler', () => {
       .mockResolvedValueOnce({ affectedRows: 1 })
       .mockResolvedValueOnce({ affectedRows: 1 });
 
-    const req: any = { body: { email: 'jameskoen78@gmail.com', password: 'correct-password' } };
+    const req: any = { body: { email: 'dev@masepos.local', password: 'correct-password' } };
     const json = vi.fn();
     const res: any = { json };
 
@@ -167,7 +167,7 @@ describe('auth-handler', () => {
     const response = json.mock.calls[0][0];
     expect(response.user).toMatchObject({
       id: 'dev_legacy',
-      email: 'jameskoen78@gmail.com',
+      email: 'dev@masepos.local',
       role: 'dev',
       tenantId: 'tenant1',
     });

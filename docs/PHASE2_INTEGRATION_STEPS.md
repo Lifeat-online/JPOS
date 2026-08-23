@@ -2,7 +2,7 @@
 
 This document has been superseded by the single source of truth:
 
-- `Implementation Plan/implementation_plan.md`
+- `implementation-plan/implementation_plan.md`
 
 Use the `P11 - Platform Migration, QA, and Operations` section there for all active auth integration, migration verification, seed data, and testing todo items.
 

@@ -1,13 +1,13 @@
 import bcrypt from "bcryptjs";
 import { query } from "./db.js";
 
-const DEV_EMAIL = "jameskoen78@gmail.com";
-const DEV_NAME = "James Koen";
+const DEV_EMAIL = "dev@masepos.local";
+const DEV_NAME = "Dev User";
 const DEV_TENANT_ID = "tenant1";
 const DEV_TENANT_NAME = "MasePOS Dev";
 const DEV_STAFF_ID = "dev-staff-001";
 const DEV_UID = "Rkfh8ZhwKMXQJurorDSeqf86qOS2";
-const DEFAULT_DEV_PASSWORD = "James4James@1978";
+const DEFAULT_DEV_PASSWORD = "dev-change-me";
 
 export async function seedDevStaffIfMissing(): Promise<void> {
     const raw = String(process.env.ENABLE_DEV_BOOTSTRAP || "").trim().toLowerCase();

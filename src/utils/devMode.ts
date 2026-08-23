@@ -11,7 +11,7 @@
 const RAW = (import.meta.env.VITE_ENABLE_DEV_BOOTSTRAP ?? '').toString().trim().toLowerCase();
 export const DEV_BOOTSTRAP_ENABLED = RAW === 'true' || RAW === '1' || RAW === 'yes';
 
-export const DEV_EMAIL = 'jameskoen78@gmail.com';
+export const DEV_EMAIL = 'dev@masepos.local';
 export const DEV_TENANT_ID = 'tenant1';
 
 export function isDevEmail(value: unknown): boolean {

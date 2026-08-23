@@ -2,7 +2,7 @@
 
 This document has been superseded by the single source of truth:
 
-- `Implementation Plan/implementation_plan.md`
+- `implementation-plan/implementation_plan.md`
 
 Use the `P8 - AI Manager Copilot and Differentiators` section there for all active AI Manager Copilot todo items.
 

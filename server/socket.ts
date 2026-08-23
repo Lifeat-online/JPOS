@@ -77,7 +77,7 @@ export function setupSocketIO(httpServer: any) {
     io.on("connection", (socket: any) => {
         console.log(`Client connected: ${socket.id}`);
         // Store socket user info
-        let socketUser: SocketUser | null = null;
+        const socketUser: SocketUser | null = null;
         // ── Join workstation channel (only when register is open) ─────────────────
         socket.on("join_workstation", async (workstationId: string) => {
             if (!workstationId)

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { generateAccessToken, generateRefreshToken, verifyToken, requireAuth, optionalAuth } from '../../server/auth-middleware.js';
+import { generateAccessToken, generateRefreshToken, verifyToken, verifyRefreshToken, requireAuth, optionalAuth } from '../../server/auth-middleware.js';
 
 describe('auth-middleware', () => {
   it('generates and verifies access tokens', () => {
@@ -16,8 +16,17 @@ describe('auth-middleware', () => {
     const second = generateRefreshToken(payload);
 
     expect(first).not.toBe(second);
-    expect(verifyToken(first)).toMatchObject(payload);
-    expect(verifyToken(first)).toHaveProperty('jti');
+    expect(verifyRefreshToken(first)).toMatchObject(payload);
+    expect(verifyRefreshToken(first)).toHaveProperty('jti');
+  });
+
+  it('rejects refresh tokens used as access tokens and access tokens used as refresh tokens', () => {
+    const payload = { uid: 'staff_1', email: 'test@example.com', name: 'Test User', tenantId: 'tenant_1', role: 'admin', staffId: 'staff_1' };
+    const accessToken = generateAccessToken(payload);
+    const refreshToken = generateRefreshToken(payload);
+
+    expect(verifyToken(refreshToken)).toBeNull();
+    expect(verifyRefreshToken(accessToken)).toBeNull();
   });
 
   it('rejects invalid tokens', () => {

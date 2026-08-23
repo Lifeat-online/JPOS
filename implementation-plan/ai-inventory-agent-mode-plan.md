@@ -2,7 +2,7 @@
 
 This document has been superseded by the single source of truth:
 
-- `Implementation Plan/implementation_plan.md`
+- `implementation-plan/implementation_plan.md`
 
 Use the `P2 - Inventory, Stock Control, and Purchasing` and `P3 - AI Inventory Copilot` sections there for all active inventory and AI-agent todo items.
 

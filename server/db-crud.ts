@@ -2234,7 +2234,7 @@ export async function deleteCustomer(
     const customer = (customerRows as any[])[0];
     if (!customer) throw new Error("Customer not found.");
     const label = anonymizedCustomerName(customerId);
-    if (Boolean(customer.isAnonymized ?? customer.is_anonymized)) {
+    if (customer.isAnonymized ?? customer.is_anonymized) {
       await conn.commit();
       return {
         success: true,

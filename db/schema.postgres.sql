@@ -1481,8 +1481,8 @@ VALUES (
   'default',
   'Admin',
   'dev',
-  'jameskoen78@gmail.com',
-  '$2b$10$GRwOgQlFUCQjHrOD/GEZmOgAwgDJ2C6mFK6SagJTs2zDf66PbzJQu',
+  'dev@masepos.local',
+  '$2b$10$H.R4F/B9dDIpIbWg9KEmhOeMpHxlVAPtC.1kKwBj/XvOSFXNlJ5ae',
   'active'
 )
 ON CONFLICT (id) DO NOTHING;

@@ -1,6 +1,6 @@
 # Migration Note Archive
 
-The active platform operations source of truth is `Implementation Plan/implementation_plan.md`, supported by:
+The active platform operations source of truth is `implementation-plan/implementation_plan.md`, supported by:
 
 - `docs/production-hardening-checklist.md`
 - `docs/operational-rollback-notes.md`

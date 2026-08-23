@@ -4,11 +4,14 @@ FROM node:22.12-alpine AS builder
 
 WORKDIR /app
 
-# Copy all source files first
-COPY . .
+# Copy dependency manifests first so source changes don't bust this layer
+COPY package.json package-lock.json ./
 
 # Install dependencies
 RUN npm ci
+
+# Copy all remaining source files
+COPY . .
 
 # Build-time base path for Vite (when hosting the app under a sub-path)
 ARG VITE_BASE_PATH=/

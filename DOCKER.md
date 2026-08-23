@@ -12,10 +12,10 @@ This guide helps you run MasePOS using Docker and Docker Compose.
 
 ### 1. Configure Environment Variables
 
-Copy the Docker environment template and customize as needed:
+Copy the environment template and customize as needed:
 
 ```bash
-cp .env.docker .env.docker.local
+cp .env.example .env.docker.local
 ```
 
 Edit `.env.docker.local` to configure:
@@ -28,7 +28,7 @@ Edit `.env.docker.local` to configure:
 Start all services (PostgreSQL, App, Nginx):
 
 ```bash
-docker-compose up -d
+docker compose --env-file .env.docker.local up -d
 ```
 
 This will:

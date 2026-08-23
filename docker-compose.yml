@@ -12,7 +12,9 @@ services:
       POSTGRES_USER: ${DB_USER:-pos_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
     ports:
-      - "5432:5432"
+      # Bind to loopback only — the app reaches Postgres over the internal
+      # network; host access (psql, backups) stays local.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
