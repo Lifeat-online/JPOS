@@ -4,10 +4,21 @@ import '@testing-library/jest-dom';
 // stub them locally. The defaults below are explicit so failures are loud.
 if (typeof window !== 'undefined') {
     if (!window.matchMedia) {
+        // Evaluate min/max-width queries against jsdom's viewport so
+        // responsive hooks (useMediaQuery) behave like a 1024px-wide
+        // desktop window by default.
+        const evaluateQuery = (query: string): boolean => {
+            const width = window.innerWidth;
+            const minWidth = /min-width:\s*(\d+)px/.exec(query);
+            if (minWidth) return width >= Number(minWidth[1]);
+            const maxWidth = /max-width:\s*(\d+)px/.exec(query);
+            if (maxWidth) return width <= Number(maxWidth[1]);
+            return false;
+        };
         Object.defineProperty(window, 'matchMedia', {
             writable: true,
             value: (query: string) => ({
-                matches: false,
+                matches: evaluateQuery(query),
                 media: query,
                 onchange: null,
                 addListener: () => {},

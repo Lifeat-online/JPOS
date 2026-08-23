@@ -1336,7 +1336,7 @@ export default function App() {
     }
 
     return (
-        <div className="h-screen w-full bg-slate-50 dark:bg-slate-950 flex flex-col font-sans overflow-hidden">
+        <div className="h-dvh w-full bg-slate-50 dark:bg-slate-950 flex flex-col font-sans overflow-hidden">
             {/* Header */}
             <header className="h-14 lg:h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700/60 px-4 lg:px-6 flex items-center justify-between flex-shrink-0 z-40 sticky top-0">
                 <div className="flex items-center gap-4 lg:gap-8">
@@ -1378,13 +1378,13 @@ export default function App() {
                     {view === 'pos' && (
                         <button
                             onClick={() => usePosStore.getState().setIsCartOpen(!usePosStore.getState().isCartOpen)}
-                            className="lg:hidden relative p-2 bg-primary text-white rounded-xl shadow-lg shadow-primary/20"
+                            className="lg:hidden relative flex items-center gap-2 h-10 px-3 bg-primary text-white rounded-xl shadow-lg shadow-primary/20 active:scale-95 transition-transform"
                             aria-label="Open cart"
                         >
                             <ShoppingCart className="w-5 h-5" />
                             {cart.length > 0 && (
-                                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">
-                                    {cart.reduce((sum, item) => sum + item.quantity, 0)}
+                                <span className="text-sm font-black">
+                                    R{cart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0).toFixed(2)}
                                 </span>
                             )}
                         </button>
@@ -1392,8 +1392,18 @@ export default function App() {
                 </div>
             </header>
 
-            {/* Mobile Nav */}
-            <nav className="lg:hidden flex overflow-x-auto bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800/60 px-4 py-2 gap-2 no-scrollbar shrink-0 sticky top-14 z-30 shadow-sm">
+            {/* Offline banner — connectivity must be visible before selling,
+                not only inside the cart panel. */}
+            {checkout.offlineStatus.isOffline && (
+                <div className="bg-amber-500 text-white text-xs font-bold text-center py-1.5 px-4 shrink-0" role="status">
+                    Offline — sales are queued and will sync automatically
+                </div>
+            )}
+
+            {/* Mobile bottom tab bar — thumb-reachable; sits after the
+                content column via order-last instead of stacking under the
+                header and eating vertical space. */}
+            <nav className="lg:hidden order-last flex overflow-x-auto bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800/60 px-2 pt-safe pb-safe gap-1 no-scrollbar shrink-0 z-30">
                 {navItems.map((item) => {
                     const badge =
                         item.id === 'messages' && messaging.unreadCount > 0

@@ -215,6 +215,10 @@ describe('PointOfSaleView daily action strip', () => {
   it('summarizes the register daily actions on the first POS screen', () => {
     renderPos();
 
+    // Tools are collapsed by default to keep the mobile terminal screen
+    // usable — open them via the toggle before asserting contents.
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+
     const strip = within(screen.getByRole('group', { name: /daily pos actions/i }));
     expect(strip.getByRole('button', { name: /Register Cashier One Expected R1250\.00/i })).toBeInTheDocument();
     expect(strip.getByRole('button', { name: /Receipt #87654321 Reprint last/i })).toBeInTheDocument();

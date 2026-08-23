@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { ModifierSelectionModal } from '../components/modals/ModifierSelectionModal';
 import { motion, AnimatePresence } from 'motion/react';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { Product, Customer, Sale, Workstation, RestaurantTable, LaybyOrder, Promotion } from '../types';
 import { CustomerSelector } from '../components/CustomerSelector';
 import { usePosStore } from '../store/usePosStore';
@@ -181,12 +182,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
   const [laybyCreateOpen, setLaybyCreateOpen] = useState(false);
   const [laybyManagerOpen, setLaybyManagerOpen] = useState(false);
   const [laybyReceiptOrder, setLaybyReceiptOrder] = useState<LaybyOrder | null>(null);
+  // Reactive breakpoint — replaces render-time window.innerWidth reads so
+  // rotation/resize keeps the cart layout correct.
+  const isDesktopLayout = useMediaQuery('(min-width: 1024px)');
   const [showQuickActions, setShowQuickActions] = useState(() => {
     try {
       const saved = window.localStorage.getItem('masepos-show-quick-actions');
-      return saved !== 'false';
+      return saved === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -1037,7 +1041,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
         />
       )}
       {terminalCategoryLayout === 'sidebar' && (
-      <nav className="w-full lg:w-28 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-700/60 flex lg:flex-col items-center py-2 lg:py-5 px-4 lg:px-2 gap-3 overflow-x-auto no-scrollbar shrink-0 shadow-sm lg:shadow-none z-10">
+      <nav className="w-full lg:w-28 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-700/60 flex lg:flex-col items-center py-2 lg:py-5 px-4 lg:px-2 gap-3 overflow-x-auto no-scrollbar lg:overflow-y-auto lg:min-h-0 shrink-0 shadow-sm lg:shadow-none z-10">
         {allowedSections.map(section => (
           <button
             key={`section-${section}`}
@@ -1049,7 +1053,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             }`}
           >
             <span className="text-base lg:text-xl">{section === 'All' ? <ShoppingBag className="w-5 h-5" /> : getCategoryIcon(section)}</span>
-            <span className="max-w-full px-1 text-center text-[9px] lg:text-[10px] font-bold uppercase tracking-wide leading-tight truncate">{section}</span>
+            <span className="max-w-full px-1 text-center text-[10px] lg:text-[10px] font-bold uppercase tracking-wide leading-tight truncate">{section}</span>
           </button>
         ))}
 
@@ -1066,7 +1070,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             }`}
           >
             <span className="text-base lg:text-xl">{cat === 'All' ? '🏠' : getCategoryIcon(cat)}</span>
-            <span className="text-[9px] lg:text-[10px] font-bold uppercase tracking-wide">{cat}</span>
+            <span className="text-[10px] lg:text-[10px] font-bold uppercase tracking-wide">{cat}</span>
           </button>
         ))}
       </nav>
@@ -1091,7 +1095,37 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
               <ScanLine className="w-5 h-5" />
             </button>
           </div>
-          <div className="flex h-12 lg:h-[54px] shrink-0 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 p-1 shadow-sm">
+          <div className="flex sm:hidden gap-2 shrink-0">
+            <div className="flex h-11 shrink-0 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setTerminalCategoryLayout('sidebar')}
+                className={`w-10 rounded-lg flex items-center justify-center transition-all ${terminalCategoryLayout === 'sidebar' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                title="Sections and categories in the sidebar"
+              >
+                <PanelLeft className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => { setTerminalCategoryLayout('grid'); setGridShowingProducts(false); }}
+                className={`w-10 rounded-lg flex items-center justify-center transition-all ${terminalCategoryLayout === 'grid' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                title="Sections and categories in the product area"
+              >
+                <LayoutGrid className="w-5 h-5" />
+              </button>
+            </div>
+            <button
+              type="button"
+              disabled={!lastReceiptSale || !onPrintLastReceipt}
+              onClick={onPrintLastReceipt}
+              className="h-11 px-3 shrink-0 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 shadow-sm flex items-center gap-2 disabled:opacity-40 active:scale-95"
+              title={lastReceiptSale ? `Reprint last receipt #${lastReceiptSale.id.slice(-8).toUpperCase()}` : 'No completed sale to reprint yet'}
+            >
+              <Printer className="w-4 h-4" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Last receipt</span>
+            </button>
+          </div>
+          <div className="hidden sm:flex h-12 lg:h-[54px] shrink-0 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 p-1 shadow-sm">
             <button
               type="button"
               onClick={() => setTerminalCategoryLayout('sidebar')}
@@ -1121,7 +1155,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             type="button"
             disabled={!lastReceiptSale || !onPrintLastReceipt}
             onClick={onPrintLastReceipt}
-            className="sm:w-44 min-h-[48px] px-4 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-sm transition-all hover:border-primary/40 hover:text-primary disabled:opacity-40 disabled:hover:border-slate-200 dark:disabled:hover:border-slate-700/60 disabled:hover:text-slate-700 dark:disabled:hover:text-slate-200 active:scale-95 flex items-center justify-center gap-2"
+            className="sm:w-44 min-h-[48px] px-4 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-sm transition-all hover:border-primary/40 hover:text-primary disabled:opacity-40 disabled:hover:border-slate-200 dark:disabled:hover:border-slate-700/60 disabled:hover:text-slate-700 dark:disabled:hover:text-slate-200 active:scale-95 hidden sm:flex items-center justify-center gap-2"
             title={lastReceiptSale ? `Reprint last receipt #${lastReceiptSale.id.slice(-8).toUpperCase()}` : 'No completed sale to reprint yet'}
           >
             <Printer className="w-4 h-4 shrink-0" />
@@ -1133,7 +1167,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             </span>
           </button>
           {config?.business?.isRestaurantMode && activeWorkstations.length > 0 && (
-            <div className="sm:w-64 flex gap-2">
+            <div className="w-full sm:w-64 flex gap-2">
               <div className="relative flex-1">
                 <ChefHat className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 w-4 h-4" />
                 <select
@@ -1625,7 +1659,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-bold text-sm leading-tight mb-0.5 text-slate-900 dark:text-white truncate">{product.name}</div>
-                  <div className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">{product.category}</div>
+                  <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">{product.category}</div>
                   {product.modifiers && product.modifiers.length > 0 && (
                     <div className="flex items-center gap-1 mt-1">
                       <div className="w-1.5 h-1.5 rounded-full bg-primary" />
@@ -1641,7 +1675,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 </div>
                 <div className="hidden lg:flex items-end justify-between w-full mt-2">
                   <div className="font-extrabold text-lg text-primary tracking-tight">R{Number(product.price).toFixed(2)}</div>
-                  <div className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${isOutOfStock ? 'bg-rose-50 text-rose-600' : isLowStock ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                  <div className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${isOutOfStock ? 'bg-rose-50 text-rose-600' : isLowStock ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                     {isOutOfStock ? 'Out' : `${remainingAfterCart} left`}
                   </div>
                 </div>
@@ -1673,20 +1707,25 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
       )}
 
       <AnimatePresence>
-        {(isCartOpen || window.innerWidth >= 1024) && (
+        {(isCartOpen || isDesktopLayout) && (
           <>
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsCartOpen(false)}
               className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[45]"
             />
-            <motion.aside 
-              initial={window.innerWidth < 1024 ? { y: '100%' } : { x: '100%' }}
-              animate={window.innerWidth < 1024 ? { y: 0 } : { x: 0 }}
-              exit={window.innerWidth < 1024 ? { y: '100%' } : { x: '100%' }}
+            <motion.aside
+              initial={!isDesktopLayout ? { y: '100%' } : { x: '100%' }}
+              animate={!isDesktopLayout ? { y: 0 } : { x: 0 }}
+              exit={!isDesktopLayout ? { y: '100%' } : { x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className={`fixed bottom-0 left-0 right-0 lg:relative lg:inset-auto z-50 lg:z-10 w-full lg:w-[360px] max-h-[90vh] lg:max-h-none bg-white dark:bg-slate-900 lg:border-l border-slate-200 dark:border-slate-700/60 flex flex-col flex-shrink-0 shadow-2xl rounded-t-3xl lg:rounded-none overflow-hidden`}
+              className={`fixed bottom-0 left-0 right-0 lg:relative lg:inset-auto z-50 lg:z-10 w-full lg:w-[360px] max-h-[70dvh] lg:max-h-none bg-white dark:bg-slate-900 lg:border-l border-slate-200 dark:border-slate-700/60 flex flex-col flex-shrink-0 shadow-2xl rounded-t-3xl lg:rounded-none overflow-hidden`}
             >
+              {!isDesktopLayout && (
+                <div className="pt-2 pb-1 flex justify-center bg-white dark:bg-slate-900 shrink-0" aria-hidden="true">
+                  <span className="w-10 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600" />
+                </div>
+              )}
               {attachedWorkstation && !isWideRegister && (
                 <div className="grid grid-cols-2 gap-1 p-2 bg-slate-100 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 shrink-0">
                   <button
@@ -1703,7 +1742,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     <ChefHat className="w-4 h-4" />
                     Queue
                     {attachedQueueCount > 0 && (
-                      <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
+                      <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center">
                         {attachedQueueCount > 99 ? '99+' : attachedQueueCount}
                       </span>
                     )}
@@ -1731,10 +1770,10 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                         <Users className="w-3 h-3" />
                         {customers.find(c => c.id === selectedCustomerId)?.name}
                       </div>
-                      <div className="text-[9px] font-bold text-slate-500">
+                      <div className="text-[10px] font-bold text-slate-500">
                         {selectedCustomer?.loyaltyPoints || selectedCustomer?.points || 0} Points Available
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 text-[9px] font-black text-violet-600 dark:text-violet-400">
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] font-black text-violet-600 dark:text-violet-400">
                         <span>Wallet: R{selectedCustomerWalletBalance.toFixed(2)}</span>
                         <button
                           type="button"
@@ -1747,7 +1786,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                         </button>
                       </div>
                       {(selectedCustomer?.accountEnabled || selectedCustomerAccountBalance > 0) && (
-                        <div className="text-[9px] font-black text-amber-600 dark:text-amber-400">
+                        <div className="text-[10px] font-black text-amber-600 dark:text-amber-400">
                           Account: R{selectedCustomerAccountBalance.toFixed(2)} owing / R{selectedCustomerAccountLimit.toFixed(2)} limit
                         </div>
                       )}
@@ -1830,7 +1869,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                                   {item.syncBatchId ? ` / batch ${String(item.syncSequence || 0).padStart(2, '0')}` : ''}
                                 </p>
                               </div>
-                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${
+                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ${
                                 item.status === 'failed'
                                   ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'
                                   : item.status === 'syncing'
@@ -1848,7 +1887,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                             {(item.conflictType || item.recommendedAction) && (
                               <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 dark:border-amber-900/50 dark:bg-amber-900/20">
                                 {item.conflictType && (
-                                  <p className="text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-200">
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-200">
                                     {offlineConflictLabel(item.conflictType)}
                                   </p>
                                 )}
@@ -1860,12 +1899,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                               </div>
                             )}
                             {item.managerReviewReportedAt && (
-                              <p className="mt-2 text-[9px] font-black uppercase tracking-widest text-violet-600 dark:text-violet-300">
+                              <p className="mt-2 text-[10px] font-black uppercase tracking-widest text-violet-600 dark:text-violet-300">
                                 Action Center
                               </p>
                             )}
                             {item.nextRetryAt && !item.managerReviewReportedAt && (
-                              <p className="mt-2 text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                              <p className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
                                 Retry after {formatOfflineRetryTime(item.nextRetryAt)}
                               </p>
                             )}
@@ -2006,7 +2045,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                         <p className="mt-1 truncate text-sm font-black text-slate-900 dark:text-white">{cashierUpsellPrompt.product.name}</p>
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           {cashierUpsellPrompt.reasons.map(reason => (
-                            <span key={reason} className="rounded-lg bg-white px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-500 shadow-sm dark:bg-slate-900 dark:text-slate-300">
+                            <span key={reason} className="rounded-lg bg-white px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500 shadow-sm dark:bg-slate-900 dark:text-slate-300">
                               {reason}
                             </span>
                           ))}
@@ -2087,14 +2126,14 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                           {pointsDiscount > 0 ? (
                             <button
                               onClick={onClearPointsDiscount}
-                              className="text-[9px] font-bold text-red-500 hover:underline"
+                              className="text-[10px] font-bold text-red-500 hover:underline"
                             >
                               Remove discount (−R{Number(pointsDiscount).toFixed(2)})
                             </button>
                           ) : canRedeem ? (
                             <button
                               onClick={() => onRedeemPoints(selectedCustomerId, pts)}
-                              className="text-[9px] font-bold text-primary hover:underline"
+                              className="text-[10px] font-bold text-primary hover:underline"
                             >
                               Redeem {pts} pts → −R{Math.min(
                                 Math.floor(pts / config!.business!.pointsRequiredForDiscount!) * config!.business!.discountAmountForPoints!,
@@ -2102,7 +2141,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                               ).toFixed(2)}
                             </button>
                           ) : (
-                            <span className="text-[9px] font-bold text-slate-400">{pts} pts (need {config?.business?.pointsRequiredForDiscount} to redeem)</span>
+                            <span className="text-[10px] font-bold text-slate-400">{pts} pts (need {config?.business?.pointsRequiredForDiscount} to redeem)</span>
                           )}
                         </div>
                       ) : null;
@@ -2161,7 +2200,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-emerald-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-emerald-600/30"
                   >
                     <Banknote className="w-5 h-5" />
-                    <span className="text-[9px] uppercase tracking-widest">CASH</span>
+                    <span className="text-[10px] uppercase tracking-widest">CASH</span>
                   </button>
                   <button 
                     disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues}
@@ -2169,7 +2208,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-slate-800/30"
                   >
                     <CreditCard className="w-5 h-5" />
-                    <span className="text-[9px] uppercase tracking-widest">CARD</span>
+                    <span className="text-[10px] uppercase tracking-widest">CARD</span>
                   </button>
                   <button
                     disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || offlineStatus.isOffline}
@@ -2178,7 +2217,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-cyan-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-cyan-600/30"
                   >
                     <QrCode className="w-5 h-5" />
-                    <span className="text-[9px] uppercase tracking-widest">QR PAY</span>
+                    <span className="text-[10px] uppercase tracking-widest">QR PAY</span>
                   </button>
                   <button
                     disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || offlineStatus.isOffline}
@@ -2187,7 +2226,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-fuchsia-600 text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-fuchsia-600/30"
                   >
                     <ReceiptText className="w-5 h-5" />
-                    <span className="text-[9px] uppercase tracking-widest">BNPL</span>
+                    <span className="text-[10px] uppercase tracking-widest">BNPL</span>
                   </button>
                   <button 
                     disabled={isProcessing || cart.length === 0 || hasBlockingStockIssues || offlineStatus.isOffline}
@@ -2196,7 +2235,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                     className="flex flex-col items-center justify-center gap-2 h-20 rounded-2xl bg-[#E84E1B] text-white font-black transition-all hover:shadow-lg disabled:opacity-50 active:scale-95 shadow-lg shadow-payfast/20"
                   >
                     {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <QrCode className="w-5 h-5" />}
-                    <span className="text-[9px] uppercase tracking-widest">PAYFAST</span>
+                    <span className="text-[10px] uppercase tracking-widest">PAYFAST</span>
                   </button>
                 </div>
 
@@ -2409,15 +2448,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
 
                     <div className="grid grid-cols-3 gap-3">
                       <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
-                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Stock</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Stock</p>
                         <p className={`mt-1 text-lg font-black ${isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-slate-900 dark:text-white'}`}>{stock}</p>
                       </div>
                       <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
-                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">In cart</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">In cart</p>
                         <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">{getCartQuantityForProduct(priceCheckProduct.id)}</p>
                       </div>
                       <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
-                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">After add</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">After add</p>
                         <p className={`mt-1 text-lg font-black ${isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-slate-900 dark:text-white'}`}>{Math.max(0, remainingAfterCart - 1)}</p>
                       </div>
                     </div>
@@ -2656,11 +2695,11 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 {walletCashAmountValue > 0 && (
                   <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
-                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">New wallet</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">New wallet</p>
                       <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">R{walletCashNextBalance.toFixed(2)}</p>
                     </div>
                     <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 p-3">
-                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Drawer impact</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Drawer impact</p>
                       <p className={`mt-1 text-lg font-black ${walletCashDrawerDelta >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                         {walletCashDrawerDelta >= 0 ? '+' : '-'}R{Math.abs(walletCashDrawerDelta).toFixed(2)}
                       </p>
@@ -2932,6 +2971,26 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             setIsCartOpen(true);
           }}
         />
+      )}
+
+      {/* Mobile peek bar — keeps the order one tap away without covering
+          the product grid like the expanded sheet does. */}
+      {!isDesktopLayout && cart.length > 0 && !isCartOpen && (
+        <button
+          type="button"
+          onClick={() => setIsCartOpen(true)}
+          className="mx-4 mb-2 shrink-0 h-12 px-4 rounded-2xl bg-primary text-white shadow-lg shadow-primary/25 flex items-center justify-between gap-3 active:scale-[0.99] transition-transform"
+          aria-label={`Open current order — ${cart.reduce((sum, item) => sum + item.quantity, 0)} items, total R${cartTotal.toFixed(2)}`}
+        >
+          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
+            <ShoppingCart className="w-4 h-4" />
+            {cart.reduce((sum, item) => sum + item.quantity, 0)} items
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="text-base font-black">R{cartTotal.toFixed(2)}</span>
+            <ChevronDown className="w-4 h-4 rotate-180" />
+          </span>
+        </button>
       )}
     </div>
   );
