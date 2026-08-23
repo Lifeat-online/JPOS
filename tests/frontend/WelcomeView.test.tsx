@@ -87,8 +87,8 @@ describe('WelcomeView', () => {
   });
 
   it.each([
-    [false, 'light'],
-    [true, 'dark'],
+    [false, 'dark'],
+    [true, 'light'],
   ] as const)('uses the official %s-theme Project Phoenix footer badge', (isDarkMode, variant) => {
     renderWithRouter(
       <WelcomeView

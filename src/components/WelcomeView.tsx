@@ -1223,7 +1223,7 @@ export function WelcomeView({ onLogin, onTryNow, onStartSetup, onClientLogin, is
           <div className="mx-auto mt-6 flex max-w-7xl justify-center border-t border-slate-200 pt-6 dark:border-slate-800">
             <a href="https://projectphoenix.co.za/" rel="noopener" target="_blank">
               <img
-                src={`https://projectphoenix.co.za/badges/phoenix-pill-${isDarkMode ? 'dark' : 'light'}.svg`}
+                src={`https://projectphoenix.co.za/badges/phoenix-pill-${isDarkMode ? 'light' : 'dark'}.svg`}
                 alt="Developed by Project Phoenix"
                 width="260"
                 height="44"
