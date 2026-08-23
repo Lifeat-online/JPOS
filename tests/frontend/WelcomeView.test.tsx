@@ -85,4 +85,27 @@ describe('WelcomeView', () => {
       expect(document.querySelector('aside')).not.toBeInTheDocument();
     });
   });
+
+  it.each([
+    [false, 'light'],
+    [true, 'dark'],
+  ] as const)('uses the official %s-theme Project Phoenix footer badge', (isDarkMode, variant) => {
+    renderWithRouter(
+      <WelcomeView
+        onLogin={vi.fn()}
+        onTryNow={vi.fn()}
+        onStartSetup={vi.fn()}
+        onClientLogin={vi.fn()}
+        isDarkMode={isDarkMode}
+        toggleDarkMode={vi.fn()}
+      />
+    );
+
+    const badge = screen.getByRole('img', { name: 'Developed by Project Phoenix' });
+    expect(badge).toHaveAttribute('src', `https://projectphoenix.co.za/badges/phoenix-pill-${variant}.svg`);
+    expect(badge).toHaveAttribute('width', '260');
+    expect(badge).toHaveAttribute('height', '44');
+    expect(badge.closest('a')).toHaveAttribute('href', 'https://projectphoenix.co.za/');
+    expect(badge.closest('a')).toHaveAttribute('rel', 'noopener');
+  });
 });
