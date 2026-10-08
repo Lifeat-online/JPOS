@@ -1,9 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Plus, Minus, Package, ShieldCheck, Banknote, ChevronRight, ChevronDown, Edit, ClipboardCheck, X, Download, RefreshCw, KeyRound, Webhook, Trash2, Copy } from 'lucide-react';
+import { Loader2, Search, Plus, Minus, Package, ShieldCheck, Banknote, ChevronRight, ChevronDown, Edit, ClipboardCheck, X, Download, RefreshCw, KeyRound, Webhook, Trash2, Copy } from 'lucide-react';
 import { Product, AppConfig, EcommerceMarketplaceExport, IntegrationApiKey, IntegrationWebhookEvent } from '../types';
 import { VendorManagementView } from '../components/VendorManagementView';
 import { PurchaseOrdersView } from '../components/PurchaseOrdersView';
-import { createIntegrationApiKey, exportEcommerceMarketplacePack, getIntegrationApiKeys, getIntegrationWebhookEvents, requestStockAdjustment, revokeIntegrationApiKey } from '../api';
+import { createIntegrationApiKey, exportEcommerceMarketplacePack, getIntegrationApiKeys, getIntegrationWebhookEvents, requestStockAdjustment, revokeIntegrationApiKey, seedProducts } from '../api';
+import { SAMPLE_PRODUCTS } from '../utils/sampleProducts';
+import { toast } from '../utils/toast';
+import { errorMessage } from '../utils/errorMessage';
 import { usePosStore } from '../store/usePosStore';
 import { BulkInventoryView } from '../components/BulkInventoryView';
 import { InventoryAgentView } from '../components/InventoryAgentView';
@@ -69,6 +72,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [integrationKeyName, setIntegrationKeyName] = useState('ERP stock sync');
   const [generatedIntegrationSecret, setGeneratedIntegrationSecret] = useState<string | null>(null);
   const [creatingIntegrationKey, setCreatingIntegrationKey] = useState(false);
+  const [sampleMode, setSampleMode] = useState<'retail' | 'cafe'>('retail');
+  const [loadingSamples, setLoadingSamples] = useState(false);
 
   const categoryTree = config?.categories || {};
   const SECTIONS = Object.keys(categoryTree);
@@ -102,6 +107,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   }), [products]);
 
   const canApplyStockDirectly = ['admin', 'manager', 'dev'].includes(currentUserStaff?.role || '');
+  const loadSampleProducts = async () => {
+    if (!tenantId || loadingSamples) return;
+    setLoadingSamples(true);
+    try {
+      await seedProducts(tenantId, SAMPLE_PRODUCTS[sampleMode]);
+      onProductsUpdated?.();
+      toast.success('Added 8 sample products \u2014 find them under the "Samples" section. Delete them any time.');
+    } catch (err) {
+      toast.error(`Couldn't add sample products: ${errorMessage(err, 'please try again.')}`);
+    } finally {
+      setLoadingSamples(false);
+    }
+  };
+
   const stockAdjustmentReasons = [
     'Stock count correction',
     'Damaged or expired stock',
@@ -777,7 +796,50 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   );
                 })}
 
-                {filteredInventory.length === 0 && (
+                {filteredInventory.length === 0 && products.length === 0 && canApplyStockDirectly && (
+                  <div className="col-span-full py-20 px-6 text-center bg-white dark:bg-slate-900 rounded-[40px] border border-dashed border-slate-200 dark:border-slate-700/60">
+                    <Package className="w-16 h-16 text-slate-200 mx-auto mb-6" />
+                    <h4 className="text-xl font-black text-slate-900 dark:text-white">Your catalog is empty</h4>
+                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto">
+                      Add your first product, or load a few sample products to explore the POS. You can delete them any time.
+                    </p>
+                    <div className="mt-8 flex flex-col items-center gap-6">
+                      <button
+                        onClick={onAddProduct}
+                        className="px-8 py-4 bg-primary text-white rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl shadow-primary/30 hover:bg-primary/90 transition-all text-xs uppercase tracking-widest"
+                      >
+                        <Plus className="w-5 h-5" />
+                        Add your first product
+                      </button>
+                      <div className="flex flex-col items-center gap-3">
+                        <div role="group" aria-label="Sample product type" className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+                          {(['retail', 'cafe'] as const).map(mode => (
+                            <button
+                              key={mode}
+                              type="button"
+                              aria-pressed={sampleMode === mode}
+                              disabled={loadingSamples}
+                              onClick={() => setSampleMode(mode)}
+                              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sampleMode === mode ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow' : 'text-slate-500 dark:text-slate-400'}`}
+                            >
+                              {mode === 'retail' ? 'Retail' : 'Café'}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={loadSampleProducts}
+                          disabled={loadingSamples}
+                          className="px-6 py-3 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {loadingSamples && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+                          Load 8 sample products
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {filteredInventory.length === 0 && !(products.length === 0 && canApplyStockDirectly) && (
                   <div className="col-span-full py-32 text-center bg-white dark:bg-slate-900 rounded-[40px] border border-dashed border-slate-200 dark:border-slate-700/60">
                     <Package className="w-16 h-16 text-slate-200 mx-auto mb-6" />
                     <h4 className="text-xl font-black text-slate-900 dark:text-white">No matching inventory found</h4>
