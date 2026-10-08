@@ -10,6 +10,7 @@ import { apiPost, apiPut, createSale, getSaleById, validatePromotionCode } from 
 import { useSocket } from './useSocket';
 import { getApplicablePricingDiscount } from '../utils/discounts';
 import { toast } from '../utils/toast';
+import { errorMessage } from '../utils/errorMessage';
 import {
   CheckoutMethod,
   dismissOfflineSale,
@@ -512,7 +513,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       }
     } catch (error) {
       console.error(error);
-      toast.error('Error saving order');
+      toast.error(`Couldn't save the order: ${errorMessage(error, 'please check your connection and try again.')}`);
     } finally {
       setIsProcessing(false);
     }
@@ -552,7 +553,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       return saleId;
     } catch (error) {
       console.error('Failed to park sale:', error);
-      toast.error('Could not park this sale. Please try again.');
+      toast.error(`Couldn't park this sale: ${errorMessage(error, 'please check your connection and try again.')}`);
       return null;
     } finally {
       setIsProcessing(false);
@@ -606,7 +607,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       }
     } catch (err) {
       console.error('Failed to open tab:', err);
-      toast.error('Error saving tab');
+      toast.error(`Couldn't save the tab: ${errorMessage(err, 'please check your connection and try again.')}`);
     } finally {
       setIsProcessing(false);
     }
@@ -660,7 +661,7 @@ export function useCheckout({ user, tenantId, currentUserStaff, customers, activ
       }
     } catch (err) {
       console.error('Failed to open table:', err);
-      toast.error('Error saving table');
+      toast.error(`Couldn't save the table: ${errorMessage(err, 'please check your connection and try again.')}`);
     } finally {
       setIsProcessing(false);
     }

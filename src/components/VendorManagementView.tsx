@@ -4,6 +4,8 @@ import { Plus, Edit, Loader2, Save, X, Building2, Mail, Phone, User } from 'luci
 import { motion, AnimatePresence } from 'motion/react';
 import { usePosStore } from '../store/usePosStore';
 import { apiGet, apiPost, apiPut } from '../api';
+import { toast } from '../utils/toast';
+import { errorMessage } from '../utils/errorMessage';
 
 export function VendorManagementView() {
   const tenantId = usePosStore(s => s.tenantId);
@@ -13,13 +15,14 @@ export function VendorManagementView() {
   const [currentVendor, setCurrentVendor] = useState<Partial<Vendor>>({});
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const fetchVendors = async () => {
+  const fetchVendors = async (options: { silent?: boolean } = {}) => {
     if (!tenantId) return;
     try {
       const data = await apiGet<Vendor[]>(`/api/data/tenants/${tenantId}/vendors`);
       setVendors(data || []);
     } catch (err) {
       console.error('Vendors fetch error:', err);
+      if (!options.silent) toast.error(`Couldn't load vendors: ${errorMessage(err, 'please check your connection.')}`);
     } finally {
       setLoading(false);
     }
@@ -28,7 +31,7 @@ export function VendorManagementView() {
   useEffect(() => {
     fetchVendors();
     // Poll every 30s to keep in sync
-    const interval = setInterval(fetchVendors, 30000);
+    const interval = setInterval(() => fetchVendors({ silent: true }), 30000);
     return () => clearInterval(interval);
   }, [tenantId]);
 
@@ -54,6 +57,7 @@ export function VendorManagementView() {
       setModalOpen(false);
     } catch (err) {
       console.error(err);
+      toast.error(`Couldn't save vendor: ${errorMessage(err, 'please try again.')}`);
     }
     setIsProcessing(false);
   };
@@ -67,6 +71,7 @@ export function VendorManagementView() {
       await fetchVendors();
     } catch (err) {
       console.error(err);
+      toast.error(`Couldn't update vendor status: ${errorMessage(err, 'please try again.')}`);
     }
   };
 

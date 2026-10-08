@@ -9,7 +9,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { Product, Customer, Sale, Workstation, RestaurantTable, LaybyOrder, Promotion } from '../types';
 import { CustomerSelector } from '../components/CustomerSelector';
-import { usePosStore } from '../store/usePosStore';
+import { usePosStore, type CartSnapshot } from '../store/usePosStore';
+import { toast } from '../utils/toast';
 import { WorkstationQueuePanel } from '../components/WorkstationQueuePanel';
 import { BillPrint } from '../components/BillPrint';
 import { BarcodeScanner } from '../components/BarcodeScanner';
@@ -126,11 +127,33 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
     activeSession, activeSection, setActiveSection, activeCategory, setActiveCategory,
     searchQuery, setSearchQuery, selectedCustomerId, setSelectedCustomerId,
     activeTableNumber, setActiveTableNumber, activeOrderId, setActiveOrderId,
-    setCart,
+    setCart, restoreCart,
     currentUserStaff, config,
     isCartOpen, setIsCartOpen,
     tenantId,
   } = usePosStore();
+  const handleClearCart = () => {
+    const { cart: currentCart, activeTableNumber: table, activeOrderId: orderId, selectedCustomerId: customerId } = usePosStore.getState();
+    if (currentCart.length === 0) return;
+    const snapshot: CartSnapshot = { cart: currentCart, activeTableNumber: table, activeOrderId: orderId, selectedCustomerId: customerId };
+    const n = currentCart.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    clearCart();
+    toast.info({
+      message: `Cart cleared (${n} item${n === 1 ? '' : 's'})`,
+      durationMs: 6000,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          // Never overwrite a cart the cashier has started since clearing.
+          if (usePosStore.getState().cart.length > 0) {
+            toast.warning('Undo skipped — a new sale is already in the cart.');
+            return;
+          }
+          restoreCart(snapshot);
+        },
+      },
+    });
+  };
   const printerReadiness = usePrinterReadiness(tenantId);
 
   const [isScanning, setIsScanning] = useState(false);
@@ -1090,6 +1113,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
             <button 
               onClick={() => setIsScanning(true)}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-slate-50 dark:bg-[#0B1120] text-primary rounded-lg hover:bg-primary hover:text-white transition-all shadow-sm active:scale-95"
+              aria-label="Price check / scan barcode"
               title="Price check / scan barcode"
             >
               <ScanLine className="w-5 h-5" />
@@ -1101,6 +1125,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 type="button"
                 onClick={() => setTerminalCategoryLayout('sidebar')}
                 className={`w-10 rounded-lg flex items-center justify-center transition-all ${terminalCategoryLayout === 'sidebar' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                aria-label="Sections and categories in the sidebar"
                 title="Sections and categories in the sidebar"
               >
                 <PanelLeft className="w-5 h-5" />
@@ -1109,6 +1134,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 type="button"
                 onClick={() => { setTerminalCategoryLayout('grid'); setGridShowingProducts(false); }}
                 className={`w-10 rounded-lg flex items-center justify-center transition-all ${terminalCategoryLayout === 'grid' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                aria-label="Sections and categories in the product area"
                 title="Sections and categories in the product area"
               >
                 <LayoutGrid className="w-5 h-5" />
@@ -1130,6 +1156,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
               type="button"
               onClick={() => setTerminalCategoryLayout('sidebar')}
               className={`w-12 rounded-lg flex items-center justify-center transition-all ${terminalCategoryLayout === 'sidebar' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+              aria-label="Sections and categories in the sidebar"
               title="Sections and categories in the sidebar"
             >
               <PanelLeft className="w-5 h-5" />
@@ -1138,6 +1165,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
               type="button"
               onClick={() => { setTerminalCategoryLayout('grid'); setGridShowingProducts(false); }}
               className={`w-12 rounded-lg flex items-center justify-center transition-all ${terminalCategoryLayout === 'grid' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+              aria-label="Sections and categories in the product area"
               title="Sections and categories in the product area"
             >
               <LayoutGrid className="w-5 h-5" />
@@ -1186,6 +1214,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 <button
                   onClick={() => { setSidePanelMode('queue'); setIsCartOpen(true); }}
                   className="lg:hidden relative w-12 rounded-xl bg-orange-500 text-white flex items-center justify-center shadow-sm active:scale-95 transition-all"
+                  aria-label="Open workstation queue"
                   title="Open workstation queue"
                 >
                   <ChefHat className="w-5 h-5" />
@@ -1969,15 +1998,16 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                             <p className="mt-1 text-[10px] font-black text-amber-600 uppercase tracking-widest">No more available</p>
                           ) : null}
                         </div>
-                        <div className="flex items-center gap-4 bg-slate-50 dark:bg-[#0B1120] rounded-xl p-1 shrink-0">
-                          <button onClick={() => updateQuantity(cartId, -1)} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-lg text-xs font-black shadow-sm active:scale-90">-</button>
+                        <div className="flex items-center gap-2 bg-slate-50 dark:bg-[#0B1120] rounded-xl p-1 shrink-0">
+                          <button onClick={() => updateQuantity(cartId, -1)} aria-label="Decrease quantity" className="w-11 h-11 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-lg text-base font-black shadow-sm active:scale-90">-</button>
                           <span className="font-black text-xs w-4 text-center">{item.quantity}</span>
                           <button
                             disabled={isOverAvailableStock || stock <= 0}
                             onClick={() => {
                               if (product && canAddProductToCart(product)) updateQuantity(cartId, 1);
                             }}
-                            className="w-8 h-8 flex items-center justify-center bg-primary text-white rounded-lg text-xs font-black shadow-sm active:scale-90 disabled:opacity-40 disabled:active:scale-100"
+                            aria-label="Increase quantity"
+                            className="w-11 h-11 flex items-center justify-center bg-primary text-white rounded-lg text-base font-black shadow-sm active:scale-90 disabled:opacity-40 disabled:active:scale-100"
                           >
                             +
                           </button>
@@ -2335,7 +2365,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({
                 )}
                 
                 <div className="flex gap-2">
-                  <button onClick={() => clearCart()} title="Clear Cart" className="h-14 w-14 bg-slate-50 dark:bg-[#0B1120] text-red-500 rounded-2xl flex items-center justify-center hover:bg-red-50 transition-all border border-slate-100 dark:border-slate-800/60 active:scale-95 shrink-0">
+                  <button onClick={handleClearCart} aria-label="Clear cart" title="Clear Cart" className="h-14 w-14 bg-slate-50 dark:bg-[#0B1120] text-red-500 rounded-2xl flex items-center justify-center hover:bg-red-50 transition-all border border-slate-100 dark:border-slate-800/60 active:scale-95 shrink-0">
                     <Trash2 className="w-5 h-5" />
                   </button>
                   <button title="Add Note" className="flex-1 h-14 bg-slate-50 dark:bg-[#0B1120] text-slate-400 dark:text-slate-500 rounded-2xl flex items-center justify-center hover:bg-slate-100 dark:bg-slate-800 transition-all border border-slate-100 dark:border-slate-800/60 active:scale-95 gap-2">
