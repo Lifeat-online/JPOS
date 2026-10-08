@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../server/db.js';
-import { clearSeededDemoData, seedDemoData } from '../../server/demo-seed.js';
+import { clearSeededDemoData, seedDemoData, PUBLIC_DEMO_TENANT_ID } from '../../server/demo-seed.js';
 vi.mock('../../server/db.js', () => ({
     getConnection: vi.fn(),
 }));
@@ -24,12 +24,11 @@ describe('demo seed data', () => {
         await seedDemoData('tenant_1', 'restaurant');
         const settingsUpdate = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes("UPDATE app_settings SET business = $1"));
         expect(settingsUpdate).toBeTruthy();
-        expect(JSON.parse(settingsUpdate?.[1]?.[0] || '{}')).toMatchObject({
-            packageTier: 'business',
-            packageName: 'Business',
-            packageStatus: 'active',
-            maxRegisters: 15,
-        });
+        const business = JSON.parse(settingsUpdate?.[1]?.[0] || '{}');
+        // A real tenant's licence must not be changed by seeding sample data.
+        expect(business.packageTier).toBeUndefined();
+        expect(business.packageStatus).toBeUndefined();
+        expect(business.maxRegisters).toBeUndefined();
         expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO staff'), expect.anything());
         expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO customers'), expect.anything());
         expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO bulk_items'), expect.anything());
@@ -42,6 +41,17 @@ describe('demo seed data', () => {
         expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO layby_orders'), expect.anything());
         expect(conn.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO ai_insights'), expect.anything());
         expect(conn.commit).toHaveBeenCalled();
+    });
+    it('grants the demo package only to the public demo tenant', async () => {
+        const conn = mockConn();
+        await seedDemoData(PUBLIC_DEMO_TENANT_ID, 'retail');
+        const settingsUpdate = conn.query.mock.calls.find(([sql]: any[]) => String(sql).includes("UPDATE app_settings SET business = $1"));
+        expect(JSON.parse(settingsUpdate?.[1]?.[0] || '{}')).toMatchObject({
+            packageTier: 'business',
+            packageName: 'Business',
+            packageStatus: 'active',
+            maxRegisters: 15,
+        });
     });
     it('clears seeded demo rows and stale demo package denials', async () => {
         const conn = mockConn();
