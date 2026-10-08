@@ -3,6 +3,7 @@ import { requireAuth } from "../auth-middleware.js";
 import {
   createSale, updateSale, getSaleById, updateSalePaymentProviderStatus,
   processSaleRefund, processSaleVoid, updateSaleItem, clearAllSales,
+  offlineSyncConflictActions, type OfflineSyncConflict,
 } from "../db-crud.js";
 import { validateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema } from "../validation.js";
 import { broadcastSalesUpdate } from "../socket.js";
@@ -14,14 +15,82 @@ import {
   auditActorFromRequest, auditRouteEvent, denyWithAudit,
   enforceSensitiveAction, saleMutationSensitiveAction,
   stripSensitiveVerification, auditChangedFields, canUseActionCenter,
-  sensitiveRouteRateLimit,
+  sensitiveRouteRateLimit, normalizeRole,
 } from "./_helpers.js";
+import { sendRouteError } from "../securityHardening.js";
+import {
+  findSaleItemPriceMismatches, findSaleTotalProblem, filterLinesNotOnSale,
+  loadStoredSaleForPricing, describePriceMismatches, type PricedSale,
+} from "../salePricing.js";
 
 export const salesRouter = Router({ mergeParams: true });
 
 // helpers local to this router
 function workstationItemsForSale(sale: any) {
   return (Array.isArray(sale?.items) ? sale.items : []).filter((i: any) => i?.workstationId || i?.workstation_id);
+}
+
+type PricingOutcome = { handled: true } | { handled: false; offlineConflicts: OfflineSyncConflict[] };
+
+// Verifies item prices against the catalog and the total against the discount
+// floor. Online: catalog mismatches need a manager/admin re-auth (cashiers are
+// told to refresh or call a manager); a bad total is rejected. Offline syncs
+// are never blocked — the sale already happened — so problems become conflicts.
+async function enforceSalePricing(req: any, res: any, sale: PricedSale & { offlineEventId?: string | null }, saleId?: string): Promise<PricingOutcome> {
+  const tenantId = req.params.tenantId;
+  const stored = saleId ? await loadStoredSaleForPricing(tenantId, saleId) : null;
+  const items = Array.isArray(sale.items) ? sale.items : null;
+  const linesToCheck = items && saleId ? await filterLinesNotOnSale(tenantId, saleId, items) : items || [];
+  const mismatches = await findSaleItemPriceMismatches(tenantId, linesToCheck);
+  const totalProblem = sale.total == null ? null : await findSaleTotalProblem(tenantId, {
+    items: items || stored?.items || [],
+    total: sale.total,
+    subtotal: items ? sale.subtotal : null,
+    customerId: sale.customerId ?? stored?.customerId ?? null,
+    promotionDiscount: sale.promotionDiscount ?? stored?.promotionDiscount ?? 0,
+    manualDiscountAmount: sale.manualDiscountAmount ?? 0,
+  });
+
+  if (sale.offlineEventId) {
+    const offlineConflicts: OfflineSyncConflict[] = mismatches.map(m => ({
+      conflictType: "price_mismatch",
+      recommendedAction: offlineSyncConflictActions.price_mismatch,
+      message: m.catalogPrice == null
+        ? `${m.name} was sold at R${m.submittedPrice.toFixed(2)} but is not in the current catalog.`
+        : `${m.name} was sold at R${m.submittedPrice.toFixed(2)}; catalog price is R${m.catalogPrice.toFixed(2)}.`,
+      productId: m.productId,
+      itemName: m.name,
+    }));
+    if (totalProblem) {
+      offlineConflicts.push({
+        conflictType: "price_mismatch",
+        recommendedAction: offlineSyncConflictActions.price_mismatch,
+        message: `Offline sale total R${totalProblem.submitted.toFixed(2)} is below the expected R${totalProblem.expected.toFixed(2)}.`,
+      });
+    }
+    return { handled: false, offlineConflicts };
+  }
+
+  if (totalProblem) {
+    res.status(400).json({
+      error: "The sale total doesn't match the items in the cart. Refresh the till and try again.",
+      pricingProblem: totalProblem.kind,
+    });
+    return { handled: true };
+  }
+  if (mismatches.length > 0) {
+    const role = normalizeRole(req.user?.role);
+    if (role !== "admin" && role !== "manager" && role !== "dev") {
+      await auditRouteEvent(req, "sale.price_mismatch_blocked", "sale", { mismatches }, saleId || null);
+      res.status(409).json({
+        error: `Prices have changed for ${describePriceMismatches(mismatches)}. Refresh the till to load current prices, or ask a manager to ring up this sale.`,
+        priceMismatches: mismatches,
+      });
+      return { handled: true };
+    }
+    if (await enforceSensitiveAction(req, res, "price_override", { saleId: saleId || null, mismatches })) return { handled: true };
+  }
+  return { handled: false, offlineConflicts: [] };
 }
 
 function orderLabelForPush(sale: any) {
@@ -53,7 +122,7 @@ salesRouter.get("/", requireAuth, async (req: any, res) => {
   try {
     res.json(await getActiveSalesByTenant(req.params.tenantId));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -65,7 +134,9 @@ salesRouter.post("/", requireAuth, sensitiveRouteRateLimit, validateSchema(SaleS
       const r = await enforceSensitiveAction(req, res, sensitiveAction, { saleId: null, changedFields: auditChangedFields(saleInput) });
       if (r) return;
     }
-    const sale = await createSale(req.params.tenantId, saleInput);
+    const pricing = await enforceSalePricing(req, res, saleInput);
+    if (pricing.handled) return;
+    const sale = await createSale(req.params.tenantId, saleInput, { offlineConflicts: pricing.offlineConflicts });
     const io = req.app.get("io");
     if (io && Array.isArray(sale.items) && sale.items.some((i: any) => i.workstationId)) {
       broadcastSalesUpdate(io, req.params.tenantId, sale.id);
@@ -77,7 +148,7 @@ salesRouter.post("/", requireAuth, sensitiveRouteRateLimit, validateSchema(SaleS
     }).catch((err: any) => console.warn("Unable to queue kitchen print jobs:", err?.message || err));
     res.json(sale);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -87,7 +158,7 @@ salesRouter.get("/:saleId", requireAuth, async (req: any, res) => {
     if (!sale) return res.status(404).json({ error: "Sale not found" });
     res.json(sale);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -99,6 +170,10 @@ salesRouter.put("/:saleId", requireAuth, sensitiveRouteRateLimit, async (req: an
     if (sensitiveAction) {
       const r = await enforceSensitiveAction(req, res, sensitiveAction, { saleId: req.params.saleId, changedFields: auditChangedFields(saleUpdate) });
       if (r) return;
+    }
+    if (saleUpdate.items !== undefined || saleUpdate.total !== undefined) {
+      const pricing = await enforceSalePricing(req, res, saleUpdate, req.params.saleId);
+      if (pricing.handled) return;
     }
     const sale = await updateSale(req.params.tenantId, req.params.saleId, saleUpdate);
     const io = req.app.get("io");
@@ -112,7 +187,7 @@ salesRouter.put("/:saleId", requireAuth, sensitiveRouteRateLimit, async (req: an
     }
     res.json(sale);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -133,7 +208,7 @@ salesRouter.put("/:saleId/payments/:paymentId/provider-status", requireAuth, sen
     if (io) broadcastSalesUpdate(io, req.params.tenantId, sale.id);
     res.json(sale);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -166,7 +241,7 @@ salesRouter.post("/:saleId/refund", requireAuth, sensitiveRouteRateLimit, valida
     if (io) broadcastSalesUpdate(io, req.params.tenantId, refund.id);
     res.json(refund);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -198,7 +273,7 @@ salesRouter.post("/:saleId/void", requireAuth, sensitiveRouteRateLimit, validate
     if (io) broadcastSalesUpdate(io, req.params.tenantId, voided.id);
     res.json(voided);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -209,7 +284,7 @@ salesRouter.put("/:saleId/items/:itemId", requireAuth, async (req: any, res) => 
     if (io) broadcastSalesUpdate(io, req.params.tenantId, req.params.saleId);
     res.json(updated);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -218,11 +293,11 @@ salesRouter.post("/offline-sync/issues", requireAuth, async (req: any, res) => {
     const issues = await syncOfflineSaleIssues(req.params.tenantId, req.body || {});
     res.json(issues);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
 salesRouter.delete("/", requireAuth, async (req: any, res) => {
   try { await clearAllSales(req.params.tenantId); res.json({ success: true }); }
-  catch (err: any) { res.status(500).json({ error: err.message }); }
+  catch (err: any) { sendRouteError(res, err, req); }
 });

@@ -4,6 +4,7 @@ import { Request } from "express";
 import { requireAuth } from "../auth-middleware.js";
 import { getAppConfigByTenant } from "../db-adapter.js";
 import { sensitiveRouteRateLimit } from "./_helpers.js";
+import { sendRouteError } from "../securityHardening.js";
 
 const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
 const PAYFAST_MERCHANT_KEY = process.env.PAYFAST_MERCHANT_KEY;
@@ -96,7 +97,7 @@ payfastRouter.post("/generate", requireAuth, async (req, res) => {
       fields,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 

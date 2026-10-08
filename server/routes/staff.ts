@@ -17,6 +17,7 @@ import {
 import {
   createManagerSaleApprovalRequest, decideManagerTask, getManagerTaskQueue, syncManagerTasksFromSignals
 } from "../managerTasks.js";
+import { sendRouteError } from "../securityHardening.js";
 
 export const staffRouter = Router({ mergeParams: true });
 
@@ -25,7 +26,7 @@ staffRouter.get("/", requireAuth, async (req: any, res) => {
     const staff = await getStaffByTenant(req.params.tenantId);
     res.json(staff);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -34,7 +35,7 @@ staffRouter.post("/", requireAuth, requireManagerRole, validateSchema(StaffSchem
     const created = await createStaff(req.params.tenantId, req.body);
     res.status(201).json(created);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -43,7 +44,7 @@ staffRouter.put("/:staffId", requireAuth, requireManagerRole, validateSchema(Sta
     const updated = await updateStaff(req.params.tenantId, req.params.staffId, req.body);
     res.json(updated);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -52,7 +53,7 @@ staffRouter.delete("/:staffId", requireAuth, requireManagerRole, async (req: any
     await deleteStaff(req.params.tenantId, req.params.staffId);
     res.status(204).end();
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -67,7 +68,7 @@ staffRouter.get("/shifts", requireAuth, async (req: any, res) => {
       staffId: req.query.staffId ? String(req.query.staffId) : undefined,
     }));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -78,7 +79,7 @@ staffRouter.post("/shifts", requireAuth, async (req: any, res) => {
     }
     res.json(await createStaffShift(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -89,7 +90,7 @@ staffRouter.put("/shifts/:shiftId", requireAuth, async (req: any, res) => {
     }
     res.json(await updateStaffShift(req.params.tenantId, req.params.shiftId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -100,7 +101,7 @@ staffRouter.delete("/shifts/:shiftId", requireAuth, async (req: any, res) => {
     }
     res.json(await cancelStaffShift(req.params.tenantId, req.params.shiftId, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -116,7 +117,7 @@ staffRouter.post("/roster/publish", requireAuth, async (req: any, res) => {
       auditActorFromRequest(req),
     ));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -132,7 +133,7 @@ staffRouter.get("/timesheet-payroll", requireAuth, async (req: any, res) => {
     });
     res.json(report);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -147,7 +148,7 @@ staffRouter.get("/performance", requireAuth, async (req: any, res) => {
       staffId: req.query.staffId ? String(req.query.staffId) : undefined,
     }));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -158,7 +159,7 @@ staffRouter.post("/performance/coaching-notes", requireAuth, async (req: any, re
     }
     res.json(await addStaffCoachingNote(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -169,7 +170,7 @@ staffRouter.get("/tip-pool-rules", requireAuth, async (req: any, res) => {
     }
     res.json(await listTipPoolRules(req.params.tenantId));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -180,7 +181,7 @@ staffRouter.post("/tip-pool-rules", requireAuth, async (req: any, res) => {
     }
     res.json(await createTipPoolRule(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -191,7 +192,7 @@ staffRouter.put("/tip-pool-rules/:ruleId", requireAuth, async (req: any, res) =>
     }
     res.json(await updateTipPoolRule(req.params.tenantId, req.params.ruleId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -202,7 +203,7 @@ staffRouter.post("/tip-pools/preview", requireAuth, async (req: any, res) => {
     }
     res.json(await previewTipPoolPayouts(req.params.tenantId, req.body || {}));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -213,7 +214,7 @@ staffRouter.post("/tip-pools/generate", requireAuth, async (req: any, res) => {
     }
     res.json(await generateTipPoolPayouts(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -229,7 +230,7 @@ staffRouter.get("/tip-pool-payouts", requireAuth, async (req: any, res) => {
       staffId: req.query.staffId ? String(req.query.staffId) : undefined,
     }));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -245,7 +246,7 @@ staffRouter.get("/attendance/me", requireAuth, async (req: any, res) => {
     }
     res.json(await getMyAttendanceStatus(req.params.tenantId, requestedStaffId));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -258,7 +259,7 @@ staffRouter.post("/clock-in", requireAuth, async (req: any, res) => {
     }
     res.json(await clockIn(req.params.tenantId, { ...req.body, staffId: requestedStaffId }, actor));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -272,7 +273,7 @@ staffRouter.post("/break/start", requireAuth, async (req: any, res) => {
     }
     res.json(await startBreak(req.params.tenantId, requestedStaffId, req.body?.at || null));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -286,7 +287,7 @@ staffRouter.post("/break/end", requireAuth, async (req: any, res) => {
     }
     res.json(await endBreak(req.params.tenantId, requestedStaffId, req.body?.at || null));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -300,6 +301,6 @@ staffRouter.post("/clock-out", requireAuth, async (req: any, res) => {
     }
     res.json(await clockOut(req.params.tenantId, { ...req.body, staffId: requestedStaffId }, actor));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });

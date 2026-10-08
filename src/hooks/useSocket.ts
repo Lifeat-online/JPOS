@@ -53,9 +53,9 @@ export function useSocket({ user, tenantId, enabled = true, workstationId, table
     const socketUrl = getSocketBaseUrl();
     
     const newSocket = io(socketUrl, {
-      auth: {
-        token: `Bearer ${token}`,
-      },
+      // Re-read on every (re)connect so a refreshed access token is used;
+      // the server rejects expired tokens.
+      auth: (cb) => cb({ token: `Bearer ${getAccessToken() || token}` }),
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 5,

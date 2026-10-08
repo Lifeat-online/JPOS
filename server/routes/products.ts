@@ -3,6 +3,7 @@ import { requireAuth } from "../auth-middleware.js";
 import { getProductsByTenant, semanticProductSearch } from "../db-adapter.js";
 import { createProduct, updateProduct, deleteProduct } from "../db-crud.js";
 import { validateSchema, ProductSchema } from "../validation.js";
+import { sendRouteError } from "../securityHardening.js";
 
 export const productsRouter = Router({ mergeParams: true });
 
@@ -18,7 +19,7 @@ productsRouter.get("/search", requireAuth, async (req: any, res) => {
     if (results === null) return res.json({ mode: "unavailable", results: [] });
     res.json({ mode: "semantic", results });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -32,7 +33,7 @@ productsRouter.get("/", requireAuth, async (req: any, res) => {
     res.json(products);
   } catch (err: any) {
     const status = String(err?.message || "").includes("not assigned") ? 403 : 500;
-    res.status(status).json({ error: err.message });
+    sendRouteError(res, err, req, status);
   }
 });
 
@@ -41,7 +42,7 @@ productsRouter.post("/", requireAuth, validateSchema(ProductSchema), async (req:
     const created = await createProduct(req.params.tenantId, req.body);
     res.status(201).json(created);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -50,7 +51,7 @@ productsRouter.put("/:productId", requireAuth, validateSchema(ProductSchema), as
     const updated = await updateProduct(req.params.tenantId, req.params.productId, req.body);
     res.json(updated);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -59,6 +60,6 @@ productsRouter.delete("/:productId", requireAuth, async (req: any, res) => {
     await deleteProduct(req.params.tenantId, req.params.productId);
     res.status(204).end();
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });

@@ -11,7 +11,7 @@ import { buildLiveWorkstationQueueRows } from "./workstationStats.js";
 import { getDashboardKpis } from "./dashboardKpis.js";
 import { validateSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema } from "./validation.js";
 import { NextFunction, Request, Response } from "express";
-import { applyTrustProxy, apiRateLimit, corsHandler, requestId, securityHeaders, sendSafeError, stripPoweredBy, } from "./securityHardening.js";
+import { applyTrustProxy, apiRateLimit, corsHandler, requestId, securityHeaders, sendSafeError, stripPoweredBy, sendRouteError } from "./securityHardening.js";
 import { getProductsByTenant, getTenantIdBySlug, getUserByUid, getStaffTenantByEmail, getAppConfigByTenant, getCustomersByTenant, getStaffByTenant, getWorkstationsByTenant, getActiveSalesByTenant, getOpenCashSessionByStaff, getPayoutRequestsByTenant, getCustomerPayoutRequestsByTenant, getMessagesByTenant, getMessagesByChannel, getTableSectionsByTenant, getRestaurantTablesByTenant, } from "./db-adapter.js";
 import { createProduct, updateProduct, createCustomer, updateCustomer, deleteCustomer, createStaff, updateStaff, deleteStaff, setupTenant, seedProducts, updateProductRecipe, getProductRecipe, createModifierGroup, getProductModifiers, updateModifierOptions, deleteModifierGroup, } from "./db-crud.js";
 import { broadcastSalesUpdate } from "./socket.js";
@@ -375,7 +375,7 @@ export async function createApp(io: any = null) {
             });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.post("/api/integrations/:tenantId/stock-sync", integrationWebhookRateLimit, async (req, res) => {
@@ -574,7 +574,7 @@ export async function createApp(io: any = null) {
             });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.post("/api/data/setup", requireAuth, async (req, res) => {
@@ -583,7 +583,7 @@ export async function createApp(io: any = null) {
             res.json(data);
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.post("/api/data/tenants/:tenantId/seed-products", requireAuth, requireManagerRole, async (req, res) => {
@@ -592,7 +592,7 @@ export async function createApp(io: any = null) {
             res.json({ success: true });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.post("/api/data/tenants/:tenantId/demo-seed/:mode", requireAuth, requireManagerRole, async (req, res) => {
@@ -602,7 +602,7 @@ export async function createApp(io: any = null) {
             res.json({ success: true, mode });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.delete("/api/data/tenants/:tenantId/demo-seed", requireAuth, requireManagerRole, async (req, res) => {
@@ -611,7 +611,7 @@ export async function createApp(io: any = null) {
             res.json({ success: true });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.get("/api/data/customers/by-email", optionalAuth, async (req, res) => {
@@ -661,7 +661,7 @@ export async function createApp(io: any = null) {
             res.json({ customer, tenantId: r.tenant_id });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.post("/api/data/tenants/:tenantId/products", requireAuth, validateSchema(ProductSchema), (req, res, next) => requirePackageCapacity(req, res, next, "products", "maxProducts", "products"), async (req, res, next) => {
@@ -674,7 +674,7 @@ export async function createApp(io: any = null) {
             res.json(data);
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.put("/api/data/tenants/:tenantId/products/:id", requireAuth, validateSchema(ProductSchema), async (req, res, next) => {
@@ -687,7 +687,7 @@ export async function createApp(io: any = null) {
             res.json(data);
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.post("/api/data/tenants/:tenantId/products/:id/stock-adjustments", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
@@ -740,7 +740,7 @@ export async function createApp(io: any = null) {
             });
         }
         catch (err: any) {
-            res.status(400).json({ error: err.message });
+            sendRouteError(res, err, req, 400);
         }
     });
     app.post("/api/data/tenants/:tenantId/customers", requireAuth, validateSchema(CustomerSchema), (req, res, next) => requirePackageCapacity(req, res, next, "customers", "maxCustomers", "customers"), async (req, res) => {
@@ -756,7 +756,7 @@ export async function createApp(io: any = null) {
             res.json(data);
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.put("/api/data/tenants/:tenantId/customers/:id", requireAuth, validateSchema(CustomerUpdateSchema), async (req, res) => {
@@ -782,7 +782,7 @@ export async function createApp(io: any = null) {
             res.json(data);
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.delete("/api/data/tenants/:tenantId/customers/:id", requireAuth, async (req, res) => {
@@ -819,7 +819,7 @@ export async function createApp(io: any = null) {
             res.json(data);
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.put("/api/data/tenants/:tenantId/staff/:id", requireAuth, requireManagerRole, validateSchema(StaffUpdateSchema), async (req, res) => {
@@ -843,7 +843,7 @@ export async function createApp(io: any = null) {
             res.json(data);
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.delete("/api/data/tenants/:tenantId/staff/:id", requireAuth, requireManagerRole, async (req, res) => {
@@ -855,7 +855,7 @@ export async function createApp(io: any = null) {
             res.json({ success: true });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     // ─────────────────────────────────────────────────────────────────────────
@@ -884,7 +884,7 @@ export async function createApp(io: any = null) {
             res.json(recipe);
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.put("/api/data/products/:productId/recipe", requireAuth, requireManagerRole, async (req, res) => {
@@ -895,7 +895,7 @@ export async function createApp(io: any = null) {
             res.json({ success: true });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.get("/api/data/products/:productId/modifiers", requireAuth, async (req, res) => {
@@ -906,7 +906,7 @@ export async function createApp(io: any = null) {
             res.json(mods);
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.post("/api/data/products/:productId/modifiers", requireAuth, requireManagerRole, async (req, res) => {
@@ -917,7 +917,7 @@ export async function createApp(io: any = null) {
             res.json({ id });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.put("/api/data/modifiers/:modifierId/options", requireAuth, requireManagerRole, async (req, res) => {
@@ -928,7 +928,7 @@ export async function createApp(io: any = null) {
             res.json({ success: true });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     app.delete("/api/data/modifiers/:modifierId", requireAuth, requireManagerRole, async (req, res) => {
@@ -939,7 +939,7 @@ export async function createApp(io: any = null) {
             res.json({ success: true });
         }
         catch (err: any) {
-            res.status(500).json({ error: err.message });
+            sendRouteError(res, err, req);
         }
     });
     const { payfastRouter } = await import("./routes/payfast.js");

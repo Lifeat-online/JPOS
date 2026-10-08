@@ -11,6 +11,7 @@ import * as licence from "../licenceMiddleware.js";
 import { canManageCash, auditActorFromRequest, auditRouteEvent, denyWithAudit, enforceSensitiveAction, drawerMovementSensitiveAction, stripSensitiveVerification, auditChangedFields, safeJsonField, } from "./_helpers.js";
 import { optionalAuth } from "../auth-middleware.js";
 import { queueCashDrawerPulseForNoSale } from "../hardwareAdapters.js";
+import { sendRouteError } from "../securityHardening.js";
 export const cashRouter = Router({ mergeParams: true });
 function toMoneyNumber(value: unknown): number {
     if (typeof value === "number")
@@ -192,7 +193,7 @@ cashRouter.get("/cash-sessions", optionalAuth, async (req: any, res) => {
         res.json(sessions);
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.get("/cash-sessions/:id/movements", requireAuth, async (req: any, res) => {
@@ -217,7 +218,7 @@ cashRouter.get("/cash-sessions/:id/movements", requireAuth, async (req: any, res
         res.json(rows.map((r: any) => ({ ...r, amount: Number(r.amount || 0) })));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.post("/cash-sessions", requireAuth, async (req: any, res) => {
@@ -286,7 +287,7 @@ cashRouter.post("/cash-sessions", requireAuth, async (req: any, res) => {
         res.json({ id, ...req.body, reviewStatus: 'in_progress' });
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.post("/cash-sessions/:id/movements", requireAuth, async (req: any, res) => {
@@ -344,7 +345,7 @@ cashRouter.post("/cash-sessions/:id/movements", requireAuth, async (req: any, re
         res.json(movement);
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.put("/cash-sessions/:id", requireAuth, async (req: any, res) => {
@@ -509,7 +510,7 @@ cashRouter.put("/cash-sessions/:id", requireAuth, async (req: any, res) => {
         res.json({ success: true });
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.put("/cash-sessions/:id/review", requireAuth, async (req: any, res) => {
@@ -559,7 +560,7 @@ cashRouter.put("/cash-sessions/:id/review", requireAuth, async (req: any, res) =
         res.json({ success: true, reviewStatus });
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.post("/cash-sessions/:id/wallet-cash", requireAuth, async (req: any, res) => {
@@ -586,7 +587,7 @@ cashRouter.post("/cash-sessions/:id/wallet-cash", requireAuth, async (req: any, 
         res.status(201).json(result);
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 // ── Payout requests ────────────────────────────────────────────────────────
@@ -595,7 +596,7 @@ cashRouter.get("/payout-requests", requireAuth, async (req: any, res) => {
         res.json(await getPayoutRequestsByTenant(req.params.tenantId));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.post("/payout-requests", requireAuth, async (req: any, res) => {
@@ -603,7 +604,7 @@ cashRouter.post("/payout-requests", requireAuth, async (req: any, res) => {
         res.json(await createPayoutRequest(req.params.tenantId, req.body));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.put("/payout-requests/:id", requireAuth, async (req: any, res) => {
@@ -611,7 +612,7 @@ cashRouter.put("/payout-requests/:id", requireAuth, async (req: any, res) => {
         res.json(await updatePayoutRequest(req.params.tenantId, req.params.id, req.body));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.get("/customer-payout-requests", requireAuth, async (req: any, res) => {
@@ -619,7 +620,7 @@ cashRouter.get("/customer-payout-requests", requireAuth, async (req: any, res) =
         res.json(await getCustomerPayoutRequestsByTenant(req.params.tenantId));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.post("/customer-payout-requests", requireAuth, async (req: any, res) => {
@@ -627,7 +628,7 @@ cashRouter.post("/customer-payout-requests", requireAuth, async (req: any, res) 
         res.json(await createCustomerPayoutRequest(req.params.tenantId, req.body));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.put("/customer-payout-requests/:id", requireAuth, async (req: any, res) => {
@@ -635,7 +636,7 @@ cashRouter.put("/customer-payout-requests/:id", requireAuth, async (req: any, re
         res.json(await updateCustomerPayoutRequest(req.params.tenantId, req.params.id, req.body));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 // ── Manager cash ───────────────────────────────────────────────────────────
@@ -646,7 +647,7 @@ cashRouter.get("/manager-cash/summary", requireAuth, async (req: any, res) => {
         res.json(await getManagerCashSummary(req.params.tenantId));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.get("/manager-cash/movements", requireAuth, async (req: any, res) => {
@@ -656,7 +657,7 @@ cashRouter.get("/manager-cash/movements", requireAuth, async (req: any, res) => 
         res.json(await getManagerCashMovements(req.params.tenantId, req.query));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.get("/manager-cash/movements/export", requireAuth, async (req: any, res) => {
@@ -666,7 +667,7 @@ cashRouter.get("/manager-cash/movements/export", requireAuth, async (req: any, r
         res.json(await exportManagerCashMovementsCsv(req.params.tenantId, req.query));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.post("/manager-cash/movements", requireAuth, async (req: any, res) => {
@@ -676,7 +677,7 @@ cashRouter.post("/manager-cash/movements", requireAuth, async (req: any, res) =>
         res.status(201).json(await recordManagerCashMovement(req.params.tenantId, req.body || {}, { staffId: req.user?.staffId, staffName: req.user?.name, role: req.user?.role }));
     }
     catch (err: any) {
-        res.status(400).json({ error: err.message });
+        sendRouteError(res, err, req, 400);
     }
 });
 cashRouter.get("/manager-cash/transfers", requireAuth, async (req: any, res) => {
@@ -686,7 +687,7 @@ cashRouter.get("/manager-cash/transfers", requireAuth, async (req: any, res) => 
         res.json(await getCashCustodyTransfers(req.params.tenantId, typeof req.query.status === "string" ? req.query.status : null, Number(req.query.limit || 25)));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.post("/manager-cash/transfers", requireAuth, async (req: any, res) => {
@@ -696,7 +697,7 @@ cashRouter.post("/manager-cash/transfers", requireAuth, async (req: any, res) =>
         res.status(201).json(await createCashCustodyTransfer(req.params.tenantId, req.body || {}, { staffId: req.user?.staffId, staffName: req.user?.name, role: req.user?.role }));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.put("/manager-cash/transfers/:transferId/confirm", requireAuth, async (req: any, res) => {
@@ -706,7 +707,7 @@ cashRouter.put("/manager-cash/transfers/:transferId/confirm", requireAuth, async
         res.json(await confirmCashCustodyTransfer(req.params.tenantId, req.params.transferId, { staffId: req.user?.staffId, staffName: req.user?.name, role: req.user?.role }));
     }
     catch (err: any) {
-        res.status(400).json({ error: err.message });
+        sendRouteError(res, err, req, 400);
     }
 });
 cashRouter.put("/manager-cash/transfers/:transferId/cancel", requireAuth, async (req: any, res) => {
@@ -716,7 +717,7 @@ cashRouter.put("/manager-cash/transfers/:transferId/cancel", requireAuth, async 
         res.json(await cancelCashCustodyTransfer(req.params.tenantId, req.params.transferId, { staffId: req.user?.staffId, staffName: req.user?.name, role: req.user?.role }));
     }
     catch (err: any) {
-        res.status(400).json({ error: err.message });
+        sendRouteError(res, err, req, 400);
     }
 });
 cashRouter.get("/manager-cash/close/preview", requireAuth, async (req: any, res) => {
@@ -726,7 +727,7 @@ cashRouter.get("/manager-cash/close/preview", requireAuth, async (req: any, res)
         res.json(await getCashClosePreview(req.params.tenantId, typeof req.query.businessDate === "string" ? req.query.businessDate : null));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.get("/manager-cash/close", requireAuth, async (req: any, res) => {
@@ -736,7 +737,7 @@ cashRouter.get("/manager-cash/close", requireAuth, async (req: any, res) => {
         res.json(await getCashCloseCheckpoints(req.params.tenantId, Number(req.query.limit || 20)));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.post("/manager-cash/close", requireAuth, async (req: any, res) => {
@@ -746,7 +747,7 @@ cashRouter.post("/manager-cash/close", requireAuth, async (req: any, res) => {
         res.status(201).json(await createCashCloseCheckpoint(req.params.tenantId, req.body || {}, { staffId: req.user?.staffId, staffName: req.user?.name, role: req.user?.role }));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.get("/manager-cash/close/:checkpointId/export", requireAuth, async (req: any, res) => {
@@ -756,7 +757,7 @@ cashRouter.get("/manager-cash/close/:checkpointId/export", requireAuth, async (r
         res.json(await exportCashCloseCheckpointCsv(req.params.tenantId, req.params.checkpointId));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 cashRouter.post("/manager-cash/wallet-cash", requireAuth, async (req: any, res) => {
@@ -770,6 +771,6 @@ cashRouter.post("/manager-cash/wallet-cash", requireAuth, async (req: any, res) 
         res.status(201).json(await recordWalletCashMovement(req.params.tenantId, walletInput || {}, { staffId: req.user?.staffId, staffName: req.user?.name, role: req.user?.role, requestId: req.requestId || null }));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });

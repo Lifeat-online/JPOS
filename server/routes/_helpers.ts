@@ -73,7 +73,7 @@ export function requireManagerRole(req: Request, res: Response, next: NextFuncti
 export function requireTenantRouteAccess(req: Request, res: Response, next: NextFunction) {
   const routeTenantId = String(req.params.tenantId || "").trim();
   const tokenTenantId = String(req.user?.tenantId || "").trim();
-  if (!routeTenantId || !tokenTenantId || routeTenantId === tokenTenantId) return next();
+  if (!routeTenantId || (tokenTenantId && routeTenantId === tokenTenantId)) return next();
   return denyWithAudit(req, res, "tenant.cross_access", "This user cannot access the requested tenant.", {
     routeTenantId,
     tokenTenantId,

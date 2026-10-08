@@ -143,6 +143,7 @@ function offlineConflictLabel(type?: string | null) {
     duplicate_local_receipt: 'Duplicate receipt',
     duplicate_table_or_tab: 'Table / tab conflict',
     duplicate_customer_order: 'Customer order conflict',
+    price_mismatch: 'Price mismatch',
     sync_failure: 'Sync failure',
   };
   return type ? labels[type] || type.replace(/_/g, ' ') : null;

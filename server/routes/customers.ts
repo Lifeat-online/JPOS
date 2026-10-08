@@ -8,6 +8,7 @@ import { getCustomerCampaignExport } from "../customerSegments.js";
 import { listCustomerConsents, upsertCustomerConsents } from "../customerConsents.js";
 import { getCustomerDataExport } from "../customerDataExport.js";
 import { denyWithAudit, auditRouteEvent, auditActorFromRequest } from "./_helpers.js";
+import { sendRouteError } from "../securityHardening.js";
 
 function canUseActionCenter(role: string | undefined | null) {
   const r = String(role || "").toLowerCase();
@@ -21,7 +22,7 @@ customersRouter.get("/", requireAuth, async (req: any, res) => {
     const customers = await getCustomersByTenant(req.params.tenantId);
     res.json(customers);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -30,7 +31,7 @@ customersRouter.post("/", requireAuth, validateSchema(CustomerSchema), async (re
     const created = await createCustomer(req.params.tenantId, req.body);
     res.status(201).json(created);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -39,7 +40,7 @@ customersRouter.put("/:customerId", requireAuth, validateSchema(CustomerUpdateSc
     const updated = await updateCustomer(req.params.tenantId, req.params.customerId, req.body);
     res.json(updated);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -48,7 +49,7 @@ customersRouter.delete("/:customerId", requireAuth, async (req: any, res) => {
     await deleteCustomer(req.params.tenantId, req.params.customerId);
     res.status(204).end();
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -63,7 +64,7 @@ customersRouter.get("/batch/export", requireAuth, async (req: any, res) => {
     }, null, "customer_batch");
     res.json(pack);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -82,7 +83,7 @@ customersRouter.post("/batch/import", requireAuth, async (req: any, res) => {
     }, null, "customer_batch");
     res.json(result);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -103,7 +104,7 @@ customersRouter.get("/campaign-export", requireAuth, async (req: any, res) => {
     }, null, "customer_campaigns");
     res.json(report);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -111,7 +112,7 @@ customersRouter.get("/:id/consents", requireAuth, async (req: any, res) => {
   try {
     res.json(await listCustomerConsents(req.params.tenantId, req.params.id));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -132,7 +133,7 @@ customersRouter.get("/:id/data-export", requireAuth, async (req: any, res) => {
     res.json(report);
   } catch (err: any) {
     const status = String(err?.message || "").includes("not found") ? 404 : 500;
-    res.status(status).json({ error: err.message });
+    sendRouteError(res, err, req, status);
   }
 });
 
@@ -150,6 +151,6 @@ customersRouter.put("/:id/consents", requireAuth, async (req: any, res) => {
       auditActorFromRequest(req),
     ));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });

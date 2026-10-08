@@ -1,6 +1,26 @@
 import { Server as SocketIOServer } from "socket.io";
 import { query } from "./db.js";
+import { verifyToken, type AuthTokenPayload } from "./auth-middleware.js";
 import { publishRealtimeEventIfEnabled, startRealtimePubsubPoller } from "./realtimePubsub.js";
+// Resource rooms are keyed by bare row ids, so a join must prove the row
+// belongs to the caller's tenant before the socket is allowed in.
+const ROOM_OWNERSHIP_SQL = {
+    workstation: "SELECT 1 FROM workstations WHERE id = $1 AND tenant_id = $2 LIMIT 1",
+    table: "SELECT 1 FROM restaurant_tables WHERE id = $1 AND tenant_id = $2 LIMIT 1",
+    tab: "SELECT 1 FROM sales WHERE id = $1 AND tenant_id = $2 LIMIT 1",
+} as const;
+async function tenantOwnsRoomResource(kind: keyof typeof ROOM_OWNERSHIP_SQL, resourceId: unknown, tenantId: string): Promise<boolean> {
+    if (!resourceId || !tenantId)
+        return false;
+    try {
+        const rows = await query<any>(ROOM_OWNERSHIP_SQL[kind], [String(resourceId), tenantId]);
+        return rows.length > 0;
+    }
+    catch (err) {
+        console.warn(`Socket ${kind} ownership check failed:`, err);
+        return false;
+    }
+}
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type SocketUser = {
     uid: string;
@@ -69,59 +89,63 @@ export function setupSocketIO(httpServer: any) {
         if (!authHeader || !authHeader.startsWith("Bearer ")) {
             return next(new Error("Authentication required"));
         }
-        const token = authHeader.substring(7);
-        socket.token = token;
+        const payload = verifyToken(authHeader.substring(7));
+        if (!payload || !payload.tenantId) {
+            return next(new Error("Authentication required"));
+        }
+        socket.data.user = payload;
         next();
     });
     // ── Connection Handler ──────────────────────────────────────────────────────
     io.on("connection", (socket: any) => {
         console.log(`Client connected: ${socket.id}`);
-        // Store socket user info
-        const socketUser: SocketUser | null = null;
+        // Identity and tenant come only from the verified token, never from event payloads.
+        const socketUser = socket.data.user as AuthTokenPayload;
+        const socketTenantId = socketUser.tenantId;
+        const socketStaffKey = socketUser.staffId || socketUser.uid;
+        const tenantKey = (id: string) => `${socketTenantId}:${id}`;
         // ── Join workstation channel (only when register is open) ─────────────────
         socket.on("join_workstation", async (workstationId: string) => {
-            if (!workstationId)
+            if (!(await tenantOwnsRoomResource("workstation", workstationId, socketTenantId)))
                 return;
             socket.join(`workstation:${workstationId}`);
             console.log(`Socket ${socket.id} joined workstation: ${workstationId}`);
         });
         // ── Join table channel (only when table is active) ────────────────────────
         socket.on("join_table", async (tableId: string) => {
-            if (!tableId)
+            if (!(await tenantOwnsRoomResource("table", tableId, socketTenantId)))
                 return;
             socket.join(`table:${tableId}`);
             console.log(`Socket ${socket.id} joined table: ${tableId}`);
         });
         // ── Join tab channel (only when tab is open) ──────────────────────────────
         socket.on("join_tab", async (tabId: string) => {
-            if (!tabId)
+            if (!(await tenantOwnsRoomResource("tab", tabId, socketTenantId)))
                 return;
             socket.join(`tab:${tabId}`);
             console.log(`Socket ${socket.id} joined tab: ${tabId}`);
         });
         // ── Join tenant channel (for general updates) ─────────────────────────────
         socket.on("join_tenant", async (tenantId: string) => {
-            if (!tenantId)
+            if (tenantId !== socketTenantId)
                 return;
             socket.join(`tenant:${tenantId}`);
             console.log(`Socket ${socket.id} joined tenant: ${tenantId}`);
         });
         // ── Join messages channel ─────────────────────────────────────────────────
         socket.on("join_messages", (tenantId: string) => {
+            if (tenantId !== socketTenantId)
+                return;
             socket.join(`tenant:${tenantId}:messages`);
         });
         socket.on("account_device_active", (payload: {
-            tenantId?: string;
-            staffId?: string;
             deviceId?: string;
         }) => {
-            const tenantId = String(payload?.tenantId || "");
-            const staffId = String(payload?.staffId || "");
             const deviceId = String(payload?.deviceId || socket.id);
-            if (!tenantId || !staffId || !deviceId)
+            if (!socketStaffKey || !deviceId)
                 return;
             removeAccountDevicePresence(socket);
-            const presenceKey = `${tenantId}:${staffId}`;
+            const presenceKey = tenantKey(socketStaffKey);
             const devices = accountDevices.get(presenceKey) || new Map<string, Set<string>>();
             const sockets = devices.get(deviceId) || new Set<string>();
             sockets.add(socket.id);
@@ -135,16 +159,12 @@ export function setupSocketIO(httpServer: any) {
             emitAccountDevicePresence(presenceKey);
         });
         socket.on("account_terminal_select", (payload: {
-            tenantId?: string;
-            staffId?: string;
             deviceId?: string;
         }) => {
-            const tenantId = String(payload?.tenantId || "");
-            const staffId = String(payload?.staffId || "");
             const deviceId = String(payload?.deviceId || socket.data.accountDeviceId || socket.id);
-            if (!tenantId || !staffId || !deviceId)
+            if (!socketStaffKey || !deviceId)
                 return;
-            const presenceKey = `${tenantId}:${staffId}`;
+            const presenceKey = tenantKey(socketStaffKey);
             activeTerminalByAccount.set(presenceKey, deviceId);
             io.to(`account-devices:${presenceKey}`).emit("account_active_terminal_selected", {
                 activeTerminalDeviceId: deviceId,
@@ -152,29 +172,25 @@ export function setupSocketIO(httpServer: any) {
             emitAccountDevicePresence(presenceKey);
         });
         socket.on("terminal_register", (payload: {
-            tenantId?: string;
-            staffId?: string;
             terminalId?: string;
             deviceId?: string;
         }) => {
             const terminalId = String(payload?.terminalId || "");
             if (!terminalId)
                 return;
-            const tenantId = String(payload?.tenantId || "");
-            const staffId = String(payload?.staffId || "");
             const deviceId = String(payload?.deviceId || socket.data.accountDeviceId || socket.id);
-            if (tenantId && staffId && deviceId) {
-                const presenceKey = `${tenantId}:${staffId}`;
+            if (socketStaffKey && deviceId) {
+                const presenceKey = tenantKey(socketStaffKey);
                 if (!activeTerminalByAccount.get(presenceKey))
                     activeTerminalByAccount.set(presenceKey, deviceId);
                 emitAccountDevicePresence(presenceKey);
             }
-            socket.join(`terminal:${terminalId}`);
+            socket.join(`terminal:${tenantKey(terminalId)}`);
             socket.data.terminalId = terminalId;
             socket.data.deviceRole = "terminal";
-            io.to(`terminal:${terminalId}`).emit("companion_state", {
+            io.to(`terminal:${tenantKey(terminalId)}`).emit("companion_state", {
                 terminalId,
-                poleDisplayDeviceId: poleDisplaysByTerminal.get(terminalId) || null,
+                poleDisplayDeviceId: poleDisplaysByTerminal.get(tenantKey(terminalId)) || null,
             });
         });
         socket.on("companion_join", (payload: {
@@ -188,16 +204,16 @@ export function setupSocketIO(httpServer: any) {
             if (!terminalId)
                 return;
             let assignedMode = requestedMode;
-            const currentPoleDisplay = poleDisplaysByTerminal.get(terminalId);
+            const currentPoleDisplay = poleDisplaysByTerminal.get(tenantKey(terminalId));
             if (requestedMode === "pole_display") {
                 if (currentPoleDisplay && currentPoleDisplay !== deviceId) {
                     assignedMode = "wireless_scanner";
                 }
                 else {
-                    poleDisplaysByTerminal.set(terminalId, deviceId);
+                    poleDisplaysByTerminal.set(tenantKey(terminalId), deviceId);
                 }
             }
-            socket.join(`terminal:${terminalId}`);
+            socket.join(`terminal:${tenantKey(terminalId)}`);
             socket.data.terminalId = terminalId;
             socket.data.companionDeviceId = deviceId;
             socket.data.companionMode = assignedMode;
@@ -206,11 +222,11 @@ export function setupSocketIO(httpServer: any) {
                 terminalId,
                 requestedMode,
                 assignedMode,
-                poleDisplayDeviceId: poleDisplaysByTerminal.get(terminalId) || null,
+                poleDisplayDeviceId: poleDisplaysByTerminal.get(tenantKey(terminalId)) || null,
             });
-            io.to(`terminal:${terminalId}`).emit("companion_state", {
+            io.to(`terminal:${tenantKey(terminalId)}`).emit("companion_state", {
                 terminalId,
-                poleDisplayDeviceId: poleDisplaysByTerminal.get(terminalId) || null,
+                poleDisplayDeviceId: poleDisplaysByTerminal.get(tenantKey(terminalId)) || null,
             });
         });
         socket.on("companion_command", (payload: {
@@ -223,7 +239,7 @@ export function setupSocketIO(httpServer: any) {
                 return;
             if (payload.command !== "barcode_lookup")
                 return;
-            socket.to(`terminal:${terminalId}`).emit("companion_command", {
+            socket.to(`terminal:${tenantKey(terminalId)}`).emit("companion_command", {
                 command: payload.command,
                 data: payload.data || {},
                 fromDeviceId: socket.data.companionDeviceId || socket.id,
@@ -236,7 +252,7 @@ export function setupSocketIO(httpServer: any) {
             const terminalId = String(payload?.terminalId || socket.data.terminalId || "");
             if (!terminalId)
                 return;
-            socket.to(`terminal:${terminalId}`).emit("terminal_display_update", {
+            socket.to(`terminal:${tenantKey(terminalId)}`).emit("terminal_display_update", {
                 terminalId,
                 data: payload.data || {},
             });
@@ -263,9 +279,9 @@ export function setupSocketIO(httpServer: any) {
             if (socket.data?.companionMode === "pole_display" && socket.data?.terminalId) {
                 const terminalId = String(socket.data.terminalId);
                 const deviceId = String(socket.data.companionDeviceId || socket.id);
-                if (poleDisplaysByTerminal.get(terminalId) === deviceId) {
-                    poleDisplaysByTerminal.delete(terminalId);
-                    io.to(`terminal:${terminalId}`).emit("companion_state", {
+                if (poleDisplaysByTerminal.get(tenantKey(terminalId)) === deviceId) {
+                    poleDisplaysByTerminal.delete(tenantKey(terminalId));
+                    io.to(`terminal:${tenantKey(terminalId)}`).emit("companion_state", {
                         terminalId,
                         poleDisplayDeviceId: null,
                     });

@@ -660,8 +660,9 @@ type OfflineSyncConflictType =
   | "negative_stock_after_sync"
   | "duplicate_local_receipt"
   | "duplicate_table_or_tab"
-  | "duplicate_customer_order";
-type OfflineSyncConflict = {
+  | "duplicate_customer_order"
+  | "price_mismatch";
+export type OfflineSyncConflict = {
   conflictType: OfflineSyncConflictType;
   recommendedAction: string;
   message: string;
@@ -683,7 +684,10 @@ const offlineSyncConflictActions: Record<OfflineSyncConflictType, string> = {
     "Compare the offline sale with the open table/tab and merge, close, or reassign the order before retrying.",
   duplicate_customer_order:
     "Check the customer/order history for a duplicate sale before retrying or dismissing the local copy.",
+  price_mismatch:
+    "The offline till sold at prices that differ from the current catalog. Confirm the prices charged, then correct the catalog or follow up with the staff member.",
 };
+export { offlineSyncConflictActions };
 function saleItemProductId(item: any) {
   return item?.productId || item?.product_id || item?.id || null;
 }
@@ -2520,6 +2524,7 @@ export async function deleteRestaurantTable(
 export async function createSale(
   tenantId: string,
   sale: Partial<Sale>,
+  options: { offlineConflicts?: OfflineSyncConflict[] } = {},
 ): Promise<Sale> {
   const offlineEventId = (sale as any).offlineEventId || null;
   // Idempotency: if this offline sale was already synced, return the existing record
@@ -2543,7 +2548,10 @@ export async function createSale(
       ? "offline"
       : (sale as any).syncSource || "online";
     const offlineSyncConflicts = offlineEventId
-      ? await collectOfflineSaleSyncConflicts(conn, tenantId, sale)
+      ? [
+          ...(await collectOfflineSaleSyncConflicts(conn, tenantId, sale)),
+          ...(options.offlineConflicts || []),
+        ]
       : [];
     const completedSale =
       (sale.status || "pending") === "completed" &&

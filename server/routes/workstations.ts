@@ -8,13 +8,14 @@ import { sendPushNotification } from "../pushNotifications.js";
 import { listHardwareDevices, createHardwareDevice, updateHardwareDevice, deleteHardwareDevice, testHardwareDevice, listHardwareDeviceEvents, queueCashDrawerPulseForNoSale, } from "../hardwareAdapters.js";
 import { query } from "../db.js";
 import { canUseActionCenter, denyWithAudit } from "./_helpers.js";
+import { sendRouteError } from "../securityHardening.js";
 export const workstationsRouter = Router({ mergeParams: true });
 workstationsRouter.get("/workstations", requireAuth, async (req: any, res) => {
     try {
         res.json(await getWorkstationsByTenant(req.params.tenantId));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 workstationsRouter.post("/workstations", requireAuth, validateSchema(WorkstationSchema), async (req: any, res) => {
@@ -22,7 +23,7 @@ workstationsRouter.post("/workstations", requireAuth, validateSchema(Workstation
         res.json(await createWorkstation(req.params.tenantId, req.body));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 workstationsRouter.delete("/workstations/:id", requireAuth, async (req: any, res) => {
@@ -31,7 +32,7 @@ workstationsRouter.delete("/workstations/:id", requireAuth, async (req: any, res
         res.json({ success: true });
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 // ── Companion device assignments ───────────────────────────────────────────
@@ -48,7 +49,7 @@ workstationsRouter.get("/companion-device-assignments", requireAuth, async (req:
         res.json(rows);
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 workstationsRouter.put("/companion-device-assignments/:deviceId", requireAuth, async (req: any, res) => {
@@ -66,7 +67,7 @@ workstationsRouter.put("/companion-device-assignments/:deviceId", requireAuth, a
         res.json({ success: true });
     }
     catch (err: any) {
-        res.status(400).json({ error: err.message });
+        sendRouteError(res, err, req, 400);
     }
 });
 workstationsRouter.delete("/companion-device-assignments/:deviceId", requireAuth, async (req: any, res) => {
@@ -78,7 +79,7 @@ workstationsRouter.delete("/companion-device-assignments/:deviceId", requireAuth
         res.json({ success: true });
     }
     catch (err: any) {
-        res.status(400).json({ error: err.message });
+        sendRouteError(res, err, req, 400);
     }
 });
 // ── Hardware devices ───────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ workstationsRouter.get("/hardware-devices", requireAuth, async (req: any, res) =
         }));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 workstationsRouter.post("/hardware-devices", requireAuth, async (req: any, res) => {
@@ -104,7 +105,7 @@ workstationsRouter.post("/hardware-devices", requireAuth, async (req: any, res) 
         }));
     }
     catch (err: any) {
-        res.status(400).json({ error: err.message });
+        sendRouteError(res, err, req, 400);
     }
 });
 workstationsRouter.put("/hardware-devices/:deviceId", requireAuth, async (req: any, res) => {
@@ -119,7 +120,7 @@ workstationsRouter.put("/hardware-devices/:deviceId", requireAuth, async (req: a
         res.json(device);
     }
     catch (err: any) {
-        res.status(400).json({ error: err.message });
+        sendRouteError(res, err, req, 400);
     }
 });
 workstationsRouter.delete("/hardware-devices/:deviceId", requireAuth, async (req: any, res) => {
@@ -131,7 +132,7 @@ workstationsRouter.delete("/hardware-devices/:deviceId", requireAuth, async (req
         }));
     }
     catch (err: any) {
-        res.status(400).json({ error: err.message });
+        sendRouteError(res, err, req, 400);
     }
 });
 workstationsRouter.post("/hardware-devices/:deviceId/test", requireAuth, async (req: any, res) => {
@@ -146,7 +147,7 @@ workstationsRouter.post("/hardware-devices/:deviceId/test", requireAuth, async (
         res.json(result);
     }
     catch (err: any) {
-        res.status(400).json({ error: err.message });
+        sendRouteError(res, err, req, 400);
     }
 });
 workstationsRouter.get("/hardware-events", requireAuth, async (req: any, res) => {
@@ -156,7 +157,7 @@ workstationsRouter.get("/hardware-events", requireAuth, async (req: any, res) =>
         res.json(await listHardwareDeviceEvents(req.params.tenantId, typeof req.query.limit === "string" ? req.query.limit : 50));
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 // ── Messages ───────────────────────────────────────────────────────────────
@@ -169,7 +170,7 @@ workstationsRouter.get("/messages", requireAuth, async (req: any, res) => {
         res.json(data);
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 workstationsRouter.post("/messages", requireAuth, async (req: any, res) => {
@@ -192,7 +193,7 @@ workstationsRouter.post("/messages", requireAuth, async (req: any, res) => {
         res.json(data);
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });
 workstationsRouter.put("/messages/:id/read", requireAuth, async (req: any, res) => {
@@ -201,6 +202,6 @@ workstationsRouter.put("/messages/:id/read", requireAuth, async (req: any, res) 
         res.json({ success: true });
     }
     catch (err: any) {
-        res.status(500).json({ error: err.message });
+        sendRouteError(res, err, req);
     }
 });

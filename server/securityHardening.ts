@@ -255,3 +255,33 @@ export function sendSafeError(res: Response, status: number, publicMessage: stri
         requestId: req.requestId || null,
     });
 }
+/**
+ * Database driver and OS-level errors carry schema, constraint and host
+ * details that must not reach the client. Postgres errors expose a
+ * five-character SQLSTATE `code` plus `severity`/`routine`; system errors
+ * expose `syscall`/`errno`.
+ */
+export function isInternalError(err: unknown): boolean {
+    if (!(err instanceof Error)) return true;
+    const e = err as any;
+    if (typeof e.code === 'string' && /^[0-9A-Z]{5}$/.test(e.code) && ('severity' in e || 'routine' in e)) return true;
+    return 'syscall' in e || 'errno' in e;
+}
+/**
+ * Route error responder that keeps app-authored messages (written for
+ * staff, e.g. "Promotion could not be applied.") but replaces database and
+ * system errors with a generic message in production.
+ */
+export function sendRouteError(res: Response, err: unknown, req: Request, status = 500): void {
+    const hide = process.env.NODE_ENV === 'production' && isInternalError(err);
+    if (hide || status >= 500) {
+        writeSecurityLog('error', 'request.error', req, {
+            status,
+            error: redactSecurityLogValue(err),
+        });
+    }
+    res.status(status).json({
+        error: hide ? 'Something went wrong. Please try again.' : String((err as any)?.message || err || 'Request failed'),
+        requestId: req.requestId || null,
+    });
+}
