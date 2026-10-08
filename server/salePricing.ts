@@ -20,6 +20,8 @@ export type PricedSale = {
     customerId?: string | null;
     promotionDiscount?: number | null;
     manualDiscountAmount?: number | null;
+    status?: string | null;
+    loyaltyPointsRedeemed?: number | null;
 };
 export type SalePriceMismatch = {
     productId: string | null;
@@ -85,7 +87,7 @@ export async function findSaleItemPriceMismatches(tenantId: string, items: Price
     return mismatches;
 }
 
-async function maxDiscountAllowances(tenantId: string, customerId: string | null) {
+async function maxDiscountAllowances(tenantId: string, customerId: string | null, pointsRedeemed: number | null) {
     const settingsRows = await query<any>(`SELECT business FROM app_settings WHERE tenant_id = $1 LIMIT 1`, [tenantId]);
     let business: any = settingsRows[0]?.business || {};
     if (typeof business === "string") {
@@ -112,7 +114,12 @@ async function maxDiscountAllowances(tenantId: string, customerId: string | null
     let pointsCapCents = 0;
     const required = Number(business.pointsRequiredForDiscount || 0);
     if (customer && business.enableLoyalty && required > 0) {
-        pointsCapCents = Math.floor(Number(customer.loyaltyPoints || 0) / required) * toCents(business.discountAmountForPoints);
+        // Completed sales may only discount for points they actually redeem
+        // (redemption is deducted from the balance in createSale/updateSale).
+        // Open/parked sales don't redeem yet, so the balance is the limit.
+        const balance = Math.max(0, Number(customer.loyaltyPoints || 0));
+        const usablePoints = pointsRedeemed == null ? balance : Math.min(balance, Math.max(0, Number(pointsRedeemed) || 0));
+        pointsCapCents = Math.floor(usablePoints / required) * toCents(business.discountAmountForPoints);
     }
     return { maxPercent: Math.max(0, ...percents), pointsCapCents };
 }
@@ -132,7 +139,8 @@ export async function findSaleTotalProblem(tenantId: string, sale: PricedSale): 
     }
     if (sale.total == null)
         return null;
-    const { maxPercent, pointsCapCents } = await maxDiscountAllowances(tenantId, sale.customerId || null);
+    const pointsRedeemed = sale.status === "completed" ? Number(sale.loyaltyPointsRedeemed || 0) : null;
+    const { maxPercent, pointsCapCents } = await maxDiscountAllowances(tenantId, sale.customerId || null, pointsRedeemed);
     const minimum = Math.round(itemsSubtotal * (1 - maxPercent / 100))
         - toCents(sale.promotionDiscount)
         - toCents(sale.manualDiscountAmount)
@@ -165,7 +173,7 @@ export async function filterLinesNotOnSale(tenantId: string, saleId: string, ite
 }
 
 export async function loadStoredSaleForPricing(tenantId: string, saleId: string): Promise<PricedSale | null> {
-    const sales = await query<any>(`SELECT customer_id AS "customerId", promotion_discount AS "promotionDiscount"
+    const sales = await query<any>(`SELECT customer_id AS "customerId", promotion_discount AS "promotionDiscount", status
            FROM sales WHERE tenant_id = $1 AND id = $2 LIMIT 1`, [tenantId, saleId]);
     if (!sales[0])
         return null;
@@ -173,6 +181,7 @@ export async function loadStoredSaleForPricing(tenantId: string, saleId: string)
     return {
         customerId: sales[0].customerId || null,
         promotionDiscount: Number(sales[0].promotionDiscount || 0),
+        status: sales[0].status || null,
         items: items.map((row: any) => ({ ...row, price: Number(row.price), quantity: Number(row.quantity) })),
     };
 }

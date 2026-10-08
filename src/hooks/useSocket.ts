@@ -74,10 +74,20 @@ export function useSocket({ user, tenantId, enabled = true, workstationId, table
     newSocket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
       setIsConnected(false);
+      // The server drops connections when the access token expires; socket.io
+      // does not auto-reconnect after a server-side disconnect, so do it here.
+      if (reason === 'io server disconnect') {
+        setTimeout(() => { if (socketRef.current === newSocket) newSocket.connect(); }, 1000);
+      }
     });
 
     newSocket.on('connect_error', (err) => {
       console.error('Socket connection error:', err.message);
+      // Auth failures aren't retried by socket.io; try again once the app has
+      // had a chance to refresh the access token.
+      if (err.message === 'Authentication required') {
+        setTimeout(() => { if (socketRef.current === newSocket && !newSocket.connected) newSocket.connect(); }, 15000);
+      }
     });
 
     socketRef.current = newSocket;
@@ -197,7 +207,8 @@ export function useSocket({ user, tenantId, enabled = true, workstationId, table
       if (tableId) leaveTable(tableId);
       if (tabId) leaveTab(tabId);
     };
-  }, [socket, workstationId, tableId, tabId, joinWorkstation, leaveWorkstation, joinTable, leaveTable, joinTab, leaveTab]);
+  // isConnected: rooms are per-connection on the server, so rejoin after every reconnect.
+  }, [socket, isConnected, workstationId, tableId, tabId, joinWorkstation, leaveWorkstation, joinTable, leaveTable, joinTab, leaveTab]);
 
   return {
     socket,

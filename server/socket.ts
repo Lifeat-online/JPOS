@@ -104,6 +104,10 @@ export function setupSocketIO(httpServer: any) {
         const socketTenantId = socketUser.tenantId;
         const socketStaffKey = socketUser.staffId || socketUser.uid;
         const tenantKey = (id: string) => `${socketTenantId}:${id}`;
+        // A live connection must not outlive the access token it authenticated with;
+        // the client reconnects with its refreshed token.
+        const tokenTtlMs = socketUser.exp ? socketUser.exp * 1000 - Date.now() : 0;
+        const tokenExpiryTimer = tokenTtlMs > 0 ? setTimeout(() => socket.disconnect(true), Math.min(tokenTtlMs, 2_147_000_000)) : null;
         // ── Join workstation channel (only when register is open) ─────────────────
         socket.on("join_workstation", async (workstationId: string) => {
             if (!(await tenantOwnsRoomResource("workstation", workstationId, socketTenantId)))
@@ -275,6 +279,8 @@ export function setupSocketIO(httpServer: any) {
         });
         // ── Disconnect Handler ────────────────────────────────────────────────────
         socket.on("disconnect", () => {
+            if (tokenExpiryTimer)
+                clearTimeout(tokenExpiryTimer);
             removeAccountDevicePresence(socket);
             if (socket.data?.companionMode === "pole_display" && socket.data?.terminalId) {
                 const terminalId = String(socket.data.terminalId);

@@ -49,6 +49,8 @@ async function enforceSalePricing(req: any, res: any, sale: PricedSale & { offli
     customerId: sale.customerId ?? stored?.customerId ?? null,
     promotionDiscount: sale.promotionDiscount ?? stored?.promotionDiscount ?? 0,
     manualDiscountAmount: sale.manualDiscountAmount ?? 0,
+    status: sale.status ?? stored?.status ?? null,
+    loyaltyPointsRedeemed: sale.loyaltyPointsRedeemed ?? null,
   });
 
   if (sale.offlineEventId) {

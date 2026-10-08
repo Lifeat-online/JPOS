@@ -126,6 +126,28 @@ describe("findSaleTotalProblem", () => {
     expect((await findSaleTotalProblem("t", { items, total: 79, customerId: "c1" }))?.kind).toBe("total_below_minimum");
   });
 
+  describe("loyalty points cap depends on redemption", () => {
+    beforeEach(() => {
+      catalog.business = { enableLoyalty: true, pointsRequiredForDiscount: 100, discountAmountForPoints: 10 };
+      catalog.customer = { discountPercent: 0, loyaltyPoints: 250 };
+    });
+
+    it("gives no points discount on a completed sale that redeems nothing", async () => {
+      const problem = await findSaleTotalProblem("t", { items, total: 80, customerId: "c1", status: "completed", loyaltyPointsRedeemed: 0 });
+      expect(problem?.kind).toBe("total_below_minimum");
+    });
+
+    it("caps a completed sale at the points it redeems", async () => {
+      const sale = { items, customerId: "c1", status: "completed", loyaltyPointsRedeemed: 200 };
+      expect(await findSaleTotalProblem("t", { ...sale, total: 80 })).toBeNull();
+      expect((await findSaleTotalProblem("t", { ...sale, total: 79 }))?.kind).toBe("total_below_minimum");
+    });
+
+    it("uses the customer's balance as the cap for an open sale", async () => {
+      expect(await findSaleTotalProblem("t", { items, total: 80, customerId: "c1", status: "open" })).toBeNull();
+    });
+  });
+
   it("allows promotionDiscount", async () => {
     expect(await findSaleTotalProblem("t", { items, total: 85, promotionDiscount: 15 })).toBeNull();
   });

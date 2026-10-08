@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import http from "http";
+import jwt from "jsonwebtoken";
 import type { AddressInfo } from "net";
 import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
 
@@ -152,5 +153,19 @@ describe("socket.io authentication and tenant isolation", () => {
     broadcastToTab(io, "sale_own", { x: 1 });
     expect(await tableOwn).toBe(true);
     expect(await tabOwn).toBe(true);
+  });
+
+  it("disconnects a socket when its access token expires", async () => {
+    const token = jwt.sign({ ...payloadA, type: "access" }, process.env.JWT_SECRET as string, { expiresIn: 1 });
+    const c = connect(`Bearer ${token}`);
+    await connected(c);
+    const reason = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("not disconnected within 2.5s")), 2500);
+      c.on("disconnect", (r) => {
+        clearTimeout(timer);
+        resolve(r);
+      });
+    });
+    expect(reason).toBe("io server disconnect");
   });
 });
