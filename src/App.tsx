@@ -1575,6 +1575,7 @@ export default function App() {
                         staff={staff}
                         tenantId={tenantId}
                         currentUserStaff={currentUserStaff}
+                        onStaffImported={refreshStaff}
                         onEdit={(s) => setStaffModal({ isOpen: true, staff: s })}
                         onAdd={() => setStaffModal({ isOpen: true, staff: { role: 'cashier' } })}
                         onDelete={(id) => setStaffToDelete(id)}

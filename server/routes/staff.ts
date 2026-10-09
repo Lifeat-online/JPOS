@@ -3,7 +3,13 @@ import { requireAuth } from "../auth-middleware.js";
 import { getStaffByTenant } from "../db-adapter.js";
 import { createStaff, updateStaff, deleteStaff } from "../db-crud.js";
 import { validateSchema, StaffSchema, StaffUpdateSchema } from "../validation.js";
-import { denyWithAudit, auditRouteEvent, auditActorFromRequest, canUseActionCenter, requireManagerRole } from "./_helpers.js";
+import {
+  denyWithAudit, auditRouteEvent, auditActorFromRequest, canUseActionCenter, requireManagerRole,
+  assignableStaffRoles, staffRoleRank, staffSensitiveAction, enforceSensitiveAction,
+  stripSensitiveVerification, auditChangedFields, sensitiveRouteRateLimit,
+} from "./_helpers.js";
+import { query } from "../db.js";
+import { getTenantPackageContext, packageLimitResponse, remainingPackageCapacity } from "../packageCapacity.js";
 import {
   cancelStaffShift, clockIn, clockOut, createStaffShift, endBreak, getMyAttendanceStatus,
   getTimesheetPayrollReport, listStaffShifts, publishRoster, startBreak, updateStaffShift
@@ -18,6 +24,7 @@ import {
   createManagerSaleApprovalRequest, decideManagerTask, getManagerTaskQueue, syncManagerTasksFromSignals
 } from "../managerTasks.js";
 import { sendRouteError } from "../securityHardening.js";
+import { importStaff } from "../batchOperations.js";
 
 export const staffRouter = Router({ mergeParams: true });
 
@@ -30,9 +37,55 @@ staffRouter.get("/", requireAuth, async (req: any, res) => {
   }
 });
 
+async function targetStaffRole(tenantId: string, staffId: string): Promise<string | null> {
+  const rows = await query<any>(`SELECT role FROM staff WHERE tenant_id = $1 AND id = $2 LIMIT 1`, [tenantId, staffId]);
+  return rows[0]?.role ?? null;
+}
+
+function denyRole(req: any, res: any, action: string, role: unknown) {
+  return denyWithAudit(req, res, action, `Your role cannot assign the ${String(role)} role.`, {
+    requestedRole: role,
+    allowedRoles: assignableStaffRoles(req.user?.role),
+  });
+}
+
+staffRouter.post("/batch/import", requireAuth, requireManagerRole, sensitiveRouteRateLimit, async (req: any, res) => {
+  try {
+    const result = await importStaff(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
+    if (!result.dryRun) {
+      await auditRouteEvent(req, "batch.staff_imported", "staff", {
+        dryRun: result.dryRun,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        errorCount: result.errors.length,
+      }, null, "staff_admin");
+    }
+    res.json(result);
+  } catch (err: any) {
+    sendRouteError(res, err, req, 400);
+  }
+});
+
 staffRouter.post("/", requireAuth, requireManagerRole, validateSchema(StaffSchema), async (req: any, res) => {
   try {
-    const created = await createStaff(req.params.tenantId, req.body);
+    const input: any = stripSensitiveVerification(req.body || {});
+    if (!assignableStaffRoles(req.user?.role).includes(String(input.role))) {
+      return denyRole(req, res, "staff.create_role_denied", input.role);
+    }
+    if ((await remainingPackageCapacity(req.params.tenantId, "staff", "maxStaff")) <= 0) {
+      const context = await getTenantPackageContext(req.params.tenantId);
+      return packageLimitResponse(res, { packageId: context.package.id, limitName: "staff members", limit: Number(context.package.maxStaff) });
+    }
+    // Opening wallet balances and staff discounts carry the same re-auth as edits.
+    const sensitiveAction = staffSensitiveAction(input);
+    if (sensitiveAction && await enforceSensitiveAction(req, res, sensitiveAction, { changedFields: auditChangedFields(input) })) return;
+    const created = await createStaff(req.params.tenantId, input);
+    await auditRouteEvent(req, "staff.created", "staff", {
+      staffName: created?.name || input.name || null,
+      role: created?.role || input.role || null,
+      changedFields: auditChangedFields(input),
+    }, created?.id || null, "staff_admin");
     res.status(201).json(created);
   } catch (err: any) {
     sendRouteError(res, err, req, 400);
@@ -41,7 +94,26 @@ staffRouter.post("/", requireAuth, requireManagerRole, validateSchema(StaffSchem
 
 staffRouter.put("/:staffId", requireAuth, requireManagerRole, validateSchema(StaffUpdateSchema), async (req: any, res) => {
   try {
-    const updated = await updateStaff(req.params.tenantId, req.params.staffId, req.body);
+    const updates: any = stripSensitiveVerification(req.body || {});
+    const currentRole = await targetStaffRole(req.params.tenantId, req.params.staffId);
+    if (currentRole === null) return res.status(404).json({ error: "Staff member not found" });
+    if (staffRoleRank(currentRole) > staffRoleRank(req.user?.role)) {
+      return denyWithAudit(req, res, "staff.update_rank_denied", "You can't edit a staff member with a higher role than yours.", { targetRole: currentRole });
+    }
+    if (updates.role !== undefined && String(updates.role) !== currentRole && !assignableStaffRoles(req.user?.role).includes(String(updates.role))) {
+      return denyRole(req, res, "staff.update_role_denied", updates.role);
+    }
+    const sensitiveAction = staffSensitiveAction(updates);
+    if (sensitiveAction && await enforceSensitiveAction(req, res, sensitiveAction, {
+      targetStaffId: req.params.staffId,
+      changedFields: auditChangedFields(updates),
+    })) return;
+    const updated = await updateStaff(req.params.tenantId, req.params.staffId, updates);
+    await auditRouteEvent(req, "staff.updated", "staff", {
+      staffName: updated?.name || (updates as any).name || null,
+      role: updated?.role || (updates as any).role || null,
+      changedFields: auditChangedFields(updates),
+    }, req.params.staffId, "staff_admin");
     res.json(updated);
   } catch (err: any) {
     sendRouteError(res, err, req, 400);
@@ -50,7 +122,12 @@ staffRouter.put("/:staffId", requireAuth, requireManagerRole, validateSchema(Sta
 
 staffRouter.delete("/:staffId", requireAuth, requireManagerRole, async (req: any, res) => {
   try {
+    const currentRole = await targetStaffRole(req.params.tenantId, req.params.staffId);
+    if (currentRole !== null && staffRoleRank(currentRole) > staffRoleRank(req.user?.role)) {
+      return denyWithAudit(req, res, "staff.delete_rank_denied", "You can't remove a staff member with a higher role than yours.", { targetRole: currentRole });
+    }
     await deleteStaff(req.params.tenantId, req.params.staffId);
+    await auditRouteEvent(req, "staff.deleted", "staff", { targetStaffId: req.params.staffId }, req.params.staffId, "staff_admin");
     res.status(204).end();
   } catch (err: any) {
     sendRouteError(res, err, req, 400);

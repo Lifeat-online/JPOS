@@ -29,12 +29,12 @@ import {
 } from "../stockTake.js";
 import {
   batchCreateProducts, batchUpdateProductPrices,
-  exportInventoryCsv, importInventory,
+  exportInventoryCsv, importInventory, exportVendorsCsv, importVendors,
 } from "../batchOperations.js";
 import {
   canManageInventory, canUseActionCenter, auditActorFromRequest, auditRouteEvent,
   denyWithAudit, enforceSensitiveAction, stripSensitiveVerification,
-  sensitiveRouteRateLimit,
+  sensitiveRouteRateLimit, requireStaffPermission,
 } from "./_helpers.js";
 import { sendRouteError } from "../securityHardening.js";
 
@@ -253,6 +253,26 @@ inventoryRouter.put("/stocktakes/:sessionId/approve", requireAuth, async (req: a
 
 // ── Vendors, POs, stock batches ────────────────────────────────────────────
 
+inventoryRouter.get("/vendors/batch/export", requireAuth, requireStaffPermission("canManageInventory", "batch.vendors_export", "Inventory access is required to export vendors."), async (req: any, res) => {
+  try {
+    res.json(await exportVendorsCsv(req.params.tenantId));
+  } catch (err: any) { sendRouteError(res, err, req); }
+});
+inventoryRouter.post("/vendors/batch/import", requireAuth, requireStaffPermission("canManageInventory", "batch.vendors_import", "Inventory access is required to import vendors."), sensitiveRouteRateLimit, async (req: any, res) => {
+  try {
+    const result = await importVendors(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
+    if (!result.dryRun) {
+      await auditRouteEvent(req, "batch.vendors_imported", "vendor", {
+        dryRun: result.dryRun,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        errorCount: result.errors.length,
+      }, null, "inventory_batch");
+    }
+    res.json(result);
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
+});
 inventoryRouter.get("/vendors", requireAuth, async (req: any, res) => {
   try { res.json(await getVendors(req.params.tenantId)); } catch (err: any) { sendRouteError(res, err, req); }
 });
