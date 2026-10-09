@@ -85,6 +85,10 @@ jobs:
       PORT: '3000'
       JWT_SECRET: ci-e2e-jwt-secret-0000000000000000000000
       ENABLE_DEV_BOOTSTRAP: 'true'
+      # Repeat logins across tests must not trip the production auth
+      # rate limiter (5 attempts / 15 min) — that throttling is what made
+      # this suite permanently 429 and forced continue-on-error.
+      AUTH_RATE_LIMIT_DISABLED: 'true'
       # Skip Playwright's own webServer; we start and health-check the server here.
       PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     steps:

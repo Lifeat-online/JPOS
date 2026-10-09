@@ -7,14 +7,24 @@ const DEV_EMAIL = process.env.E2E_EMAIL || "dev@masepos.local";
 const DEV_PASSWORD = process.env.E2E_PASSWORD || "dev-change-me";
 
 // ── Helper: log in via the Staff Login modal ────────────────────────────
+// Helper: open the login modal (the entry lives in the header menu on
+// narrow viewports and is labelled "Admin Login" on the landing page).
+async function openLogin(page: Page) {
+  const adminLogin = page.getByRole("button", { name: /admin login/i }).first();
+  if (!(await adminLogin.isVisible().catch(() => false))) {
+    await page.getByRole("button", { name: /open menu/i }).click();
+  }
+  await adminLogin.click();
+}
+
 async function login(page: Page) {
   await page.goto("/");
-  await page.locator("text=Staff Login").click();
+  await openLogin(page);
   await page.locator("#login-email").fill(DEV_EMAIL);
   await page.locator("#login-password").fill(DEV_PASSWORD);
   await page.locator("button:has-text('Sign In')").click();
   // Wait for navigation to POS (the app redirects there on login)
-  await page.waitForURL("**/pos", { timeout: 15000 });
+  await page.locator('button[aria-label="Open cart"]').waitFor({ timeout: 15000 });
 }
 
 // ── Helper: pick a section from the sidebar by its label (case-insensitive) ─
@@ -31,10 +41,10 @@ async function navigateTo(
 // 1. Public pages (no auth required)
 // ══════════════════════════════════════════════════════════════════════════
 test.describe("Public pages", () => {
-  test("homepage loads, has title and Staff Login button", async ({ page }) => {
+  test("homepage loads with header menu entry point", async ({ page }) => {
     await page.goto("/");
     await expect(page).toHaveTitle(/MasePOS/);
-    await expect(page.locator("text=Staff Login")).toBeVisible();
+    await expect(page.getByRole("button", { name: /open menu/i })).toBeVisible();
   });
 
   test("homepage shows PWA meta tags", async ({ page }) => {
@@ -61,14 +71,14 @@ test.describe("Public pages", () => {
 
   test("Staff Login modal opens and closes", async ({ page }) => {
     await page.goto("/");
-    await page.locator("text=Staff Login").click();
+    await openLogin(page);
     // modal heading
     await expect(page.locator("text=Admin Login")).toBeVisible();
     // close via X button
     await page.locator('button[aria-label="Close"]').click();
     await expect(page.locator("text=Admin Login")).not.toBeVisible();
     // reopen and close via Escape
-    await page.locator("text=Staff Login").click();
+    await openLogin(page);
     await expect(page.locator("text=Admin Login")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.locator("text=Admin Login")).not.toBeVisible();
@@ -76,7 +86,7 @@ test.describe("Public pages", () => {
 
   test("login form validates empty fields", async ({ page }) => {
     await page.goto("/");
-    await page.locator("text=Staff Login").click();
+    await openLogin(page);
     // Submit button should be disabled when fields are empty
     const submitBtn = page.locator("button:has-text('Sign In')");
     await expect(submitBtn).toBeDisabled();
@@ -114,7 +124,7 @@ test.describe("Authentication", () => {
 
   test("login with wrong password shows error", async ({ page }) => {
     await page.goto("/");
-    await page.locator("text=Staff Login").click();
+    await openLogin(page);
     await page.locator("#login-email").fill(DEV_EMAIL);
     await page.locator("#login-password").fill("WrongPassword123!");
     await page.locator("button:has-text('Sign In')").click();
@@ -125,7 +135,7 @@ test.describe("Authentication", () => {
 
   test("login with non-existent email shows error", async ({ page }) => {
     await page.goto("/");
-    await page.locator("text=Staff Login").click();
+    await openLogin(page);
     await page.locator("#login-email").fill("nobody@nowhere.invalid");
     await page.locator("#login-password").fill("anything");
     await page.locator("button:has-text('Sign In')").click();
@@ -143,7 +153,7 @@ test.describe("Authentication", () => {
     if (await logoutBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await logoutBtn.first().click();
       // Should return to login-visible state
-      await expect(page.locator("text=Staff Login")).toBeVisible({
+      await expect(page.getByRole("button", { name: /admin login/i }).first()).toBeVisible({
         timeout: 10000,
       });
       // Re-login
@@ -259,7 +269,7 @@ test.describe("Settings", () => {
 test.describe("Theme", () => {
   test("toggles dark mode", async ({ page }) => {
     await page.goto("/");
-    await page.locator("text=Staff Login").click();
+    await openLogin(page);
     // Look for a theme toggle button (sun/moon icon)
     const themeToggle = page
       .locator(
