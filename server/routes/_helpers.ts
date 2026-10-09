@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { Request, Response, NextFunction } from "express";
 import { recordAuditEventSafe } from "../audit.js";
 import { verifySensitiveActionForRequest, type SensitiveActionType } from "../sensitiveActions.js";
+import { query } from "../db.js";
 
 // ── Role helpers ─────────────────────────────────────────────────────────────
 
@@ -68,6 +69,47 @@ export function requireManagerRole(req: Request, res: Response, next: NextFuncti
   return denyWithAudit(req, res, "authz.insufficient_role", "Manager or admin access is required.", {
     requiredRole: "manager|admin|dev",
   });
+}
+
+// Managers and above always pass; other staff need the permission granted on
+// their staff profile (staff.permissions JSON), matching the client's views.
+export function requireStaffPermission(permission: string, action: string, message: string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (canManageInventory(req.user?.role)) return next();
+      const staffId = req.user?.staffId || req.user?.uid;
+      const rows = staffId
+        ? await query<any>(`SELECT permissions FROM staff WHERE tenant_id = $1 AND id = $2 AND status = 'active' LIMIT 1`, [req.user?.tenantId, staffId])
+        : [];
+      let permissions: Record<string, unknown> = {};
+      try {
+        permissions = typeof rows[0]?.permissions === "string" ? JSON.parse(rows[0].permissions) : rows[0]?.permissions || {};
+      } catch {
+        permissions = {};
+      }
+      if (permissions[permission] === true) return next();
+      return denyWithAudit(req, res, action, message, { requiredPermission: permission });
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+// ── Staff role hierarchy ─────────────────────────────────────────────────
+// "dev" is platform-level and is never granted through the tenant API; only
+// admins grant "admin". Staff can only manage people at or below their rank.
+
+const STAFF_ROLE_RANK: Record<string, number> = { cashier: 1, chef: 1, manager: 2, admin: 3, dev: 4 };
+
+export function staffRoleRank(role: unknown) {
+  return STAFF_ROLE_RANK[normalizeRole(role)] || 0;
+}
+
+export function assignableStaffRoles(actorRole: unknown): string[] {
+  const r = normalizeRole(actorRole);
+  if (r === "dev" || r === "admin") return ["admin", "manager", "cashier", "chef"];
+  if (r === "manager") return ["manager", "cashier", "chef"];
+  return [];
 }
 
 export function requireTenantRouteAccess(req: Request, res: Response, next: NextFunction) {

@@ -7,7 +7,11 @@ import { exportCustomersCsv, importCustomers } from "../batchOperations.js";
 import { getCustomerCampaignExport } from "../customerSegments.js";
 import { listCustomerConsents, upsertCustomerConsents } from "../customerConsents.js";
 import { getCustomerDataExport } from "../customerDataExport.js";
-import { denyWithAudit, auditRouteEvent, auditActorFromRequest } from "./_helpers.js";
+import {
+  denyWithAudit, auditRouteEvent, auditActorFromRequest, auditChangedFields,
+  customerSensitiveAction, enforceSensitiveAction, stripSensitiveVerification,
+} from "./_helpers.js";
+import { getTenantPackageContext, packageLimitResponse, remainingPackageCapacity } from "../packageCapacity.js";
 import { sendRouteError } from "../securityHardening.js";
 
 function canUseActionCenter(role: string | undefined | null) {
@@ -28,7 +32,19 @@ customersRouter.get("/", requireAuth, async (req: any, res) => {
 
 customersRouter.post("/", requireAuth, validateSchema(CustomerSchema), async (req: any, res) => {
   try {
-    const created = await createCustomer(req.params.tenantId, req.body);
+    if ((await remainingPackageCapacity(req.params.tenantId, "customers", "maxCustomers")) <= 0) {
+      const context = await getTenantPackageContext(req.params.tenantId);
+      return packageLimitResponse(res, { packageId: context.package.id, limitName: "customers", limit: Number(context.package.maxCustomers) });
+    }
+    const input: any = stripSensitiveVerification(req.body || {});
+    // Opening balances, account limits and discounts carry the same re-auth as edits.
+    const sensitiveAction = customerSensitiveAction(input);
+    if (sensitiveAction && await enforceSensitiveAction(req, res, sensitiveAction, { changedFields: auditChangedFields(input) })) return;
+    const created = await createCustomer(req.params.tenantId, { ...input, consentActor: auditActorFromRequest(req) });
+    await auditRouteEvent(req, "customer.created", "customer", {
+      customerName: created?.name || input.name || null,
+      changedFields: auditChangedFields(input),
+    }, created?.id || null, "customer_admin");
     res.status(201).json(created);
   } catch (err: any) {
     sendRouteError(res, err, req, 400);
@@ -37,7 +53,17 @@ customersRouter.post("/", requireAuth, validateSchema(CustomerSchema), async (re
 
 customersRouter.put("/:customerId", requireAuth, validateSchema(CustomerUpdateSchema), async (req: any, res) => {
   try {
-    const updated = await updateCustomer(req.params.tenantId, req.params.customerId, req.body);
+    const updates: any = stripSensitiveVerification(req.body || {});
+    const sensitiveAction = customerSensitiveAction(updates);
+    if (sensitiveAction && await enforceSensitiveAction(req, res, sensitiveAction, {
+      customerId: req.params.customerId,
+      changedFields: auditChangedFields(updates),
+    })) return;
+    const updated = await updateCustomer(req.params.tenantId, req.params.customerId, { ...updates, consentActor: auditActorFromRequest(req) });
+    await auditRouteEvent(req, "customer.updated", "customer", {
+      customerName: updated?.name || updates.name || null,
+      changedFields: auditChangedFields(updates),
+    }, req.params.customerId, "customer_admin");
     res.json(updated);
   } catch (err: any) {
     sendRouteError(res, err, req, 400);
@@ -46,10 +72,25 @@ customersRouter.put("/:customerId", requireAuth, validateSchema(CustomerUpdateSc
 
 customersRouter.delete("/:customerId", requireAuth, async (req: any, res) => {
   try {
-    await deleteCustomer(req.params.tenantId, req.params.customerId);
-    res.status(204).end();
+    if (!canUseActionCenter(req.user?.role)) {
+      return denyWithAudit(req, res, "customers.anonymize", "Manager access is required to anonymize customer profiles.", {
+        customerId: req.params.customerId,
+      });
+    }
+    const result = await deleteCustomer(req.params.tenantId, req.params.customerId, {
+      ...auditActorFromRequest(req),
+      reason: req.body?.reason || null,
+    });
+    await auditRouteEvent(req, "customer.deleted", "customer", {
+      customerId: req.params.customerId,
+      mode: (result as any)?.mode || "anonymized",
+      retainedSaleCount: (result as any)?.retainedSaleCount ?? null,
+    }, req.params.customerId, "customer_admin");
+    res.json(result);
   } catch (err: any) {
-    sendRouteError(res, err, req, 400);
+    const message = String(err?.message || "");
+    const status = message.includes("not found") ? 404 : message.includes("cannot be anonymized") ? 409 : 500;
+    sendRouteError(res, err, req, status);
   }
 });
 

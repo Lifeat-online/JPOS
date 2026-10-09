@@ -9,25 +9,26 @@ import http from "http";
 import { setupSocketIO, broadcastToMessages, broadcastToWorkstation, broadcastToTable, broadcastToTab, broadcastToSales } from "./socket.js";
 import { buildLiveWorkstationQueueRows } from "./workstationStats.js";
 import { getDashboardKpis } from "./dashboardKpis.js";
-import { validateSchema, ProductSchema, CustomerSchema, CustomerUpdateSchema, StaffSchema, StaffUpdateSchema, SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema } from "./validation.js";
+import { SaleSchema, SaleRefundSchema, SaleVoidSchema, PaymentProviderStatusSchema, WorkstationSchema, TableSectionSchema, RestaurantTableSchema } from "./validation.js";
 import { NextFunction, Request, Response } from "express";
 import { applyTrustProxy, apiRateLimit, corsHandler, requestId, securityHeaders, sendSafeError, stripPoweredBy, sendRouteError } from "./securityHardening.js";
-import { getProductsByTenant, getTenantIdBySlug, getUserByUid, getStaffTenantByEmail, getAppConfigByTenant, getCustomersByTenant, getStaffByTenant, getWorkstationsByTenant, getActiveSalesByTenant, getOpenCashSessionByStaff, getPayoutRequestsByTenant, getCustomerPayoutRequestsByTenant, getMessagesByTenant, getMessagesByChannel, getTableSectionsByTenant, getRestaurantTablesByTenant, } from "./db-adapter.js";
-import { createProduct, updateProduct, createCustomer, updateCustomer, deleteCustomer, createStaff, updateStaff, deleteStaff, setupTenant, seedProducts, updateProductRecipe, getProductRecipe, createModifierGroup, getProductModifiers, updateModifierOptions, deleteModifierGroup, } from "./db-crud.js";
+import { getProductsByTenant, getTenantIdBySlug, getUserByUid, getStaffTenantByEmail, getAppConfigByTenant, getCustomersByTenant, getStaffByTenant, getWorkstationsByTenant, getActiveSalesByTenant, getOpenCashSessionByStaff, getPayoutRequestsByTenant, getCustomerPayoutRequestsByTenant, getMessagesByTenant, getMessagesByChannel, getTableSectionsByTenant, getRestaurantTablesByTenant } from "./db-adapter.js";
+import { setupTenant, seedProducts, updateProductRecipe, getProductRecipe, createModifierGroup, getProductModifiers, updateModifierOptions, deleteModifierGroup } from "./db-crud.js";
 import { broadcastSalesUpdate } from "./socket.js";
 import { handleEnrollment, handleStartDemo } from "./auth-handler.js";
 import { requireAuth, optionalAuth } from "./auth-middleware.js";
 import { clearSeededDemoData, seedDemoData } from "./demo-seed.js";
-import { featureSetForPackage, getHostedPackage, hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES, type PackageFeature } from "../shared/packageCatalog.js";
-import { canManageAi, deleteInsight, generateInsights, generateStaffScores, getAiSettings, listAiModels, listInsights, listStaffScores, requireAiRoleAccess, requireAiStaffScoreAccess, saveAiSettings, serializeAiSettings, testAiProviderContact, } from "./ai.js";
+import { getTenantPackageContext, getTenantPackageUsage, requirePackageFeature } from "./packageCapacity.js";
+import { hasPackageFeature, JPOS_PACKAGE_ADDONS, JPOS_PACKAGES } from "../shared/packageCatalog.js";
+import { canManageAi, deleteInsight, generateInsights, generateStaffScores, getAiSettings, listAiModels, listInsights, listStaffScores, requireAiRoleAccess, requireAiStaffScoreAccess, saveAiSettings, serializeAiSettings, testAiProviderContact } from "./ai.js";
 import { applyApprovedInventoryAgentSteps, generateInventoryAgentProposal } from "./aiInventoryAgent.js";
-import { generateTenantVapidKeys, getPushOverview, removePushSubscription, savePushSubscription, sendPushNotification, } from "./pushNotifications.js";
+import { generateTenantVapidKeys, getPushOverview, removePushSubscription, savePushSubscription, sendPushNotification } from "./pushNotifications.js";
 import { getManagerActionCenter, getManagerActivityCsv, getManagerActivityHistory, getManagerAuditReport } from "./actionCenter.js";
 import { applyStockAdjustment, createManagerSaleApprovalRequest, createManagerStockAdjustmentRequest, decideManagerTask, getManagerTaskQueue, syncManagerTasksFromSignals } from "./managerTasks.js";
-import { cancelCashCustodyTransfer, confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, exportCashCloseCheckpointCsv, exportManagerCashMovementsCsv, getCashCloseCheckpoints, getCashClosePreview, getCashCustodyTransfers, getManagerCashMovements, getManagerCashSummary, recordManagerCashMovement, recordRegisterWalletCashMovement, recordWalletCashMovement, transferCashSessionToManagerFloat, } from "./managerCash.js";
+import { cancelCashCustodyTransfer, confirmCashCustodyTransfer, createCashCloseCheckpoint, createCashCustodyTransfer, exportCashCloseCheckpointCsv, exportManagerCashMovementsCsv, getCashCloseCheckpoints, getCashClosePreview, getCashCustodyTransfers, getManagerCashMovements, getManagerCashSummary, recordManagerCashMovement, recordRegisterWalletCashMovement, recordWalletCashMovement, transferCashSessionToManagerFloat } from "./managerCash.js";
 import { recordAuditEventSafe } from "./audit.js";
-import { approveStockTakeSession, createStockTakeRule, createStockTakeSession, deleteStockTakeRule, getMyStockTakeAssignments, getStockTakeExportPack, getStockTakeSuggestions, getStockTakeRules, getStockTakeSession, getStockTakeSessions, requestStockTakeRecount, runDueStockTakeRules, submitStockTakeCount, updateStockTakeRule, } from "./stockTake.js";
-import { approveReorderRecommendation, createReorderNotificationRule, dismissReorderRecommendation, listReorderNotificationRules, listReorderRecommendations, refreshReorderRecommendations, runReorderNotificationRule, updateReorderNotificationRule, } from "./reorderRecommendations.js";
+import { approveStockTakeSession, createStockTakeRule, createStockTakeSession, deleteStockTakeRule, getMyStockTakeAssignments, getStockTakeExportPack, getStockTakeSuggestions, getStockTakeRules, getStockTakeSession, getStockTakeSessions, requestStockTakeRecount, runDueStockTakeRules, submitStockTakeCount, updateStockTakeRule } from "./stockTake.js";
+import { approveReorderRecommendation, createReorderNotificationRule, dismissReorderRecommendation, listReorderNotificationRules, listReorderRecommendations, refreshReorderRecommendations, runReorderNotificationRule, updateReorderNotificationRule } from "./reorderRecommendations.js";
 import { getStockValuationReport } from "./stockReports.js";
 import { getPaymentProviderReconciliationReport } from "./paymentReports.js";
 import { getMarginReport } from "./marginReports.js";
@@ -35,7 +36,7 @@ import { getOperationalAnalyticsReport } from "./operationalReports.js";
 import { getAccountingJournalReport } from "./accountingJournal.js";
 import { getEcommerceMarketplaceExport } from "./ecommerceIntegrations.js";
 import { ingestDeliveryOrder, listDeliveryOrders, updateDeliveryOrderStatus } from "./deliveryIntegrations.js";
-import { authenticateIntegrationApiKey, createIntegrationApiKey, ingestStockWebhook, listIntegrationApiKeys, listIntegrationWebhookEvents, revokeIntegrationApiKey, } from "./integrationAccess.js";
+import { authenticateIntegrationApiKey, createIntegrationApiKey, ingestStockWebhook, listIntegrationApiKeys, listIntegrationWebhookEvents, revokeIntegrationApiKey } from "./integrationAccess.js";
 import { getCustomerCampaignExport } from "./customerSegments.js";
 import { getCustomerDataExport } from "./customerDataExport.js";
 import { listCustomerConsents, upsertCustomerConsents } from "./customerConsents.js";
@@ -44,16 +45,16 @@ import { cancelStaffShift, clockIn, clockOut, createStaffShift, endBreak, getMyA
 import { createTipPoolRule, generateTipPoolPayouts, listTipPoolPayouts, listTipPoolRules, previewTipPoolPayouts, updateTipPoolRule } from "./tipPooling.js";
 import { addStaffCoachingNote, getStaffPerformanceReport } from "./staffPerformance.js";
 import { getTaxPeriods, getVatTaxReport, lockTaxPeriod } from "./taxReports.js";
-import { completeStockTransferOrder, createInventoryLocation, createStockTransferOrder, listInventoryLocations, listProductLocationStocks, listStockTransferOrders, updateInventoryLocation, upsertProductLocationStock, } from "./inventoryLocations.js";
-import { createHardwareDevice, deleteHardwareDevice, listHardwareDeviceEvents, listHardwareDevices, queueCashDrawerPulseForNoSale, queueKitchenPrintJobsForSale, testHardwareDevice, updateHardwareDevice, } from "./hardwareAdapters.js";
-import { addLaybyPayment, cancelLaybyOrder, completeLaybyOrder, createLaybyOrder, getLaybyOrderById, listLaybyOrders, } from "./layby.js";
-import { createEventBooking, deleteEventBooking, listEventBookings, updateEventBooking, } from "./eventBookings.js";
-import { createPromotion, listPromotions, updatePromotion, validatePromotionForSale, } from "./promotions.js";
+import { completeStockTransferOrder, createInventoryLocation, createStockTransferOrder, listInventoryLocations, listProductLocationStocks, listStockTransferOrders, updateInventoryLocation, upsertProductLocationStock } from "./inventoryLocations.js";
+import { createHardwareDevice, deleteHardwareDevice, listHardwareDeviceEvents, listHardwareDevices, queueCashDrawerPulseForNoSale, queueKitchenPrintJobsForSale, testHardwareDevice, updateHardwareDevice } from "./hardwareAdapters.js";
+import { addLaybyPayment, cancelLaybyOrder, completeLaybyOrder, createLaybyOrder, getLaybyOrderById, listLaybyOrders } from "./layby.js";
+import { createEventBooking, deleteEventBooking, listEventBookings, updateEventBooking } from "./eventBookings.js";
+import { createPromotion, listPromotions, updatePromotion, validatePromotionForSale } from "./promotions.js";
 import { stripSensitiveVerification, verifySensitiveActionForRequest, type SensitiveActionType } from "./sensitiveActions.js";
 import { listManagerOverrides } from "./managerOverrides.js";
-import { calculateLoyaltyAward, createLoyaltyRewardRule, createLoyaltyTier, listLoyaltyRewardRules, listLoyaltyTiers, updateLoyaltyRewardRule, updateLoyaltyTier, } from "./loyalty.js";
-import { batchCreateProducts, batchUpdateProductPrices, exportCustomersCsv, exportInventoryCsv, importCustomers, importInventory, } from "./batchOperations.js";
-import { normalizeRole, canManageCash, canManagePush, canUseActionCenter, canManageInventory, canGenerateVapidKeys, canUseDevMaintenance, requireDevMaintenance, requireManagerRole, auditActorFromRequest, tenantIdFromRequest, auditChangedFields, integrationSecretFromRequest, auditRouteEvent, denyWithAudit, requireTenantRouteAccess, enforceSensitiveAction, customerSensitiveAction, staffSensitiveAction, createTenantLocalSyncSecret, } from "./routes/_helpers.js";
+import { calculateLoyaltyAward, createLoyaltyRewardRule, createLoyaltyTier, listLoyaltyRewardRules, listLoyaltyTiers, updateLoyaltyRewardRule, updateLoyaltyTier } from "./loyalty.js";
+import { batchCreateProducts, batchUpdateProductPrices, exportCustomersCsv, exportInventoryCsv, importCustomers, importInventory } from "./batchOperations.js";
+import { normalizeRole, canManageCash, canManagePush, canManageInventory, canGenerateVapidKeys, canUseDevMaintenance, requireDevMaintenance, requireManagerRole, tenantIdFromRequest, integrationSecretFromRequest, requireTenantRouteAccess, enforceSensitiveAction, createTenantLocalSyncSecret } from "./routes/_helpers.js";
 export { createTenantLocalSyncSecret };
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
@@ -93,118 +94,6 @@ export async function createApp(io: any = null) {
     }
     const licence = await import("./licenceMiddleware.js");
     await licence.initialiseLicence();
-    async function getTenantPackageContext(tenantId: string) {
-        const info = licence.getLicenceInfo();
-        if (licence.shouldEnforceLicence() && info.payload) {
-            const tier = info.payload.tier;
-            const pkg = getHostedPackage(tier);
-            const catalogPackage = JPOS_PACKAGES.find((p) => p.id === tier) || pkg;
-            return {
-                source: "licence",
-                package: {
-                    ...catalogPackage,
-                    id: tier,
-                    maxRegisters: info.payload.maxRegisters,
-                    features: info.payload.features,
-                },
-            };
-        }
-        const cfg = await getAppConfigByTenant(tenantId);
-        const tier = cfg?.business?.packageTier || process.env.JPOS_HOSTED_PACKAGE_TIER || "free";
-        const pkg = getHostedPackage(tier);
-        return {
-            source: "hosted",
-            package: {
-                ...pkg,
-                features: featureSetForPackage(pkg.id),
-            },
-        };
-    }
-    async function getTenantPackageUsage(tenantId: string) {
-        const [productRows, staffRows, customerRows, registerRows] = await Promise.all([
-            query<any>("SELECT COUNT(*) AS count FROM products WHERE tenant_id = $1", [tenantId]),
-            query<any>("SELECT COUNT(*) AS count FROM staff WHERE tenant_id = $1", [tenantId]),
-            query<any>("SELECT COUNT(*) AS count FROM customers WHERE tenant_id = $1", [tenantId]),
-            query<any>("SELECT COUNT(*) AS count FROM cash_sessions WHERE tenant_id = $1 AND status = 'open'", [tenantId]),
-        ]);
-        return {
-            products: Number(productRows[0]?.count || 0),
-            staff: Number(staffRows[0]?.count || 0),
-            customers: Number(customerRows[0]?.count || 0),
-            activeRegisters: Number(registerRows[0]?.count || 0),
-        };
-    }
-    function limitReached(current: number, limit: number) {
-        return limit !== -1 && current >= limit;
-    }
-    function packageLimitResponse(res: Response, details: {
-        packageId: string;
-        limitName: string;
-        limit: number;
-        current?: number;
-    }) {
-        return res.status(403).json({
-            error: "Package limit reached",
-            package: details.packageId,
-            limitName: details.limitName,
-            limit: details.limit,
-            current: details.current,
-            upgrade: "Upgrade your MasePOS package to unlock more capacity",
-        });
-    }
-    async function requirePackageCapacity(req: Request, res: Response, next: NextFunction, usageKey: "products" | "staff" | "customers" | "activeRegisters", limitKey: "maxProducts" | "maxStaff" | "maxCustomers" | "maxRegisters", limitName: string) {
-        try {
-            const context = await getTenantPackageContext(String(req.params.tenantId));
-            const usage = await getTenantPackageUsage(String(req.params.tenantId));
-            const limit = Number((context.package as any)[limitKey]);
-            if (limitReached(Number((usage as any)[usageKey]), limit)) {
-                void auditRouteEvent(req, "permission.denied", "security", {
-                    attemptedAction: `package.capacity.${usageKey}`,
-                    reason: "package_limit_reached",
-                    package: context.package.id,
-                    limitName,
-                    limit,
-                    current: Number((usage as any)[usageKey]),
-                }, auditActorFromRequest(req).staffId, "permission");
-                packageLimitResponse(res, {
-                    packageId: context.package.id,
-                    limitName,
-                    limit,
-                    current: Number((usage as any)[usageKey]),
-                });
-                return;
-            }
-            next();
-        }
-        catch (err) {
-            next(err);
-        }
-    }
-    function requirePackageFeature(feature: PackageFeature) {
-        return async (req: Request, res: Response, next: NextFunction) => {
-            try {
-                const context = await getTenantPackageContext(String(req.params.tenantId));
-                if (!hasPackageFeature(context.package.features, feature)) {
-                    void auditRouteEvent(req, "permission.denied", "security", {
-                        attemptedAction: `package.feature.${feature}`,
-                        reason: "feature_not_available",
-                        package: context.package.id,
-                        feature,
-                    }, auditActorFromRequest(req).staffId, "permission");
-                    return res.status(403).json({
-                        error: "Feature not available on your package",
-                        package: context.package.id,
-                        feature,
-                        upgrade: "Upgrade your MasePOS package to unlock this feature",
-                    });
-                }
-                next();
-            }
-            catch (err) {
-                next(err);
-            }
-        };
-    }
     function requireAiPackageAccess(req: Request, res: Response, next: NextFunction) {
         if (normalizeRole(req.user?.role) === "dev")
             return next();
@@ -664,32 +553,7 @@ export async function createApp(io: any = null) {
             sendRouteError(res, err, req);
         }
     });
-    app.post("/api/data/tenants/:tenantId/products", requireAuth, validateSchema(ProductSchema), (req, res, next) => requirePackageCapacity(req, res, next, "products", "maxProducts", "products"), async (req, res, next) => {
-        if (!req.body.imageUrl)
-            return next();
-        return requirePackageFeature("images")(req, res, next);
-    }, async (req, res) => {
-        try {
-            const data = await createProduct(String(req.params.tenantId), req.body);
-            res.json(data);
-        }
-        catch (err: any) {
-            sendRouteError(res, err, req);
-        }
-    });
-    app.put("/api/data/tenants/:tenantId/products/:id", requireAuth, validateSchema(ProductSchema), async (req, res, next) => {
-        if (!req.body.imageUrl)
-            return next();
-        return requirePackageFeature("images")(req, res, next);
-    }, async (req, res) => {
-        try {
-            const data = await updateProduct(String(req.params.tenantId), String(req.params.id), req.body);
-            res.json(data);
-        }
-        catch (err: any) {
-            sendRouteError(res, err, req);
-        }
-    });
+    // Product create/update/delete live in routes/products.ts (mounted earlier).
     app.post("/api/data/tenants/:tenantId/products/:id/stock-adjustments", sensitiveRouteRateLimit, requireAuth, async (req, res) => {
         try {
             const stockInput = stripSensitiveVerification(req.body || {});
@@ -743,121 +607,8 @@ export async function createApp(io: any = null) {
             sendRouteError(res, err, req, 400);
         }
     });
-    app.post("/api/data/tenants/:tenantId/customers", requireAuth, validateSchema(CustomerSchema), (req, res, next) => requirePackageCapacity(req, res, next, "customers", "maxCustomers", "customers"), async (req, res) => {
-        try {
-            const data = await createCustomer(String(req.params.tenantId), {
-                ...req.body,
-                consentActor: auditActorFromRequest(req),
-            });
-            await auditRouteEvent(req, "customer.created", "customer", {
-                customerName: data?.name || req.body?.name || null,
-                changedFields: auditChangedFields(req.body || {}),
-            }, data?.id || null, "customer_admin");
-            res.json(data);
-        }
-        catch (err: any) {
-            sendRouteError(res, err, req);
-        }
-    });
-    app.put("/api/data/tenants/:tenantId/customers/:id", requireAuth, validateSchema(CustomerUpdateSchema), async (req, res) => {
-        try {
-            const customerUpdates = stripSensitiveVerification(req.body || {});
-            const sensitiveAction = customerSensitiveAction(customerUpdates);
-            if (sensitiveAction) {
-                const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
-                    customerId: String(req.params.id),
-                    changedFields: auditChangedFields(customerUpdates),
-                });
-                if (sensitiveResponse)
-                    return;
-            }
-            const data = await updateCustomer(String(req.params.tenantId), String(req.params.id), {
-                ...customerUpdates,
-                consentActor: auditActorFromRequest(req),
-            });
-            await auditRouteEvent(req, "customer.updated", "customer", {
-                customerName: data?.name || (customerUpdates as any)?.name || null,
-                changedFields: auditChangedFields(customerUpdates || {}),
-            }, String(req.params.id), "customer_admin");
-            res.json(data);
-        }
-        catch (err: any) {
-            sendRouteError(res, err, req);
-        }
-    });
-    app.delete("/api/data/tenants/:tenantId/customers/:id", requireAuth, async (req, res) => {
-        try {
-            if (!canUseActionCenter(req.user?.role)) {
-                return denyWithAudit(req, res, "customers.anonymize", "Manager access is required to anonymize customer profiles.", {
-                    customerId: String(req.params.id),
-                });
-            }
-            const result = await deleteCustomer(String(req.params.tenantId), String(req.params.id), {
-                ...auditActorFromRequest(req),
-                reason: req.body?.reason || null,
-            });
-            await auditRouteEvent(req, "customer.deleted", "customer", {
-                customerId: String(req.params.id),
-                mode: result.mode || "anonymized",
-                retainedSaleCount: result.retainedSaleCount ?? null,
-            }, String(req.params.id), "customer_admin");
-            res.json(result);
-        }
-        catch (err: any) {
-            const message = String(err?.message || "");
-            res.status(message.includes("not found") ? 404 : message.includes("cannot be anonymized") ? 409 : 500).json({ error: err.message });
-        }
-    });
-    app.post("/api/data/tenants/:tenantId/staff", requireAuth, requireManagerRole, validateSchema(StaffSchema), (req, res, next) => requirePackageCapacity(req, res, next, "staff", "maxStaff", "staff members"), async (req, res) => {
-        try {
-            const data = await createStaff(String(req.params.tenantId), req.body);
-            await auditRouteEvent(req, "staff.created", "staff", {
-                staffName: data?.name || req.body?.name || null,
-                role: data?.role || req.body?.role || null,
-                changedFields: auditChangedFields(req.body || {}),
-            }, data?.id || null, "staff_admin");
-            res.json(data);
-        }
-        catch (err: any) {
-            sendRouteError(res, err, req);
-        }
-    });
-    app.put("/api/data/tenants/:tenantId/staff/:id", requireAuth, requireManagerRole, validateSchema(StaffUpdateSchema), async (req, res) => {
-        try {
-            const staffUpdates = stripSensitiveVerification(req.body || {});
-            const sensitiveAction = staffSensitiveAction(staffUpdates);
-            if (sensitiveAction) {
-                const sensitiveResponse = await enforceSensitiveAction(req, res, sensitiveAction, {
-                    targetStaffId: String(req.params.id),
-                    changedFields: auditChangedFields(staffUpdates),
-                });
-                if (sensitiveResponse)
-                    return;
-            }
-            const data = await updateStaff(String(req.params.tenantId), String(req.params.id), staffUpdates);
-            await auditRouteEvent(req, "staff.updated", "staff", {
-                staffName: data?.name || (staffUpdates as any)?.name || null,
-                role: data?.role || (staffUpdates as any)?.role || null,
-                changedFields: auditChangedFields(staffUpdates || {}),
-            }, String(req.params.id), "staff_admin");
-            res.json(data);
-        }
-        catch (err: any) {
-            sendRouteError(res, err, req);
-        }
-    });
-    app.delete("/api/data/tenants/:tenantId/staff/:id", requireAuth, requireManagerRole, async (req, res) => {
-        try {
-            await deleteStaff(String(req.params.tenantId), String(req.params.id));
-            await auditRouteEvent(req, "staff.deleted", "staff", {
-                targetStaffId: String(req.params.id),
-            }, String(req.params.id), "staff_admin");
-            res.json({ success: true });
-        }
-        catch (err: any) {
-            sendRouteError(res, err, req);
-        }
-    });
+    // Customer create/update/delete live in routes/customers.ts (mounted earlier).
+    // Staff create/update/delete live in routes/staff.ts (mounted earlier).
     // ─────────────────────────────────────────────────────────────────────────
     // Bulk Items & Inventory Expansion
     // ─────────────────────────────────────────────────────────────────────────
