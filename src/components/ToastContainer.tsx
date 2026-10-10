@@ -1,13 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, AlertCircle, Info, AlertTriangle, X } from 'lucide-react';
-import type { ToastKind } from '../utils/toast';
+import type { ToastKind, ToastAction } from '../utils/toast';
 
 type ToastItem = {
   id: string;
   kind: ToastKind;
   message: string;
   durationMs: number;
+  action?: ToastAction;
 };
 
 const kindStyle: Record<ToastKind, { icon: React.ComponentType<{ className?: string }>; bg: string; border: string; iconColor: string }> = {
@@ -65,6 +66,15 @@ export function ToastContainer() {
             >
               <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${style.iconColor}`} />
               <p className="flex-1 text-sm text-slate-800 dark:text-slate-100">{item.message}</p>
+              {item.action && (
+                <button
+                  type="button"
+                  onClick={() => { item.action?.onClick(); dismiss(item.id); }}
+                  className="min-h-11 px-3 rounded-lg text-sm font-bold underline text-slate-900 dark:text-white hover:bg-black/5 dark:hover:bg-white/10"
+                >
+                  {item.action.label}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => dismiss(item.id)}

@@ -86,6 +86,15 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
   }, [billSplitEnabled, billSplitTableLabel, billSplitTableOptions, billTableLabels, isOpen]);
 
   useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isProcessing) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, isProcessing, onClose]);
+
+  useEffect(() => {
     if (offlineMode && (currentMethod === 'wallet' || currentMethod === 'account')) {
       setCurrentMethod('cash');
     }
@@ -183,7 +192,7 @@ export const SplitPaymentModal: React.FC<SplitPaymentModalProps> = ({
               Add multiple tenders to complete checkout
             </p>
           </div>
-          <button onClick={onClose} className="p-3 text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-2xl transition-all">
+          <button onClick={onClose} aria-label="Close" className="p-3 text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-2xl transition-all">
             <X className="w-6 h-6" />
           </button>
         </div>

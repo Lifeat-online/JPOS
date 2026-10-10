@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Vendor } from '../types';
-import { Plus, Edit, Loader2, Save, X, Building2, Mail, Phone, User } from 'lucide-react';
+import { Plus, Edit, Loader2, Save, X, Building2, Mail, Phone, User, Download, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { usePosStore } from '../store/usePosStore';
-import { apiGet, apiPost, apiPut } from '../api';
+import { apiGet, apiPost, apiPut, exportVendorsBatchCsv, importVendorsBatch } from '../api';
+import { CsvImportCard, saveCsvFile } from './CsvImportCard';
+import { vendorTemplateCsv } from '../utils/csvTemplates';
+import { toast } from '../utils/toast';
+import { errorMessage } from '../utils/errorMessage';
 
 export function VendorManagementView() {
   const tenantId = usePosStore(s => s.tenantId);
@@ -12,14 +16,31 @@ export function VendorManagementView() {
   const [modalOpen, setModalOpen] = useState(false);
   const [currentVendor, setCurrentVendor] = useState<Partial<Vendor>>({});
   const [isProcessing, setIsProcessing] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  const fetchVendors = async () => {
+  const exportVendors = async () => {
+    if (!tenantId) return;
+    setExporting(true);
+    try {
+      const pack = await exportVendorsBatchCsv(tenantId);
+      saveCsvFile(pack.csv, pack.filename, pack.mimeType);
+      toast.success(`${pack.count} vendor${pack.count === 1 ? '' : 's'} exported.`);
+    } catch (err) {
+      toast.error(`Couldn't export vendors: ${errorMessage(err, 'please try again.')}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const fetchVendors = async (options: { silent?: boolean } = {}) => {
     if (!tenantId) return;
     try {
       const data = await apiGet<Vendor[]>(`/api/data/tenants/${tenantId}/vendors`);
       setVendors(data || []);
     } catch (err) {
       console.error('Vendors fetch error:', err);
+      if (!options.silent) toast.error(`Couldn't load vendors: ${errorMessage(err, 'please check your connection.')}`);
     } finally {
       setLoading(false);
     }
@@ -28,7 +49,7 @@ export function VendorManagementView() {
   useEffect(() => {
     fetchVendors();
     // Poll every 30s to keep in sync
-    const interval = setInterval(fetchVendors, 30000);
+    const interval = setInterval(() => fetchVendors({ silent: true }), 30000);
     return () => clearInterval(interval);
   }, [tenantId]);
 
@@ -54,6 +75,7 @@ export function VendorManagementView() {
       setModalOpen(false);
     } catch (err) {
       console.error(err);
+      toast.error(`Couldn't save vendor: ${errorMessage(err, 'please try again.')}`);
     }
     setIsProcessing(false);
   };
@@ -67,6 +89,7 @@ export function VendorManagementView() {
       await fetchVendors();
     } catch (err) {
       console.error(err);
+      toast.error(`Couldn't update vendor status: ${errorMessage(err, 'please try again.')}`);
     }
   };
 
@@ -85,6 +108,42 @@ export function VendorManagementView() {
         >
           <Plus className="w-5 h-5" /> New Vendor
         </button>
+      </div>
+
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-[24px] border border-slate-100 dark:border-slate-800/60 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setImportOpen(open => !open)}
+            aria-expanded={importOpen}
+            className="inline-flex min-h-[44px] items-center gap-2 text-sm font-black text-slate-800 dark:text-white"
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform ${importOpen ? 'rotate-180' : ''}`} />
+            Import / export
+          </button>
+          <button
+            type="button"
+            onClick={() => void exportVendors()}
+            disabled={exporting || !tenantId}
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-40 dark:bg-white dark:text-slate-900"
+          >
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            Export CSV
+          </button>
+        </div>
+        {importOpen && tenantId && (
+          <div className="mt-3">
+            <CsvImportCard
+              title="Import vendors"
+              description="Upload a CSV to add or update suppliers."
+              templateFilename="vendors-template.csv"
+              templateCsv={vendorTemplateCsv}
+              onPreview={csv => importVendorsBatch(tenantId, { csv, dryRun: true })}
+              onImport={csv => importVendorsBatch(tenantId, { csv })}
+              onImported={() => fetchVendors()}
+            />
+          </div>
+        )}
       </div>
 
       {vendors.length === 0 && (

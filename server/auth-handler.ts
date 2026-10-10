@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { Request, Response } from 'express';
 import { query, getConnection } from './db.js';
-import { seedDemoData, type DemoSeedMode } from './demo-seed.js';
+import { seedDemoData, PUBLIC_DEMO_TENANT_ID, type DemoSeedMode } from './demo-seed.js';
 import { ensureBulkInventorySchema } from './init-db.js';
 import { getHostedPackage } from '../shared/packageCatalog.js';
 import { recordAuditEventSafe } from './audit.js';
@@ -166,7 +166,7 @@ function parseDemoMode(value: unknown): DemoSeedMode {
     return value === 'retail' ? 'retail' : 'restaurant';
 }
 async function ensureDemoTenant(mode: DemoSeedMode) {
-    const tenantId = 'demo-tenant-001';
+    const tenantId = PUBLIC_DEMO_TENANT_ID;
     const staffId = 'demo-admin-001';
     const email = 'demo@masepos.test';
     const name = 'Demo Admin';

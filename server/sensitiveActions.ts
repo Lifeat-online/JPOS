@@ -13,6 +13,7 @@ export const SENSITIVE_ACTION_TYPES = [
     "wallet_adjustment",
     "stock_adjustment",
     "settings_change",
+    "price_override",
 ] as const;
 export type SensitiveActionType = typeof SENSITIVE_ACTION_TYPES[number];
 type SensitiveVerificationInput = {
@@ -45,6 +46,7 @@ const actionLabels: Record<SensitiveActionType, string> = {
     wallet_adjustment: "adjust a wallet balance",
     stock_adjustment: "adjust stock",
     settings_change: "change settings",
+    price_override: "sell items at a non-catalog price",
 };
 function cleanText(value: unknown) {
     if (typeof value !== "string")

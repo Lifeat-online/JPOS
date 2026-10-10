@@ -1,3 +1,4 @@
+import type React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -54,6 +55,60 @@ describe('TenderModal', () => {
         providerStatus: 'approved',
         providerNote: null,
       });
+    });
+  });
+
+  describe('keyboard', () => {
+    const setup = (overrides: Partial<React.ComponentProps<typeof TenderModal>> = {}) => {
+      const onConfirm = vi.fn();
+      const onClose = vi.fn();
+      render(
+        <TenderModal
+          method="cash"
+          cartTotal={50}
+          tenderedAmount={50}
+          cardOverageAction="tip"
+          isProcessing={false}
+          onTenderedChange={vi.fn()}
+          onCardOverageChange={vi.fn()}
+          onConfirm={onConfirm}
+          onClose={onClose}
+          {...overrides}
+        />
+      );
+      return { onConfirm, onClose };
+    };
+
+    it('closes on Escape', () => {
+      const { onClose } = setup();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('confirms on Enter when payment is sufficient', () => {
+      const { onConfirm } = setup();
+      fireEvent.keyDown(screen.getByRole('spinbutton'), { key: 'Enter' });
+      expect(onConfirm).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not confirm on Enter when amount is insufficient', () => {
+      const { onConfirm } = setup({ tenderedAmount: 10 });
+      fireEvent.keyDown(window, { key: 'Enter' });
+      expect(onConfirm).not.toHaveBeenCalled();
+    });
+
+    it('ignores Enter from a focused button', () => {
+      const { onConfirm } = setup();
+      fireEvent.keyDown(screen.getByRole('button', { name: /Confirm/i }), { key: 'Enter' });
+      expect(onConfirm).not.toHaveBeenCalled();
+    });
+
+    it('ignores Enter and Escape while processing', () => {
+      const { onConfirm, onClose } = setup({ isProcessing: true });
+      fireEvent.keyDown(window, { key: 'Enter' });
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(onConfirm).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 });

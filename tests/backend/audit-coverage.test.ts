@@ -25,16 +25,18 @@ describe('immutable audit coverage instrumentation', () => {
     const settingsSource = readRepoFile('server/routes/settings.ts');
     const cashSource = readRepoFile('server/routes/cash.ts');
     const helpers = readRepoFile('server/routes/_helpers.ts');
+    const staffSource = readRepoFile('server/routes/staff.ts');
+    const customersSource = readRepoFile('server/routes/customers.ts');
 
     expect(helpers).toContain('function denyWithAudit');
     expect(settingsSource).toContain('settings.app_updated');
     expect(settingsSource).toContain('settings.logo_uploaded');
-    expect(appSource).toContain('customer.created');
-    expect(appSource).toContain('customer.updated');
-    expect(appSource).toContain('customer.deleted');
-    expect(appSource).toContain('staff.created');
-    expect(appSource).toContain('staff.updated');
-    expect(appSource).toContain('staff.deleted');
+    expect(customersSource).toContain('customer.created');
+    expect(customersSource).toContain('customer.updated');
+    expect(customersSource).toContain('customer.deleted');
+    expect(staffSource).toContain('staff.created');
+    expect(staffSource).toContain('staff.updated');
+    expect(staffSource).toContain('staff.deleted');
     expect(cashSource).toContain('cash_session.opened');
     expect(cashSource).toContain('cash_session.updated');
     expect(cashSource).toContain('cash_session.reviewed');

@@ -3,6 +3,9 @@ import { requireAuth } from "../auth-middleware.js";
 import { getProductsByTenant, semanticProductSearch } from "../db-adapter.js";
 import { createProduct, updateProduct, deleteProduct } from "../db-crud.js";
 import { validateSchema, ProductSchema } from "../validation.js";
+import { sendRouteError } from "../securityHardening.js";
+import { auditChangedFields, auditRouteEvent, requireStaffPermission } from "./_helpers.js";
+import { requirePackageCapacity, requirePackageFeature } from "../packageCapacity.js";
 
 export const productsRouter = Router({ mergeParams: true });
 
@@ -18,7 +21,7 @@ productsRouter.get("/search", requireAuth, async (req: any, res) => {
     if (results === null) return res.json({ mode: "unavailable", results: [] });
     res.json({ mode: "semantic", results });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -32,33 +35,50 @@ productsRouter.get("/", requireAuth, async (req: any, res) => {
     res.json(products);
   } catch (err: any) {
     const status = String(err?.message || "").includes("not assigned") ? 403 : 500;
-    res.status(status).json({ error: err.message });
+    sendRouteError(res, err, req, status);
   }
 });
 
-productsRouter.post("/", requireAuth, validateSchema(ProductSchema), async (req: any, res) => {
-  try {
-    const created = await createProduct(req.params.tenantId, req.body);
-    res.status(201).json(created);
-  } catch (err: any) {
-    res.status(400).json({ error: err.message });
-  }
-});
+const requireInventoryPermission = (action: string) =>
+  requireStaffPermission("canManageInventory", action, "Inventory access is required to change products.");
 
-productsRouter.put("/:productId", requireAuth, validateSchema(ProductSchema), async (req: any, res) => {
+// Image uploads are a package feature; only check it when an image is sent.
+const requireImagesWhenPresent = (req: any, res: any, next: any) =>
+  req.body?.imageUrl ? requirePackageFeature("images")(req, res, next) : next();
+
+productsRouter.post("/", requireAuth, requireInventoryPermission("products.create"), validateSchema(ProductSchema),
+  (req: any, res: any, next: any) => requirePackageCapacity(req, res, next, "products", "maxProducts", "products"),
+  requireImagesWhenPresent,
+  async (req: any, res) => {
+    try {
+      const created = await createProduct(req.params.tenantId, req.body);
+      await auditRouteEvent(req, "product.created", "product", { name: created?.name || null, price: created?.price ?? null }, created?.id || null, "inventory");
+      res.status(201).json(created);
+    } catch (err: any) {
+      sendRouteError(res, err, req, 400);
+    }
+  });
+
+productsRouter.put("/:productId", requireAuth, requireInventoryPermission("products.update"), validateSchema(ProductSchema), requireImagesWhenPresent, async (req: any, res) => {
   try {
     const updated = await updateProduct(req.params.tenantId, req.params.productId, req.body);
+    await auditRouteEvent(req, "product.updated", "product", {
+      name: updated?.name || req.body?.name || null,
+      price: req.body?.price ?? null,
+      changedFields: auditChangedFields(req.body || {}),
+    }, req.params.productId, "inventory");
     res.json(updated);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
-productsRouter.delete("/:productId", requireAuth, async (req: any, res) => {
+productsRouter.delete("/:productId", requireAuth, requireInventoryPermission("products.delete"), async (req: any, res) => {
   try {
     await deleteProduct(req.params.tenantId, req.params.productId);
+    await auditRouteEvent(req, "product.deleted", "product", {}, req.params.productId, "inventory");
     res.status(204).end();
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });

@@ -20,6 +20,8 @@ function readSettingsFileAsDataUrl(file: File) {
   });
 }
 
+type SettingsTabId = 'business' | 'connection' | 'package' | 'ai' | 'payment' | 'categories' | 'features' | 'printing' | 'hardware' | 'tax' | 'loyalty' | 'discounts' | 'retention' | 'workstations' | 'tables';
+
 type PromotionDraft = Partial<Promotion> & {
   targetProductIdsText: string;
   targetCategoriesText: string;
@@ -153,6 +155,38 @@ function formatRetentionDate(value?: any) {
   return date.toLocaleString();
 }
 
+const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; keywords: string[] }> = [
+  { id: 'business', label: 'General', keywords: ['business', 'name', 'address', 'phone', 'currency', 'logo', 'restaurant mode'] },
+  { id: 'features', label: 'Features', keywords: ['features', 'restaurant mode', 'loyalty program', 'toggle', 'enable'] },
+  { id: 'connection', label: 'Connection', keywords: ['connection', 'server', 'network', 'online', 'offline', 'sync'] },
+  { id: 'package', label: 'Package', keywords: ['package', 'plan', 'limits', 'subscription', 'usage'] },
+  { id: 'ai', label: 'AI', keywords: ['ai', 'provider', 'model', 'api key', 'assistant', 'test chat'] },
+  { id: 'payment', label: 'Payments', keywords: ['payment', 'cash', 'card terminal', 'payfast', 'merchant', 'accepted methods'] },
+  { id: 'tax', label: 'Tax', keywords: ['tax', 'vat', 'inclusive', 'rate'] },
+  { id: 'printing', label: 'Receipts', keywords: ['printer', 'receipt', 'print', 'escpos', 'paper', 'branding', 'preview'] },
+  { id: 'hardware', label: 'Hardware', keywords: ['hardware', 'printer', 'ip address', 'cash drawer', 'scale', 'scanner', 'card terminal', 'escpos'] },
+  { id: 'loyalty', label: 'Loyalty', keywords: ['loyalty', 'points', 'tiers', 'rewards', 'member'] },
+  { id: 'discounts', label: 'Discounts', keywords: ['discount', 'promotion', 'coupon', 'happy hour', 'staff role'] },
+  { id: 'retention', label: 'Retention', keywords: ['retention', 'data', 'privacy', 'delete', 'archive', 'policy'] },
+  { id: 'categories', label: 'Categories', keywords: ['category', 'product hierarchy', 'sections', 'subcategory'] },
+  { id: 'workstations', label: 'Workstations', keywords: ['workstation', 'kitchen', 'bar', 'pairing', 'mobile', 'device'] },
+  { id: 'tables', label: 'Tables', keywords: ['table', 'floor', 'sections', 'seating', 'restaurant'] },
+];
+
+const SETTINGS_TAB_IDS = new Set<string>(SETTINGS_TABS.map(tab => tab.id));
+
+function readInitialSettingsTab(): SettingsTabId {
+  if (typeof window === 'undefined') return 'business';
+  const requested = new URLSearchParams(window.location.search).get('tab');
+  return requested && SETTINGS_TAB_IDS.has(requested) ? (requested as SettingsTabId) : 'business';
+}
+
+function tabMatchesQuery(tab: { label: string; keywords: string[] }, query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [tab.label, ...tab.keywords].some(text => text.toLowerCase().includes(needle));
+}
+
 export function SettingsView({ config, setConfig }: { config: AppConfig, setConfig: (c: AppConfig) => void }) {
   const tenantId = usePosStore(state => state.tenantId);
   const currentUserStaff = usePosStore(state => state.currentUserStaff);
@@ -161,7 +195,8 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     categories: config.categories || DEFAULT_CATEGORY_TREE
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'business' | 'connection' | 'package' | 'ai' | 'payment' | 'categories' | 'features' | 'printing' | 'hardware' | 'tax' | 'loyalty' | 'discounts' | 'retention' | 'workstations' | 'tables'>('business');
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(readInitialSettingsTab);
+  const [tabQuery, setTabQuery] = useState('');
   const [packageLimits, setPackageLimits] = useState<TenantPackageLimitsResponse | null>(null);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [promotionDraft, setPromotionDraft] = useState<PromotionDraft>(() => newPromotionDraft());
@@ -1020,6 +1055,29 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
     }
   };
 
+  const isRestaurantMode = !!config.business?.isRestaurantMode;
+  const visibleTabIds = SETTINGS_TABS
+    .filter(tab => (tab.id !== 'workstations' && tab.id !== 'tables') || isRestaurantMode)
+    .filter(tab => tabMatchesQuery(tab, tabQuery))
+    .map(tab => tab.id);
+  const isTabVisible = (id: SettingsTabId) => visibleTabIds.includes(id);
+  const selectTab = (id: SettingsTabId) => {
+    setActiveTab(id);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', id);
+      window.history.replaceState(null, '', url);
+    }
+  };
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (visibleTabIds.length > 0) selectTab(visibleTabIds[0]);
+    } else if (event.key === 'Escape') {
+      setTabQuery('');
+    }
+  };
+
   return (
     <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50 dark:bg-slate-950">
       <div className="max-w-4xl mx-auto space-y-8">
@@ -1028,116 +1086,171 @@ export function SettingsView({ config, setConfig }: { config: AppConfig, setConf
           <p className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Application Configuration</p>
         </div>
 
+        <div className="space-y-3">
+          <input
+            type="search"
+            value={tabQuery}
+            onChange={event => setTabQuery(event.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Search settings…"
+            aria-label="Search settings"
+            className="min-h-[44px] w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-900 outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+          />
+          {tabQuery.trim() && visibleTabIds.length === 0 && (
+            <p className="text-sm font-bold text-slate-500" role="status">No settings match “{tabQuery.trim()}”</p>
+          )}
         <div className="flex gap-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar">
+          {isTabVisible('business') && (
           <button
-            onClick={() => setActiveTab('business')}
+            type="button"
+            onClick={() => selectTab('business')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'business' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Store className="w-4 h-4" />
             General
           </button>
+          )}
+          {isTabVisible('features') && (
           <button
-            onClick={() => setActiveTab('features')}
+            type="button"
+            onClick={() => selectTab('features')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'features' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Settings2 className="w-4 h-4" />
             Features
           </button>
+          )}
+          {isTabVisible('connection') && (
           <button
-            onClick={() => setActiveTab('connection')}
+            type="button"
+            onClick={() => selectTab('connection')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'connection' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Wifi className="w-4 h-4" />
             Connection
           </button>
+          )}
+          {isTabVisible('package') && (
           <button
-            onClick={() => setActiveTab('package')}
+            type="button"
+            onClick={() => selectTab('package')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'package' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <PackageCheck className="w-4 h-4" />
             Package
           </button>
+          )}
+          {isTabVisible('ai') && (
           <button
-            onClick={() => setActiveTab('ai')}
+            type="button"
+            onClick={() => selectTab('ai')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'ai' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <BrainCircuit className="w-4 h-4" />
             AI
           </button>
+          )}
+          {isTabVisible('payment') && (
           <button
-            onClick={() => setActiveTab('payment')}
+            type="button"
+            onClick={() => selectTab('payment')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'payment' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <CreditCard className="w-4 h-4" />
             Payments
           </button>
+          )}
+          {isTabVisible('tax') && (
           <button
-            onClick={() => setActiveTab('tax')}
+            type="button"
+            onClick={() => selectTab('tax')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'tax' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Calculator className="w-4 h-4" />
             Tax
           </button>
+          )}
+          {isTabVisible('printing') && (
           <button
-            onClick={() => setActiveTab('printing')}
+            type="button"
+            onClick={() => selectTab('printing')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'printing' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Receipt className="w-4 h-4" />
             Receipts
           </button>
+          )}
+          {isTabVisible('hardware') && (
           <button
-            onClick={() => setActiveTab('hardware')}
+            type="button"
+            onClick={() => selectTab('hardware')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'hardware' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Printer className="w-4 h-4" />
             Hardware
           </button>
+          )}
+          {isTabVisible('loyalty') && (
           <button
-            onClick={() => setActiveTab('loyalty')}
+            type="button"
+            onClick={() => selectTab('loyalty')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'loyalty' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Award className="w-4 h-4" />
             Loyalty
           </button>
+          )}
+          {isTabVisible('discounts') && (
           <button
-            onClick={() => setActiveTab('discounts')}
+            type="button"
+            onClick={() => selectTab('discounts')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'discounts' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Clock className="w-4 h-4" />
             Discounts
           </button>
+          )}
+          {isTabVisible('retention') && (
           <button
-            onClick={() => setActiveTab('retention')}
+            type="button"
+            onClick={() => selectTab('retention')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'retention' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <ShieldCheck className="w-4 h-4" />
             Retention
           </button>
+          )}
+          {isTabVisible('categories') && (
           <button
-            onClick={() => setActiveTab('categories')}
+            type="button"
+            onClick={() => selectTab('categories')}
             className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'categories' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
           >
             <Layers className="w-4 h-4" />
             Categories
           </button>
-          {config.business?.isRestaurantMode && (
+          )}
+          {config.business?.isRestaurantMode && isTabVisible('workstations') && (
             <button
-              onClick={() => setActiveTab('workstations')}
+              type="button"
+              onClick={() => selectTab('workstations')}
               className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'workstations' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
             >
               <ChefHat className="w-4 h-4" />
               Workstations
             </button>
           )}
-          {config.business?.isRestaurantMode && (
+          {config.business?.isRestaurantMode && isTabVisible('tables') && (
             <button
-              onClick={() => setActiveTab('tables')}
+              type="button"
+              onClick={() => selectTab('tables')}
               className={`pb-4 px-4 font-bold text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${activeTab === 'tables' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
             >
               <Layers className="w-4 h-4" />
               Tables
             </button>
           )}
+        </div>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 space-y-6">

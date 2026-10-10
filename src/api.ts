@@ -550,6 +550,18 @@ export function importCustomersBatch(tenantId: string, data: { csv?: string; row
   return apiPost<BatchMutationResult>(`/api/data/tenants/${tenantId}/batch/customers/import`, data);
 }
 
+export function importStaffBatch(tenantId: string, data: { csv: string; dryRun?: boolean }) {
+  return apiPost<BatchMutationResult>(`/api/data/tenants/${tenantId}/staff/batch/import`, data);
+}
+
+export function importVendorsBatch(tenantId: string, data: { csv: string; dryRun?: boolean }) {
+  return apiPost<BatchMutationResult>(`/api/data/tenants/${tenantId}/vendors/batch/import`, data);
+}
+
+export function exportVendorsBatchCsv(tenantId: string) {
+  return apiGet<BatchExportResult>(`/api/data/tenants/${tenantId}/vendors/batch/export`);
+}
+
 export function getTenantStaff(tenantId: string) {
   return apiGet<any[]>(`/api/data/tenants/${tenantId}/staff`);
 }

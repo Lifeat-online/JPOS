@@ -57,6 +57,25 @@ export const TenderModal: React.FC<TenderModalProps> = ({
     });
   };
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isProcessing) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === 'Enter' && canConfirm) {
+        const tag = (e.target as HTMLElement | null)?.tagName;
+        if (tag === 'BUTTON' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        confirm();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -214,6 +233,7 @@ export const TenderModal: React.FC<TenderModalProps> = ({
             Confirm
           </button>
         </div>
+        <p className="hidden md:block mt-3 text-center text-[11px] text-slate-400">Enter to confirm · Esc to cancel</p>
       </motion.div>
     </motion.div>
   );

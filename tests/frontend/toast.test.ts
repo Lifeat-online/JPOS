@@ -71,4 +71,27 @@ describe('toast event contract', () => {
     const ids = new Set(seen.map((s) => s.id));
     expect(ids.size).toBe(3);
   });
+
+  it('object form passes action through in the event detail', () => {
+    const seen: any[] = [];
+    const handler = (e: Event) => seen.push((e as CustomEvent).detail);
+    const onClick = () => {};
+    window.addEventListener('masepos:toast', handler);
+    toast.info({ message: 'Cart cleared', durationMs: 6000, action: { label: 'Undo', onClick } });
+    window.removeEventListener('masepos:toast', handler);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].action).toEqual({ label: 'Undo', onClick });
+    expect(seen[0].durationMs).toBe(6000);
+  });
+
+  it('string input still works and has no action', () => {
+    const seen: any[] = [];
+    const handler = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener('masepos:toast', handler);
+    toast.info('plain');
+    window.removeEventListener('masepos:toast', handler);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ kind: 'info', message: 'plain' });
+    expect(seen[0].action).toBeUndefined();
+  });
 });

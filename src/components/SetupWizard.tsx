@@ -32,6 +32,8 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
         ...config,
         setupCompleted: true,
         business: {
+          // Keep defaults (tax-inclusive pricing, loyalty, package) from the base config.
+          ...config.business,
           name: businessName,
           logoUrl: formData.logoUrl || '',
           address: formData.address || '',
@@ -74,9 +76,10 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
           <button
             onClick={() => handleSave(true)}
             disabled={isSaving}
+            title="Uses defaults (R currency, 15% VAT). You can change these any time in Settings."
             className="absolute top-4 right-4 text-xs font-bold text-white/70 hover:text-white uppercase tracking-widest transition-all px-3 py-1.5 rounded-lg hover:bg-white/10"
           >
-            Skip Config
+            Skip for now
           </button>
           <div className="w-16 h-16 bg-white/20 rounded-2xl mx-auto flex items-center justify-center backdrop-blur-md">
             <Building2 className="w-8 h-8 text-white" />
@@ -90,7 +93,7 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
         <div className="p-8 space-y-6 overflow-y-auto">
           <div className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="business-name" className="text-xs font-black uppercase tracking-widest text-slate-500">Business Name</label>
+              <label htmlFor="business-name" className="text-xs font-black uppercase tracking-widest text-slate-500">Business Name <span aria-hidden="true" className="text-red-500">*</span></label>
               <input 
                 id="business-name"
                 type="text" 
@@ -99,6 +102,7 @@ export function SetupWizard({ user, config }: SetupWizardProps) {
                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-primary/50 text-sm font-bold dark:text-white transition-all"
                 placeholder="e.g. Acme Supermarket"
                 required
+                aria-required="true"
               />
             </div>
             

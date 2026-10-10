@@ -3,7 +3,13 @@ import { requireAuth } from "../auth-middleware.js";
 import { getStaffByTenant } from "../db-adapter.js";
 import { createStaff, updateStaff, deleteStaff } from "../db-crud.js";
 import { validateSchema, StaffSchema, StaffUpdateSchema } from "../validation.js";
-import { denyWithAudit, auditRouteEvent, auditActorFromRequest, canUseActionCenter, requireManagerRole } from "./_helpers.js";
+import {
+  denyWithAudit, auditRouteEvent, auditActorFromRequest, canUseActionCenter, requireManagerRole,
+  assignableStaffRoles, staffRoleRank, staffSensitiveAction, enforceSensitiveAction,
+  stripSensitiveVerification, auditChangedFields, sensitiveRouteRateLimit,
+} from "./_helpers.js";
+import { query } from "../db.js";
+import { getTenantPackageContext, packageLimitResponse, remainingPackageCapacity } from "../packageCapacity.js";
 import {
   cancelStaffShift, clockIn, clockOut, createStaffShift, endBreak, getMyAttendanceStatus,
   getTimesheetPayrollReport, listStaffShifts, publishRoster, startBreak, updateStaffShift
@@ -17,6 +23,8 @@ import {
 import {
   createManagerSaleApprovalRequest, decideManagerTask, getManagerTaskQueue, syncManagerTasksFromSignals
 } from "../managerTasks.js";
+import { sendRouteError } from "../securityHardening.js";
+import { importStaff } from "../batchOperations.js";
 
 export const staffRouter = Router({ mergeParams: true });
 
@@ -25,34 +33,104 @@ staffRouter.get("/", requireAuth, async (req: any, res) => {
     const staff = await getStaffByTenant(req.params.tenantId);
     res.json(staff);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
+  }
+});
+
+async function targetStaffRole(tenantId: string, staffId: string): Promise<string | null> {
+  const rows = await query<any>(`SELECT role FROM staff WHERE tenant_id = $1 AND id = $2 LIMIT 1`, [tenantId, staffId]);
+  return rows[0]?.role ?? null;
+}
+
+function denyRole(req: any, res: any, action: string, role: unknown) {
+  return denyWithAudit(req, res, action, `Your role cannot assign the ${String(role)} role.`, {
+    requestedRole: role,
+    allowedRoles: assignableStaffRoles(req.user?.role),
+  });
+}
+
+staffRouter.post("/batch/import", requireAuth, requireManagerRole, sensitiveRouteRateLimit, async (req: any, res) => {
+  try {
+    const result = await importStaff(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
+    if (!result.dryRun) {
+      await auditRouteEvent(req, "batch.staff_imported", "staff", {
+        dryRun: result.dryRun,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        errorCount: result.errors.length,
+      }, null, "staff_admin");
+    }
+    res.json(result);
+  } catch (err: any) {
+    sendRouteError(res, err, req, 400);
   }
 });
 
 staffRouter.post("/", requireAuth, requireManagerRole, validateSchema(StaffSchema), async (req: any, res) => {
   try {
-    const created = await createStaff(req.params.tenantId, req.body);
+    const input: any = stripSensitiveVerification(req.body || {});
+    if (!assignableStaffRoles(req.user?.role).includes(String(input.role))) {
+      return denyRole(req, res, "staff.create_role_denied", input.role);
+    }
+    if ((await remainingPackageCapacity(req.params.tenantId, "staff", "maxStaff")) <= 0) {
+      const context = await getTenantPackageContext(req.params.tenantId);
+      return packageLimitResponse(res, { packageId: context.package.id, limitName: "staff members", limit: Number(context.package.maxStaff) });
+    }
+    // Opening wallet balances and staff discounts carry the same re-auth as edits.
+    const sensitiveAction = staffSensitiveAction(input);
+    if (sensitiveAction && await enforceSensitiveAction(req, res, sensitiveAction, { changedFields: auditChangedFields(input) })) return;
+    const created = await createStaff(req.params.tenantId, input);
+    await auditRouteEvent(req, "staff.created", "staff", {
+      staffName: created?.name || input.name || null,
+      role: created?.role || input.role || null,
+      changedFields: auditChangedFields(input),
+    }, created?.id || null, "staff_admin");
     res.status(201).json(created);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
 staffRouter.put("/:staffId", requireAuth, requireManagerRole, validateSchema(StaffUpdateSchema), async (req: any, res) => {
   try {
-    const updated = await updateStaff(req.params.tenantId, req.params.staffId, req.body);
+    const updates: any = stripSensitiveVerification(req.body || {});
+    const currentRole = await targetStaffRole(req.params.tenantId, req.params.staffId);
+    if (currentRole === null) return res.status(404).json({ error: "Staff member not found" });
+    if (staffRoleRank(currentRole) > staffRoleRank(req.user?.role)) {
+      return denyWithAudit(req, res, "staff.update_rank_denied", "You can't edit a staff member with a higher role than yours.", { targetRole: currentRole });
+    }
+    if (updates.role !== undefined && String(updates.role) !== currentRole && !assignableStaffRoles(req.user?.role).includes(String(updates.role))) {
+      return denyRole(req, res, "staff.update_role_denied", updates.role);
+    }
+    const sensitiveAction = staffSensitiveAction(updates);
+    if (sensitiveAction && await enforceSensitiveAction(req, res, sensitiveAction, {
+      targetStaffId: req.params.staffId,
+      changedFields: auditChangedFields(updates),
+    })) return;
+    const updated = await updateStaff(req.params.tenantId, req.params.staffId, updates);
+    await auditRouteEvent(req, "staff.updated", "staff", {
+      staffName: updated?.name || (updates as any).name || null,
+      role: updated?.role || (updates as any).role || null,
+      changedFields: auditChangedFields(updates),
+    }, req.params.staffId, "staff_admin");
     res.json(updated);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
 staffRouter.delete("/:staffId", requireAuth, requireManagerRole, async (req: any, res) => {
   try {
+    const currentRole = await targetStaffRole(req.params.tenantId, req.params.staffId);
+    if (currentRole !== null && staffRoleRank(currentRole) > staffRoleRank(req.user?.role)) {
+      return denyWithAudit(req, res, "staff.delete_rank_denied", "You can't remove a staff member with a higher role than yours.", { targetRole: currentRole });
+    }
     await deleteStaff(req.params.tenantId, req.params.staffId);
+    await auditRouteEvent(req, "staff.deleted", "staff", { targetStaffId: req.params.staffId }, req.params.staffId, "staff_admin");
     res.status(204).end();
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -67,7 +145,7 @@ staffRouter.get("/shifts", requireAuth, async (req: any, res) => {
       staffId: req.query.staffId ? String(req.query.staffId) : undefined,
     }));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -78,7 +156,7 @@ staffRouter.post("/shifts", requireAuth, async (req: any, res) => {
     }
     res.json(await createStaffShift(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -89,7 +167,7 @@ staffRouter.put("/shifts/:shiftId", requireAuth, async (req: any, res) => {
     }
     res.json(await updateStaffShift(req.params.tenantId, req.params.shiftId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -100,7 +178,7 @@ staffRouter.delete("/shifts/:shiftId", requireAuth, async (req: any, res) => {
     }
     res.json(await cancelStaffShift(req.params.tenantId, req.params.shiftId, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -116,7 +194,7 @@ staffRouter.post("/roster/publish", requireAuth, async (req: any, res) => {
       auditActorFromRequest(req),
     ));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -132,7 +210,7 @@ staffRouter.get("/timesheet-payroll", requireAuth, async (req: any, res) => {
     });
     res.json(report);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -147,7 +225,7 @@ staffRouter.get("/performance", requireAuth, async (req: any, res) => {
       staffId: req.query.staffId ? String(req.query.staffId) : undefined,
     }));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -158,7 +236,7 @@ staffRouter.post("/performance/coaching-notes", requireAuth, async (req: any, re
     }
     res.json(await addStaffCoachingNote(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -169,7 +247,7 @@ staffRouter.get("/tip-pool-rules", requireAuth, async (req: any, res) => {
     }
     res.json(await listTipPoolRules(req.params.tenantId));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -180,7 +258,7 @@ staffRouter.post("/tip-pool-rules", requireAuth, async (req: any, res) => {
     }
     res.json(await createTipPoolRule(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -191,7 +269,7 @@ staffRouter.put("/tip-pool-rules/:ruleId", requireAuth, async (req: any, res) =>
     }
     res.json(await updateTipPoolRule(req.params.tenantId, req.params.ruleId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -202,7 +280,7 @@ staffRouter.post("/tip-pools/preview", requireAuth, async (req: any, res) => {
     }
     res.json(await previewTipPoolPayouts(req.params.tenantId, req.body || {}));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -213,7 +291,7 @@ staffRouter.post("/tip-pools/generate", requireAuth, async (req: any, res) => {
     }
     res.json(await generateTipPoolPayouts(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -229,7 +307,7 @@ staffRouter.get("/tip-pool-payouts", requireAuth, async (req: any, res) => {
       staffId: req.query.staffId ? String(req.query.staffId) : undefined,
     }));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -245,7 +323,7 @@ staffRouter.get("/attendance/me", requireAuth, async (req: any, res) => {
     }
     res.json(await getMyAttendanceStatus(req.params.tenantId, requestedStaffId));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendRouteError(res, err, req);
   }
 });
 
@@ -258,7 +336,7 @@ staffRouter.post("/clock-in", requireAuth, async (req: any, res) => {
     }
     res.json(await clockIn(req.params.tenantId, { ...req.body, staffId: requestedStaffId }, actor));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -272,7 +350,7 @@ staffRouter.post("/break/start", requireAuth, async (req: any, res) => {
     }
     res.json(await startBreak(req.params.tenantId, requestedStaffId, req.body?.at || null));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -286,7 +364,7 @@ staffRouter.post("/break/end", requireAuth, async (req: any, res) => {
     }
     res.json(await endBreak(req.params.tenantId, requestedStaffId, req.body?.at || null));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });
 
@@ -300,6 +378,6 @@ staffRouter.post("/clock-out", requireAuth, async (req: any, res) => {
     }
     res.json(await clockOut(req.params.tenantId, { ...req.body, staffId: requestedStaffId }, actor));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    sendRouteError(res, err, req, 400);
   }
 });

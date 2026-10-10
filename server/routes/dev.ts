@@ -14,7 +14,7 @@ import { requireDevMaintenance } from "./_helpers.js";
 
 export const devRouter = Router();
 
-devRouter.get("/db-test", async (req, res) => {
+devRouter.get("/db-test", requireAuth, requireDevMaintenance, async (req, res) => {
   try {
     const conn = await getConnection();
     try {
@@ -28,7 +28,7 @@ devRouter.get("/db-test", async (req, res) => {
   }
 });
 
-devRouter.post("/init-db", async (req, res) => {
+devRouter.post("/init-db", requireAuth, requireDevMaintenance, async (req, res) => {
   try {
     await initDb();
     res.json({ success: true, message: "Database schema initialized successfully" });

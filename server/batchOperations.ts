@@ -1,5 +1,7 @@
-import { createCustomer, createProduct, updateCustomer, updateProduct } from "./db-crud.js";
-import { getCustomersByTenant, getProductsByTenant } from "./db-adapter.js";
+import { createCustomer, createProduct, createStaff, createVendor, getVendors, updateCustomer, updateProduct, updateVendor } from "./db-crud.js";
+import { getCustomersByTenant, getProductsByTenant, getStaffByTenant } from "./db-adapter.js";
+import { remainingPackageCapacity } from "./packageCapacity.js";
+import { assignableStaffRoles } from "./routes/_helpers.js";
 import { DEFAULT_INVENTORY_LOCATION_ID, listProductLocationStocks, upsertProductLocationStock } from "./inventoryLocations.js";
 import type { Customer, Product } from "./types.js";
 
@@ -139,10 +141,20 @@ export function parseCsv(csv: string) {
   });
 }
 
+export const MAX_BATCH_ROWS = 1000;
+
 function rowsFromInput(input: BatchInput) {
-  if (Array.isArray(input.rows)) return input.rows;
-  if (clean(input.csv)) return parseCsv(String(input.csv));
-  return [];
+  let rows: Record<string, unknown>[] = [];
+  if (Array.isArray(input.rows)) rows = input.rows;
+  else if (clean(input.csv)) rows = parseCsv(String(input.csv));
+  if (rows.length > MAX_BATCH_ROWS) {
+    throw new Error(`This file has ${rows.length} rows. Import up to ${MAX_BATCH_ROWS} rows at a time — split the file and try again.`);
+  }
+  return rows;
+}
+
+function packageLimitMessage(noun: string) {
+  return `Package limit reached — upgrade your package to add more ${noun}`;
 }
 
 function indexProducts(products: Product[]) {
@@ -172,6 +184,7 @@ export async function batchCreateProducts(tenantId: string, input: BatchInput, a
   const dryRun = Boolean(input.dryRun);
   const result: BatchMutationResult = { dryRun, created: 0, updated: 0, skipped: 0, errors: [], rows: [] };
   const existing = indexProducts(await getProductsByTenant(tenantId, { role: actor.role || "manager" }) as Product[]);
+  let remaining = rows.length ? await remainingPackageCapacity(tenantId, "products", "maxProducts") : Infinity;
 
   for (const [index, row] of rows.entries()) {
     const rowNumber = index + 2;
@@ -193,6 +206,12 @@ export async function batchCreateProducts(tenantId: string, input: BatchInput, a
       result.skipped += 1;
       continue;
     }
+    if (remaining <= 0) {
+      result.errors.push({ row: rowNumber, message: packageLimitMessage("products"), data: row });
+      result.skipped += 1;
+      continue;
+    }
+    remaining -= 1;
 
     const product = {
       name,
@@ -322,6 +341,7 @@ export async function importCustomers(tenantId: string, input: BatchInput, actor
   const dryRun = Boolean(input.dryRun);
   const result: BatchMutationResult = { dryRun, created: 0, updated: 0, skipped: 0, errors: [], rows: [] };
   const customerIndex = indexCustomers(await getCustomersByTenant(tenantId) as Customer[]);
+  let remaining = rows.length ? await remainingPackageCapacity(tenantId, "customers", "maxCustomers") : Infinity;
 
   for (const [index, row] of rows.entries()) {
     const rowNumber = index + 2;
@@ -331,6 +351,14 @@ export async function importCustomers(tenantId: string, input: BatchInput, actor
       result.errors.push({ row: rowNumber, message: "Customer name is required for new customers", data: row });
       result.skipped += 1;
       continue;
+    }
+    if (!existing) {
+      if (remaining <= 0) {
+        result.errors.push({ row: rowNumber, message: packageLimitMessage("customers"), data: row });
+        result.skipped += 1;
+        continue;
+      }
+      remaining -= 1;
     }
 
     if (dryRun) {
@@ -447,6 +475,144 @@ export async function importInventory(tenantId: string, input: BatchInput, actor
       result.rows.push({ row: rowNumber, action: "updated", id: product.id, name: product.name, locationId: updated.locationId, quantity: updated.quantity });
     }
     result.updated += 1;
+  }
+
+  return result;
+}
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export async function importVendors(tenantId: string, input: BatchInput, _actor: BatchActor = {}): Promise<BatchMutationResult> {
+  const rows = rowsFromInput(input);
+  const dryRun = Boolean(input.dryRun);
+  const result: BatchMutationResult = { dryRun, created: 0, updated: 0, skipped: 0, errors: [], rows: [] };
+  const existingByName = new Map<string, any>();
+  for (const vendor of await getVendors(tenantId) as any[]) existingByName.set(clean(vendor.name).toLowerCase(), vendor);
+  const seen = new Set<string>();
+
+  for (const [index, row] of rows.entries()) {
+    const rowNumber = index + 2;
+    const fail = (message: string) => {
+      result.errors.push({ row: rowNumber, message, data: row });
+      result.skipped += 1;
+    };
+    const name = clean(read(row, ["name", "vendorName", "vendor_name"]));
+    if (!name) { fail("Vendor name is required"); continue; }
+    const key = name.toLowerCase();
+    if (seen.has(key)) { fail("Duplicate vendor name in file"); continue; }
+    seen.add(key);
+    const email = clean(read(row, ["email"]));
+    if (email && !EMAIL_PATTERN.test(email)) { fail("Vendor email is not valid"); continue; }
+    const statusText = clean(read(row, ["status"])).toLowerCase();
+    if (statusText && statusText !== "active" && statusText !== "inactive") { fail("Status must be active or inactive"); continue; }
+
+    const fields: Record<string, string> = {};
+    const contactPerson = clean(read(row, ["contact_person", "contactPerson", "contact"]));
+    const phone = clean(read(row, ["phone"]));
+    const address = clean(read(row, ["address"]));
+    if (contactPerson) fields.contactPerson = contactPerson;
+    if (email) fields.email = email;
+    if (phone) fields.phone = phone;
+    if (address) fields.address = address;
+    if (statusText) fields.status = statusText;
+
+    const existing = existingByName.get(key);
+    if (existing) {
+      if (!dryRun) await updateVendor(tenantId, existing.id, fields);
+      result.rows.push({ row: rowNumber, action: dryRun ? "update_vendor" : "updated", id: existing.id, name: existing.name });
+      result.updated += 1;
+    } else if (dryRun) {
+      result.rows.push({ row: rowNumber, action: "create_vendor", id: null, name });
+      result.created += 1;
+    } else {
+      const created = await createVendor(tenantId, { name, status: "active", ...fields } as any);
+      existingByName.set(key, created);
+      result.rows.push({ row: rowNumber, action: "created", id: created.id, name });
+      result.created += 1;
+    }
+  }
+
+  return result;
+}
+
+export async function exportVendorsCsv(tenantId: string): Promise<BatchExportResult> {
+  const vendors = await getVendors(tenantId) as any[];
+  const headers = ["name", "contact_person", "email", "phone", "address", "status"];
+  const rows = vendors.map((vendor) => ({
+    name: vendor.name,
+    contact_person: vendor.contactPerson || "",
+    email: vendor.email || "",
+    phone: vendor.phone || "",
+    address: vendor.address || "",
+    status: vendor.status || "active",
+  }));
+  return {
+    rows,
+    csv: toCsv(rows, headers),
+    filename: `vendors-${new Date().toISOString().slice(0, 10)}.csv`,
+    mimeType: CSV_MIME,
+    count: rows.length,
+  };
+}
+
+const STAFF_ROLES = ["cashier", "chef", "manager", "admin"];
+
+// Only the columns read below are ever used; anything else in the file (password,
+// pin, wallet_balance, discount_percent, id_number, permissions…) is ignored.
+export async function importStaff(tenantId: string, input: BatchInput, actor: BatchActor = {}): Promise<BatchMutationResult> {
+  const rows = rowsFromInput(input);
+  const dryRun = Boolean(input.dryRun);
+  const result: BatchMutationResult = { dryRun, created: 0, updated: 0, skipped: 0, errors: [], rows: [] };
+  const knownEmails = new Set<string>();
+  for (const member of await getStaffByTenant(tenantId) as any[]) {
+    if (member.email) knownEmails.add(clean(member.email).toLowerCase());
+  }
+  const allowedRoles = assignableStaffRoles(actor.role);
+  let remaining = rows.length ? await remainingPackageCapacity(tenantId, "staff", "maxStaff") : Infinity;
+
+  for (const [index, row] of rows.entries()) {
+    const rowNumber = index + 2;
+    const fail = (message: string) => {
+      result.errors.push({ row: rowNumber, message, data: row });
+      result.skipped += 1;
+    };
+    const name = clean(read(row, ["name"]));
+    const email = clean(read(row, ["email"])).toLowerCase();
+    const role = clean(read(row, ["role"])).toLowerCase();
+    if (!name) { fail("Staff name is required"); continue; }
+    if (!email || !EMAIL_PATTERN.test(email)) { fail("A valid staff email is required"); continue; }
+    if (!STAFF_ROLES.includes(role)) { fail("Role must be cashier, chef, manager or admin"); continue; }
+    if (!allowedRoles.includes(role)) { fail(`Your role can't create ${role} accounts`); continue; }
+    const payRateRaw = read(row, ["pay_rate", "payRate"]);
+    const payRate = numberOrNull(payRateRaw);
+    if (String(payRateRaw).trim() !== "" && (payRate === null || payRate < 0)) { fail("Pay rate must be a number of 0 or more"); continue; }
+    const payType = clean(read(row, ["pay_type", "payType"])).toLowerCase();
+    if (payType && payType !== "hourly" && payType !== "salary") { fail("Pay type must be hourly or salary"); continue; }
+    const status = clean(read(row, ["status"]), "active").toLowerCase();
+    if (status !== "active" && status !== "inactive") { fail("Status must be active or inactive"); continue; }
+    if (knownEmails.has(email)) { fail("Staff member with this email already exists"); continue; }
+    if (remaining <= 0) { fail(packageLimitMessage("staff")); continue; }
+
+    const staff: Record<string, unknown> = { name, email, role, status };
+    const phone = clean(read(row, ["phone"]));
+    if (phone) staff.phone = phone;
+    if (payRate !== null) staff.payRate = payRate;
+    if (payType) staff.payType = payType;
+
+    if (dryRun) {
+      result.rows.push({ row: rowNumber, action: "create_staff", id: null, name, role });
+    } else {
+      try {
+        const created = await createStaff(tenantId, staff as any);
+        result.rows.push({ row: rowNumber, action: "created", id: created.id, name, role });
+      } catch {
+        fail("Couldn't create this staff member — the email may already be in use");
+        continue;
+      }
+    }
+    knownEmails.add(email);
+    remaining -= 1;
+    result.created += 1;
   }
 
   return result;

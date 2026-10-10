@@ -12,7 +12,8 @@
  */
 
 export type ToastKind = 'success' | 'error' | 'info' | 'warning';
-export type ToastInput = string | { message: string; kind?: ToastKind; durationMs?: number };
+export type ToastAction = { label: string; onClick: () => void };
+export type ToastInput = string | { message: string; kind?: ToastKind; durationMs?: number; action?: ToastAction };
 
 const DEFAULT_DURATION_MS = 4000;
 
@@ -21,11 +22,13 @@ function dispatch(kind: ToastKind, input: ToastInput) {
   if (input == null) return;
   const message = typeof input === 'string' ? input : (input && typeof input === 'object' ? input.message : null);
   if (!message || typeof message !== 'string') return;
+  const action = typeof input === 'object' ? input.action : undefined;
   const detail = {
     id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     kind: typeof input === 'object' && input.kind ? input.kind : kind,
     message,
     durationMs: typeof input === 'object' && input.durationMs ? input.durationMs : DEFAULT_DURATION_MS,
+    ...(action ? { action } : {}),
   };
   window.dispatchEvent(new CustomEvent('masepos:toast', { detail }));
 }

@@ -171,6 +171,9 @@ const DEMO_START_DAYS_AGO = 364;
 const PASSWORD_HASH_PLACEHOLDER =
   "$2b$10$cllz1VjHJl97oeAyzvZWsOpYd66l7kaOXG977GZ6yDT6C58SgMf9S";
 const DEMO_PACKAGE = getHostedPackage("business");
+// Only the shared public demo workspace may be granted the demo package;
+// seeding sample data into a real tenant must never change its licence.
+export const PUBLIC_DEMO_TENANT_ID = "demo-tenant-001";
 const RETAIL_CATEGORIES = {
   Retail: {
     Electronics: ["Mobile", "Audio", "Accessories", "Computing"],
@@ -1288,13 +1291,17 @@ async function updateDemoConfig(
         taxRate: TAX_RATE,
         taxName: "VAT",
         taxInclusive: true,
-        packageTier: DEMO_PACKAGE.id,
-        packageName: DEMO_PACKAGE.name,
-        packageStatus: "active",
-        maxRegisters: DEMO_PACKAGE.maxRegisters,
-        maxProducts: DEMO_PACKAGE.maxProducts,
-        maxStaff: DEMO_PACKAGE.maxStaff,
-        maxCustomers: DEMO_PACKAGE.maxCustomers,
+        ...(tenantId === PUBLIC_DEMO_TENANT_ID
+          ? {
+              packageTier: DEMO_PACKAGE.id,
+              packageName: DEMO_PACKAGE.name,
+              packageStatus: "active",
+              maxRegisters: DEMO_PACKAGE.maxRegisters,
+              maxProducts: DEMO_PACKAGE.maxProducts,
+              maxStaff: DEMO_PACKAGE.maxStaff,
+              maxCustomers: DEMO_PACKAGE.maxCustomers,
+            }
+          : {}),
         enableLoyalty: true,
         pointsEarnedPerCurrency: 1,
         pointsRequiredForDiscount: 100,

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as adapter from '../../server/db-adapter.js';
 import * as crud from '../../server/db-crud.js';
+import * as capacity from '../../server/packageCapacity.js';
 import * as inventory from '../../server/inventoryLocations.js';
 import {
   batchCreateProducts,
@@ -9,6 +10,10 @@ import {
   exportInventoryCsv,
   importCustomers,
   importInventory,
+  importStaff,
+  importVendors,
+  exportVendorsCsv,
+  MAX_BATCH_ROWS,
   parseCsv,
   toCsv,
 } from '../../server/batchOperations.js';
@@ -16,6 +21,11 @@ import {
 vi.mock('../../server/db-adapter.js', () => ({
   getProductsByTenant: vi.fn(),
   getCustomersByTenant: vi.fn(),
+  getStaffByTenant: vi.fn(),
+}));
+
+vi.mock('../../server/packageCapacity.js', () => ({
+  remainingPackageCapacity: vi.fn(),
 }));
 
 vi.mock('../../server/db-crud.js', () => ({
@@ -23,6 +33,10 @@ vi.mock('../../server/db-crud.js', () => ({
   updateProduct: vi.fn(),
   createCustomer: vi.fn(),
   updateCustomer: vi.fn(),
+  createStaff: vi.fn(),
+  getVendors: vi.fn(),
+  createVendor: vi.fn(),
+  updateVendor: vi.fn(),
 }));
 
 vi.mock('../../server/inventoryLocations.js', () => ({
@@ -43,6 +57,12 @@ const customers = [
 describe('batch operations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (capacity.remainingPackageCapacity as any).mockResolvedValue(Infinity);
+    (adapter.getStaffByTenant as any).mockResolvedValue([{ id: 'staff_1', name: 'Existing', email: 'Existing@Example.com', role: 'cashier' }]);
+    (crud.getVendors as any).mockResolvedValue([{ id: 'v1', name: 'Acme Foods', email: 'old@acme.com', phone: '111', status: 'active' }]);
+    (crud.createVendor as any).mockImplementation((_t: string, v: any) => Promise.resolve({ id: `vendor_${v.name}`, ...v }));
+    (crud.updateVendor as any).mockResolvedValue(undefined);
+    (crud.createStaff as any).mockImplementation((_t: string, st: any) => Promise.resolve({ id: `staff_${st.email}`, ...st }));
     (adapter.getProductsByTenant as any).mockResolvedValue(products);
     (adapter.getCustomersByTenant as any).mockResolvedValue(customers);
     (crud.createProduct as any).mockImplementation((_tenantId: string, product: any) => Promise.resolve({ id: `created_${product.name}`, ...product }));
@@ -136,5 +156,85 @@ describe('batch operations', () => {
       reorderThreshold: 6,
       staffId: 'mgr_1',
     }));
+  });
+  it('creates, updates, dedupes and validates vendors', async () => {
+    const result = await importVendors('tenant_1', {
+      csv: 'name,contact,email,phone,status\nNew Co,Jo,jo@new.co,222,\nacme foods,,,333,inactive\nNew Co,,,,\nBad Co,,nope,,\n',
+    }, { role: 'manager' });
+
+    expect(result.created).toBe(1);
+    expect(result.updated).toBe(1);
+    expect(result.skipped).toBe(2);
+    expect(result.errors.map((e) => e.message)).toEqual(['Duplicate vendor name in file', 'Vendor email is not valid']);
+    expect(crud.createVendor).toHaveBeenCalledWith('tenant_1', expect.objectContaining({ name: 'New Co', contactPerson: 'Jo', status: 'active' }));
+    expect(crud.updateVendor).toHaveBeenCalledWith('tenant_1', 'v1', { phone: '333', status: 'inactive' });
+  });
+
+  it('does not write vendors on dry run and exports vendors csv', async () => {
+    const result = await importVendors('tenant_1', { dryRun: true, rows: [{ name: 'New Co' }, { name: 'Acme Foods', phone: '9' }] });
+    expect(result.dryRun).toBe(true);
+    expect(result.created).toBe(1);
+    expect(result.updated).toBe(1);
+    expect(crud.createVendor).not.toHaveBeenCalled();
+    expect(crud.updateVendor).not.toHaveBeenCalled();
+
+    const pack = await exportVendorsCsv('tenant_1');
+    expect(pack.csv.split('\n')[0]).toBe('name,contact_person,email,phone,address,status');
+    expect(pack.filename).toMatch(/^vendors-\d{4}-\d{2}-\d{2}\.csv$/);
+    expect(pack.count).toBe(1);
+  });
+
+  it('denies staff roles the actor cannot assign and skips existing emails', async () => {
+    const result = await importStaff('tenant_1', {
+      rows: [
+        { name: 'A', email: 'a@x.co', role: 'admin' },
+        { name: 'B', email: 'existing@example.com', role: 'cashier' },
+        { name: 'C', email: 'c@x.co', role: 'Cashier' },
+      ],
+    }, { role: 'manager' });
+
+    expect(result.created).toBe(1);
+    expect(result.errors.map((e) => e.message)).toEqual(["Your role can't create admin accounts", 'Staff member with this email already exists']);
+    expect(crud.createStaff).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores sensitive staff columns and reports createStaff failures generically', async () => {
+    await importStaff('tenant_1', {
+      rows: [{ name: 'C', email: 'c@x.co', role: 'cashier', password: 'pw', pin: '1234', wallet_balance: '500', discount_percent: '50', id_number: '1', permissions: '{"x":1}', pay_rate: '25', pay_type: 'hourly' }],
+    }, { role: 'admin' });
+    const args = (crud.createStaff as any).mock.calls[0][1];
+    expect(args).toEqual({ name: 'C', email: 'c@x.co', role: 'cashier', status: 'active', payRate: 25, payType: 'hourly' });
+
+    (crud.createStaff as any).mockRejectedValueOnce(new Error('duplicate key tenant_9'));
+    const failed = await importStaff('tenant_1', { rows: [{ name: 'D', email: 'd@x.co', role: 'chef' }] }, { role: 'admin' });
+    expect(failed.created).toBe(0);
+    expect(failed.errors[0].message).toBe("Couldn't create this staff member — the email may already be in use");
+  });
+
+  it('skips staff rows beyond remaining package capacity, also in dry run', async () => {
+    (capacity.remainingPackageCapacity as any).mockResolvedValue(1);
+    const rows = [1, 2, 3].map((n) => ({ name: `S${n}`, email: `s${n}@x.co`, role: 'cashier' }));
+    const result = await importStaff('tenant_1', { rows, dryRun: true }, { role: 'admin' });
+    expect(result.created).toBe(1);
+    expect(result.skipped).toBe(2);
+    expect(result.errors[0].message).toBe('Package limit reached — upgrade your package to add more staff');
+    expect(crud.createStaff).not.toHaveBeenCalled();
+  });
+
+  it('skips product and customer creates beyond package capacity', async () => {
+    (capacity.remainingPackageCapacity as any).mockResolvedValue(1);
+    const p = await batchCreateProducts('tenant_1', { rows: [{ name: 'P1', price: 1 }, { name: 'P2', price: 2 }] });
+    expect(p.created).toBe(1);
+    expect(p.errors[0].message).toBe('Package limit reached — upgrade your package to add more products');
+    const c = await importCustomers('tenant_1', { rows: [{ name: 'N1' }, { name: 'N2' }, { email: 'sarah@example.com', name: 'Sarah' }] });
+    expect(c.created).toBe(1);
+    expect(c.updated).toBe(1);
+    expect(c.errors[0].message).toBe('Package limit reached — upgrade your package to add more customers');
+  });
+
+  it('rejects imports over the row cap', async () => {
+    const rows = Array.from({ length: MAX_BATCH_ROWS + 1 }, (_, i) => ({ name: `P${i}`, price: 1 }));
+    await expect(batchCreateProducts('tenant_1', { rows })).rejects.toThrow('This file has 1001 rows. Import up to 1000 rows at a time');
+    await expect(importVendors('tenant_1', { rows })).rejects.toThrow(/1001 rows/);
   });
 });

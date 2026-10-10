@@ -26,6 +26,7 @@ import {
   stripSensitiveVerification, auditChangedFields, normalizeRole, parseImageDataUrl,
   sensitiveRouteRateLimit,
 } from "./_helpers.js";
+import { sendRouteError } from "../securityHardening.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,7 +37,7 @@ export const settingsRouter = Router({ mergeParams: true });
 
 settingsRouter.get("/config", requireAuth, async (req: any, res) => {
   try { res.json(await getAppConfigByTenant(req.params.tenantId)); }
-  catch (err: any) { res.status(500).json({ error: err.message }); }
+  catch (err: any) { sendRouteError(res, err, req); }
 });
 
 settingsRouter.put("/settings/app", requireAuth, async (req: any, res) => {
@@ -47,7 +48,7 @@ settingsRouter.put("/settings/app", requireAuth, async (req: any, res) => {
     await updateAppConfig(req.params.tenantId, settingsUpdate as any);
     await auditRouteEvent(req, "settings.app_updated", "settings", { changedFields: auditChangedFields(settingsUpdate || {}), businessFields: auditChangedFields((settingsUpdate as any)?.business || {}) }, req.params.tenantId, "settings");
     res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req); }
 });
 
 settingsRouter.post("/settings/logo", requireAuth, async (req: any, res) => {
@@ -67,32 +68,32 @@ settingsRouter.post("/settings/logo", requireAuth, async (req: any, res) => {
     await updateAppConfig(req.params.tenantId, nextConfig);
     await auditRouteEvent(req, "settings.logo_uploaded", "settings", { logoUrl, mimeType: parsed.mimeType, sizeBytes: parsed.buffer.length }, req.params.tenantId, "settings");
     res.json({ logoUrl, config: nextConfig });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req); }
 });
 
 settingsRouter.get("/settings/retention-policy", requireAuth, async (req: any, res) => {
   try {
     if (!canUseActionCenter(req.user?.role)) return denyWithAudit(req, res, "retention_policy.view", "Manager access is required to view retention settings.");
     res.json(await getRetentionPolicy(req.params.tenantId));
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.put("/settings/retention-policy", requireAuth, async (req: any, res) => {
   try {
     if (!canUseActionCenter(req.user?.role)) return denyWithAudit(req, res, "retention_policy.update", "Manager access is required to update retention settings.");
     res.json(await saveRetentionPolicy(req.params.tenantId, req.body || {}, auditActorFromRequest(req)));
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.post("/settings/retention-policy/preview", requireAuth, async (req: any, res) => {
   try {
     if (!canUseActionCenter(req.user?.role)) return denyWithAudit(req, res, "retention_policy.preview", "Manager access is required to preview retention cleanup.");
     res.json(await getRetentionPreview(req.params.tenantId, req.body || undefined));
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.post("/settings/retention-policy/apply", requireAuth, async (req: any, res) => {
   try {
     if (!canUseActionCenter(req.user?.role)) return denyWithAudit(req, res, "retention_policy.apply", "Manager access is required to apply retention cleanup.");
     res.json(await applyRetentionPolicy(req.params.tenantId, req.body || undefined, auditActorFromRequest(req)));
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 
 // ── Promotions ─────────────────────────────────────────────────────────────
@@ -101,7 +102,7 @@ settingsRouter.get("/promotions", requireAuth, async (req: any, res) => {
   try {
     if (!canUseActionCenter(req.user?.role)) return denyWithAudit(req, res, "promotions.view", "Manager access is required for promotions.");
     res.json(await listPromotions(req.params.tenantId));
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/promotions", requireAuth, async (req: any, res) => {
   try {
@@ -109,14 +110,14 @@ settingsRouter.post("/promotions", requireAuth, async (req: any, res) => {
     const promotion = await createPromotion(req.params.tenantId, req.body || {}, auditActorFromRequest(req));
     await auditRouteEvent(req, "promotion.created", "promotion", { promotionId: promotion.id, code: promotion.code, discountType: promotion.discountType, discountValue: promotion.discountValue }, promotion.id, "promotions");
     res.status(201).json(promotion);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.post("/promotions/validate", requireAuth, async (req: any, res) => {
   try {
     const result = await validatePromotionForSale(null, req.params.tenantId, req.body || {});
     if (!result.valid) return res.status(400).json({ ...result, error: result.reason || "Promotion could not be applied." });
     res.json(result);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.put("/promotions/:promotionId", requireAuth, async (req: any, res) => {
   try {
@@ -124,13 +125,13 @@ settingsRouter.put("/promotions/:promotionId", requireAuth, async (req: any, res
     const promotion = await updatePromotion(req.params.tenantId, req.params.promotionId, req.body || {}, auditActorFromRequest(req));
     await auditRouteEvent(req, "promotion.updated", "promotion", { promotionId: promotion.id, code: promotion.code, status: promotion.status, discountType: promotion.discountType }, promotion.id, "promotions");
     res.json(promotion);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 
 // ── Loyalty ────────────────────────────────────────────────────────────────
 
 settingsRouter.get("/loyalty/tiers", requireAuth, async (req: any, res) => {
-  try { res.json(await listLoyaltyTiers(req.params.tenantId)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try { res.json(await listLoyaltyTiers(req.params.tenantId)); } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/loyalty/tiers", requireAuth, async (req: any, res) => {
   try {
@@ -138,7 +139,7 @@ settingsRouter.post("/loyalty/tiers", requireAuth, async (req: any, res) => {
     const tier = await createLoyaltyTier(req.params.tenantId, req.body || {});
     await auditRouteEvent(req, "loyalty.tier_created", "loyalty_tier", { tierId: tier.id, name: tier.name, minPoints: tier.minPoints }, tier.id, "loyalty");
     res.status(201).json(tier);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.put("/loyalty/tiers/:tierId", requireAuth, async (req: any, res) => {
   try {
@@ -146,10 +147,10 @@ settingsRouter.put("/loyalty/tiers/:tierId", requireAuth, async (req: any, res) 
     const tier = await updateLoyaltyTier(req.params.tenantId, req.params.tierId, req.body || {});
     await auditRouteEvent(req, "loyalty.tier_updated", "loyalty_tier", { tierId: tier.id, name: tier.name, status: tier.status }, tier.id, "loyalty");
     res.json(tier);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.get("/loyalty/reward-rules", requireAuth, async (req: any, res) => {
-  try { res.json(await listLoyaltyRewardRules(req.params.tenantId)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try { res.json(await listLoyaltyRewardRules(req.params.tenantId)); } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/loyalty/reward-rules", requireAuth, async (req: any, res) => {
   try {
@@ -157,7 +158,7 @@ settingsRouter.post("/loyalty/reward-rules", requireAuth, async (req: any, res) 
     const rule = await createLoyaltyRewardRule(req.params.tenantId, req.body || {});
     await auditRouteEvent(req, "loyalty.reward_rule_created", "loyalty_reward_rule", { ruleId: rule.id, name: rule.name, ruleType: rule.ruleType }, rule.id, "loyalty");
     res.status(201).json(rule);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.put("/loyalty/reward-rules/:ruleId", requireAuth, async (req: any, res) => {
   try {
@@ -165,17 +166,17 @@ settingsRouter.put("/loyalty/reward-rules/:ruleId", requireAuth, async (req: any
     const rule = await updateLoyaltyRewardRule(req.params.tenantId, req.params.ruleId, req.body || {});
     await auditRouteEvent(req, "loyalty.reward_rule_updated", "loyalty_reward_rule", { ruleId: rule.id, name: rule.name, status: rule.status }, rule.id, "loyalty");
     res.json(rule);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.post("/loyalty/preview", requireAuth, async (req: any, res) => {
   try { res.json(await calculateLoyaltyAward(null, req.params.tenantId, req.body || {})); }
-  catch (err: any) { res.status(400).json({ error: err.message }); }
+  catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 
 // ── Push notifications ─────────────────────────────────────────────────────
 
 settingsRouter.get("/push/status", requireAuth, async (req: any, res) => {
-  try { res.json(await getPushOverview(req.params.tenantId)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try { res.json(await getPushOverview(req.params.tenantId)); } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/push/vapid/generate", requireAuth, async (req: any, res) => {
   try {
@@ -183,20 +184,20 @@ settingsRouter.post("/push/vapid/generate", requireAuth, async (req: any, res) =
     const result = await generateTenantVapidKeys(req.params.tenantId, req.body?.subject);
     await auditRouteEvent(req, "settings.push_vapid_generated", "settings", { subject: req.body?.subject || null }, req.params.tenantId, "push");
     res.json(result);
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/push/subscriptions", requireAuth, async (req: any, res) => {
   try {
     const overview = await savePushSubscription(req.params.tenantId, req.user?.staffId || req.user?.uid || null, req.body?.subscription || req.body, { deviceLabel: req.body?.deviceLabel, userAgent: req.get("user-agent") || "" });
     res.json(overview);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.delete("/push/subscriptions", requireAuth, async (req: any, res) => {
   try {
     const endpoint = String(req.body?.endpoint || req.query.endpoint || "").trim();
     if (!endpoint) return res.status(400).json({ error: "Push subscription endpoint is required" });
     res.json(await removePushSubscription(req.params.tenantId, endpoint));
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.post("/push/test", requireAuth, async (req: any, res) => {
   try {
@@ -205,14 +206,14 @@ settingsRouter.post("/push/test", requireAuth, async (req: any, res) => {
     const result = await sendPushNotification(req.params.tenantId, { title: "MasePOS push test", body: "Browser push is ready for workstation orders, ready messages, and staff alerts.", url: "/messages", tag: `dev-push-test-${Date.now()}`, icon: "/icons/icon-192.png", badge: "/icons/icon-192.png", requireInteraction: true, vibrate: [120, 60, 120], data: { type: "dev_push_test" }, actions: [{ action: "open-messages", title: "Open messages" }] }, { staffIds, urgency: "high", ttl: 60 });
     await auditRouteEvent(req, "settings.push_test_sent", "settings", { success: true, recipientStaffIds: staffIds || [] }, req.params.tenantId, "push");
     res.json(result);
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req); }
 });
 
 // ── AI ─────────────────────────────────────────────────────────────────────
 
 settingsRouter.get("/ai/settings", requireAuth, requireAiRoleAccess, async (req: any, res) => {
   try { res.json(serializeAiSettings(await getAiSettings(req.params.tenantId))); }
-  catch (err: any) { res.status(500).json({ error: err.message }); }
+  catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.put("/ai/settings", requireAuth, async (req: any, res) => {
   try {
@@ -220,7 +221,7 @@ settingsRouter.put("/ai/settings", requireAuth, async (req: any, res) => {
     const settings = await saveAiSettings(req.params.tenantId, req.body || {});
     await auditRouteEvent(req, "ai.settings_updated", "settings", { provider: settings.provider, model: settings.model, enabled: settings.enabled, changedFields: auditChangedFields(req.body || {}), apiKeySubmitted: req.body?.apiKey !== undefined }, req.params.tenantId, "ai");
     res.json(serializeAiSettings(settings));
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.post("/ai/models", requireAuth, async (req: any, res) => {
   try {
@@ -228,7 +229,7 @@ settingsRouter.post("/ai/models", requireAuth, async (req: any, res) => {
     const models = await listAiModels(req.params.tenantId, req.body || {});
     await auditRouteEvent(req, "ai.models_listed", "settings", { provider: req.body?.provider || null, modelCount: models.length }, req.params.tenantId, "ai");
     res.json({ models });
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.post("/ai/test", requireAuth, sensitiveRouteRateLimit, async (req: any, res) => {
   try {
@@ -236,26 +237,26 @@ settingsRouter.post("/ai/test", requireAuth, sensitiveRouteRateLimit, async (req
     const result = await testAiProviderContact(req.params.tenantId, req.body || {});
     await auditRouteEvent(req, "ai.provider_tested", "settings", { provider: result.provider, model: result.model }, req.params.tenantId, "ai");
     res.json(result);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.get("/ai/insights", requireAuth, requireAiRoleAccess, async (req: any, res) => {
-  try { res.json(await listInsights(req.params.tenantId)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try { res.json(await listInsights(req.params.tenantId)); } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.delete("/ai/insights/:insightId", requireAuth, requireAiRoleAccess, async (req: any, res) => {
-  try { res.json(await deleteInsight(req.params.tenantId, req.params.insightId)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try { res.json(await deleteInsight(req.params.tenantId, req.params.insightId)); } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/ai/insights/generate", requireAuth, requireAiRoleAccess, async (req: any, res) => {
-  try { res.json(await generateInsights(req.params.tenantId, req.user?.staffId || null)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try { res.json(await generateInsights(req.params.tenantId, req.user?.staffId || null)); } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.get("/ai/staff-scores", requireAuth, requireAiStaffScoreAccess, async (req: any, res) => {
-  try { res.json(await listStaffScores(req.params.tenantId)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try { res.json(await listStaffScores(req.params.tenantId)); } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/ai/staff-scores/generate", requireAuth, requireAiStaffScoreAccess, async (req: any, res) => {
-  try { res.json(await generateStaffScores(req.params.tenantId, req.user?.staffId || null)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try { res.json(await generateStaffScores(req.params.tenantId, req.user?.staffId || null)); } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/ai/agent/inventory/proposal", requireAuth, requireAiRoleAccess, async (req: any, res) => {
   try { res.json(await generateInventoryAgentProposal(req.params.tenantId, req.body || {}, { actor: auditActorFromRequest(req) })); }
-  catch (err: any) { res.status(500).json({ error: err.message }); }
+  catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/ai/agent/inventory/apply", requireAuth, requireAiRoleAccess, async (req: any, res) => {
   try {
@@ -265,28 +266,28 @@ settingsRouter.post("/ai/agent/inventory/apply", requireAuth, requireAiRoleAcces
     const result = await applyApprovedInventoryAgentSteps(req.params.tenantId, req.body?.steps || [], { fullAutopilot, runId, actor: auditActorFromRequest(req) });
     await auditRouteEvent(req, "ai.inventory_steps_applied", "ai_agent_run", { runId, fullAutopilot, requestedStepCount: Array.isArray(req.body?.steps) ? req.body.steps.length : 0, appliedCount: result.applied.length, skippedCount: result.skipped.length }, runId, "ai");
     res.json(result);
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req); }
 });
 
 // ── Laybys ─────────────────────────────────────────────────────────────────
 
 settingsRouter.get("/laybys", requireAuth, async (req: any, res) => {
-  try { res.json(await listLaybyOrders(req.params.tenantId, req.query || {})); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  try { res.json(await listLaybyOrders(req.params.tenantId, req.query || {})); } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/laybys", requireAuth, async (req: any, res) => {
   try { res.json(await createLaybyOrder(req.params.tenantId, { ...req.body, staffId: req.user?.staffId || req.user?.uid || null, staffName: req.user?.name || null })); }
-  catch (err: any) { res.status(400).json({ error: err.message }); }
+  catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.get("/laybys/:laybyId", requireAuth, async (req: any, res) => {
   try {
     const order = await getLaybyOrderById(req.params.tenantId, req.params.laybyId);
     if (!order) return res.status(404).json({ error: "Lay-by not found" });
     res.json(order);
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/laybys/:laybyId/payments", requireAuth, async (req: any, res) => {
   try { res.json(await addLaybyPayment(req.params.tenantId, req.params.laybyId, { ...req.body, staffId: req.user?.staffId || req.user?.uid || null, staffName: req.user?.name || null })); }
-  catch (err: any) { res.status(400).json({ error: err.message }); }
+  catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.post("/laybys/:laybyId/complete", requireAuth, async (req: any, res) => {
   try {
@@ -294,11 +295,11 @@ settingsRouter.post("/laybys/:laybyId/complete", requireAuth, async (req: any, r
     const io = req.app.get("io");
     if (io && order.completedSaleId) broadcastSalesUpdate(io, req.params.tenantId, order.completedSaleId);
     res.json(order);
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.post("/laybys/:laybyId/cancel", requireAuth, async (req: any, res) => {
   try { res.json(await cancelLaybyOrder(req.params.tenantId, req.params.laybyId, { ...req.body, staffId: req.user?.staffId || req.user?.uid || null, staffName: req.user?.name || null })); }
-  catch (err: any) { res.status(400).json({ error: err.message }); }
+  catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 
 // ── Event bookings ─────────────────────────────────────────────────────────
@@ -307,23 +308,23 @@ settingsRouter.get("/event-bookings", requireAuth, async (req: any, res) => {
   try {
     if (!canManageBookings(req.user?.role)) return denyWithAudit(req, res, "event_bookings.view", "Manager access is required for event bookings.");
     res.json(await listEventBookings(req.params.tenantId, { from: typeof req.query.from === "string" ? req.query.from : undefined, to: typeof req.query.to === "string" ? req.query.to : undefined, status: typeof req.query.status === "string" ? req.query.status : undefined, eventType: typeof req.query.eventType === "string" ? req.query.eventType : undefined, reminderStatus: typeof req.query.reminderStatus === "string" ? req.query.reminderStatus : undefined }));
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req); }
 });
 settingsRouter.post("/event-bookings", requireAuth, async (req: any, res) => {
   try {
     if (!canManageBookings(req.user?.role)) return denyWithAudit(req, res, "event_bookings.create", "Manager access is required to create event bookings.");
     res.json(await createEventBooking(req.params.tenantId, { ...req.body, staffId: req.user?.staffId || req.user?.uid || null, staffName: req.user?.name || null }));
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.put("/event-bookings/:id", requireAuth, async (req: any, res) => {
   try {
     if (!canManageBookings(req.user?.role)) return denyWithAudit(req, res, "event_bookings.update", "Manager access is required to update event bookings.", { bookingId: req.params.id });
     res.json(await updateEventBooking(req.params.tenantId, req.params.id, { ...req.body, staffId: req.user?.staffId || req.user?.uid || null, staffName: req.user?.name || null }));
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });
 settingsRouter.delete("/event-bookings/:id", requireAuth, async (req: any, res) => {
   try {
     if (!canManageBookings(req.user?.role)) return denyWithAudit(req, res, "event_bookings.delete", "Manager access is required to delete event bookings.", { bookingId: req.params.id });
     res.json(await deleteEventBooking(req.params.tenantId, req.params.id, { staffId: req.user?.staffId || req.user?.uid || null, staffName: req.user?.name || null }));
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
+  } catch (err: any) { sendRouteError(res, err, req, 400); }
 });

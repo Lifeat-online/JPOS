@@ -16,16 +16,10 @@ export async function seedDevStaffIfMissing(): Promise<void> {
     const password = process.env.DEV_SEED_PASSWORD || DEFAULT_DEV_PASSWORD;
 
     try {
-        const existing = await query<any>(
-            "SELECT id, password_hash FROM staff WHERE LOWER(email) = $1 LIMIT 1",
-            [DEV_EMAIL]
-        );
-
-        if (existing.length > 0 && existing[0].password_hash) {
-            console.log("[seed-dev] Dev staff already exists with a password — skipping seed.");
-            return;
-        }
-
+        // Always ensure the dev tenant and its app_settings exist — even when
+        // the staff row already has a password. Otherwise a schema-seeded
+        // staff row leaves the environment half-provisioned (no tenant1,
+        // no app_settings) and every login lands in the Setup wizard.
         const tenants = await query<any>("SELECT id FROM tenants WHERE id = $1", [DEV_TENANT_ID]);
         if (tenants.length === 0) {
             await query(
@@ -42,6 +36,16 @@ export async function seedDevStaffIfMissing(): Promise<void> {
                 [DEV_TENANT_ID]
             );
             console.log("[seed-dev] Created app_settings for tenant:", DEV_TENANT_ID);
+        }
+
+        const existing = await query<any>(
+            "SELECT id, password_hash FROM staff WHERE LOWER(email) = $1 LIMIT 1",
+            [DEV_EMAIL]
+        );
+
+        if (existing.length > 0 && existing[0].password_hash) {
+            console.log("[seed-dev] Dev staff already exists with a password — skipping seed.");
+            return;
         }
 
         const users = await query<any>("SELECT uid FROM users WHERE uid = $1", [DEV_UID]);

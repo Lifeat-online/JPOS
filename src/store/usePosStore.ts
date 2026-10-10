@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import { CartItem, OrderItem, Product, Staff, AppConfig, Workstation } from '../types';
 
+export interface CartSnapshot {
+  cart: (CartItem | OrderItem)[];
+  activeTableNumber: string | null;
+  activeOrderId: string | null;
+  selectedCustomerId: string | null;
+}
+
 interface PosState {
   cart: (CartItem | OrderItem)[];
   // Synced from useAppData — kept here so components can read without prop drilling
@@ -23,6 +30,8 @@ interface PosState {
   addToCart: (product: Product, workstationId?: string, selectedModifiers?: { modifierId: string, optionId: string, name: string, priceExtra: number }[]) => void;
   updateQuantity: (cartItemId: string, delta: number) => void;
   clearCart: () => void;
+  /** Restore a previously captured cart (undo for clearCart) */
+  restoreCart: (snapshot: CartSnapshot) => void;
   setCurrentUserStaff: (staff: Staff | null) => void;
   setConfig: (config: AppConfig | null) => void;
   setActiveSession: (session: any | null) => void;
@@ -101,6 +110,12 @@ export const usePosStore = create<PosState>((set) => ({
     })),
 
   clearCart: () => set({ cart: [], activeTableNumber: null, activeOrderId: null, selectedCustomerId: null }),
+  restoreCart: (snapshot) => set({
+    cart: snapshot.cart,
+    activeTableNumber: snapshot.activeTableNumber,
+    activeOrderId: snapshot.activeOrderId,
+    selectedCustomerId: snapshot.selectedCustomerId,
+  }),
   setCurrentUserStaff: (staff) => set({ currentUserStaff: staff }),
   setConfig: (config) => set({ config }),
   setActiveSession: (session) => set({ activeSession: session }),

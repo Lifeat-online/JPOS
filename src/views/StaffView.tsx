@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BrainCircuit, UserPlus, UserCog, Edit, Trash2, CalendarDays, FileDown, Send, Loader2, XCircle, Banknote } from 'lucide-react';
+import { BrainCircuit, UserPlus, UserCog, Edit, Trash2, CalendarDays, FileDown, Send, Loader2, XCircle, Banknote, ChevronDown } from 'lucide-react';
 import { AiStaffScore, Staff, StaffCoachingNote, StaffPerformanceReport, StaffShift, StaffTimesheetReport, TipPoolReport, TipPoolRule } from '../types';
-import { addStaffCoachingNote, cancelStaffShift, createStaffShift, createTipPoolRule, generateTipPoolPayouts, getAiStaffScores, getStaffPerformanceReport, getStaffShifts, getTimesheetPayrollReport, getTipPoolRules, previewTipPoolPayouts, publishStaffRoster, updateTipPoolRule } from '../api';
+import { CsvImportCard } from '../components/CsvImportCard';
+import { staffTemplateCsv } from '../utils/csvTemplates';
+import { addStaffCoachingNote, cancelStaffShift, createStaffShift, createTipPoolRule, generateTipPoolPayouts, getAiStaffScores, getStaffPerformanceReport, getStaffShifts, getTimesheetPayrollReport, getTipPoolRules, importStaffBatch, previewTipPoolPayouts, publishStaffRoster, updateTipPoolRule } from '../api';
 
 interface StaffViewProps {
   staff: Staff[];
@@ -10,6 +12,7 @@ interface StaffViewProps {
   onDelete: (id: string) => void;
   tenantId?: string | null;
   currentUserStaff?: Staff | null;
+  onStaffImported?: () => void | Promise<void>;
 }
 
 function todayInput() {
@@ -56,7 +59,8 @@ function downloadCsv(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-export const StaffView: React.FC<StaffViewProps> = ({ staff, onEdit, onAdd, onDelete, tenantId, currentUserStaff }) => {
+export const StaffView: React.FC<StaffViewProps> = ({ staff, onEdit, onAdd, onDelete, tenantId, currentUserStaff, onStaffImported }) => {
+  const [importOpen, setImportOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'directory' | 'roster' | 'payroll' | 'performance' | 'tips'>('directory');
   const [scores, setScores] = useState<AiStaffScore[]>([]);
   const [rosterStart, setRosterStart] = useState(todayInput());
@@ -419,6 +423,33 @@ export const StaffView: React.FC<StaffViewProps> = ({ staff, onEdit, onAdd, onDe
               : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-900/20 dark:text-rose-200'
           }`}>
             {workforceMessage.text}
+          </div>
+        )}
+
+        {activeTab === 'directory' && canManageWorkforce && tenantId && (
+          <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm dark:border-slate-800/60 dark:bg-slate-900">
+            <button
+              type="button"
+              onClick={() => setImportOpen(open => !open)}
+              aria-expanded={importOpen}
+              className="inline-flex min-h-[44px] items-center gap-2 text-sm font-black text-slate-800 dark:text-white"
+            >
+              <ChevronDown className={`h-4 w-4 transition-transform ${importOpen ? 'rotate-180' : ''}`} />
+              Import / export
+            </button>
+            {importOpen && (
+              <div className="mt-3">
+                <CsvImportCard
+                  title="Import staff"
+                  description="Upload a CSV to add or update team members. Passwords aren't imported — each person sets theirs when they first sign in."
+                  templateFilename="staff-template.csv"
+                  templateCsv={staffTemplateCsv}
+                  onPreview={csv => importStaffBatch(tenantId, { csv, dryRun: true })}
+                  onImport={csv => importStaffBatch(tenantId, { csv })}
+                  onImported={() => onStaffImported?.()}
+                />
+              </div>
+            )}
           </div>
         )}
 

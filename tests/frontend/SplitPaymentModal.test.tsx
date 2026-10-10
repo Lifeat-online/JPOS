@@ -50,4 +50,12 @@ describe('SplitPaymentModal restaurant bill split', () => {
       ]);
     });
   });
+
+  it('closes on Escape', () => {
+    const onClose = vi.fn();
+    render(<SplitPaymentModal isOpen cartTotal={90} isProcessing={false} onConfirm={vi.fn()} onClose={onClose} />);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
 });

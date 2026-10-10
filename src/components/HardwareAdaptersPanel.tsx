@@ -55,7 +55,7 @@ function safeParseConfig(text: string) {
 }
 
 function defaultConfig(connectionType: HardwareConnectionType) {
-  if (connectionType === 'escpos_network') return { port: 9100 };
+  if (connectionType === 'escpos_network') return { host: '', port: 9100 };
   if (connectionType === 'local_bridge') return { bridgeUrl: '' };
   if (connectionType === 'payment_provider') return { provider: '', providerDeviceId: '' };
   if (connectionType === 'webserial' || connectionType === 'serial') return { baudRate: 9600, protocol: 'nci' };
@@ -112,6 +112,7 @@ export function HardwareAdaptersPanel({ tenantId, workstations }: { tenantId?: s
   const [devices, setDevices] = React.useState<HardwareDevice[]>([]);
   const [events, setEvents] = React.useState<HardwareDeviceEvent[]>([]);
   const [draft, setDraft] = React.useState<Draft>(() => newDraft());
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [testingId, setTestingId] = React.useState<string | null>(null);
@@ -174,6 +175,26 @@ export function HardwareAdaptersPanel({ tenantId, workstations }: { tenantId?: s
     });
   };
   const configValue = (key: string) => draftConfig?.[key] === undefined || draftConfig?.[key] === null ? '' : String(draftConfig[key]);
+  const isNetworkPrinter = draft.connectionType === 'escpos_network';
+  const configParseable = React.useMemo(() => {
+    try {
+      const parsed = parseConfig(draft.connectionConfigText);
+      return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+    } catch {
+      return false;
+    }
+  }, [draft.connectionConfigText]);
+  const networkErrors = React.useMemo(() => {
+    const errors: { host?: string; port?: string } = {};
+    if (!isNetworkPrinter || !configParseable) return errors;
+    const host = draftConfig?.host;
+    if (typeof host !== 'string' || !host.trim()) errors.host = 'Printer IP address or hostname is required.';
+    const port = draftConfig?.port;
+    if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) errors.port = 'Port must be a whole number from 1 to 65535.';
+    return errors;
+  }, [isNetworkPrinter, configParseable, draftConfig]);
+  const showJsonTextarea = !configParseable || !isNetworkPrinter || showAdvanced;
+  const canSave = configParseable && !networkErrors.host && !networkErrors.port;
   const configInputClass = 'h-12 rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-bold outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-white';
 
   const saveDevice = async () => {
@@ -383,21 +404,36 @@ export function HardwareAdaptersPanel({ tenantId, workstations }: { tenantId?: s
               />
               Default for this hardware type
             </label>
-            {draft.connectionType === 'escpos_network' && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <input
-                  value={configValue('host')}
-                  onChange={event => setConfigValue('host', event.target.value)}
-                  className={configInputClass}
-                  placeholder="Printer IP address"
-                />
-                <input
-                  value={configValue('port')}
-                  onChange={event => setConfigValue('port', event.target.value, true)}
-                  className={configInputClass}
-                  placeholder="Port, usually 9100"
-                  inputMode="numeric"
-                />
+            {isNetworkPrinter && configParseable && (
+              <div className="space-y-2">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1 text-xs font-black uppercase tracking-widest text-slate-500">
+                    Printer IP address / hostname
+                    <input
+                      value={configValue('host')}
+                      onChange={event => setConfigValue('host', event.target.value)}
+                      className={`${configInputClass} w-full normal-case tracking-normal`}
+                      placeholder="192.168.0.50"
+                      aria-invalid={!!networkErrors.host}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs font-black uppercase tracking-widest text-slate-500">
+                    Port
+                    <input
+                      type="number"
+                      value={configValue('port')}
+                      onChange={event => setConfigValue('port', event.target.value, true)}
+                      className={`${configInputClass} w-full normal-case tracking-normal`}
+                      placeholder="9100"
+                      min={1}
+                      max={65535}
+                      step={1}
+                      aria-invalid={!!networkErrors.port}
+                    />
+                  </label>
+                </div>
+                {networkErrors.host && <p className="text-xs font-bold text-rose-600" role="alert">{networkErrors.host}</p>}
+                {networkErrors.port && <p className="text-xs font-bold text-rose-600" role="alert">{networkErrors.port}</p>}
               </div>
             )}
             {draft.connectionType === 'local_bridge' && (
@@ -477,17 +513,44 @@ export function HardwareAdaptersPanel({ tenantId, workstations }: { tenantId?: s
                 placeholder="Paper width"
               />
             )}
-            <textarea
-              value={draft.connectionConfigText}
-              onChange={event => setDraft(current => ({ ...current, connectionConfigText: event.target.value }))}
-              rows={5}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-white"
-              placeholder={configPlaceholder(draft.connectionType)}
-            />
+            {isNetworkPrinter && configParseable && (
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(value => !value)}
+                aria-expanded={showAdvanced}
+                className="text-xs font-black uppercase tracking-widest text-primary"
+              >
+                {showAdvanced ? 'Hide advanced (JSON)' : 'Show advanced (JSON)'}
+              </button>
+            )}
+            {showJsonTextarea && (
+              <div className="space-y-2">
+                {!configParseable && (
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-bold text-rose-600" role="alert">Fix the JSON or reset to defaults</p>
+                    <button
+                      type="button"
+                      onClick={() => setDraft(current => ({ ...current, connectionConfigText: JSON.stringify(defaultConfig(current.connectionType), null, 2) }))}
+                      className="h-9 rounded-xl bg-rose-50 px-3 text-xs font-black uppercase tracking-widest text-rose-600 dark:bg-rose-950/40 dark:text-rose-300"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                )}
+                <textarea
+                  value={draft.connectionConfigText}
+                  onChange={event => setDraft(current => ({ ...current, connectionConfigText: event.target.value }))}
+                  rows={5}
+                  aria-label="Connection config (JSON)"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                  placeholder={configPlaceholder(draft.connectionType)}
+                />
+              </div>
+            )}
             <button
               type="button"
               onClick={() => void saveDevice()}
-              disabled={saving}
+              disabled={saving || !canSave}
               className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-primary text-sm font-black uppercase tracking-widest text-white disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
